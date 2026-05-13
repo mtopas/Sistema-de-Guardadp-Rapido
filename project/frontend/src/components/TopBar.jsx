@@ -37,7 +37,7 @@ export default function TopBar({ searchQuery, onSearchChange }) {
           className="gradient-text font-bold text-xl tracking-wide"
           style={{ fontFamily: "'Playfair Display', serif" }}
         >
-          hoja
+          {t(lang, 'brandName')}
         </span>
       </button>
 

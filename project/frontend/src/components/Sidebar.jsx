@@ -77,7 +77,7 @@ export default function Sidebar() {
           className="gradient-text font-bold text-xl tracking-wide"
           style={{ fontFamily: "'Playfair Display', serif" }}
         >
-          hoja
+          {t(lang, 'brandName')}
         </span>
       </div>
 

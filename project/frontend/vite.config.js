@@ -11,8 +11,8 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest}'],
       },
       manifest: {
-        name: 'Sistema de Guardado Rápido',
-        short_name: 'SGR',
+        name: 'Bóveda — Sistema de Guardado Rápido',
+        short_name: 'Bóveda',
         description: 'Capturá, organizá y recuperá tus ideas.',
         theme_color: '#0f0520',
         background_color: '#0f0520',

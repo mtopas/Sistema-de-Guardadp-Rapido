@@ -1,6 +1,10 @@
+import os
+
+# Si existe la variable en Docker la usa, si no, usa la ruta local
+DB_PATH = os.getenv("DB_PATH", "./database/app.db")
+
 DEBUG = True  # set to False in production
 
-DB_PATH = "database/app.db"
 API_BASE_URL = "http://127.0.0.1:8000"
 MAX_IMAGE_SIZE_MB = 5
 

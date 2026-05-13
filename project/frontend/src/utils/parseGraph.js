@@ -10,7 +10,7 @@ export function buildGraph(hojas, categorias) {
   const edges = []
 
   // Root node
-  nodes.push({ id: 'root', type: 'root', label: 'hoja', r: 22 })
+  nodes.push({ id: 'root', type: 'root', label: 'Bóveda', r: 22 })
 
   // Category nodes
   categorias.forEach(cat => {

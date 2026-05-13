@@ -1,5 +1,6 @@
 export const TRANSLATIONS = {
   es: {
+    brandName: 'Bóveda',
     browse: 'Explorar', capture: 'Nueva hoja', settings: 'Ajustes',
     categories: 'Categorías', newCategory: '+ Nueva categoría', trophies: 'Trofeos',
     searchPlaceholder: 'Buscar en todo el conocimiento...', noHojas: 'No hay hojas — usá el + para agregar.', noResults: 'Sin resultados.',
@@ -16,6 +17,7 @@ export const TRANSLATIONS = {
     back: '← Volver',
   },
   en: {
+    brandName: 'Vault',
     browse: 'Browse', capture: 'New note', settings: 'Settings',
     categories: 'Categories', newCategory: '+ New category', trophies: 'Trophies',
     searchPlaceholder: 'Search all knowledge...', noHojas: 'No notes yet — use + to add one.', noResults: 'No results.',

@@ -7,8 +7,11 @@ import requests
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
 
+
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-API_BASE = os.environ.get("API_BASE_URL", "http://127.0.0.1:8000")
+
+# En Docker usará http://backend:8000, en tu PC usará localhost
+API_BASE = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
 
 STEP_NONE = None
 STEP_PHOTO_TITLE    = "photo_title"

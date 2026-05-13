@@ -1,0 +1,11 @@
+{
+  "enabledPlugins": {
+    "pitch-agent@claude-for-financial-services": true,
+    "market-researcher@claude-for-financial-services": true
+  },
+  "permissions": {
+    "allow": [
+      "WebSearch"
+    ]
+  }
+}

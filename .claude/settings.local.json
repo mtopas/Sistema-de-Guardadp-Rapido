@@ -1,11 +1,14 @@
 {
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(npm run *)",
+      "Bash(node -e \"const pkg = require\\('./node_modules/lucide-react/package.json'\\); console.log\\(pkg.version\\)\")",
+      "Bash(.\\\\venv\\\\Scripts\\\\python.exe -c \"from app.db.database import init_db; init_db\\(\\); print\\('OK'\\)\")"
+    ]
+  },
   "enabledPlugins": {
     "pitch-agent@claude-for-financial-services": true,
     "market-researcher@claude-for-financial-services": true
-  },
-  "permissions": {
-    "allow": [
-      "WebSearch"
-    ]
   }
 }

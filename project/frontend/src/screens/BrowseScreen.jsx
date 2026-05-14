@@ -99,9 +99,11 @@ function DesktopGraph() {
       {/* Top bar */}
       <TopBar searchQuery={searchQuery} onSearchChange={setSearchQuery} />
 
-      {/* Graph area — panels float on top */}
+      {/* Graph area — panels float on top, graph stays centered in the visible gap */}
       <div className="relative flex-1 overflow-hidden">
-        <NetworkGraph />
+        <div className="absolute top-0 bottom-0" style={{ left: 300, right: 425 }}>
+          <NetworkGraph />
+        </div>
         <LeftPanel searchQuery={searchQuery} onOpenHoja={(id) => setOpenHojaId(id)} />
         <RightPanel openHojaId={openHojaId} onClose={() => setOpenHojaId(null)} />
       </div>

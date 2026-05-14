@@ -1,5 +1,5 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
-import { ChevronLeft, Maximize2, Minimize2, X, Save, Calendar, PenLine, Pencil } from 'lucide-react'
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
+import { ChevronLeft, ChevronRight, Maximize2, Minimize2, X, Calendar, Pencil, FileText, Link as LinkIcon, Image as ImageIcon } from 'lucide-react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
@@ -9,8 +9,10 @@ import { BRANCH_COLORS } from '../utils/themes'
 import { extractTags } from '../utils/tags'
 import { getLeafIcon, LEAF_ICON_LIST, DEFAULT_LEAF_ICON } from '../utils/leafIcons'
 import ScrollArea from './ScrollArea'
+import LinkPreview from './LinkPreview'
 
 function relativeDate(dateStr) {
+  if (!dateStr) return ''
   const diff  = Date.now() - new Date(dateStr).getTime()
   const mins  = Math.floor(diff / 60000)
   const hours = Math.floor(diff / 3600000)
@@ -20,6 +22,18 @@ function relativeDate(dateStr) {
   if (days  <  1) return `${hours}h`
   if (days  < 30) return `${days}d`
   return new Date(dateStr).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })
+}
+
+function categoryBreadcrumb(catId, categorias) {
+  const map = new Map(categorias.map(c => [c.id, c]))
+  const path = []
+  let cur = map.get(catId)
+  let guard = 0
+  while (cur && guard++ < 32) {
+    path.unshift(cur)
+    cur = cur.padre_id ? map.get(cur.padre_id) : null
+  }
+  return path
 }
 
 // ── Editor toolbar ─────────────────────────────────────────────────────────────
@@ -43,6 +57,29 @@ function EditorToolbar({ editor, color }) {
       {btn(() => editor.chain().focus().toggleBulletList().run(),           '•',  editor.isActive('bulletList'))}
       {btn(() => editor.chain().focus().toggleOrderedList().run(),          '1.', editor.isActive('orderedList'))}
     </div>
+  )
+}
+
+// ── Type chip ─────────────────────────────────────────────────────────────────
+function TypeChip({ tipo, color }) {
+  const meta = {
+    link:  { Icon: LinkIcon,  label: 'link'  },
+    foto:  { Icon: ImageIcon, label: 'foto'  },
+    texto: { Icon: FileText,  label: 'texto' },
+  }[tipo] || { Icon: FileText, label: tipo || 'nota' }
+  const { Icon: ChipIcon, label } = meta
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-2 py-[3px] rounded-full text-[10.5px] font-medium border"
+      style={{
+        background:  color + '22',
+        borderColor: color + '40',
+        color,
+      }}
+    >
+      <ChipIcon size={10} />
+      {label}
+    </span>
   )
 }
 
@@ -82,7 +119,7 @@ function NoteCard({ hoja, color, onClick }) {
         </div>
       </div>
       <div className="flex-shrink-0 text-[12px] pl-1" style={{ color: 'var(--subtext)' }}>
-        {relativeDate(hoja.fecha)}
+        {relativeDate(hoja.fecha_actualizado || hoja.fecha)}
       </div>
     </button>
   )
@@ -98,12 +135,17 @@ export default function RightPanel({ openHojaId, onClose }) {
   const lang          = useStore(s => s.lang)
 
   const [expanded,       setExpanded]       = useState(false)
-  const [view,           setView]           = useState('latest') // 'latest' | 'note' | 'apuntes'
+  const [view,           setView]           = useState('latest') // 'latest' | 'note'
   const [selHoja,        setSelHoja]        = useState(null)
-  const [isDirty,        setIsDirty]        = useState(false)
   const [saving,         setSaving]         = useState(false)
+  const [savedFlash,     setSavedFlash]     = useState(false)
   const [iconPickerOpen, setIconPickerOpen] = useState(false)
   const iconPickerRef = useRef(null)
+  const saveTimerRef  = useRef(null)
+  const pendingRef    = useRef(null)
+  const selHojaRef    = useRef(null)
+
+  useEffect(() => { selHojaRef.current = selHoja }, [selHoja])
 
   useEffect(() => {
     if (!iconPickerOpen) return
@@ -130,67 +172,114 @@ export default function RightPanel({ openHojaId, onClose }) {
     if (hoja) { setSelHoja(hoja); setView('note') }
   }, [openHojaId])
 
-  const latestHojas = [...hojas].sort((a, b) => new Date(b.fecha) - new Date(a.fecha)).slice(0, 8)
+  // Keep selHoja in sync with store updates (e.g., fecha_actualizado after save)
+  useEffect(() => {
+    if (!selHoja) return
+    const fresh = hojas.find(h => h.id === selHoja.id)
+    if (fresh && fresh.fecha_actualizado !== selHoja.fecha_actualizado) {
+      setSelHoja(fresh)
+    }
+  }, [hojas])
+
+  const latestHojas = useMemo(
+    () => [...hojas].sort((a, b) =>
+      new Date(b.fecha_actualizado || b.fecha) - new Date(a.fecha_actualizado || a.fecha)
+    ).slice(0, 8),
+    [hojas]
+  )
 
   // For foto notes: split the leading <img> from the rest so TipTap doesn't strip it
-  const photoImgHtml = (() => {
+  const photoImgHtml = useMemo(() => {
     if (selHoja?.tipo !== 'foto' || !selHoja?.apuntes) return ''
     const m = selHoja.apuntes.match(/^(<img\b[^>]*\/?>)/i)
     return m ? m[1] : ''
-  })()
-  const editorInitContent = (() => {
-    if (view !== 'apuntes' || !selHoja) return ''
-    if (photoImgHtml) return selHoja.apuntes.slice(photoImgHtml.length).trim()
+  }, [selHoja?.id, selHoja?.apuntes])
+
+  const editorInitContent = useMemo(() => {
+    if (view !== 'note' || !selHoja) return ''
+    if (photoImgHtml) return (selHoja.apuntes || '').slice(photoImgHtml.length).trim()
     return selHoja.apuntes || ''
-  })()
+  }, [view, selHoja?.id])
+
+  // ── Autosave (debounced) ────────────────────────────────────────────────────
+  const flushSave = useCallback(async () => {
+    const target = selHojaRef.current
+    if (!target || pendingRef.current == null) return
+    const apuntes = pendingRef.current
+    pendingRef.current = null
+    if (apuntes === (target.apuntes ?? '')) return
+    setSaving(true)
+    try {
+      await updateApuntes(target.id, apuntes)
+      setSavedFlash(true)
+      setTimeout(() => setSavedFlash(false), 1200)
+    } catch (_) {
+      showToast('Error', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }, [updateApuntes, showToast])
+
+  const scheduleSave = useCallback((html) => {
+    pendingRef.current = html
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(() => { flushSave() }, 800)
+  }, [flushSave])
+
+  // Flush pending save on hoja switch / unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      flushSave()
+    }
+  }, [selHoja?.id, flushSave])
 
   const editor = useEditor({
     extensions: [StarterKit, Underline],
     content: editorInitContent,
-    editorProps: { attributes: { class: 'outline-none min-h-[120px] text-sm leading-relaxed' } },
-    onUpdate: () => setIsDirty(true),
-  }, [view === 'apuntes' ? selHoja?.id : null])
-
-  const handleSave = useCallback(async () => {
-    if (!editor || saving || !selHoja) return
-    setSaving(true)
-    const imgPrefix = selHoja.tipo === 'foto'
-      ? (selHoja.apuntes?.match(/^(<img\b[^>]*\/?>)/i)?.[1] ?? '')
-      : ''
-    const newApuntes = imgPrefix + editor.getHTML()
-    try {
-      await updateApuntes(selHoja.id, newApuntes)
-      setSelHoja(prev => ({ ...prev, apuntes: newApuntes }))
-      setIsDirty(false)
-      showToast(t(lang, 'notesSaved'))
-    } catch (_) { showToast('Error', 'error') }
-    finally { setSaving(false) }
-  }, [editor, selHoja, saving, lang])
+    editorProps: { attributes: { class: 'outline-none min-h-[140px] text-sm leading-relaxed' } },
+    onUpdate: ({ editor }) => {
+      const imgPrefix = selHojaRef.current?.tipo === 'foto'
+        ? (selHojaRef.current.apuntes?.match(/^(<img\b[^>]*\/?>)/i)?.[1] ?? '')
+        : ''
+      scheduleSave(imgPrefix + editor.getHTML())
+    },
+  }, [view === 'note' ? selHoja?.id : null])
 
   const handleIconChange = useCallback(async (key) => {
     setIconPickerOpen(false)
     try {
       await updateIcono(selHoja.id, key)
-      setSelHoja(prev => ({ ...prev, icono: key }))
     } catch (_) { showToast('Error', 'error') }
   }, [selHoja, updateIcono, showToast])
 
   const handleClose = () => {
+    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); flushSave() }
     setView('latest')
     setSelHoja(null)
-    setIsDirty(false)
     onClose?.()
   }
 
   const handleBack = () => {
-    if (view === 'apuntes') setView('note')
-    else handleClose()
+    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); flushSave() }
+    handleClose()
   }
 
-  const panelWidth = expanded ? '50vw' : '300px'
+  const panelWidth = expanded ? '50vw' : '425px'
   const dotColor   = selHoja ? getColor(selHoja.categoria_id) : 'var(--accent)'
-
-  const LeafIcon = selHoja ? getLeafIcon(selHoja.icono, selHoja.tipo) : null
+  const LeafIcon   = selHoja ? getLeafIcon(selHoja.icono, selHoja.tipo) : null
+  const breadcrumb = selHoja ? categoryBreadcrumb(selHoja.categoria_id, categorias) : []
+  const strippedContenido = selHoja
+    ? (selHoja.contenido?.replace(/https?:\/\/\S+/g, '').trim() || '')
+    : ''
+  const title = selHoja
+    ? (selHoja.tipo === 'link'
+        ? (selHoja.link_preview?.title || strippedContenido || selHoja.contenido || '—')
+        : (strippedContenido || selHoja.contenido || '—'))
+    : ''
+  const linkUrl = selHoja?.tipo === 'link'
+    ? (selHoja.contenido.match(/https?:\/\/\S+/)?.[0] || selHoja.contenido)
+    : null
 
   return (
     <div
@@ -212,29 +301,14 @@ export default function RightPanel({ openHojaId, onClose }) {
             </button>
           )}
           <span className="text-[10px] uppercase tracking-widest font-semibold truncate" style={{ color: 'var(--subtext)' }}>
-            {view === 'latest'  && t(lang, 'latestLeaves')}
-            {view === 'note'    && selHoja?.categoria_nombre}
-            {view === 'apuntes' && (
-              <span>
-                {t(lang, 'apuntes')}
-                {selHoja && (
-                  <span className="ml-2 normal-case font-normal" style={{ color: dotColor }}>
-                    — {selHoja.categoria_nombre}
-                  </span>
-                )}
-              </span>
-            )}
+            {view === 'latest' ? t(lang, 'latestLeaves') : t(lang, 'apuntes')}
           </span>
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0">
-          {view === 'apuntes' && isDirty && (
-            <button onClick={handleSave} disabled={saving}
-              className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg disabled:opacity-50 transition-all"
-              style={{ background: dotColor, color: '#fff' }}
-            >
-              <Save size={10} />
-              {saving ? t(lang, 'saving') : t(lang, 'save')}
-            </button>
+          {view === 'note' && (saving || savedFlash) && (
+            <span className="text-[10px]" style={{ color: savedFlash ? dotColor : 'var(--subtext)' }}>
+              {saving ? t(lang, 'saving') : t(lang, 'saved')}
+            </span>
           )}
           <button onClick={() => setExpanded(e => !e)}
             className="p-1 rounded-lg transition-colors"
@@ -279,24 +353,29 @@ export default function RightPanel({ openHojaId, onClose }) {
         {view === 'note' && selHoja && (
           <div className="px-4 py-5 space-y-4">
 
-            {/* Hero — icon (+ title for non-foto) */}
-            <div className="flex items-center gap-3">
+            {/* Row 1: type chip + last edited */}
+            <div className="flex items-center gap-2">
+              <TypeChip tipo={selHoja.tipo} color={dotColor} />
+              <span className="text-[10.5px]" style={{ color: 'var(--subtext)' }}>
+                · {t(lang, 'edited') || 'Editado'} {relativeDate(selHoja.fecha_actualizado || selHoja.fecha)}
+              </span>
+              <div className="flex-1" />
               <div ref={iconPickerRef} className="relative flex-shrink-0">
                 <button
                   type="button"
                   onClick={() => setIconPickerOpen(o => !o)}
-                  className="w-11 h-11 rounded-xl flex items-center justify-center relative group"
-                  style={{ background: dotColor + '22' }}
+                  className="w-7 h-7 rounded-lg flex items-center justify-center relative group"
+                  style={{ background: dotColor + '1a' }}
                   title="Cambiar ícono"
                 >
-                  {LeafIcon && <LeafIcon size={20} style={{ color: dotColor }} />}
-                  <span className="absolute inset-0 rounded-xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                    style={{ background: dotColor + '44' }}>
-                    <Pencil size={13} style={{ color: '#fff' }} />
+                  {LeafIcon && <LeafIcon size={13} style={{ color: dotColor }} />}
+                  <span className="absolute inset-0 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    style={{ background: dotColor + '33' }}>
+                    <Pencil size={10} style={{ color: '#fff' }} />
                   </span>
                 </button>
                 {iconPickerOpen && (
-                  <div className="absolute z-50 top-12 left-0 p-2 rounded-xl border shadow-2xl"
+                  <div className="absolute z-50 top-9 right-0 p-2 rounded-xl border shadow-2xl"
                     style={{ background: 'var(--surface)', borderColor: 'var(--border)', width: '220px' }}>
                     <div className="grid grid-cols-8 gap-1">
                       {LEAF_ICON_LIST.map(({ key, Icon }) => {
@@ -321,20 +400,44 @@ export default function RightPanel({ openHojaId, onClose }) {
                   </div>
                 )}
               </div>
-              {selHoja.tipo !== 'foto' && (
-                <p className="text-sm font-medium leading-snug" style={{ color: 'var(--text)', fontFamily: 'var(--font-serif)' }}>
-                  {selHoja.contenido.replace(/https?:\/\/\S+/g, '').trim() || selHoja.contenido}
-                </p>
-              )}
             </div>
 
-            {/* Link */}
-            {selHoja.tipo === 'link' && (
-              <a href={selHoja.contenido} target="_blank" rel="noopener noreferrer"
-                className="text-xs break-all block px-3 py-2 rounded-xl"
-                style={{ color: dotColor, background: dotColor + '12', border: `1px solid ${dotColor}30` }}>
-                {selHoja.contenido}
-              </a>
+            {/* Row 2: title */}
+            <h2
+              className="text-[18px] leading-tight font-semibold"
+              style={{ color: 'var(--text)', fontFamily: 'var(--font-serif)' }}
+            >
+              {title}
+            </h2>
+
+            {/* Row 3: location breadcrumb */}
+            <div className="flex items-center gap-1 text-[11px] flex-wrap" style={{ color: 'var(--subtext)' }}>
+              {breadcrumb.length === 0 && <span>—</span>}
+              {breadcrumb.map((c, idx) => (
+                <span key={c.id} className="inline-flex items-center gap-1">
+                  {idx > 0 && <ChevronRight size={10} style={{ opacity: 0.6 }} />}
+                  <span style={{ color: idx === breadcrumb.length - 1 ? dotColor : 'var(--subtext)' }}>
+                    {c.icono ? `${c.icono} ` : ''}{c.nombre}
+                  </span>
+                </span>
+              ))}
+              <span className="mx-1.5" style={{ opacity: 0.5 }}>·</span>
+              <Calendar size={10} />
+              <span>
+                {new Date(selHoja.fecha).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' })}
+              </span>
+            </div>
+
+            {/* Row 4: type-specific preview */}
+            {selHoja.tipo === 'link' && linkUrl && (
+              <LinkPreview url={linkUrl} preview={selHoja.link_preview} />
+            )}
+            {selHoja.tipo === 'foto' && photoImgHtml && (
+              <div
+                className="rounded-xl overflow-hidden border"
+                style={{ borderColor: dotColor + '30' }}
+                dangerouslySetInnerHTML={{ __html: photoImgHtml }}
+              />
             )}
 
             {/* Tags */}
@@ -349,66 +452,15 @@ export default function RightPanel({ openHojaId, onClose }) {
               </div>
             )}
 
-            {/* Date */}
-            <div className="flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--subtext)' }}>
-              <Calendar size={11} />
-              {new Date(selHoja.fecha).toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' })}
-            </div>
-
-            {/* Apuntes preview + edit button */}
-            {selHoja.apuntes?.trim() && (
-              <div className="rounded-xl px-3 py-2.5"
-                style={{ background: dotColor + '0e', border: `1px solid ${dotColor}25` }}>
-                <div className="flex items-center gap-1.5 mb-2">
-                  <PenLine size={10} style={{ color: dotColor }} />
-                  <span className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: dotColor }}>
-                    {t(lang, 'apuntes')}
-                  </span>
-                </div>
-                <div
-                  className="apuntes-preview"
-                  style={{ color: 'var(--text)' }}
-                  dangerouslySetInnerHTML={{ __html: selHoja.apuntes }}
-                />
-              </div>
-            )}
-
-            <button
-              onClick={() => setView('apuntes')}
-              className="w-full py-2.5 rounded-xl text-xs font-medium flex items-center justify-center gap-1.5 transition-all"
-              style={{ background: dotColor + '18', color: dotColor, border: `1px solid ${dotColor}40` }}
-              onMouseEnter={e => e.currentTarget.style.background = dotColor + '28'}
-              onMouseLeave={e => e.currentTarget.style.background = dotColor + '18'}
-            >
-              <PenLine size={12} />
-              {selHoja.apuntes?.trim()
-                ? t(lang, 'editApuntes') || 'Editar apuntes'
-                : t(lang, 'apuntes')}
-            </button>
-          </div>
-        )}
-
-        {/* Apuntes editor */}
-        {view === 'apuntes' && selHoja && (
-          <div className="px-3 py-3 space-y-3">
-            {/* Frozen photo at top of editor */}
-            {photoImgHtml && (
-              <div className="rounded-xl overflow-hidden border"
-                style={{ borderColor: dotColor + '30' }}
-                dangerouslySetInnerHTML={{ __html: photoImgHtml }}
-              />
-            )}
-            {/* Title hint for non-foto */}
-            {!photoImgHtml && (
-              <p className="text-xs line-clamp-2 leading-snug pb-3 border-b"
-                style={{ color: 'var(--subtext)', borderColor: 'var(--border)' }}>
-                {selHoja.contenido.replace(/https?:\/\/\S+/g, '').trim() || selHoja.contenido}
-              </p>
-            )}
+            {/* Row 5: always-editable apuntes */}
             <div className="rounded-xl overflow-hidden border"
               style={{ borderColor: dotColor + '40', background: 'rgba(255,255,255,0.04)' }}>
               <EditorToolbar editor={editor} color={dotColor} />
-              <div className="px-3 py-2" style={{ color: 'var(--text)' }}>
+              <div
+                className="px-3 py-2.5 cursor-text"
+                style={{ color: 'var(--text)' }}
+                onClick={() => editor?.chain().focus().run()}
+              >
                 <EditorContent editor={editor} />
               </div>
             </div>

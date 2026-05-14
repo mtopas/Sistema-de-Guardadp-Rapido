@@ -9,21 +9,24 @@ export default function Layout({ children }) {
   const location = useLocation()
   const path     = location.pathname
 
-  // BrowseScreen (/) manages its own full-screen layout — no sidebar
-  const isBrowse = path === '/'
+  // Full-screen modules (Bóveda, Finanzas) own their layout and hide the Bóveda sidebar.
+  const isBrowse         = path === '/'
+  const isFinanzas       = path.startsWith('/finanzas')
+  const hideSidebar      = isBrowse || isFinanzas
+  const managesOwnLayout = isBrowse || isFinanzas
 
   return (
     <div className="flex h-screen overflow-hidden bg-app-bg text-app-text">
 
-      {/* Desktop sidebar — hidden on browse screen */}
-      {!isBrowse && (
+      {/* Desktop sidebar — only on Bóveda sub-pages (capture, hoja, settings) */}
+      {!hideSidebar && (
         <div className="hidden md:flex flex-shrink-0">
           <Sidebar />
         </div>
       )}
 
       {/* Main content */}
-      {isBrowse ? (
+      {managesOwnLayout ? (
         <main className="flex-1 overflow-hidden">{children}</main>
       ) : (
         <ScrollArea className="flex-1" contentClassName="pb-20 md:pb-0">

@@ -1,5 +1,6 @@
 # entrypoints (FastAPI)
 
+import re
 import shutil
 import uuid
 from contextlib import asynccontextmanager
@@ -7,15 +8,19 @@ from pathlib import Path
 
 import httpx
 from bs4 import BeautifulSoup
+from typing import Any, Optional
+
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from app.config import DEBUG
 from app.db.crud import (
     actualizar_apuntes,
     actualizar_icono,
+    actualizar_link_preview,
     categoria_existe,
     crear_categoria,
     crear_hoja,
@@ -24,10 +29,81 @@ from app.db.crud import (
     obtener_categorias,
     obtener_hoja_por_id,
     obtener_hojas,
+    # Finanzas
+    fin_obtener_cuentas,
+    fin_crear_cuenta,
+    fin_actualizar_cuenta_saldo,
+    fin_eliminar_cuenta,
+    fin_buscar_cuenta_por_nombre,
+    fin_obtener_categorias,
+    fin_crear_categoria,
+    fin_eliminar_categoria,
+    fin_buscar_categoria_por_nombre,
+    fin_obtener_movimientos,
+    fin_crear_movimiento,
+    fin_eliminar_movimiento,
+    fin_obtener_config,
+    fin_actualizar_config,
+    fin_obtener_notas,
+    fin_crear_nota,
+    fin_eliminar_nota,
+    fin_obtener_emergencia_saldo,
 )
 from app.db.database import init_db
 from app.models.categoria import CategoriaCreate
 from app.models.hoja import HojaCreate, HojaPatch
+
+
+# --- Pydantic models for Finanzas ---
+
+class FinCuentaCreate(BaseModel):
+    nombre: str
+    tipo: str = "wallet"
+    color: Optional[str] = None
+    initials: Optional[str] = None
+    saldo_ars: float = 0
+    saldo_usd: float = 0
+
+
+class FinCuentaSaldoUpdate(BaseModel):
+    saldo_ars: float = 0
+    saldo_usd: float = 0
+
+
+class FinCategoriaCreate(BaseModel):
+    nombre: str
+    color: Optional[str] = None
+    tipo: str = "expense"
+
+
+class FinMovimientoCreate(BaseModel):
+    tipo: str
+    monto: float
+    moneda: str = "ARS"
+    fecha: str
+    descripcion: str
+    icono: Optional[str] = None
+    cuenta_id: Optional[Any] = None
+    cuenta_nombre: Optional[str] = None
+    categoria_nombre: Optional[str] = None
+    cuotas: Optional[int] = None
+    nota: Optional[str] = None
+    audit: Optional[bool] = False
+    # Legacy fields sent by the frontend — ignored server-side
+    type: Optional[str] = None
+    amount: Optional[float] = None
+    currency: Optional[str] = None
+    datetime: Optional[str] = None
+    date: Optional[str] = None
+    desc: Optional[str] = None
+    cat: Optional[str] = None
+    method: Optional[str] = None
+    cuentaId: Optional[Any] = None
+    categoria_id: Optional[Any] = None
+
+
+class FinNotaCreate(BaseModel):
+    contenido: str
 
 DIST_DIR    = Path("frontend/dist")
 UPLOADS_DIR = Path("uploads")
@@ -96,12 +172,19 @@ def eliminar_categoria_endpoint(categoria_id: int):
 # --- Hojas ---
 
 @app.post("/hojas")
-def crear_hoja_endpoint(hoja: HojaCreate):
+async def crear_hoja_endpoint(hoja: HojaCreate):
     if not hoja.contenido.strip():
         raise HTTPException(status_code=400, detail="El contenido no puede estar vacío")
     if not categoria_existe(hoja.categoria_id):
         raise HTTPException(status_code=400, detail="Categoría no encontrada")
-    crear_hoja(
+
+    preview = None
+    if hoja.tipo == "link":
+        url_match = re.search(r"https?://\S+", hoja.contenido)
+        if url_match:
+            preview = await _fetch_link_preview(url_match.group(0))
+
+    hid = crear_hoja(
         hoja.contenido,
         hoja.categoria_id,
         tipo=hoja.tipo,
@@ -111,8 +194,24 @@ def crear_hoja_endpoint(hoja: HojaCreate):
         longitud=hoja.longitud,
         fecha_recordatorio=hoja.fecha_recordatorio,
         icono=hoja.icono,
+        link_preview=preview,
     )
-    return {"mensaje": "Hoja guardada"}
+    return {"mensaje": "Hoja guardada", "id": hid, "link_preview": preview}
+
+
+@app.post("/hojas/{hoja_id}/preview")
+async def refrescar_preview(hoja_id: int):
+    hoja = obtener_hoja_por_id(hoja_id)
+    if hoja is None:
+        raise HTTPException(status_code=404, detail="Hoja no encontrada")
+    if hoja["tipo"] != "link":
+        raise HTTPException(status_code=400, detail="La hoja no es un link")
+    url_match = re.search(r"https?://\S+", hoja["contenido"] or "")
+    if not url_match:
+        raise HTTPException(status_code=400, detail="No se encontró URL en la hoja")
+    preview = await _fetch_link_preview(url_match.group(0))
+    actualizar_link_preview(hoja_id, preview)
+    return {"link_preview": preview}
 
 
 @app.get("/hojas")
@@ -132,11 +231,12 @@ def obtener_hoja(hoja_id: int):
 def actualizar_hoja_endpoint(hoja_id: int, data: HojaPatch):
     if obtener_hoja_por_id(hoja_id) is None:
         raise HTTPException(status_code=404, detail="Hoja no encontrada")
+    fecha_actualizado = None
     if "apuntes" in data.model_fields_set:
-        actualizar_apuntes(hoja_id, data.apuntes)
+        fecha_actualizado = actualizar_apuntes(hoja_id, data.apuntes)
     if "icono" in data.model_fields_set:
-        actualizar_icono(hoja_id, data.icono)
-    return {"mensaje": "Hoja actualizada"}
+        fecha_actualizado = actualizar_icono(hoja_id, data.icono)
+    return {"mensaje": "Hoja actualizada", "fecha_actualizado": fecha_actualizado}
 
 
 @app.delete("/hojas/{hoja_id}")
@@ -164,8 +264,7 @@ async def upload_file(file: UploadFile = File(...)):
 
 # --- Link preview ---
 
-@app.get("/preview")
-async def fetch_preview(url: str = Query(...)):
+async def _fetch_link_preview(url: str) -> dict:
     try:
         async with httpx.AsyncClient(timeout=6, follow_redirects=True) as client:
             r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -191,3 +290,165 @@ async def fetch_preview(url: str = Query(...)):
         if DEBUG:
             print(f"preview error: {e}")
         return {"title": None, "description": None, "image": None, "favicon": None}
+
+
+@app.get("/preview")
+async def fetch_preview(url: str = Query(...)):
+    return await _fetch_link_preview(url)
+
+
+# ---------------------------------------------------------------------------
+# Finanzas — Cuentas
+# ---------------------------------------------------------------------------
+
+@app.get("/fin/cuentas")
+def listar_fin_cuentas():
+    return fin_obtener_cuentas()
+
+
+@app.post("/fin/cuentas")
+def crear_fin_cuenta(body: FinCuentaCreate):
+    cid = fin_crear_cuenta(
+        body.nombre, body.tipo, body.color, body.initials,
+        body.saldo_ars, body.saldo_usd,
+    )
+    return {"id": cid, "name": body.nombre, "tipo": body.tipo,
+            "color": body.color, "initials": body.initials,
+            "ars": body.saldo_ars, "usd": body.saldo_usd}
+
+
+@app.patch("/fin/cuentas/{cuenta_id}/saldo")
+def actualizar_saldo_cuenta(cuenta_id: int, body: FinCuentaSaldoUpdate):
+    result = fin_actualizar_cuenta_saldo(cuenta_id, body.saldo_ars, body.saldo_usd)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Cuenta no encontrada")
+    return result
+
+
+@app.delete("/fin/cuentas/{cuenta_id}")
+def eliminar_fin_cuenta(cuenta_id: int):
+    if not fin_eliminar_cuenta(cuenta_id):
+        raise HTTPException(status_code=404, detail="Cuenta no encontrada")
+    return {"mensaje": "Cuenta eliminada"}
+
+
+# ---------------------------------------------------------------------------
+# Finanzas — Categorías
+# ---------------------------------------------------------------------------
+
+@app.get("/fin/categorias")
+def listar_fin_categorias():
+    return fin_obtener_categorias()
+
+
+@app.post("/fin/categorias")
+def crear_fin_categoria(body: FinCategoriaCreate):
+    cid = fin_crear_categoria(body.nombre, body.color, body.tipo)
+    if cid is None:
+        raise HTTPException(status_code=400, detail="Ya existe una categoría con ese nombre")
+    return {"id": cid, "name": body.nombre, "color": body.color, "tipo": body.tipo}
+
+
+@app.delete("/fin/categorias/{cat_id}")
+def eliminar_fin_categoria(cat_id: int):
+    if not fin_eliminar_categoria(cat_id):
+        raise HTTPException(status_code=404, detail="Categoría no encontrada")
+    return {"mensaje": "Categoría eliminada"}
+
+
+# ---------------------------------------------------------------------------
+# Finanzas — Movimientos
+# ---------------------------------------------------------------------------
+
+@app.get("/fin/movimientos")
+def listar_fin_movimientos(mes: Optional[str] = Query(None)):
+    return fin_obtener_movimientos(mes)
+
+
+@app.post("/fin/movimientos")
+def crear_fin_movimiento(body: FinMovimientoCreate):
+    # Resolve cuenta_id from nombre if needed
+    cuenta_id = None
+    if isinstance(body.cuenta_id, int):
+        cuenta_id = body.cuenta_id
+    elif body.cuenta_nombre:
+        cuenta_id = fin_buscar_cuenta_por_nombre(body.cuenta_nombre)
+
+    # Resolve categoria_id from nombre
+    categoria_id = None
+    raw_cat_id = body.categoria_id
+    if isinstance(raw_cat_id, int):
+        categoria_id = raw_cat_id
+    elif body.categoria_nombre:
+        categoria_id = fin_buscar_categoria_por_nombre(body.categoria_nombre)
+        if categoria_id is None:
+            # Auto-create category on the fly
+            tipo_cat = "income" if body.tipo == "income" else "expense"
+            categoria_id = fin_crear_categoria(body.categoria_nombre, tipo=tipo_cat)
+
+    return fin_crear_movimiento(
+        fecha=body.fecha,
+        monto=body.monto,
+        tipo=body.tipo,
+        descripcion=body.descripcion,
+        icono=body.icono,
+        cuenta_id=cuenta_id,
+        cuotas=body.cuotas,
+        categoria_id=categoria_id,
+        moneda=body.moneda,
+        nota=body.nota,
+        audit=body.audit or False,
+    )
+
+
+@app.delete("/fin/movimientos/{mov_id}")
+def eliminar_fin_movimiento(mov_id: int):
+    if not fin_eliminar_movimiento(mov_id):
+        raise HTTPException(status_code=404, detail="Movimiento no encontrado")
+    return {"mensaje": "Movimiento eliminado"}
+
+
+# ---------------------------------------------------------------------------
+# Finanzas — Config
+# ---------------------------------------------------------------------------
+
+@app.get("/fin/config")
+def obtener_fin_config():
+    return fin_obtener_config()
+
+
+@app.put("/fin/config")
+def actualizar_fin_config(updates: dict):
+    return fin_actualizar_config(updates)
+
+
+# ---------------------------------------------------------------------------
+# Finanzas — Notas
+# ---------------------------------------------------------------------------
+
+@app.get("/fin/notas")
+def listar_fin_notas():
+    return fin_obtener_notas()
+
+
+@app.post("/fin/notas")
+def crear_fin_nota(body: FinNotaCreate):
+    if not body.contenido.strip():
+        raise HTTPException(status_code=400, detail="El contenido no puede estar vacío")
+    return fin_crear_nota(body.contenido)
+
+
+@app.delete("/fin/notas/{nota_id}")
+def eliminar_fin_nota(nota_id: int):
+    if not fin_eliminar_nota(nota_id):
+        raise HTTPException(status_code=404, detail="Nota no encontrada")
+    return {"mensaje": "Nota eliminada"}
+
+
+# ---------------------------------------------------------------------------
+# Finanzas — Fondo de emergencia
+# ---------------------------------------------------------------------------
+
+@app.get("/fin/emergencia")
+def obtener_fin_emergencia():
+    return {"saldo": fin_obtener_emergencia_saldo()}

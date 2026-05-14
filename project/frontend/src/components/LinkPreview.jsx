@@ -2,11 +2,16 @@ import { useEffect, useState } from 'react'
 import { ExternalLink } from 'lucide-react'
 import { API_URL, DEBUG } from '../config'
 
-export default function LinkPreview({ url }) {
-  const [preview, setPreview] = useState(null)
-  const [loading, setLoading] = useState(true)
+export default function LinkPreview({ url, preview: cachedPreview }) {
+  const [preview, setPreview] = useState(cachedPreview || null)
+  const [loading, setLoading] = useState(!cachedPreview)
 
   useEffect(() => {
+    if (cachedPreview) {
+      setPreview(cachedPreview)
+      setLoading(false)
+      return
+    }
     if (!url) return
     setLoading(true)
     setPreview(null)
@@ -18,7 +23,7 @@ export default function LinkPreview({ url }) {
       })
       .catch(() => setPreview(null))
       .finally(() => setLoading(false))
-  }, [url])
+  }, [url, cachedPreview])
 
   if (loading) return (
     <div className="h-20 bg-app-surface rounded-xl border border-app-border animate-pulse" />

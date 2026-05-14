@@ -1,7 +1,31 @@
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { Search, Bell, Plus, Settings } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { t } from '../utils/i18n'
+
+// Top-level modules that can be cycled from the title.
+// Each entry: route to navigate to + i18n key for the title.
+const MODULES = [
+  {
+    match:    (p) => p === '/' || p.startsWith('/hoja') || p === '/capture',
+    path:     '/',
+    titleKey: 'brandName',
+    ctaKey:   'capture',
+    ctaStore: 'openCapture',
+  },
+  {
+    match:    (p) => p.startsWith('/finanzas'),
+    path:     '/finanzas',
+    titleKey: 'finanzas',
+    ctaKey:   'addMovement',
+    ctaStore: 'openMovement',
+  },
+]
+
+function currentModuleIndex(path) {
+  const i = MODULES.findIndex(m => m.match(path))
+  return i === -1 ? 0 : i
+}
 
 const kbdStyle = {
   borderColor: 'var(--border)',
@@ -46,13 +70,24 @@ function IconButton({ children, onClick, ariaLabel, badge = false }) {
   )
 }
 
-export default function TopBar({ searchQuery, onSearchChange }) {
+export default function TopBar({ searchQuery = '', onSearchChange }) {
   const navigate    = useNavigate()
-  const userName    = useStore(s => s.userName)
-  const lang        = useStore(s => s.lang)
-  const openCapture = useStore(s => s.openCapture)
-  const initial     = userName ? userName.trim()[0].toUpperCase() : '?'
-  const title       = (t(lang, 'brandName') || 'Bóveda').toUpperCase()
+  const location    = useLocation()
+  const userName     = useStore(s => s.userName)
+  const lang         = useStore(s => s.lang)
+  const openCapture  = useStore(s => s.openCapture)
+  const openMovement = useStore(s => s.openMovement)
+  const initial      = userName ? userName.trim()[0].toUpperCase() : '?'
+
+  const modIdx       = currentModuleIndex(location.pathname)
+  const currentMod   = MODULES[modIdx]
+  const nextMod      = MODULES[(modIdx + 1) % MODULES.length]
+  const title        = (t(lang, currentMod.titleKey) || 'SGR').toUpperCase()
+  const cycleToNext  = () => navigate(nextMod.path)
+
+  const ctaLabel     = t(lang, currentMod.ctaKey)
+  const ctaActions   = { openCapture, openMovement }
+  const runCta       = () => ctaActions[currentMod.ctaStore]?.()
 
   return (
     <header
@@ -64,12 +99,13 @@ export default function TopBar({ searchQuery, onSearchChange }) {
         WebkitBackdropFilter: 'blur(12px)',
       }}
     >
-      {/* Module title */}
+      {/* Module title — click to cycle modules */}
       <button
         type="button"
-        onClick={() => navigate('/')}
-        aria-label="Inicio"
-        className="flex items-center rounded-md select-none transition-transform duration-150 hover:scale-[1.03] active:scale-95 focus:outline-none"
+        onClick={cycleToNext}
+        aria-label={`Cambiar a ${t(lang, nextMod.titleKey)}`}
+        title={`Ir a ${t(lang, nextMod.titleKey)}`}
+        className="flex items-center rounded-md select-none transition-transform duration-150 hover:scale-[1.03] active:scale-95 focus:outline-none cursor-pointer"
       >
         <span
           className="gradient-text font-bold"
@@ -121,7 +157,7 @@ export default function TopBar({ searchQuery, onSearchChange }) {
 
         <button
           type="button"
-          onClick={openCapture}
+          onClick={runCta}
           className="inline-flex items-center gap-1.5 px-3 py-2 rounded-[10px] text-[13px] font-medium transition-all duration-150 active:scale-[0.985]"
           style={{
             background: 'var(--cta-bg)',
@@ -133,7 +169,7 @@ export default function TopBar({ searchQuery, onSearchChange }) {
           onMouseLeave={e => e.currentTarget.style.filter = 'none'}
         >
           <Plus size={15} strokeWidth={2} />
-          Capturar
+          {ctaLabel}
         </button>
 
         <div className="w-px h-6" style={{ background: 'var(--border)' }} />

@@ -195,3 +195,35 @@ Body: DM Sans (neo-grotesque calma, casi neutral)
 6. Playful
 Títulos / marca: Bricolage Grotesque (display variable de Mathieu Triay — anchos opticos, juega con grade)
 Body: Outfit (geo sans limpia, casi cuadrada)
+
+
+## Finanzas
+
+Analiza la sección finanzas de ClaudeDesign y project\README.md.
+
+Vamos a migrar el front de Finanzas. Front e implementar el back. 
+En la barra superior solo cambia el título y el botón de "+Capturar".
+Por ahora, no lo conectamos al bot. Usamos el botón de "+ Movimiento".
+Se tiene que tener de cada movimiento: Fecha y hora / Monto / Gasto o Ingreso / Descripción / Método de Pago (Uala/Brubank/Efectivo) / Cuotas (opcional) / Categoría / Pesos o dólares
+Si se te ocurre algo más que pueda ser importante, decime.
+
+En Claude Design se ven las tabs de Dashboard / Movimiento / Patrimonio / Proyección FIRE .
+Yo quiero que tengamos Dashboard / Anual / FIRE / Ahorro / Datos . 
+
+### Dashboard
+
+Es la vista que más usaría. Es la vista del mes actual.
+Me gustaria mantener las 3 secciones.
+A la izquierda me gusta mucho el panel que está en ClaudeDesign. Saldo disponible, la equivalencia en dolares (que no sea con API, cargo manual el precio actual del dólar oficial), ingresos y gastos, tasa de ahorro (el objetivo se extrae del plan FIRE), Billeteras, Bancos, En Mano.
+
+Abajo de todo quiero un botón de configuración desde donde se cargan nuevos bancos y billeteras, desde donde actualizo el precio del dólar oficial, y otras cosas que iremos viendo.
+
+En el panel del medio, quiero dós gráficos de torta, que muestre los ignresos y los gastos partidos por categorías.
+Abajo, dos tarjetas como se ven en ClaudeDesign, pero una tarjeta tiene los movimientos de ingresos y otra los movimientos de gastos. Cada una con su botón de ver todos. El botón de ver todos, abre un cuadro flotante con cada movimiento (gasto o ingreso depende donde se apreto) con toda la infomración de cada movimiento. Me gustaría que si tocas en una columna, se ordene ascendentemente por esa columna, si apretas una segunda ves, se ordena descendentemente, y una tercera vez se desactiva y vuelve a estar ordenado por fecha (default - desde el ultimo para abajo al primero). Me gustaría que se pueda filtrar por la columna categoría.
+
+Abajo de esas dos tarjetas, quiero que haya una sección de notas, para anotarme cosas.
+
+En el panel derecho, quiero ver primero una tabla de cuotas. Cosas que haya pagado con cuotas. Descripción o título / cuando fue la primera cuota, cuando es la útlima cuota y el monto. Cuando se termine, se borra automaticamente.
+Abajo de esto, quiero una tabla de gasto total por categoría.
+
+Despues vemos que hacemos con el resto de las tabs.

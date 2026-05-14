@@ -8,6 +8,7 @@ import { t } from '../utils/i18n'
 import { BRANCH_COLORS } from '../utils/themes'
 import { extractTags } from '../utils/tags'
 import { getLeafIcon, LEAF_ICON_LIST, DEFAULT_LEAF_ICON } from '../utils/leafIcons'
+import ScrollArea from './ScrollArea'
 
 function relativeDate(dateStr) {
   const diff  = Date.now() - new Date(dateStr).getTime()
@@ -55,9 +56,9 @@ function NoteCard({ hoja, color, onClick }) {
     <button
       onClick={onClick}
       className="w-full text-left rounded-2xl px-4 py-3.5 flex items-center gap-3.5 transition-all duration-150 active:scale-[0.99]"
-      style={{ background: 'var(--surface)', boxShadow: '0 0 0 1px rgba(255,255,255,0.05)' }}
+      style={{ background: 'var(--surface)', boxShadow: '0 0 0 1px var(--border)' }}
       onMouseEnter={e => e.currentTarget.style.boxShadow = `0 0 0 1px ${color}60`}
-      onMouseLeave={e => e.currentTarget.style.boxShadow = '0 0 0 1px rgba(255,255,255,0.05)'}
+      onMouseLeave={e => e.currentTarget.style.boxShadow = '0 0 0 1px var(--border)'}
     >
       <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
         style={{ background: color + '22' }}>
@@ -196,9 +197,9 @@ export default function RightPanel({ openHojaId, onClose }) {
       className="absolute right-0 top-0 h-full z-20 flex flex-col transition-all duration-300 overflow-hidden"
       style={{
         width:          panelWidth,
-        background:     'var(--panel-bg)',
+        background:     'color-mix(in oklch, var(--panel-bg) 55%, transparent)',
         backdropFilter: 'blur(18px)',
-        borderLeft:     '1px solid var(--border)',
+        boxShadow:      'inset 1px 0 0 0 color-mix(in oklch, var(--border) 60%, transparent)',
       }}
     >
       {/* Header */}
@@ -257,7 +258,7 @@ export default function RightPanel({ openHojaId, onClose }) {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto panel-scroll">
+      <ScrollArea className="flex-1">
 
         {/* Latest leaves */}
         {view === 'latest' && (
@@ -321,7 +322,7 @@ export default function RightPanel({ openHojaId, onClose }) {
                 )}
               </div>
               {selHoja.tipo !== 'foto' && (
-                <p className="text-sm font-medium leading-snug" style={{ color: 'var(--text)', fontFamily: "'Playfair Display', serif" }}>
+                <p className="text-sm font-medium leading-snug" style={{ color: 'var(--text)', fontFamily: 'var(--font-serif)' }}>
                   {selHoja.contenido.replace(/https?:\/\/\S+/g, '').trim() || selHoja.contenido}
                 </p>
               )}
@@ -413,7 +414,7 @@ export default function RightPanel({ openHojaId, onClose }) {
             </div>
           </div>
         )}
-      </div>
+      </ScrollArea>
     </div>
   )
 }

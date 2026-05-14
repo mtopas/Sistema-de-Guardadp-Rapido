@@ -152,7 +152,7 @@ export default function DetailScreen() {
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-base font-medium leading-snug mb-3"
-              style={{ color: 'var(--text)', fontFamily: "'Playfair Display', serif" }}>
+              style={{ color: 'var(--text)', fontFamily: 'var(--font-serif)' }}>
               {title}
             </p>
             {/* Tags */}

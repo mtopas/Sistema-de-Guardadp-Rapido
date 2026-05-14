@@ -13,7 +13,7 @@ export default function SettingsScreen() {
 
   return (
     <div className="px-4 py-6 max-w-xl mx-auto space-y-8">
-      <h2 className="font-semibold text-lg" style={{ color: 'var(--text)', fontFamily: "'Playfair Display', serif" }}>
+      <h2 className="font-semibold text-lg" style={{ color: 'var(--text)', fontFamily: 'var(--font-serif)' }}>
         {t(lang, 'settings')}
       </h2>
 
@@ -56,7 +56,7 @@ export default function SettingsScreen() {
               <button key={code} onClick={() => setLang(code)}
                 className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm border transition-all duration-150 active:scale-[0.97]"
                 style={{
-                  background: active ? 'rgba(139,92,246,0.15)' : 'var(--surface)',
+                  background: active ? 'color-mix(in srgb, var(--accent) 15%, transparent)' : 'var(--surface)',
                   borderColor: active ? 'var(--accent)' : 'var(--border)',
                   color: active ? 'var(--accent)' : 'var(--subtext)',
                   boxShadow: active ? '0 0 0 1px var(--accent)' : 'none',
@@ -82,17 +82,17 @@ export default function SettingsScreen() {
               <button key={key} onClick={() => setTheme(key)}
                 className="relative flex items-center gap-3 p-3 rounded-xl border transition-all duration-150 active:scale-[0.97]"
                 style={{
-                  background: th['--surface'],
+                  background: th['--bg'],
                   borderColor: active ? th['--accent'] : th['--border'],
                   boxShadow: active ? `0 0 0 1px ${th['--accent']}` : 'none',
                 }}
               >
                 <div className="flex gap-1 flex-shrink-0">
-                  {['--bg','--accent','--accent-light'].map(v => (
-                    <div key={v} className="w-3.5 h-3.5 rounded-full" style={{ background: th[v] }} />
-                  ))}
+                  <div className="w-4 h-4 rounded-full border" style={{ background: th['--surface'], borderColor: th['--border'] }} />
+                  <div className="w-4 h-4 rounded-full" style={{ background: `linear-gradient(135deg, ${th['--accent']}, ${th['--accent-light']})` }} />
+                  <div className="w-4 h-4 rounded-full" style={{ background: th['--accent-deep'] }} />
                 </div>
-                <span className="text-xs flex-1 text-left font-medium truncate" style={{ color: th['--text'] }}>
+                <span className="text-xs flex-1 text-left font-medium truncate" style={{ color: th['--text'], fontFamily: th['--font-sans'] }}>
                   {th.name}
                 </span>
                 {active && <Check size={13} style={{ color: th['--accent'], flexShrink: 0 }} />}

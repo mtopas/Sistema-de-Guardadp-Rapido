@@ -57,7 +57,7 @@ export default function Sidebar() {
         onClick={() => navigate(path)}
         className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs transition-all duration-150"
         style={active
-          ? { color: 'var(--accent-light)', background: 'linear-gradient(90deg,rgba(139,92,246,.18),rgba(236,72,153,.06))', borderLeft: '2px solid var(--accent-light)' }
+          ? { color: 'var(--accent-light)', background: 'linear-gradient(90deg, color-mix(in srgb, var(--accent) 18%, transparent), color-mix(in srgb, var(--accent-light) 6%, transparent))', borderLeft: '2px solid var(--accent-light)' }
           : { color: 'var(--subtext)' }
         }
         onMouseEnter={e => { if (!active) e.currentTarget.style.color = 'var(--text)' }}
@@ -75,7 +75,7 @@ export default function Sidebar() {
       <div className="px-4 py-4 border-b flex-shrink-0" style={{ borderColor: 'var(--border)' }}>
         <span
           className="gradient-text font-bold text-xl tracking-wide"
-          style={{ fontFamily: "'Playfair Display', serif" }}
+          style={{ fontFamily: 'var(--font-serif)' }}
         >
           {t(lang, 'brandName')}
         </span>
@@ -89,7 +89,7 @@ export default function Sidebar() {
       {/* Category tree */}
       <div className="flex-1 overflow-y-auto px-2 py-2" style={{ scrollbarWidth: 'thin', scrollbarColor: 'var(--border) transparent' }}>
         <p className="text-[9.5px] tracking-widest uppercase px-2 py-2 mt-1"
-          style={{ color: 'rgba(196,181,253,0.5)', letterSpacing: '0.12em' }}>
+          style={{ color: 'var(--mute)', letterSpacing: '0.12em' }}>
           {t(lang, 'categories')}
         </p>
         {roots.map(c => (
@@ -112,8 +112,13 @@ export default function Sidebar() {
         {navBtn('/settings', Settings, 'settings')}
         <button
           onClick={() => navigate('/capture')}
-          className="gradient-bg w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-white transition-all duration-150 mt-1"
-          style={{ boxShadow: '0 4px 16px rgba(139,92,246,0.35)', letterSpacing: '0.04em' }}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-all duration-150 mt-1"
+          style={{
+            background: 'var(--cta-bg)',
+            color: 'var(--cta-text)',
+            boxShadow: 'var(--shadow-soft)',
+            letterSpacing: '0.04em',
+          }}
         >
           + {t(lang, 'capture')}
         </button>

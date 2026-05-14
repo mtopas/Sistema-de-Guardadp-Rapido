@@ -1,289 +1,267 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useMemo } from 'react'
 import { useStore } from '../store/useStore'
 import { BRANCH_COLORS } from '../utils/themes'
 import { extractTags } from '../utils/tags'
-import { DEFAULT_LEAF_ICON } from '../utils/leafIcons'
-import { getIconImg } from '../utils/iconCanvas'
-import { DEBUG } from '../config'
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function darkenHex(hex, amount = 0.35) {
-  const n = parseInt(hex.replace('#', ''), 16)
-  const r = Math.max(0, Math.round(((n >> 16) & 0xff) * (1 - amount)))
-  const g = Math.max(0, Math.round(((n >>  8) & 0xff) * (1 - amount)))
-  const b = Math.max(0, Math.round(( n        & 0xff) * (1 - amount)))
-  return `#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`
-}
+const W = 720, H = 560
+const HUB = { x: W / 2, y: H / 2, r: 36 }
+const BRANCH_DIST = 165
+const MAX_LEAVES_PER_BRANCH = 14
 
-// ── Radial layout builder ─────────────────────────────────────────────────────
-function buildRadialGraph(hojas, categorias, W, H, userName) {
-  const CX = W / 2, CY = H * 0.58
-  const nodes = [], edges = []
+function buildGraph(categorias, hojas) {
+  // Map every category to its root ancestor
+  const rootOf = {}
+  const findRoot = (id, seen = new Set()) => {
+    if (id == null || seen.has(id)) return null
+    seen.add(id)
+    const c = categorias.find(x => x.id === id)
+    if (!c) return null
+    if (!c.padre_id) return c.id
+    return findRoot(c.padre_id, seen)
+  }
+  categorias.forEach(c => { rootOf[c.id] = findRoot(c.id) })
 
-  // Root node
-  nodes.push({
-    id: 'root', type: 'root', label: userName || 'yo',
-    x: CX, y: CY, r: 28,
-    color: '#ffffff', phase: 0, speed: 0.003, amp: 3,
-  })
-
-  // Root categories — distribute in a ring
-  const roots = categorias.filter(c => !c.padre_id)
-  const rootRingR = Math.min(W, H) * 0.22
-  roots.forEach((cat, i) => {
-    const angle = (i / roots.length) * Math.PI * 2 - Math.PI / 2
-    const color = BRANCH_COLORS[i % BRANCH_COLORS.length]
-    const x = CX + Math.cos(angle) * rootRingR
-    const y = CY + Math.sin(angle) * rootRingR
-    nodes.push({
-      id: `cat-${cat.id}`, type: 'category', catId: cat.id,
-      label: cat.nombre, icono: cat.icono || '',
-      x, y, r: 18, color,
-      branchColor: color, branchIdx: i,
-      angle, phase: Math.random() * Math.PI * 2, speed: 0.002 + Math.random() * 0.002, amp: 4 + Math.random() * 3,
-    })
-    edges.push({ source: 'root', target: `cat-${cat.id}`, color: color + '55' })
-
-    // Subcategories — fan out from parent
-    const subs = categorias.filter(c => c.padre_id === cat.id)
-    const subRingR = rootRingR * 0.58
-    subs.forEach((sub, si) => {
-      const spread = Math.PI * 0.55
-      const subAngle = angle - spread / 2 + (spread / Math.max(subs.length - 1, 1)) * si
-      const sx = x + Math.cos(subAngle) * subRingR
-      const sy = y + Math.sin(subAngle) * subRingR
-      nodes.push({
-        id: `cat-${sub.id}`, type: 'subcategory', catId: sub.id,
-        label: sub.nombre, icono: sub.icono || '',
-        x: sx, y: sy, r: 14,
-        color: color + 'cc', // slightly lighter
-        branchColor: color, branchIdx: i,
-        angle: subAngle, phase: Math.random() * Math.PI * 2, speed: 0.0025 + Math.random() * 0.002, amp: 3 + Math.random() * 3,
-      })
-      edges.push({ source: `cat-${cat.id}`, target: `cat-${sub.id}`, color: color + '40' })
-    })
-  })
-
-  // Hojas — leaf dots placed near their category
-  const tagOwners = {} // tag → [hojaId]
+  // Group hojas under their root ancestor (subcat hojas roll up to root)
+  const hojasByRoot = {}
   hojas.forEach(h => {
-    const parentNode = nodes.find(n => (n.type === 'category' || n.type === 'subcategory') && n.catId === h.categoria_id)
-    const base = parentNode || nodes[0]
-    const angle = Math.random() * Math.PI * 2
-    const dist = base.r * 2.2 + Math.random() * 28
-    const color = darkenHex(parentNode?.branchColor || '#6d28d9')
-    nodes.push({
-      id: `hoja-${h.id}`, type: 'hoja', hojaId: h.id,
-      label: h.contenido.replace(/https?:\/\/\S+/g, '').trim().slice(0, 22) || '—',
-      icono: h.icono || null, tipo: h.tipo || 'texto',
-      x: base.x + Math.cos(angle) * dist,
-      y: base.y + Math.sin(angle) * dist,
-      r: 9, color,
-      phase: Math.random() * Math.PI * 2, speed: 0.003 + Math.random() * 0.003, amp: 2 + Math.random() * 4,
-    })
-    edges.push({ source: base.id, target: `hoja-${h.id}`, color: color + '60' })
-
-    // Track tag → hoja
-    const tags = extractTags(h.contenido, h.apuntes)
-    tags.forEach(tag => {
-      if (!tagOwners[tag]) tagOwners[tag] = []
-      tagOwners[tag].push(`hoja-${h.id}`)
-    })
+    const r = rootOf[h.categoria_id]
+    if (r == null) return
+    if (!hojasByRoot[r]) hojasByRoot[r] = []
+    hojasByRoot[r].push(h)
   })
 
-  // Leaf-to-leaf connections for shared tags
-  Object.values(tagOwners).forEach(ids => {
-    if (ids.length < 2) return
-    for (let i = 0; i < ids.length - 1; i++) {
-      edges.push({ source: ids[i], target: ids[i + 1], color: 'rgba(255,255,255,0.28)', tag: true })
+  // Branches = root categories arranged in a ring
+  const roots = categorias.filter(c => !c.padre_id)
+  const branches = roots.map((c, i) => {
+    const angle = (i / Math.max(roots.length, 1)) * Math.PI * 2 - Math.PI / 2
+    const count = (hojasByRoot[c.id] || []).length
+    const color = BRANCH_COLORS[i % BRANCH_COLORS.length]
+    return {
+      id: c.id,
+      name: c.nombre,
+      count,
+      color,
+      angle,
+      x: HUB.x + Math.cos(angle) * BRANCH_DIST,
+      y: HUB.y + Math.sin(angle) * BRANCH_DIST,
+      r: 14 + Math.min(count, 40) * 0.4,
     }
   })
 
-  return { nodes, edges }
+  // Leaves fan out from each branch
+  const leaves = []
+  branches.forEach(b => {
+    const bHojas = (hojasByRoot[b.id] || []).slice(0, MAX_LEAVES_PER_BRANCH)
+    const n = bHojas.length
+    const idealStep = 0.32
+    const maxSpread = Math.PI * 0.55
+    const spread = n <= 1 ? 0 : Math.min(idealStep * (n - 1), maxSpread)
+    bHojas.forEach((h, j) => {
+      const sub = n === 1 ? 0 : -spread / 2 + spread * (j / (n - 1))
+      const a = b.angle + sub
+      const dist = 90 + ((j * 37) % 50)
+      leaves.push({
+        id: h.id,
+        tipo: h.tipo,
+        contenido: h.contenido,
+        apuntes: h.apuntes,
+        color: b.color,
+        branchId: b.id,
+        x: b.x + Math.cos(a) * dist,
+        y: b.y + Math.sin(a) * dist,
+      })
+    })
+  })
+
+  // Structural links: hub→branch, branch→leaf
+  const links = [
+    ...branches.map(b => ({ x1: HUB.x, y1: HUB.y, x2: b.x, y2: b.y, c: b.color, w: 1.5 })),
+    ...leaves.map(l => {
+      const b = branches.find(br => br.id === l.branchId)
+      return { x1: b.x, y1: b.y, x2: l.x, y2: l.y, c: l.color, w: 0.8 }
+    }),
+  ]
+
+  // Cross-links via shared #tags
+  const tagOwners = {}
+  leaves.forEach(l => {
+    extractTags(l.contenido, l.apuntes).forEach(t => {
+      if (!tagOwners[t]) tagOwners[t] = []
+      tagOwners[t].push(l)
+    })
+  })
+  const crossLinks = []
+  Object.values(tagOwners).forEach(group => {
+    if (group.length < 2) return
+    for (let i = 0; i < group.length - 1; i++) {
+      crossLinks.push({ a: group[i], b: group[i + 1] })
+    }
+  })
+
+  return { branches, leaves, links, crossLinks }
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
-export default function NetworkGraph() {
-  const canvasRef = useRef(null)
-  const stateRef  = useRef({ nodes: [], edges: [], W: 0, H: 0 })
-  const rafRef    = useRef(null)
+const panelStyle = {
+  background: 'var(--panel-bg)',
+  backdropFilter: 'blur(16px)',
+  WebkitBackdropFilter: 'blur(16px)',
+  border: '1px solid var(--border)',
+  borderRadius: 14,
+}
 
+const iconBtnStyle = {
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+  width: 30, height: 30, borderRadius: 10,
+  color: 'var(--subtext)', cursor: 'pointer',
+  border: '1px solid transparent', background: 'transparent',
+}
+
+export default function NetworkGraph() {
   const hojas      = useStore(s => s.hojas)
   const categorias = useStore(s => s.categorias)
-  const userName   = useStore(s => s.userName)
 
-  // ── Draw ──────────────────────────────────────────────────────────────────
-  const draw = useCallback(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    const { nodes, edges, W, H } = stateRef.current
-    if (!W || !H) return
-
-    ctx.clearRect(0, 0, W, H)
-
-    // 1 — Structural edges
-    edges.filter(e => !e.tag).forEach(e => {
-      const a = nodes.find(n => n.id === e.source)
-      const b = nodes.find(n => n.id === e.target)
-      if (!a || !b) return
-      ctx.save()
-      ctx.beginPath()
-      ctx.moveTo(a.x, a.y)
-      ctx.lineTo(b.x, b.y)
-      ctx.strokeStyle = e.color || 'rgba(139,92,246,0.2)'
-      if (a.type === 'root')          ctx.lineWidth = 2.2
-      else if (a.type === 'category') ctx.lineWidth = 1.4
-      else                            ctx.lineWidth = 0.9
-      ctx.stroke()
-      ctx.restore()
-    })
-
-    // 2 — Tag edges (under all nodes)
-    edges.filter(e => e.tag).forEach(e => {
-      const a = nodes.find(n => n.id === e.source)
-      const b = nodes.find(n => n.id === e.target)
-      if (!a || !b) return
-      ctx.save()
-      ctx.beginPath()
-      ctx.moveTo(a.x, a.y)
-      ctx.lineTo(b.x, b.y)
-      ctx.strokeStyle = e.color
-      ctx.lineWidth = 1.5
-      ctx.stroke()
-      ctx.restore()
-    })
-
-    // 3 — Category / root nodes (on top of tag lines)
-    nodes.filter(n => n.type !== 'hoja').forEach(n => {
-      if (n.type === 'root') {
-        // White glowing center
-        const gr = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, n.r * 3.5)
-        gr.addColorStop(0, 'rgba(255,255,255,0.18)')
-        gr.addColorStop(1, 'transparent')
-        ctx.beginPath(); ctx.arc(n.x, n.y, n.r * 3.5, 0, Math.PI * 2)
-        ctx.fillStyle = gr; ctx.fill()
-
-        const fg = ctx.createRadialGradient(n.x - n.r * 0.3, n.y - n.r * 0.3, 0, n.x, n.y, n.r)
-        fg.addColorStop(0, '#ffffff')
-        fg.addColorStop(1, '#d4c6ff')
-        ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2)
-        ctx.fillStyle = fg; ctx.fill()
-
-        // Label inside
-        ctx.font = 'bold 10px "Sora",sans-serif'
-        ctx.fillStyle = '#1a0040'
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-        ctx.fillText((n.label || 'yo').slice(0, 12), n.x, n.y)
-
-      } else if (n.type === 'category' || n.type === 'subcategory') {
-        const alpha = n.type === 'subcategory' ? 0.72 : 1
-        // Glow
-        const gr = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, n.r * 2.8)
-        gr.addColorStop(0, n.color + '55')
-        gr.addColorStop(1, 'transparent')
-        ctx.beginPath(); ctx.arc(n.x, n.y, n.r * 2.8, 0, Math.PI * 2)
-        ctx.fillStyle = gr; ctx.fill()
-
-        // Disc
-        ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2)
-        ctx.fillStyle = n.color
-        ctx.globalAlpha = alpha
-        ctx.fill()
-        ctx.globalAlpha = 1
-
-        // Icon inside disc (emoji or initial)
-        const icon = n.icono || n.label.slice(0, 1).toUpperCase()
-        ctx.font = n.icono ? `${n.r * 1.1}px sans-serif` : `bold ${n.r * 0.85}px Sora`
-        ctx.fillStyle = '#fff'
-        ctx.globalAlpha = alpha
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-        ctx.fillText(icon, n.x, n.y)
-        ctx.globalAlpha = 1
-
-        // Label below
-        if (n.type === 'category') {
-          ctx.font = '600 9px Sora,sans-serif'
-          ctx.fillStyle = n.color
-          ctx.globalAlpha = 0.9
-          ctx.textAlign = 'center'; ctx.textBaseline = 'top'
-          ctx.fillText(n.label.slice(0, 14), n.x, n.y + n.r + 4)
-          ctx.globalAlpha = 1
-        }
-
-      }
-    })
-
-    // 4 — Leaf nodes (drawn last, on top of tag lines)
-    nodes.filter(n => n.type === 'hoja').forEach(n => {
-      const gr = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, n.r * 1.8)
-      gr.addColorStop(0, n.color + '55')
-      gr.addColorStop(1, 'transparent')
-      ctx.beginPath(); ctx.arc(n.x, n.y, n.r * 1.8, 0, Math.PI * 2)
-      ctx.fillStyle = gr; ctx.fill()
-
-      ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2)
-      ctx.fillStyle = n.color + 'cc'
-      ctx.fill()
-
-      const iconKey = n.icono || DEFAULT_LEAF_ICON[n.tipo] || 'FileText'
-      const iconImg = getIconImg(iconKey, '#ffffff')
-      if (iconImg && iconImg.complete) {
-        const s = n.r * 1.2
-        ctx.drawImage(iconImg, n.x - s / 2, n.y - s / 2, s, s)
-      }
-    })
-  }, [])
-
-  // ── Float tick ────────────────────────────────────────────────────────────
-  const tick = useCallback(() => {
-    const { nodes } = stateRef.current
-    nodes.forEach(n => {
-      n.phase += n.speed
-      n.x = n.restX + Math.sin(n.phase) * n.amp
-      n.y = n.restY + Math.cos(n.phase * 0.87) * n.amp
-    })
-    draw()
-    rafRef.current = requestAnimationFrame(tick)
-  }, [draw])
-
-  // ── Init ──────────────────────────────────────────────────────────────────
-  const init = useCallback(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const W = canvas.offsetWidth, H = canvas.offsetHeight
-    if (!W || !H) return
-    const { nodes, edges } = buildRadialGraph(hojas, categorias, W, H, userName)
-    nodes.forEach(n => { n.restX = n.x; n.restY = n.y })
-    stateRef.current = { nodes, edges, W, H }
-    if (DEBUG) console.log('graph init:', nodes.length, 'nodes,', edges.length, 'edges')
-  }, [hojas, categorias, userName])
-
-  // ── Resize ────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const resize = () => {
-      canvas.width  = canvas.offsetWidth
-      canvas.height = canvas.offsetHeight
-    }
-    resize()
-    const ro = new ResizeObserver(() => { resize(); init() })
-    ro.observe(canvas)
-    return () => ro.disconnect()
-  }, [init])
-
-  // ── Start / restart on data change ────────────────────────────────────────
-  useEffect(() => {
-    cancelAnimationFrame(rafRef.current)
-    init()
-    rafRef.current = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(rafRef.current)
-  }, [hojas, categorias, userName, init, tick])
+  const { branches, leaves, links, crossLinks } = useMemo(
+    () => buildGraph(categorias, hojas),
+    [categorias, hojas]
+  )
 
   return (
-    <div className="absolute inset-0">
-      <canvas ref={canvasRef} className="w-full h-full block" style={{ cursor: 'default' }} />
+    <div className="absolute inset-0 grid place-items-center">
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="w-full h-full"
+        preserveAspectRatio="xMidYMid meet"
+      >
+        <defs>
+          <radialGradient id="hubGrad" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="var(--accent-light)" />
+            <stop offset="100%" stopColor="var(--accent)" />
+          </radialGradient>
+          <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="6" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
+
+        {/* tag cross-links (under structural lines) */}
+        {crossLinks.map((l, i) => (
+          <line key={`x${i}`} x1={l.a.x} y1={l.a.y} x2={l.b.x} y2={l.b.y}
+            stroke="rgba(255,255,255,0.28)" strokeDasharray="2 3" strokeWidth="1" />
+        ))}
+
+        {/* structural links */}
+        {links.map((l, i) => (
+          <line key={`s${i}`} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2}
+            stroke={l.c} strokeOpacity="0.35" strokeWidth={l.w} />
+        ))}
+
+        {/* leaves — shape by tipo */}
+        {leaves.map(l => {
+          if (l.tipo === 'link') {
+            const s = 10
+            return (
+              <rect key={l.id} x={l.x - s / 2} y={l.y - s / 2}
+                width={s} height={s} fill={l.color} opacity="0.75"
+                transform={`rotate(45 ${l.x} ${l.y})`} />
+            )
+          }
+          if (l.tipo === 'foto') {
+            return (
+              <rect key={l.id} x={l.x - 5} y={l.y - 5}
+                width="10" height="10" rx="2" fill={l.color} opacity="0.8" />
+            )
+          }
+          return (
+            <circle key={l.id} cx={l.x} cy={l.y} r="5"
+              fill={l.color} opacity="0.75" />
+          )
+        })}
+
+        {/* branches */}
+        {branches.map(b => (
+          <g key={b.id}>
+            <circle cx={b.x} cy={b.y} r={b.r} fill={b.color} opacity="0.18" />
+            <circle cx={b.x} cy={b.y} r={b.r * 0.55} fill={b.color}
+              stroke="white" strokeOpacity="0.15" strokeWidth="1" />
+            <text x={b.x} y={b.y + b.r + 18}
+              style={{ fontFamily: 'var(--font-sans)' }} fontSize="11.5" fontWeight="500"
+              textAnchor="middle" fill="var(--text)">
+              {b.name}
+            </text>
+            <text x={b.x} y={b.y + b.r + 32}
+              style={{ fontFamily: 'var(--font-mono)' }}
+              fontSize="9.5" textAnchor="middle" fill="var(--subtext)">
+              {b.count} {b.count === 1 ? 'hoja' : 'hojas'}
+            </text>
+          </g>
+        ))}
+
+        {/* hub */}
+        <g filter="url(#softGlow)">
+          <circle cx={HUB.x} cy={HUB.y} r={HUB.r + 8} fill="var(--accent)" opacity="0.18" />
+          <circle cx={HUB.x} cy={HUB.y} r={HUB.r} fill="url(#hubGrad)" />
+        </g>
+        <text x={HUB.x} y={HUB.y + 5}
+          style={{ fontFamily: 'var(--font-serif)' }} fontStyle="italic"
+          fontSize="22" fontWeight="700" textAnchor="middle" fill="var(--cta-text)">
+          SGR
+        </text>
+      </svg>
+
+      {/* legend */}
+      <div
+        className="absolute bottom-3 left-3 px-3 py-2 flex items-center gap-3 text-[10.5px]"
+        style={{ ...panelStyle, color: 'var(--subtext)' }}
+      >
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block w-2 h-2 rounded-full" style={{ background: 'var(--accent-light)' }} />
+          texto
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block w-2 h-2 rotate-45" style={{ background: 'var(--accent-light)' }} />
+          link
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block w-2 h-2 rounded-sm" style={{ background: 'var(--accent-light)' }} />
+          foto
+        </span>
+      </div>
+
+      {/* minimap */}
+      <div
+        className="absolute bottom-3 right-3 w-[120px] h-[80px] p-2 grid place-items-center"
+        style={panelStyle}
+      >
+        <svg viewBox="0 0 120 80" className="w-full h-full opacity-70">
+          <circle cx="60" cy="40" r="4" fill="var(--accent)" />
+          {branches.map((b, i) => {
+            const mx = 60 + Math.cos(b.angle) * 22
+            const my = 40 + Math.sin(b.angle) * 16
+            return <circle key={i} cx={mx} cy={my} r="2.4" fill={b.color} opacity="0.8" />
+          })}
+          <rect x="40" y="22" width="40" height="36"
+            fill="none" stroke="var(--accent-light)" strokeWidth="1" rx="2" />
+        </svg>
+      </div>
+
+      {/* zoom controls (decorative — match design) */}
+      <div className="absolute top-3 right-3 flex flex-col" style={panelStyle}>
+        <button style={iconBtnStyle} aria-label="Zoom in">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+        </button>
+        <div className="h-px" style={{ background: 'var(--border)' }} />
+        <button style={iconBtnStyle} aria-label="Zoom out">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+        </button>
+      </div>
     </div>
   )
 }

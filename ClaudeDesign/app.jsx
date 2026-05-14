@@ -15,7 +15,7 @@ const ACCENT_SWATCHES = [
 ];
 
 function App() {
-  const [active, setActive] = React.useState("habitos");
+  const [active, setActive] = React.useState("boveda");
   const [transitioning, setTransitioning] = React.useState(false);
 
   const [tweaks, setTweak] = useTweaks(TWEAK_DEFAULTS);
@@ -65,6 +65,13 @@ function App() {
     }, 80);
   };
 
+  const CYCLE_ORDER = ["boveda", "finanzas", "agenda", "habitos"];
+  const cycleModule = () => {
+    const idx = CYCLE_ORDER.indexOf(active);
+    const next = idx === -1 ? CYCLE_ORDER[0] : CYCLE_ORDER[(idx + 1) % CYCLE_ORDER.length];
+    handleNav(next);
+  };
+
   const [primaryModal, setPrimaryModal] = React.useState(null);
   const handlePrimary = () => {
     if (active === "habitos") setPrimaryModal("habit");
@@ -75,9 +82,8 @@ function App() {
 
   return (
     <div className="flex h-screen w-full relative">
-      <Sidebar active={active} onNav={handleNav} onSettings={()=>setPrimaryModal("settings")} />
       <div className="flex-1 min-w-0 flex flex-col relative">
-        <TopBar moduleId={active} onPrimary={handlePrimary}/>
+        <TopBar moduleId={active} onPrimary={handlePrimary} onSettings={()=>setPrimaryModal("settings")} onCycle={cycleModule}/>
         <main className={`flex-1 min-h-0 flex flex-col ${transitioning ? "opacity-0" : "opacity-100"} transition-opacity duration-150`}>
           {active === "boveda"   && <BovedaScreen />}
           {active === "habitos"  && <HabitosScreen />}

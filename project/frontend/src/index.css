@@ -2,42 +2,102 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Default theme — violet dark (overridden by JS on load) */
+/* Default theme — Disco 90s (overridden by JS on load) */
 :root {
-  --bg:           #060210;
-  --surface:      #170f32;
-  --sidebar:      #0e0720;
-  --accent:       #8b5cf6;
-  --accent-light: #ec4899;
-  --text:         #f0e6ff;
-  --subtext:      #c4b5fd;
-  --border:       rgba(139,92,246,0.22);
+  --bg:            #0d0420;
+  --sidebar:       #0a031a;
+  --surface:       #1a0a35;
+  --panel-bg:      rgba(22,8,48,0.82);
+  --border:        rgba(190,24,93,0.18);
+  --accent:        #ec4899;
+  --accent-light:  #f9a8d4;
+  --accent-deep:   #be185d;
+  --text:          #fbeaff;
+  --text-2:        #dcc6f0;
+  --subtext:       #9b7fb8;
+  --mute:          #6b4d8a;
+  --cta-bg:        linear-gradient(130deg, #ec4899, #22d3ee);
+  --cta-text:      #ffffff;
+  --shadow-accent: 0 6px 18px -6px rgba(236,72,153,0.55);
+  --shadow-soft:   0 4px 16px rgba(236,72,153,0.32);
+  --font-serif:    'Playfair Display', Georgia, serif;
+  --font-sans:     'Space Grotesk', 'Sora', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono:     ui-monospace, 'SFMono-Regular', Menlo, monospace;
 }
 
 * { box-sizing: border-box; }
 
 body {
   margin: 0;
-  font-family: 'Sora', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: var(--font-sans);
   background-color: var(--bg);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
+  position: relative;
+  min-height: 100vh;
 }
 
-/* Gradient utilities */
+/* Soft glow ambient — dos radials del color del tema; arriba-izquierda fuerte
+   y abajo-derecha tenue. Capa fija detrás de todo, así LeftPanel + grafo + main
+   comparten la misma luz. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(60% 50% at 18% 0%,
+      color-mix(in oklch, var(--accent) 18%, transparent) 0%,
+      transparent 60%),
+    radial-gradient(40% 35% at 100% 100%,
+      color-mix(in oklch, var(--accent) 10%, transparent) 0%,
+      transparent 70%);
+}
+/* En light themes el glow se ve sobre-saturado; bajamos la intensidad */
+html[data-theme-mode="light"] body::before {
+  background:
+    radial-gradient(60% 50% at 18% 0%,
+      color-mix(in oklch, var(--accent) 9%, transparent) 0%,
+      transparent 60%),
+    radial-gradient(40% 35% at 100% 100%,
+      color-mix(in oklch, var(--accent) 5%, transparent) 0%,
+      transparent 70%);
+}
+/* El #root debe quedar por encima del glow */
+#root { position: relative; z-index: 1; }
+
+/* Gradient utilities — usan --cta-bg (mismo gradient del botón "+ Capturar")
+   así títulos y CTA comparten identidad cromática por tema. */
 .gradient-text {
-  background: linear-gradient(130deg, var(--accent), var(--accent-light));
+  background: var(--cta-bg);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+  color: transparent;
 }
 .gradient-bg {
-  background: linear-gradient(135deg, var(--accent), var(--accent-light));
+  background: var(--cta-bg);
 }
+/* Active item highlight — derived from --accent via color-mix, theme-aware */
 .gradient-border-active {
-  background: linear-gradient(90deg, rgba(139,92,246,.18), rgba(236,72,153,.06));
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 18%, transparent),
+    color-mix(in srgb, var(--accent-light) 6%, transparent)
+  );
   border-left: 2px solid var(--accent-light);
+}
+
+/* In light themes the active-bg becomes too tinted — soften it */
+[data-theme-mode="light"] .gradient-border-active {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 12%, transparent),
+    color-mix(in srgb, var(--accent) 3%, transparent)
+  );
+  border-left: 2px solid var(--accent-deep);
 }
 
 /* Micro-animations */
@@ -81,21 +141,43 @@ body {
 .apuntes-preview u      { text-decoration: underline; }
 .apuntes-preview img    { max-width: 100%; border-radius: 8px; display: block; margin-top: 6px; }
 
-/* Global scrollbar */
-::-webkit-scrollbar       { width: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+/* ============================================================
+   Scrollbars custom — gradient del tema (--cta-bg) que se mueve
+   con el scroll. El thumb es un <div> real (componente ScrollArea),
+   no el pseudo-element nativo; así background-position responde
+   bien a las actualizaciones de JS.
+   ============================================================ */
 
-/* Left panel scrollbar */
-.panel-scroll { scrollbar-width: thin; scrollbar-color: var(--accent) transparent; }
-.panel-scroll::-webkit-scrollbar       { width: 5px; }
-.panel-scroll::-webkit-scrollbar-track { background: transparent; margin: 6px 0; }
-.panel-scroll::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, var(--accent), var(--accent-light));
+/* Firefox y nativos como fallback discreto */
+* { scrollbar-width: thin; scrollbar-color: var(--accent) transparent; }
+::-webkit-scrollbar          { width: 6px; height: 6px; }
+::-webkit-scrollbar-track    { background: transparent; }
+::-webkit-scrollbar-corner   { background: transparent; }
+::-webkit-scrollbar-thumb    { background: var(--cta-bg); border-radius: 99px; opacity: 0.8; }
+
+/* Contenedor ScrollArea — oculta la barra nativa */
+.scroll-area-host { scrollbar-width: none; }
+.scroll-area-host::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+/* Thumb custom — gradiente del CTA del tema, se mueve con --scroll-pos */
+.scroll-area-thumb {
+  position: absolute;
+  right: 3px;
+  width: 6px;
   border-radius: 99px;
-  opacity: 0.6;
+  background-image: var(--cta-bg);
+  background-size: 100% 300%;
+  background-repeat: no-repeat;
+  opacity: 0.85;
+  pointer-events: none;
+  z-index: 20;
+  transition: opacity 0.15s;
 }
-.panel-scroll::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(180deg, var(--accent-light), var(--accent));
-  opacity: 1;
-}
+.scroll-area-thumb:hover { opacity: 1; }
+
+/* Panel-scroll (left/right panels) sigue usando barra nativa por ahora */
+.panel-scroll                          { scrollbar-width: thin; scrollbar-color: var(--accent) transparent; }
+.panel-scroll::-webkit-scrollbar       { width: 6px; }
+.panel-scroll::-webkit-scrollbar-track { background: transparent; margin: 6px 0; }
+.panel-scroll::-webkit-scrollbar-thumb { background: var(--cta-bg); border-radius: 99px; opacity: 0.8; }
+.panel-scroll::-webkit-scrollbar-thumb:hover { opacity: 1; }

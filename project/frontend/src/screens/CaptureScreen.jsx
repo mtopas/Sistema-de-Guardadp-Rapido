@@ -104,8 +104,8 @@ export default function CaptureScreen() {
       <button
         onClick={handleSave}
         disabled={!contenido.trim() || !categoriaId || saving}
-        className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-white font-medium text-sm disabled:opacity-40 hover:brightness-110 active:scale-[0.98] transition-all duration-150"
-        style={{ backgroundColor: 'var(--accent)' }}
+        className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-medium text-sm disabled:opacity-40 hover:brightness-110 active:scale-[0.98] transition-all duration-150"
+        style={{ background: 'var(--cta-bg)', color: 'var(--cta-text)' }}
       >
         <Send size={15} />
         {saving ? 'Guardando...' : 'Guardar'}

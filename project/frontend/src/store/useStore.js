@@ -1,10 +1,19 @@
 import { create } from 'zustand'
 import { API_URL, DEBUG } from '../config'
-import { applyTheme, DEFAULT_THEME } from '../utils/themes'
+import { applyTheme, DEFAULT_THEME, DEFAULT_TONE, DEFAULT_FONT_PAIR, FONT_PAIRS, THEMES, TONES } from '../utils/themes'
 
-// Apply saved theme immediately before first render
-const savedTheme = localStorage.getItem('sgr-theme') || DEFAULT_THEME
-applyTheme(savedTheme)
+// Apply saved theme + tone + font pair immediately before first render
+// Migrate: if localStorage holds a key from an old set, fall back to default.
+const rawTheme    = localStorage.getItem('sgr-theme')
+const rawTone     = localStorage.getItem('sgr-tone')
+const rawFontPair = localStorage.getItem('sgr-font-pair')
+const savedTheme    = (rawTheme    && THEMES[rawTheme])         ? rawTheme    : DEFAULT_THEME
+const savedTone     = (rawTone     && TONES[rawTone])           ? rawTone     : DEFAULT_TONE
+const savedFontPair = (rawFontPair && FONT_PAIRS[rawFontPair])  ? rawFontPair : DEFAULT_FONT_PAIR
+if (rawTheme    && !THEMES[rawTheme])         localStorage.setItem('sgr-theme',     savedTheme)
+if (rawTone     && !TONES[rawTone])           localStorage.setItem('sgr-tone',      savedTone)
+if (rawFontPair && !FONT_PAIRS[rawFontPair])  localStorage.setItem('sgr-font-pair', savedFontPair)
+applyTheme(savedTheme, savedTone, savedFontPair)
 
 const savedLang     = localStorage.getItem('sgr-lang')     || 'es'
 const savedUserName = localStorage.getItem('sgr-username')  || ''
@@ -13,9 +22,16 @@ export const useStore = create((set, get) => ({
   hojas:      [],
   categorias: [],
   theme:      savedTheme,
+  tone:       savedTone,
+  fontPair:   savedFontPair,
   lang:       savedLang,
   userName:   savedUserName,
   toast:      null,
+
+  // --- Capture modal (floating, replaces /capture screen) ---
+  captureOpen: false,
+  openCapture:  () => set({ captureOpen: true }),
+  closeCapture: () => set({ captureOpen: false }),
 
   // --- User name ---
   setUserName: (name) => {
@@ -32,10 +48,26 @@ export const useStore = create((set, get) => ({
 
   // --- Theme ---
   setTheme: (key) => {
-    applyTheme(key)
+    applyTheme(key, get().tone, get().fontPair)
     localStorage.setItem('sgr-theme', key)
     set({ theme: key })
     if (DEBUG) console.log('theme set:', key)
+  },
+
+  // --- Tone (modificador del theme) ---
+  setTone: (key) => {
+    applyTheme(get().theme, key, get().fontPair)
+    localStorage.setItem('sgr-tone', key)
+    set({ tone: key })
+    if (DEBUG) console.log('tone set:', key)
+  },
+
+  // --- Font pair (independiente del tema) ---
+  setFontPair: (key) => {
+    applyTheme(get().theme, get().tone, key)
+    localStorage.setItem('sgr-font-pair', key)
+    set({ fontPair: key })
+    if (DEBUG) console.log('fontPair set:', key)
   },
 
   // --- Toast ---

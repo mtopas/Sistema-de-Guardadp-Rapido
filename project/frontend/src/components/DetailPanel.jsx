@@ -12,7 +12,7 @@ function EditorToolbar({ editor }) {
   const btn = (action, label, active) => (
     <button type="button" onClick={action}
       className="px-2 py-0.5 text-[11px] rounded transition-colors duration-100"
-      style={{ color: active ? 'var(--accent)' : 'var(--subtext)', background: active ? 'rgba(139,92,246,0.15)' : 'transparent' }}
+      style={{ color: active ? 'var(--accent)' : 'var(--subtext)', background: active ? 'color-mix(in srgb, var(--accent) 15%, transparent)' : 'transparent' }}
     >{label}</button>
   )
   return (
@@ -85,7 +85,7 @@ export default function DetailPanel({ hojaId, onClose }) {
             <X size={14} />
           </button>
         </div>
-        <p className="font-serif text-sm leading-snug" style={{ color: 'var(--text)', fontFamily: "'Playfair Display', serif" }}>
+        <p className="font-serif text-sm leading-snug" style={{ color: 'var(--text)', fontFamily: 'var(--font-serif)' }}>
           {hoja.contenido.replace(/https?:\/\/\S+/g, '').trim().slice(0, 80) || hoja.contenido.slice(0, 80)}
         </p>
         <div className="flex gap-3 mt-1.5 text-[11px]" style={{ color: 'var(--subtext)' }}>
@@ -110,7 +110,7 @@ export default function DetailPanel({ hojaId, onClose }) {
           {isDirty && (
             <button onClick={handleSave} disabled={saving}
               className="ml-auto flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg disabled:opacity-50 transition-all"
-              style={{ background: 'linear-gradient(135deg, var(--accent), var(--accent-light))', color: '#fff' }}
+              style={{ background: 'var(--cta-bg)', color: 'var(--cta-text)' }}
             >
               <Save size={10} />
               {saving ? t(lang, 'saving') : t(lang, 'saveNotes')}
@@ -128,7 +128,7 @@ export default function DetailPanel({ hojaId, onClose }) {
       {/* Category pills + delete */}
       <div className="px-3 py-2 border-t flex items-center gap-2 flex-wrap flex-shrink-0" style={{ borderColor: 'var(--border)' }}>
         <span className="text-[10px] px-2.5 py-1 rounded-full border"
-          style={{ borderColor: 'var(--accent)', color: 'var(--accent)', background: 'rgba(139,92,246,0.12)' }}>
+          style={{ borderColor: 'var(--accent)', color: 'var(--accent)', background: 'color-mix(in srgb, var(--accent) 12%, transparent)' }}>
           {hoja.categoria_nombre}
         </span>
         <button onClick={handleDelete} className="ml-auto text-[11px] px-2.5 py-1 rounded-lg transition-colors"

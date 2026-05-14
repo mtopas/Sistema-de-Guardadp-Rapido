@@ -2,6 +2,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { Home, Settings } from 'lucide-react'
 import Sidebar from './Sidebar'
 import FAB from './FAB'
+import ScrollArea from './ScrollArea'
 
 export default function Layout({ children }) {
   const navigate = useNavigate()
@@ -22,9 +23,13 @@ export default function Layout({ children }) {
       )}
 
       {/* Main content */}
-      <main className={`flex-1 overflow-y-auto pb-20 md:pb-0 ${isBrowse ? 'overflow-hidden' : ''}`}>
-        {children}
-      </main>
+      {isBrowse ? (
+        <main className="flex-1 overflow-hidden">{children}</main>
+      ) : (
+        <ScrollArea className="flex-1" contentClassName="pb-20 md:pb-0">
+          {children}
+        </ScrollArea>
+      )}
 
       {/* Mobile bottom nav */}
       <nav

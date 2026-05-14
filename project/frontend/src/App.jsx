@@ -3,6 +3,8 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { useStore } from './store/useStore'
 import Layout from './components/Layout'
 import Toast from './components/Toast'
+import TweaksPanel from './components/TweaksPanel'
+import CaptureModal from './components/CaptureModal'
 import BrowseScreen  from './screens/BrowseScreen'
 import CaptureScreen from './screens/CaptureScreen'
 import DetailScreen  from './screens/DetailScreen'
@@ -18,7 +20,12 @@ export default function App() {
   }, [])
 
   return (
-    <BrowserRouter>
+    <BrowserRouter
+      future={{
+        v7_startTransition: true,
+        v7_relativeSplatPath: true,
+      }}
+    >
       <Layout>
         <Routes>
           <Route path="/"          element={<BrowseScreen />}  />
@@ -28,6 +35,8 @@ export default function App() {
         </Routes>
       </Layout>
       <Toast />
+      <TweaksPanel />
+      <CaptureModal />
     </BrowserRouter>
   )
 }

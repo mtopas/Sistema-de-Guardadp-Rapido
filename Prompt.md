@@ -227,3 +227,311 @@ En el panel derecho, quiero ver primero una tabla de cuotas. Cosas que haya paga
 Abajo de esto, quiero una tabla de gasto total por categoría.
 
 Despues vemos que hacemos con el resto de las tabs.
+
+### Datos
+
+**Rutas (contexto — no re-explorar el repo):**
+
+| Qué | Ruta |
+|-----|------|
+| Pantalla Finanzas | `project/frontend/src/screens/FinanzasScreen.jsx` |
+| Tabs | `project/frontend/src/components/finanzas/DashboardTabs.jsx` |
+| Modal alta de movimiento | `project/frontend/src/components/finanzas/MovementModal.jsx` |
+| Tabla “ver todos” del dashboard (solo lectura) | `project/frontend/src/components/finanzas/MovimientosTableModal.jsx` |
+| Panel derecho del dashboard | `project/frontend/src/components/finanzas/FinanzasRightPanel.jsx` |
+| Estado Finanzas | `project/frontend/src/store/useStore.js` |
+| Datos mock / reglas de negocio | `project/frontend/src/data/finanzas.js` |
+| Textos UI | `project/frontend/src/utils/i18n.js` |
+| Backend Finanzas | `project/app/main.py`, `project/app/db/crud.py`, `project/app/db/database.py` |
+| Diseño referencia | `ClaudeDesign/finanzas.jsx`, `ClaudeDesign/modals.jsx` |
+| Spec general Finanzas | sección `## Finanzas` arriba; `project/README.md` |
+
+**Qué debe hacer la tab**
+
+- Mostrar el **histórico completo** de movimientos. El selector de mes/año de las tabs **no** filtra esta vista.
+- **Una tabla** con ingresos y gastos juntos y una columna que indique **gasto o ingreso**.
+- **No mostrar transferencias** entre cuentas (misma regla que el resto de Finanzas).
+- Puede haber **miles** de filas.
+- **Panel central:** tabla a ancho completo.
+- **Orden fijo** por fecha: la más antigua arriba, la más reciente abajo. Sin ordenar por otras columnas ni filtros.
+- **Edición inline** de cada celda; al salir del campo (**blur**) se guarda el cambio.
+- **Columnas editables:** las mismas que el formulario de **+ Movimiento** (fecha y hora, monto, gasto/ingreso, descripción, método de pago, cuotas opcional, categoría, pesos o dólares, nota opcional, audit). Cuenta y categoría: **texto libre**. El icono no se edita a mano.
+- Al final de cada fila, botón para **eliminar** el movimiento (**sin** diálogo de confirmación).
+- **Crear** movimientos solo desde **+ Movimiento** del header; no hace falta botón extra en esta tab.
+
+**Panel derecho (solo en tab Datos)**
+
+KPIs y detalles calculados sobre el histórico (sin transferencias), por ejemplo:
+
+- Fecha del primer movimiento
+- Días desde ese primer movimiento
+- Promedio de movimientos por mes
+- Otros indicadores útiles en la misma línea visual que el resto de Finanzas
+
+**Restricciones**
+
+- Finanzas es **offline**; edición y borrado deben funcionar igual que el resto del módulo cuando no hay red.
+- Lo **online** del sistema es solo lo del bot de Telegram.
+
+
+---
+Podemos cambiar el órden de las columnas?
+Fecha - Tipo - Monto - Moneda- Método - Categoría - Descripción - Cuotas - Tacho de basura.
+Borramos la lógica de notas.
+Cambiemos el formato de la fecha a DD-MM-AAAA . 
+Podemos lograr que las barras desplazadoras de todo Finanzas cambien de color como pasa en Bóveda?
+
+### Ahorro
+
+Quiero implementar la pestaña **Ahorro** dentro de **Finanzas** en el proyecto (`project/`). Es la vista donde veo cuánto tengo ahorrado en total, cómo está distribuido entre mis instrumentos (acciones, plazos fijos, FCI, ONs, etc.) y mis objetivos de ahorro — que se actualizan solos cuando registro movimientos con categoría `Ahorro`. Leé la spec de abajo y las rutas; no re-explores el repo desde cero.
+
+**Rutas (contexto — re-explorar lo que sea necesario):**
+
+| Qué | Ruta |
+|-----|------|
+| Pantalla Finanzas + tab Ahorro | `project/frontend/src/screens/FinanzasScreen.jsx` |
+| Tabs | `project/frontend/src/components/finanzas/DashboardTabs.jsx` |
+| Movimientos (origen del total ahorrado) | `project/frontend/src/components/finanzas/MovementModal.jsx`, tab **Datos** en este archivo |
+| Panel derecho dashboard (objetivos FIRE / emergencia hoy) | `project/frontend/src/components/finanzas/FinanzasRightPanel.jsx` |
+| Tab FIRE | `project/frontend/src/components/finanzas/FireProjectionCard.jsx` |
+| Estado Finanzas | `project/frontend/src/store/useStore.js` |
+| Categorías / reglas | `project/frontend/src/data/finanzas.js`, `project/app/db/database.py` |
+| Backend Finanzas | `project/app/main.py`, `project/app/db/crud.py` |
+| Diseño referencia | `ClaudeDesign/finanzas.jsx` |
+| Spec general | sección `## Finanzas` arriba |
+
+**Qué es “ahorro total” (número principal)**
+
+- **Suma** de todos los **gastos** con categoría exacta **`Ahorro`** (dinero que guardaste).
+- **Menos** la **suma** de todos los **ingresos** con categoría exacta **`Ahorro`** (dinero que retiraste desde tus ahorros hacia el día a día).
+- Ese total es el que **repartís** entre instrumentos (acciones, plazos fijos, FCI, ONs, etc.).
+- **No** se mezcla con el **saldo disponible** del panel izquierdo: un gasto categoría Ahorro es plata que dejás de tener para gastar; un ingreso categoría Ahorro es plata que vuelve al disponible y **sale** del ahorro total.
+- Las **transferencias** entre cuentas no afectan este cálculo (misma regla que en Datos).
+- Si editás un movimiento en **Datos**, los totales y objetivos **se recalculan**.
+
+**A debatir:** cómo mostrar y sumar **monedas** (ARS vs USD) en el total y en cada instrumento.
+
+**Tab Ahorro — una sola pantalla (sin sub-pestañas)**
+
+- **Panel central:** patrimonio de ahorro/inversión.
+  - **Total ahorrado** (regla de arriba).
+  - **Desglose por tipo de instrumento** — lista **fija y amplia** (mejor que sobren tipos que falten): p. ej. acciones, cedears, plazo fijo, FCI, ONs, bonos, crypto, otros que encajen. Cada tipo muestra la **información propia** de ese instrumento (no todos iguales).
+  - Donde aplique (**acciones, cedears**, etc.): **una fila por ticker**; ir cargando **compras y ventas** con todos los campos que hagan falta (que sobre antes que falte); ir **sumando nominales** y el **precio promedio** de la posición.
+  - En **otro lugar** (misma fila o sección del activo): poder **actualizar a mano el valor actual** del mercado y ver **rendimiento** (ganancias y pérdidas) calculado a partir de eso.
+  - Instrumentos donde **no** aplique ledger de compra/venta (plazo fijo, FCI, etc.): la info que corresponda a ese producto, sin forzar el mismo modelo que acciones.
+- **Quitar** de esta tab lo que hoy sea suscripciones u otros widgets que no correspondan.
+
+**Objetivos de ahorro**
+
+- Crear objetivos con **monto meta** y **fecha límite opcional**.
+- Cada objetivo puede tener **cuánto ahorrar por mes**: si hay fecha límite, se **calcula**; si no, se **carga a mano**. Mostrar **cuánto llevás**, **cuánto falta**, progreso, etc.
+- **Vinculación automática con movimientos:**
+  - Un **gasto**, categoría **`Ahorro`**, descripción **idéntica** al nombre del objetivo → suma ese monto **solo a ese objetivo** y al total de ahorro.
+  - Un **ingreso**, categoría **`Ahorro`**, descripción idéntica → **resta** del objetivo y del total (retiro desde ese ahorro).
+  - Un movimiento solo afecta **un** objetivo. Si la descripción no coincide con ningún objetivo existente → **mostrar error** (no asignar a ningún lado).
+- Al retirar, los objetivos **bajan**; no solo suben.
+- Objetivo al **100%**: sigue **visible** hasta que lo **elimines** manualmente.
+- El **fondo de emergencia** pasa a ser **un objetivo más** (no un sistema aparte con categoría Emergencia como hoy).
+
+**Panel derecho (solo en tab Ahorro)**
+
+- Lista de **objetivos** con **porcentaje** de avance y **cuánto falta** (y lo que ayude a leer el estado de cada meta).
+
+**Relación con tab FIRE**
+
+- FIRE y Ahorro se cruzan solo en **cuánto te toca ahorrar este mes** (meta mensual que sale del plan FIRE).
+- Tab **FIRE:** tabla **editable** mes a mes con cuánto **ahorraste**; el resto de columnas/valores se **derivan** según reglas del plan (p. ej. % de incremento mensual de ahorro configurado en el **panel derecho de FIRE**).
+- En **Ahorro** no duplicar toda la proyección FIRE; usar la meta mensual donde corresponda (p. ej. comparar con lo ahorrado vía categoría Ahorro en el mes).
+
+**Alcance futuro (incluir en el producto; orden de implementación lo define la IA en su momento)**
+
+- Ventas parciales, splits, dividendos, amortizaciones y casos similares en posiciones con compra/venta.
+- Prioridad de entregas y exclusiones de v1: **sin definir** en este prompt.
+
+**Restricciones**
+
+- **Offline**, como el resto de Finanzas.
+- Categoría: nombre exacto **`Ahorro`** (no variantes ni contains).
+
+### FIRE (complemento — tab propia)
+
+- Tabla del plan **editable** (meses, lo ahorrado, metas derivadas).
+- **Panel derecho:** configuración del **% en que aumentás el ahorro cada mes**; con eso y lo cargado se recalculan los demás valores del plan.
+- Vinculación con Ahorro: ver sección **Relación con tab FIRE** arriba.
+
+#### PREGUNTAS A AGREGAR AL PROMPT
+
+**1. Vinculación movimiento → objetivo: ¿qué pasa con los huérfanos?**
+
+> Un movimiento categoría `Ahorro` con descripción que no coincide con ningún objetivo existente: ¿el error bloquea el guardado, o el movimiento se guarda igual y aparece marcado como "sin asignar"? Si no bloquea, ¿ese monto suma al total ahorrado o queda fuera?
+Me gusta que quede cómo "sin asignar". Ese monto suma al total ahorrado.
+
+**2. Monedas (el punto marcado explícitamente como "a debatir")**
+
+> El total ahorrado, ¿se muestra en ARS, en USD, o en ambos (con conversión manual igual que el Dashboard)?
+Tiene que haber dos totales, en ARS y en USD. Se usa el DOLAR OFICIAL (se carga manualmente) para convertir de uno a otro.
+> Para los instrumentos, ¿el precio promedio de posiciones en acciones/CEDEARs se carga en ARS, USD, o permite los dos?
+Tengo entendido que lo mejor es manjerase con USD en lo que respecta al portafolio, acciones, cedears, ONs, etc. Creo que voy a cargar siempre en dólares. Si compro 1500 pesos y el dólar está 1500 pesos, cargo como que compré un dólar de esa acción. Que pensas de esto?
+> Si un plazo fijo está en pesos y una ON está en USD, ¿cómo se suma el total del portafolio?
+Total en pesos: intrumensots en pesos + instrumentos en dólar * dólar oficial.
+Total en dólares: intrumentos en dólares + instrumentos en pesos / dólar oficial.
+Que pensas de esto?
+
+
+**3. Instrumentos vs. movimientos: ¿son mundos separados o el mismo dato?**
+
+> Cuando compro 10 acciones de AAPL, ¿registro ese gasto como un movimiento categoría `Ahorro` descripción `AAPL` + cargo la compra en el ledger del instrumento? ¿O son cosas independientes? (Si son las dos cosas a la vez, ¿cómo evitar que el total se duplique?)
+Podemos charlarlo. Que pensas que es mejor?
+Creo que una opción podría ser que yo categorice todo lo que vaya a ahorro como "Ahorro" y después dentro de la pestaña ahorro yo particiono el ahorro en distintas cosas.
+La otra opción es usar la categoría + descripción para asignar.
+
+**4. Fondo de emergencia: migración**
+
+> Hoy existe `fondo_emergencia_meta` en `fin_config` y la categoría especial `Emergencia` en la BD. ¿Se migra eso a "un objetivo más" llamado `Fondo de Emergencia` con categoría `Ahorro` descripción exacta `Fondo de Emergencia`? ¿Y los movimientos históricos con categoría `Emergencia` cómo se tratan — se re-categorizan manualmente o se borran?
+
+Sí, se migra eso a "un objetivo más" llamado `Fondo de Emergencia` con categoría `Ahorro` descripción exacta `Fondo de Emergencia`. Los recategorizo yo manualmente.
+
+**5. Layout del panel central**
+
+> ¿El total ahorrado es un número grande en la parte superior del panel (estilo "Saldo disponible" del Dashboard), o va dentro de un card/sección? ¿Hay algún gráfico (por ejemplo torta/pie) que muestre la distribución del portafolio por tipo de instrumento, o solo una lista?
+Tenes que analizar bien cómo podemos usar los 3 paneles.
+Quiero que me ayudes y me des ideas con esto.
+
+**6. Los instrumentos: ¿acordeón colapsable o lista plana?**
+
+> ¿Cada tipo de instrumento (Acciones, Plazos Fijos, FCI, etc.) tiene su propia sección expandible/colapsable? ¿O todos se muestran en una lista corrida? ¿Los tipos sin posiciones se ocultan o se muestran vacíos con un botón "+"?
+Cada tipo de instrumento tiene su propia sección expandible/colapsable.
+
+**7. Precio promedio ponderado (PPP) en acciones/CEDEARs**
+
+> Al cargar varias compras del mismo ticker, ¿el precio promedio se calcula como promedio ponderado por cantidad (PPP)? ¿Las ventas parciales reducen la posición usando FIFO, LIFO o precio promedio?
+Lo dejo a tu criterio.
+
+**8. Valor actual de mercado: ¿dónde y cómo se actualiza?**
+
+> ¿El precio actual del mercado para calcular P&L se carga por ticker (un solo campo editable por ticker) o por compra individual? ¿Se guarda en la BD o es un campo volátil que hay que re-ingresar cada sesión?
+Tiene que haber una sección donde yo ignrese manualmente el precio del ticker actual. Los totales, ganancia/perdida, todo se debe actualizar segun ese numero.
+
+**9. Plazo fijo / FCI: ¿qué información propia tienen?**
+
+> Para un plazo fijo: ¿qué campos quierés ver? (sugerencia: entidad, capital inicial, TNA o TEA, fecha inicio, fecha vencimiento, capital + intereses proyectados). ¿Los intereses se calculan automáticamente o se ingresan al vencimiento?
+> Para un FCI: ¿cuotapartes + precio de cuotaparte actual, o solo monto invertido + rendimiento %?
+Los campos que vos sugeriste. Los intereses se calculan automaticamente.
+Para FCI cuotapartes + precio de cuotaparte actual.
+
+**10. Crear objetivos: ¿desde dónde?**
+
+> ¿Los objetivos se crean desde un botón en el panel derecho, desde un modal flotante, o desde un formulario inline en el panel central? ¿Se pueden editar después de creados (cambiar nombre, monto meta, fecha)?
+Los objetivos se crean desde un modal flotante. Se deben poder editar después de creados.
+
+**11. Objetivo al 100%: ¿qué pasa visualmente?**
+
+> ¿El objetivo completado se ve igual que los demás pero con la barra llena y un checkmark, o tiene algún tratamiento visual especial (color, badge "Completado")? ¿Aparece al principio o al final de la lista?
+El objetivo completado se ve igual que los demás. Se deben poder borrar y esa plata se va como "sin asignar". Solo disminuye el ahorro cuando hago un movimiento del tipo Ingreso + Ahorro + Descripicón (Emergencia/Objetivo:Viaje/etc).
+
+**12. Meta mensual FIRE en la tab Ahorro**
+
+> ¿Cómo querés ver la meta mensual FIRE en Ahorro? ¿Como un número comparativo ("ahorrado este mes: $X vs meta: $Y") o como una barra de progreso? ¿En el panel central o en el panel derecho?
+Me gustaría ver la barra y también "ahorrado este mes: $X vs meta: $Y".
+
+**13. Selector de mes/año en la tab Ahorro**
+
+> ¿La tab Ahorro usa el selector de mes/año del header de tabs (igual que Dashboard) o el selector queda oculto porque muestra el histórico completo (igual que Datos)?
+Muestra histórico completo. No usa el selector de mes/año.
+
+**14. v1: ¿qué queda para después?**
+
+> El prompt menciona "ventas parciales, splits, dividendos, amortizaciones" como alcance futuro. ¿En v1 entramos solo objetivos + el cálculo del total, y los instrumentos vienen en una segunda entrega? ¿O la IA arranca todo junto?
+Lo dejo a tu criterio.
+
+**15. Tablas en backend**
+
+> ¿Preferís que la IA diseñe las tablas nuevas que necesite (ej: `fin_objetivos`, `fin_instrumentos`, `fin_posiciones`) sin restricción, o hay algún patrón que tenés que ya quieras mantener (por ejemplo, todos los instrumentos en una sola tabla polimórfica vs. tablas separadas por tipo)?
+Analicemos bien todo lo que hay para agregar y después vemos bien la distribución. Hay que terminar de definir que va en el panel derecho, central e izquierdo.
+
+¿Cómo manejo FIRE actualmente?
+
+Aumento Aporte Mensual: 1,20%
+Rentabilidad Anual en Mercado: 6,00%
+
+A los … años		Cobraría Mensual USD		Cobraría Mensual ARS	
+25		 USD $24,05		ARS $33.788,60	
+30		 USD $141,28		ARS $198.502,26	
+35		 USD $413,23		ARS $580.583,48	
+40		 USD $1.012,86		ARS $1.423.067,47	
+45		 USD $2.297,94		ARS $3.228.611,34	
+50		 USD $5.005,61		ARS $7.032.883,15	
+60		 USD $22.342,55		ARS $31.391.281,10	
+70		 USD $96.035,60		ARS $134.930.014,84	
+
+Edad	Mes	Aporte Mensual	Inicial	Interés	Saldo Final	Ahorrado	Falta	Año	Mes
+23,2	1/2/2026	USD $126,28	USD $1.022,55	USD $5,74	USD $1.154,57	ARS $0,00	USD $0,00	2026	2
+23,3	1/3/2026	USD $127,80	USD $1.154,57	USD $6,41	USD $1.288,78	ARS $0,00	USD $0,00	2026	3
+
+La columna "Edad" es simplemente mi edad actual en esa fecha. El primer día del mes que cumplo años (noviembre) ya sumo 1 a mi edad.
+La columa "Mes" indica lo que hay que ahorrar y lo que debería tener cada mes.
+La columna "Aporte Mensual" es lo que ahorré o tengo que ahorrar. La primera vez en la tabla hice el cálculo manual. Desde ahí para adelante se calcular cómo: (lo que debería haber ahorrado el mes anterior)*(1 + Aumento Aporte Mensual) + (lo que faltó ahorrar del mes anterior)
+La columna "Inicial" es la plata con la que arranco ese mes. La primera vez lo cargué a mano, luego lo até al "Salfo Final" del mes anterior.
+La columna de "Interés" es un supuesto aproximado de lo que debería ganar. Se calcula como "[(Aporte Mensual)+(Inigial)]*[(Rentabilidad Anual en Mercado)/12]".
+La columna "Saldo Final" es la suma de (Aporte Mensual)+(Saldo Inicial)+(Interes).
+La columna "Ahorrado" indica lo que realmente ahorré ese mes.
+La columna "Falta" se calcula como (Aporte Mensual)-(Ahorrado) . 
+La columna "Año" y "Mes" son simplemente descomposición de la columna "Mes".
+
+
+
+
+**Lo que vale la pena revisar:**
+
+1. **¿Qué pasa si ahorrás de más?** Si `Ahorrado > Aporte`, `Falta` queda negativo. Con tu fórmula actual eso *reduce* el próximo aporte requerido. ¿Eso es lo que querés? Podría ser que prefieras que el superávit reduzca el `Inicial` del siguiente mes directamente (ya está en el `Saldo Final`), y que el aporte siguiente solo ajuste por el déficit histórico, no por el superávit. Vale confirmarlo.
+
+
+2. **`Ahorrado` vs. `Ahorro` del sistema**: Hoy lo cargás a mano. En el sistema, este número puede venir automáticamente de la suma de movimientos categoría `Ahorro` del mes. La pregunta es: ¿siempre debe venir de ahí, o a veces querés poder editarlo a mano (ej: si registraste algo fuera del sistema)?
+
+
+3. **La tabla superior** (25 años → cobrarías X) está calculada sobre el total acumulado proyectado del plan. Eso funciona mientras sigas el plan, pero si en un mes fallás mucho, esa tabla no se actualiza. Podría ser útil que esa tabla se recalcule siempre desde el `Saldo Final` del último mes real (no el proyectado).
+Tenes razón. Hagamos lo que decís.
+
+### Anual
+
+Vista de retrospectiva y planificación para el año seleccionado. Dos ejes: entender lo que pasó y saber qué ajustar de acá en adelante.
+
+**Selector de período**
+
+Solo muestra el selector de **año** (no mes + año). El mes no aplica en esta vista.
+
+**Panel central**
+
+1. **Fila de resumen anual** — 4 números grandes al estilo Dashboard:
+   - Total ingresos del año · Total gastos del año · Total ahorrado · Tasa de ahorro promedio anual · Inflación acumulada del año (calculada desde los valores cargados mes a mes)
+
+2. **Gráfico de barras mensual** — corazón de la vista
+   - 12 columnas (una por mes); cada columna tiene 3 barras: ingresos (verde), gastos (rojo), ahorro neto (acento).
+   - Toggle **Nominal / Real**: cuando está en Real, los valores se ajustan por inflación acumulada desde enero del año seleccionado. Permite ver si los gastos realmente subieron o solo siguieron la inflación.
+
+3. **Tabla resumen mes a mes** (12 filas, compacta)
+   - Columnas: Mes | Ingresos | Gastos | Ahorrado | Tasa% | Inflación% | Vs mes anterior ↑↓
+   - Ordenada enero → diciembre. Meses con déficit (gastos > ingresos) resaltados sutilmente.
+
+4. **Categorías anuales**
+   - Gastos del año entero partidos por categoría (donut o tabla). Diferente al Dashboard que muestra solo el mes actual; acá se ve el peso real de cada categoría en el año completo.
+
+**Panel derecho**
+
+- **Highlights del año**: mejor mes de ahorro (mes + monto), peor mes (mes + déficit), cantidad de meses en positivo vs. negativo (ej: 8/12).
+- **Comparación con año anterior**: ingresos +X%, gastos +X%, ahorrado +X% vs. el año anterior.
+- **Proyección de cierre del año**: si estamos a mitad del año, calcula "a este ritmo, cerrarías el año con $X ahorrados. Meta FIRE anual: $Y."
+- **Inflación mensual** (tabla editable inline): Mes | Inflación%. Se carga manualmente mes a mes. Con estos datos se calcula la inflación acumulada del año y se habilita el toggle Nominal/Real en el gráfico.
+
+**Lo que NO va en esta tab**
+
+- Detalle de movimientos individuales → eso es Datos.
+- Cuotas ni notas → eso es Dashboard.
+- Proyección FIRE completa → eso es la tab FIRE.
+
+**Por qué la inflación importa**
+
+Sin ajuste por inflación, los números nominales engañan: si en enero ganabas $300k y en diciembre $500k parece que mejoró, pero con 60% de inflación en el año perdiste poder adquisitivo. La inflación mensual habilita:
+- Ver si el salario real creció o cayó.
+- Saber si los gastos realmente subieron o solo acompañaron la inflación.
+- Entender cuánto valen en términos reales los pesos ahorrados.

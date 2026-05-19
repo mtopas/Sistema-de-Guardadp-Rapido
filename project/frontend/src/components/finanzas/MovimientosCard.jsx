@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
 import { fmtARS, fmtUSD } from '../../data/finanzas'
+import { buildCategories } from './CategoryDonutCard'
 import CardHeader from './CardHeader'
 import MovimientosTableModal from './MovimientosTableModal'
 
@@ -9,6 +10,11 @@ export default function MovimientosListCard({ type = 'expense' }) {
   const lang = useStore(s => s.lang)
   const finMovimientos = useStore(s => s.finMovimientos)
   const [modalOpen, setModalOpen] = useState(false)
+
+  const catColors = useMemo(() => {
+    const { cats } = buildCategories(finMovimientos, type)
+    return Object.fromEntries(cats.map(c => [c.name, c.color]))
+  }, [finMovimientos, type])
 
   const items = finMovimientos
     .filter(m => (m.type ?? m.tipo) === type)
@@ -43,6 +49,7 @@ export default function MovimientosListCard({ type = 'expense' }) {
             const date   = m.date ?? (m.fecha ? new Date(m.fecha).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' }) : '')
             const icon   = m.icon ?? m.icono ?? (type === 'income' ? '💰' : '💸')
             const isIncome = type === 'income'
+            const catColor = catColors[cat] ?? null
 
             return (
               <div
@@ -51,15 +58,13 @@ export default function MovimientosListCard({ type = 'expense' }) {
                 style={{ borderBottom: i < items.length - 1 ? '1px solid var(--border)' : 'none' }}
               >
                 <div
-                  className="w-9 h-9 rounded-lg grid place-items-center text-[15px] shrink-0"
-                  style={{ background: 'var(--surface)' }}
+                  className="w-2.5 h-2.5 rounded-sm shrink-0"
+                  style={{ background: catColor ?? 'var(--border)' }}
                   aria-hidden
-                >
-                  {icon}
-                </div>
+                />
                 <div className="flex-1 min-w-0">
                   <div className="text-[12.5px] font-medium truncate" style={{ color: 'var(--text)' }}>
-                    {desc}
+                    {icon} {desc}
                   </div>
                   <div className="text-[10.5px] flex items-center gap-1.5 mt-0.5" style={{ color: 'var(--subtext)' }}>
                     <span>{cat}</span>

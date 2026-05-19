@@ -48,6 +48,24 @@ from app.db.crud import (
     fin_crear_nota,
     fin_eliminar_nota,
     fin_obtener_emergencia_saldo,
+    # Instrumentos
+    fin_obtener_instrumentos,
+    fin_crear_instrumento,
+    fin_actualizar_instrumento,
+    fin_eliminar_instrumento,
+    # Objetivos
+    fin_obtener_objetivos,
+    fin_crear_objetivo,
+    fin_actualizar_objetivo,
+    fin_eliminar_objetivo,
+    # FIRE filas
+    fin_obtener_fire_filas,
+    fin_upsert_fire_fila,
+    # Movimiento PATCH
+    fin_actualizar_movimiento,
+    # Inflación
+    fin_obtener_inflacion,
+    fin_upsert_inflacion,
 )
 from app.db.database import init_db
 from app.models.categoria import CategoriaCreate
@@ -104,6 +122,76 @@ class FinMovimientoCreate(BaseModel):
 
 class FinNotaCreate(BaseModel):
     contenido: str
+
+
+class FinMovimientoPatch(BaseModel):
+    fecha: Optional[str] = None
+    monto: Optional[float] = None
+    tipo: Optional[str] = None
+    descripcion: Optional[str] = None
+    cuenta_nombre: Optional[str] = None
+    cuenta_id: Optional[Any] = None
+    cuotas: Optional[Any] = None
+    categoria_nombre: Optional[str] = None
+    categoria_id: Optional[Any] = None
+    moneda: Optional[str] = None
+    nota: Optional[str] = None
+    audit: Optional[bool] = None
+
+
+class FinInstrumentoCreate(BaseModel):
+    tipo: str
+    nombre: str
+    ticker: Optional[str] = None
+    sociedad: Optional[str] = None
+    cantidad: float = 0
+    costo_usd: Optional[float] = None
+    tipo_cambio: Optional[float] = None
+    precio_actual: Optional[float] = None
+    entidad: Optional[str] = None
+    capital_ars: Optional[float] = None
+    tna: Optional[float] = None
+    fecha_inicio: Optional[str] = None
+    fecha_vencimiento: Optional[str] = None
+
+
+class FinInstrumentoPatch(BaseModel):
+    ticker: Optional[str] = None
+    sociedad: Optional[str] = None
+    nombre: Optional[str] = None
+    cantidad: Optional[float] = None
+    costo_usd: Optional[float] = None
+    tipo_cambio: Optional[float] = None
+    precio_actual: Optional[float] = None
+    entidad: Optional[str] = None
+    capital_ars: Optional[float] = None
+    tna: Optional[float] = None
+    fecha_inicio: Optional[str] = None
+    fecha_vencimiento: Optional[str] = None
+
+
+class FinObjetivoCreate(BaseModel):
+    nombre: str
+    meta: float
+    moneda: str = "ARS"
+    fecha_limite: Optional[str] = None
+    cuota_mensual: Optional[float] = None
+
+
+class FinObjetivoPatch(BaseModel):
+    nombre: Optional[str] = None
+    meta: Optional[float] = None
+    moneda: Optional[str] = None
+    fecha_limite: Optional[str] = None
+    cuota_mensual: Optional[float] = None
+
+
+class FinFireFilaUpsert(BaseModel):
+    ahorrado_override: Optional[float] = None
+
+
+class FinInflacionUpsert(BaseModel):
+    inflacion: Optional[float] = None
 
 DIST_DIR    = Path("frontend/dist")
 UPLOADS_DIR = Path("uploads")
@@ -401,6 +489,44 @@ def crear_fin_movimiento(body: FinMovimientoCreate):
     )
 
 
+@app.patch("/fin/movimientos/{mov_id}")
+def actualizar_fin_movimiento(mov_id: int, body: FinMovimientoPatch):
+    campos: dict = {}
+    if body.fecha        is not None: campos["fecha"]       = body.fecha
+    if body.monto        is not None: campos["monto"]       = body.monto
+    if body.tipo         is not None: campos["tipo"]        = body.tipo
+    if body.descripcion  is not None: campos["descripcion"] = body.descripcion
+    if body.moneda       is not None: campos["moneda"]      = body.moneda
+    if body.nota         is not None: campos["nota"]        = body.nota
+    if body.audit        is not None: campos["audit"]       = int(body.audit)
+    if body.cuotas       is not None:
+        campos["cuotas"] = int(body.cuotas) if body.cuotas != "" else None
+
+    # Resolve cuenta
+    if isinstance(body.cuenta_id, int):
+        campos["cuenta_id"] = body.cuenta_id
+    elif body.cuenta_nombre:
+        cid = fin_buscar_cuenta_por_nombre(body.cuenta_nombre)
+        if cid:
+            campos["cuenta_id"] = cid
+
+    # Resolve categoría
+    if isinstance(body.categoria_id, int):
+        campos["categoria_id"] = body.categoria_id
+    elif body.categoria_nombre:
+        cat_id = fin_buscar_categoria_por_nombre(body.categoria_nombre)
+        if cat_id is None:
+            tipo_cat = "income" if body.tipo == "income" else "expense"
+            cat_id = fin_crear_categoria(body.categoria_nombre, tipo=tipo_cat)
+        if cat_id:
+            campos["categoria_id"] = cat_id
+
+    result = fin_actualizar_movimiento(mov_id, campos)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Movimiento no encontrado")
+    return result
+
+
 @app.delete("/fin/movimientos/{mov_id}")
 def eliminar_fin_movimiento(mov_id: int):
     if not fin_eliminar_movimiento(mov_id):
@@ -452,3 +578,116 @@ def eliminar_fin_nota(nota_id: int):
 @app.get("/fin/emergencia")
 def obtener_fin_emergencia():
     return {"saldo": fin_obtener_emergencia_saldo()}
+
+
+# ---------------------------------------------------------------------------
+# Finanzas — Instrumentos (portafolio)
+# ---------------------------------------------------------------------------
+
+@app.get("/fin/instrumentos")
+def listar_fin_instrumentos():
+    return fin_obtener_instrumentos()
+
+
+@app.post("/fin/instrumentos")
+def crear_fin_instrumento(body: FinInstrumentoCreate):
+    return fin_crear_instrumento(
+        tipo=body.tipo,
+        nombre=body.nombre,
+        ticker=body.ticker,
+        sociedad=body.sociedad,
+        cantidad=body.cantidad,
+        costo_usd=body.costo_usd,
+        tipo_cambio=body.tipo_cambio,
+        precio_actual=body.precio_actual,
+        entidad=body.entidad,
+        capital_ars=body.capital_ars,
+        tna=body.tna,
+        fecha_inicio=body.fecha_inicio,
+        fecha_vencimiento=body.fecha_vencimiento,
+    )
+
+
+@app.patch("/fin/instrumentos/{inst_id}")
+def actualizar_fin_instrumento(inst_id: int, body: FinInstrumentoPatch):
+    campos = {k: v for k, v in body.model_dump().items() if v is not None}
+    result = fin_actualizar_instrumento(inst_id, campos)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Instrumento no encontrado")
+    return result
+
+
+@app.delete("/fin/instrumentos/{inst_id}")
+def eliminar_fin_instrumento_endpoint(inst_id: int):
+    if not fin_eliminar_instrumento(inst_id):
+        raise HTTPException(status_code=404, detail="Instrumento no encontrado")
+    return {"mensaje": "Instrumento eliminado"}
+
+
+# ---------------------------------------------------------------------------
+# Finanzas — Objetivos de ahorro
+# ---------------------------------------------------------------------------
+
+@app.get("/fin/objetivos")
+def listar_fin_objetivos():
+    return fin_obtener_objetivos()
+
+
+@app.post("/fin/objetivos")
+def crear_fin_objetivo(body: FinObjetivoCreate):
+    result = fin_crear_objetivo(
+        nombre=body.nombre,
+        meta=body.meta,
+        moneda=body.moneda,
+        fecha_limite=body.fecha_limite,
+        cuota_mensual=body.cuota_mensual,
+    )
+    if result is None:
+        raise HTTPException(status_code=400, detail="Ya existe un objetivo con ese nombre")
+    return result
+
+
+@app.patch("/fin/objetivos/{obj_id}")
+def actualizar_fin_objetivo(obj_id: int, body: FinObjetivoPatch):
+    campos = {k: v for k, v in body.model_dump().items() if v is not None}
+    result = fin_actualizar_objetivo(obj_id, campos)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Objetivo no encontrado")
+    return result
+
+
+@app.delete("/fin/objetivos/{obj_id}")
+def eliminar_fin_objetivo_endpoint(obj_id: int):
+    if not fin_eliminar_objetivo(obj_id):
+        raise HTTPException(status_code=404, detail="Objetivo no encontrado")
+    return {"mensaje": "Objetivo eliminado"}
+
+
+# ---------------------------------------------------------------------------
+# Finanzas — FIRE filas (overrides de ahorrado por mes)
+# ---------------------------------------------------------------------------
+
+@app.get("/fin/fire-filas")
+def obtener_fin_fire_filas():
+    return fin_obtener_fire_filas()
+
+
+@app.put("/fin/fire-filas/{mes}")
+def upsert_fin_fire_fila(mes: str, body: FinFireFilaUpsert):
+    fin_upsert_fire_fila(mes, body.ahorrado_override)
+    return {"mes": mes, "ahorrado_override": body.ahorrado_override}
+
+
+# ---------------------------------------------------------------------------
+# Finanzas — Inflación mensual
+# ---------------------------------------------------------------------------
+
+@app.get("/fin/inflacion")
+def obtener_fin_inflacion():
+    return fin_obtener_inflacion()
+
+
+@app.put("/fin/inflacion/{mes}")
+def upsert_fin_inflacion(mes: str, body: FinInflacionUpsert):
+    fin_upsert_inflacion(mes, body.inflacion)
+    return {"mes": mes, "inflacion": body.inflacion}

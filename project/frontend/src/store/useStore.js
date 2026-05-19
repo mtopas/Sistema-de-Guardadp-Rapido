@@ -47,12 +47,13 @@ export const useStore = create((set, get) => ({
   closeMovement: () => set({ movementOpen: false }),
 
   // Finanzas state
-  selectedMes:     currentMes(),
-  finMovimientos:  FINANZAS.movimientos.slice(),
-  finCuentas:      FINANZAS.cuentas,
-  finCategorias:   FINANZAS.categorias,
-  finConfig:       { dolar_oficial: 1245, fire_meta_usd: 500000 },
-  finNotas:        [],
+  selectedMes:        currentMes(),
+  finMovimientos:     FINANZAS.movimientos.slice(),
+  finMovimientosAll:  FINANZAS.movimientos.slice(),
+  finCuentas:         FINANZAS.cuentas,
+  finCategorias:      FINANZAS.categorias,
+  finConfig:          { dolar_oficial: 1245, fire_meta_usd: 500000 },
+  finNotas:           [],
   finEmergenciaSaldo: 0,
 
   fetchFinMovimientos: async (mes) => {
@@ -85,6 +86,19 @@ export const useStore = create((set, get) => ({
     }
   },
 
+  fetchFinMovimientosAll: async () => {
+    try {
+      const res = await fetch(`${API_URL}/fin/movimientos`)
+      if (!res.ok) throw new Error('not ok')
+      const data = await res.json()
+      set({ finMovimientosAll: data })
+      if (DEBUG) console.log('fetchFinMovimientosAll:', data.length)
+    } catch {
+      set({ finMovimientosAll: FINANZAS.movimientos.slice() })
+      if (DEBUG) console.log('fetchFinMovimientosAll: using mock data')
+    }
+  },
+
   addFinMovimiento: async (payload) => {
     try {
       const res = await fetch(`${API_URL}/fin/movimientos`, {
@@ -94,12 +108,18 @@ export const useStore = create((set, get) => ({
       })
       if (!res.ok) throw new Error('not ok')
       const data = await res.json()
-      set(state => ({ finMovimientos: [data, ...state.finMovimientos] }))
+      set(state => ({
+        finMovimientos:    [data, ...state.finMovimientos],
+        finMovimientosAll: [data, ...state.finMovimientosAll],
+      }))
       if (DEBUG) console.log('addFinMovimiento (API):', data)
     } catch {
       const id = `m_${Date.now()}`
       const full = { id, ...payload }
-      set(state => ({ finMovimientos: [full, ...state.finMovimientos] }))
+      set(state => ({
+        finMovimientos:    [full, ...state.finMovimientos],
+        finMovimientosAll: [full, ...state.finMovimientosAll],
+      }))
       if (DEBUG) console.log('addFinMovimiento (mock):', full)
     }
   },
@@ -108,8 +128,26 @@ export const useStore = create((set, get) => ({
     try {
       await fetch(`${API_URL}/fin/movimientos/${id}`, { method: 'DELETE' })
     } catch { /* noop */ }
-    set(state => ({ finMovimientos: state.finMovimientos.filter(m => m.id !== id) }))
+    set(state => ({
+      finMovimientos:    state.finMovimientos.filter(m => m.id !== id),
+      finMovimientosAll: state.finMovimientosAll.filter(m => m.id !== id),
+    }))
     if (DEBUG) console.log('deleteFinMovimiento:', id)
+  },
+
+  updateFinMovimiento: async (id, patch) => {
+    set(state => ({
+      finMovimientos:    state.finMovimientos.map(m    => m.id === id ? { ...m, ...patch } : m),
+      finMovimientosAll: state.finMovimientosAll.map(m => m.id === id ? { ...m, ...patch } : m),
+    }))
+    try {
+      await fetch(`${API_URL}/fin/movimientos/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      })
+    } catch { /* offline ok */ }
+    if (DEBUG) console.log('updateFinMovimiento:', id, patch)
   },
 
   updateFinCuenta: async (id, saldo_ars, saldo_usd) => {
@@ -225,6 +263,177 @@ export const useStore = create((set, get) => ({
     } catch { /* noop */ }
     set(state => ({ finNotas: state.finNotas.filter(n => n.id !== id) }))
     if (DEBUG) console.log('deleteFinNota:', id)
+  },
+
+  // ---------------------------------------------------------------------------
+  // Finanzas — Instrumentos
+  // ---------------------------------------------------------------------------
+  finInstrumentos: [],
+
+  fetchFinInstrumentos: async () => {
+    try {
+      const res = await fetch(`${API_URL}/fin/instrumentos`)
+      if (!res.ok) throw new Error('not ok')
+      const data = await res.json()
+      set({ finInstrumentos: data })
+    } catch {
+      set({ finInstrumentos: [] })
+    }
+  },
+
+  addFinInstrumento: async (payload) => {
+    try {
+      const res = await fetch(`${API_URL}/fin/instrumentos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) throw new Error('not ok')
+      const data = await res.json()
+      set(state => ({ finInstrumentos: [...state.finInstrumentos, data] }))
+      return data
+    } catch {
+      const mock = { id: `i_${Date.now()}`, ...payload }
+      set(state => ({ finInstrumentos: [...state.finInstrumentos, mock] }))
+      return mock
+    }
+  },
+
+  updateFinInstrumento: async (id, patch) => {
+    set(state => ({
+      finInstrumentos: state.finInstrumentos.map(i => i.id === id ? { ...i, ...patch } : i),
+    }))
+    try {
+      await fetch(`${API_URL}/fin/instrumentos/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      })
+    } catch { /* offline ok */ }
+  },
+
+  deleteFinInstrumento: async (id) => {
+    set(state => ({ finInstrumentos: state.finInstrumentos.filter(i => i.id !== id) }))
+    try {
+      await fetch(`${API_URL}/fin/instrumentos/${id}`, { method: 'DELETE' })
+    } catch { /* noop */ }
+  },
+
+  // ---------------------------------------------------------------------------
+  // Finanzas — Objetivos de ahorro
+  // ---------------------------------------------------------------------------
+  finObjetivos: [],
+
+  fetchFinObjetivos: async () => {
+    try {
+      const res = await fetch(`${API_URL}/fin/objetivos`)
+      if (!res.ok) throw new Error('not ok')
+      const data = await res.json()
+      set({ finObjetivos: data })
+    } catch {
+      set({ finObjetivos: [] })
+    }
+  },
+
+  addFinObjetivo: async (payload) => {
+    try {
+      const res = await fetch(`${API_URL}/fin/objetivos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) throw new Error('not ok')
+      const data = await res.json()
+      set(state => ({ finObjetivos: [...state.finObjetivos, data] }))
+      return data
+    } catch {
+      const mock = { id: `o_${Date.now()}`, fecha_creacion: new Date().toISOString(), ...payload }
+      set(state => ({ finObjetivos: [...state.finObjetivos, mock] }))
+      return mock
+    }
+  },
+
+  updateFinObjetivo: async (id, patch) => {
+    set(state => ({
+      finObjetivos: state.finObjetivos.map(o => o.id === id ? { ...o, ...patch } : o),
+    }))
+    try {
+      await fetch(`${API_URL}/fin/objetivos/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      })
+    } catch { /* offline ok */ }
+  },
+
+  deleteFinObjetivo: async (id) => {
+    set(state => ({ finObjetivos: state.finObjetivos.filter(o => o.id !== id) }))
+    try {
+      await fetch(`${API_URL}/fin/objetivos/${id}`, { method: 'DELETE' })
+    } catch { /* noop */ }
+  },
+
+  // ---------------------------------------------------------------------------
+  // Finanzas — FIRE filas (ahorrado override por mes)
+  // ---------------------------------------------------------------------------
+  finFireFilas: {},
+
+  fetchFinFireFilas: async () => {
+    try {
+      const res = await fetch(`${API_URL}/fin/fire-filas`)
+      if (!res.ok) throw new Error('not ok')
+      const data = await res.json()
+      set({ finFireFilas: data })
+    } catch {
+      set({ finFireFilas: {} })
+    }
+  },
+
+  upsertFinFireFila: async (mes, ahorrado_override) => {
+    set(state => ({
+      finFireFilas: ahorrado_override == null
+        ? Object.fromEntries(Object.entries(state.finFireFilas).filter(([k]) => k !== mes))
+        : { ...state.finFireFilas, [mes]: ahorrado_override },
+    }))
+    try {
+      await fetch(`${API_URL}/fin/fire-filas/${mes}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ahorrado_override }),
+      })
+    } catch { /* offline ok */ }
+  },
+
+  // ---------------------------------------------------------------------------
+  // Finanzas — Inflación mensual
+  // ---------------------------------------------------------------------------
+  finInflacion: {},
+
+  fetchFinInflacion: async () => {
+    try {
+      const res = await fetch(`${API_URL}/fin/inflacion`)
+      if (!res.ok) throw new Error('not ok')
+      const data = await res.json()
+      set({ finInflacion: data })
+    } catch {
+      set({ finInflacion: {} })
+    }
+  },
+
+  upsertFinInflacion: async (mes, inflacion) => {
+    set(state => ({
+      finInflacion: inflacion == null
+        ? Object.fromEntries(Object.entries(state.finInflacion).filter(([k]) => k !== mes))
+        : { ...state.finInflacion, [mes]: inflacion },
+    }))
+    try {
+      await fetch(`${API_URL}/fin/inflacion/${mes}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inflacion }),
+      })
+    } catch { /* offline ok */ }
+    if (DEBUG) console.log('upsertFinInflacion:', mes, inflacion)
   },
 
   // Legacy alias — kept for backward compat

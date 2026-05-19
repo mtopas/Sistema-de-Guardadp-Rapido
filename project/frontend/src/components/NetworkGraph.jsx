@@ -230,23 +230,6 @@ export default function NetworkGraph() {
         </span>
       </div>
 
-      {/* minimap */}
-      <div
-        className="absolute bottom-3 right-3 w-[120px] h-[80px] p-2 grid place-items-center"
-        style={panelStyle}
-      >
-        <svg viewBox="0 0 120 80" className="w-full h-full opacity-70">
-          <circle cx="60" cy="40" r="4" fill="var(--accent)" />
-          {branches.map((b, i) => {
-            const mx = 60 + Math.cos(b.angle) * 22
-            const my = 40 + Math.sin(b.angle) * 16
-            return <circle key={i} cx={mx} cy={my} r="2.4" fill={b.color} opacity="0.8" />
-          })}
-          <rect x="40" y="22" width="40" height="36"
-            fill="none" stroke="var(--accent-light)" strokeWidth="1" rx="2" />
-        </svg>
-      </div>
-
       {/* zoom controls (decorative — match design) */}
       <div className="absolute top-3 right-3 flex flex-col" style={panelStyle}>
         <button style={iconBtnStyle} aria-label="Zoom in">

@@ -4,6 +4,7 @@ import { X, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
 import { fmtARS, fmtUSD } from '../../data/finanzas'
+import { buildCategories } from './CategoryDonutCard'
 
 // Sorting: 3-click cycle — asc → desc → default (fecha desc)
 function useColumnSort() {
@@ -36,6 +37,10 @@ function SortIcon({ col, sortCol, sortDir }) {
 export default function MovimientosTableModal({ open, onClose, type = 'expense' }) {
   const lang = useStore(s => s.lang)
   const finMovimientos = useStore(s => s.finMovimientos)
+  const catColors = useMemo(() => {
+    const { cats } = buildCategories(finMovimientos, type)
+    return Object.fromEntries(cats.map(c => [c.name, c.color]))
+  }, [finMovimientos, type])
 
   const { sortCol, sortDir, handleSort } = useColumnSort()
   const [filterCat, setFilterCat] = useState('__all__')
@@ -267,7 +272,12 @@ export default function MovimientosTableModal({ open, onClose, type = 'expense' 
                       </span>
                     </td>
                     <td style={tdStyle}>
-                      <span className="chip" style={{ fontSize: 11 }}>{cat}</span>
+                      {(() => {
+                        const color = catColors[cat]
+                        return color
+                          ? <span className="chip" style={{ fontSize: 11, color, background: `color-mix(in oklch, ${color} 15%, transparent)`, borderColor: `color-mix(in oklch, ${color} 35%, transparent)` }}>{cat}</span>
+                          : <span className="chip" style={{ fontSize: 11 }}>{cat}</span>
+                      })()}
                     </td>
                     <td style={{ ...tdStyle, color: 'var(--subtext)', fontSize: 11.5 }}>
                       {method}

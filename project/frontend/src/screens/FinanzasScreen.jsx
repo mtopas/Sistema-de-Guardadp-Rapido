@@ -9,10 +9,14 @@ import DonutCard           from '../components/finanzas/CategoryDonutCard'
 import MovimientosListCard from '../components/finanzas/MovimientosCard'
 import CuotasCard          from '../components/finanzas/CuotasCard'
 import NotasCard           from '../components/finanzas/NotasCard'
-import IncomeExpenseCard   from '../components/finanzas/IncomeExpenseCard'
-import SubscriptionsCard   from '../components/finanzas/SubscriptionsCard'
-import KPIsCard            from '../components/finanzas/KPIsCard'
-import FireProjectionCard  from '../components/finanzas/FireProjectionCard'
+import DatosTab            from '../components/finanzas/DatosTab'
+import DatosRightPanel     from '../components/finanzas/DatosRightPanel'
+import AhorroTab           from '../components/finanzas/AhorroTab'
+import AhorroRightPanel    from '../components/finanzas/AhorroRightPanel'
+import FireTab             from '../components/finanzas/FireTab'
+import FireRightPanel      from '../components/finanzas/FireRightPanel'
+import AnualTab            from '../components/finanzas/AnualTab'
+import AnualRightPanel     from '../components/finanzas/AnualRightPanel'
 
 function Placeholder() {
   const lang = useStore(s => s.lang)
@@ -44,7 +48,12 @@ export default function FinanzasScreen() {
 
         {/* Center content */}
         <div className="flex-1 min-w-0 overflow-y-auto px-4 md:px-6 py-5 panel-scroll">
-          <DashboardTabs active={tab} onChange={setTab} />
+          <DashboardTabs
+            active={tab}
+            onChange={setTab}
+            hideSelector={tab === 'datos' || tab === 'ahorro' || tab === 'fire'}
+            yearOnly={tab === 'anual'}
+          />
 
           {tab === 'dashboard' ? (
             <div className="flex flex-col gap-4">
@@ -67,17 +76,13 @@ export default function FinanzasScreen() {
               <div className="anim-card-in" style={{ '--i': 5 }}><NotasCard /></div>
             </div>
           ) : tab === 'anual' ? (
-            <div className="flex flex-col gap-4">
-              <div className="anim-card-in" style={{ '--i': 0 }}><IncomeExpenseCard /></div>
-              <div className="anim-card-in" style={{ '--i': 1 }}><KPIsCard /></div>
-            </div>
+            <div className="anim-card-in"><AnualTab /></div>
           ) : tab === 'fire' ? (
-            <div className="anim-card-in" style={{ '--i': 0 }}><FireProjectionCard /></div>
+            <div className="anim-card-in" style={{ '--i': 0 }}><FireTab /></div>
           ) : tab === 'ahorro' ? (
-            <div className="flex flex-col gap-4">
-              <div className="anim-card-in" style={{ '--i': 0 }}><KPIsCard /></div>
-              <div className="anim-card-in" style={{ '--i': 1 }}><SubscriptionsCard /></div>
-            </div>
+            <div className="anim-card-in" style={{ '--i': 0 }}><AhorroTab /></div>
+          ) : tab === 'datos' ? (
+            <div className="anim-card-in"><DatosTab /></div>
           ) : (
             <div className="anim-card-in"><Placeholder /></div>
           )}
@@ -89,6 +94,26 @@ export default function FinanzasScreen() {
         {tab === 'dashboard' && (
           <div className="hidden xl:block h-full">
             <FinanzasRightPanel />
+          </div>
+        )}
+        {tab === 'anual' && (
+          <div className="hidden xl:block h-full">
+            <AnualRightPanel />
+          </div>
+        )}
+        {tab === 'datos' && (
+          <div className="hidden xl:block h-full">
+            <DatosRightPanel />
+          </div>
+        )}
+        {tab === 'ahorro' && (
+          <div className="hidden xl:block h-full">
+            <AhorroRightPanel />
+          </div>
+        )}
+        {tab === 'fire' && (
+          <div className="hidden xl:block h-full">
+            <FireRightPanel />
           </div>
         )}
       </div>

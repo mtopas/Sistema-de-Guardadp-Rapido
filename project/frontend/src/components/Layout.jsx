@@ -16,7 +16,7 @@ export default function Layout({ children }) {
   const managesOwnLayout = isBrowse || isFinanzas
 
   return (
-    <div className="flex h-screen overflow-hidden bg-app-bg text-app-text">
+    <div className="flex h-screen overflow-hidden text-app-text">
 
       {/* Desktop sidebar — only on Bóveda sub-pages (capture, hoja, settings) */}
       {!hideSidebar && (

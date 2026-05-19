@@ -519,3 +519,305 @@ def fin_eliminar_nota(nota_id: int) -> bool:
     conn.commit()
     conn.close()
     return deleted
+
+
+# ---------------------------------------------------------------------------
+# Finanzas — Movimientos (PATCH)
+# ---------------------------------------------------------------------------
+
+_MOV_UPDATABLE = frozenset({
+    "fecha", "monto", "tipo", "descripcion", "icono",
+    "cuenta_id", "cuotas", "categoria_id", "moneda", "nota", "audit",
+})
+
+
+def fin_actualizar_movimiento(mov_id: int, campos: dict) -> Optional[dict]:
+    safe = {k: v for k, v in campos.items() if k in _MOV_UPDATABLE}
+    if not safe:
+        return None
+    conn = get_connection()
+    cursor = conn.cursor()
+    sets = ", ".join(f"{k} = ?" for k in safe)
+    vals = list(safe.values()) + [mov_id]
+    cursor.execute(f"UPDATE fin_movimientos SET {sets} WHERE id = ?", vals)
+    conn.commit()
+    cursor.execute(
+        """SELECT m.id, m.fecha, m.monto, m.tipo, m.descripcion, m.icono,
+                  m.cuenta_id, c.nombre, m.cuotas, m.categoria_id, cat.nombre,
+                  m.moneda, m.nota, m.audit
+           FROM fin_movimientos m
+           LEFT JOIN fin_cuentas c   ON c.id   = m.cuenta_id
+           LEFT JOIN fin_categorias cat ON cat.id = m.categoria_id
+           WHERE m.id = ?""",
+        (mov_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return _mov_dict(row) if row else None
+
+
+# ---------------------------------------------------------------------------
+# Finanzas — Instrumentos (portafolio)
+# ---------------------------------------------------------------------------
+
+def _inst_dict(r) -> dict:
+    return {
+        "id":               r[0],
+        "tipo":             r[1],
+        "ticker":           r[2],
+        "sociedad":         r[3],
+        "nombre":           r[4],
+        "cantidad":         r[5],
+        "costo_usd":        r[6],
+        "tipo_cambio":      r[7],
+        "precio_actual":    r[8],
+        "entidad":          r[9],
+        "capital_ars":      r[10],
+        "tna":              r[11],
+        "fecha_inicio":     r[12],
+        "fecha_vencimiento":r[13],
+        "fecha":            r[14],
+    }
+
+
+def fin_obtener_instrumentos() -> list:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """SELECT id, tipo, ticker, sociedad, nombre, cantidad, costo_usd, tipo_cambio,
+                  precio_actual, entidad, capital_ars, tna, fecha_inicio,
+                  fecha_vencimiento, fecha
+           FROM fin_instrumentos ORDER BY tipo, id"""
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [_inst_dict(r) for r in rows]
+
+
+def fin_crear_instrumento(
+    tipo: str,
+    nombre: str,
+    ticker: Optional[str] = None,
+    sociedad: Optional[str] = None,
+    cantidad: float = 0,
+    costo_usd: Optional[float] = None,
+    tipo_cambio: Optional[float] = None,
+    precio_actual: Optional[float] = None,
+    entidad: Optional[str] = None,
+    capital_ars: Optional[float] = None,
+    tna: Optional[float] = None,
+    fecha_inicio: Optional[str] = None,
+    fecha_vencimiento: Optional[str] = None,
+) -> dict:
+    conn = get_connection()
+    cursor = conn.cursor()
+    fecha = datetime.now().isoformat()
+    cursor.execute(
+        """INSERT INTO fin_instrumentos
+           (tipo, ticker, sociedad, nombre, cantidad, costo_usd, tipo_cambio, precio_actual,
+            entidad, capital_ars, tna, fecha_inicio, fecha_vencimiento, fecha)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (tipo, ticker, sociedad, nombre.strip(), cantidad, costo_usd, tipo_cambio, precio_actual,
+         entidad, capital_ars, tna, fecha_inicio, fecha_vencimiento, fecha),
+    )
+    iid = cursor.lastrowid
+    conn.commit()
+    cursor.execute(
+        """SELECT id, tipo, ticker, sociedad, nombre, cantidad, costo_usd, tipo_cambio,
+                  precio_actual, entidad, capital_ars, tna, fecha_inicio,
+                  fecha_vencimiento, fecha
+           FROM fin_instrumentos WHERE id = ?""",
+        (iid,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if DEBUG:
+        print(f"fin_crear_instrumento: id={iid} tipo={tipo} nombre={nombre}")
+    return _inst_dict(row)
+
+
+_INST_UPDATABLE = frozenset({
+    "ticker", "sociedad", "nombre", "cantidad", "costo_usd", "tipo_cambio", "precio_actual",
+    "entidad", "capital_ars", "tna", "fecha_inicio", "fecha_vencimiento",
+})
+
+
+def fin_actualizar_instrumento(inst_id: int, campos: dict) -> Optional[dict]:
+    safe = {k: v for k, v in campos.items() if k in _INST_UPDATABLE}
+    if not safe:
+        return None
+    conn = get_connection()
+    cursor = conn.cursor()
+    sets = ", ".join(f"{k} = ?" for k in safe)
+    vals = list(safe.values()) + [inst_id]
+    cursor.execute(f"UPDATE fin_instrumentos SET {sets} WHERE id = ?", vals)
+    conn.commit()
+    cursor.execute(
+        """SELECT id, tipo, ticker, sociedad, nombre, cantidad, costo_usd, tipo_cambio,
+                  precio_actual, entidad, capital_ars, tna, fecha_inicio,
+                  fecha_vencimiento, fecha
+           FROM fin_instrumentos WHERE id = ?""",
+        (inst_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return _inst_dict(row) if row else None
+
+
+def fin_eliminar_instrumento(inst_id: int) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM fin_instrumentos WHERE id = ?", (inst_id,))
+    deleted = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted
+
+
+# ---------------------------------------------------------------------------
+# Finanzas — Objetivos de ahorro
+# ---------------------------------------------------------------------------
+
+def _obj_dict(r) -> dict:
+    return {
+        "id":            r[0],
+        "nombre":        r[1],
+        "meta":          r[2],
+        "moneda":        r[3],
+        "fecha_limite":  r[4],
+        "cuota_mensual": r[5],
+        "fecha_creacion":r[6],
+    }
+
+
+def fin_obtener_objetivos() -> list:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, nombre, meta, moneda, fecha_limite, cuota_mensual, fecha_creacion FROM fin_objetivos ORDER BY id"
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [_obj_dict(r) for r in rows]
+
+
+def fin_crear_objetivo(
+    nombre: str,
+    meta: float,
+    moneda: str = "ARS",
+    fecha_limite: Optional[str] = None,
+    cuota_mensual: Optional[float] = None,
+) -> Optional[dict]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    fecha_creacion = datetime.now().isoformat()
+    try:
+        cursor.execute(
+            """INSERT INTO fin_objetivos (nombre, meta, moneda, fecha_limite, cuota_mensual, fecha_creacion)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (nombre.strip(), meta, moneda, fecha_limite, cuota_mensual, fecha_creacion),
+        )
+        oid = cursor.lastrowid
+        conn.commit()
+        cursor.execute(
+            "SELECT id, nombre, meta, moneda, fecha_limite, cuota_mensual, fecha_creacion FROM fin_objetivos WHERE id = ?",
+            (oid,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if DEBUG:
+            print(f"fin_crear_objetivo: id={oid} nombre={nombre}")
+        return _obj_dict(row)
+    except sqlite3.IntegrityError:
+        conn.close()
+        return None
+
+
+_OBJ_UPDATABLE = frozenset({"nombre", "meta", "moneda", "fecha_limite", "cuota_mensual"})
+
+
+def fin_actualizar_objetivo(obj_id: int, campos: dict) -> Optional[dict]:
+    safe = {k: v for k, v in campos.items() if k in _OBJ_UPDATABLE}
+    if not safe:
+        return None
+    conn = get_connection()
+    cursor = conn.cursor()
+    sets = ", ".join(f"{k} = ?" for k in safe)
+    vals = list(safe.values()) + [obj_id]
+    cursor.execute(f"UPDATE fin_objetivos SET {sets} WHERE id = ?", vals)
+    conn.commit()
+    cursor.execute(
+        "SELECT id, nombre, meta, moneda, fecha_limite, cuota_mensual, fecha_creacion FROM fin_objetivos WHERE id = ?",
+        (obj_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return _obj_dict(row) if row else None
+
+
+def fin_eliminar_objetivo(obj_id: int) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM fin_objetivos WHERE id = ?", (obj_id,))
+    deleted = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted
+
+
+# ---------------------------------------------------------------------------
+# Finanzas — FIRE filas (overrides de ahorrado por mes)
+# ---------------------------------------------------------------------------
+
+def fin_obtener_fire_filas() -> dict:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT mes, ahorrado_override FROM fin_fire_filas")
+    rows = cursor.fetchall()
+    conn.close()
+    return {r[0]: r[1] for r in rows}
+
+
+def fin_upsert_fire_fila(mes: str, ahorrado_override: Optional[float]):
+    conn = get_connection()
+    cursor = conn.cursor()
+    if ahorrado_override is None:
+        cursor.execute("DELETE FROM fin_fire_filas WHERE mes = ?", (mes,))
+    else:
+        cursor.execute(
+            "INSERT OR REPLACE INTO fin_fire_filas (mes, ahorrado_override) VALUES (?, ?)",
+            (mes, ahorrado_override),
+        )
+    conn.commit()
+    conn.close()
+    if DEBUG:
+        print(f"fin_upsert_fire_fila: mes={mes} override={ahorrado_override}")
+
+
+# ---------------------------------------------------------------------------
+# Finanzas — Inflación mensual
+# ---------------------------------------------------------------------------
+
+def fin_obtener_inflacion() -> dict:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT mes, inflacion FROM fin_inflacion ORDER BY mes")
+    rows = cursor.fetchall()
+    conn.close()
+    return {r[0]: r[1] for r in rows}
+
+
+def fin_upsert_inflacion(mes: str, inflacion: Optional[float]):
+    conn = get_connection()
+    cursor = conn.cursor()
+    if inflacion is None:
+        cursor.execute("DELETE FROM fin_inflacion WHERE mes = ?", (mes,))
+    else:
+        cursor.execute(
+            "INSERT OR REPLACE INTO fin_inflacion (mes, inflacion) VALUES (?, ?)",
+            (mes, inflacion),
+        )
+    conn.commit()
+    conn.close()
+    if DEBUG:
+        print(f"fin_upsert_inflacion: mes={mes} inflacion={inflacion}")

@@ -35,7 +35,7 @@ const selectStyle = {
   fontSize: 12,
 }
 
-export default function DashboardTabs({ active, onChange }) {
+export default function DashboardTabs({ active, onChange, hideSelector = false, yearOnly = false }) {
   const lang         = useStore(s => s.lang)
   const selectedMes  = useStore(s => s.selectedMes)
   const setSelectedMes = useStore(s => s.setSelectedMes)
@@ -75,35 +75,39 @@ export default function DashboardTabs({ active, onChange }) {
         })}
       </div>
 
-      {/* Month / Year selectors */}
-      <div className="flex items-center gap-2">
-        <select
-          value={month}
-          onChange={handleMonth}
-          className="px-2.5 py-1.5 rounded-xl border outline-none transition-colors"
-          style={selectStyle}
-          onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
-          onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
-        >
-          {MONTHS.map(m => (
-            <option key={m.v} value={m.v}>
-              {lang === 'en' ? m.en : m.es}
-            </option>
-          ))}
-        </select>
-        <select
-          value={year}
-          onChange={handleYear}
-          className="px-2.5 py-1.5 rounded-xl border outline-none transition-colors"
-          style={selectStyle}
-          onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
-          onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
-        >
-          {YEARS.map(y => (
-            <option key={y} value={String(y)}>{y}</option>
-          ))}
-        </select>
-      </div>
+      {/* Month / Year selectors — hidden on tabs that don't use them */}
+      {!hideSelector && (
+        <div className="flex items-center gap-2">
+          {!yearOnly && (
+            <select
+              value={month}
+              onChange={handleMonth}
+              className="px-2.5 py-1.5 rounded-xl border outline-none transition-colors"
+              style={selectStyle}
+              onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
+              onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+            >
+              {MONTHS.map(m => (
+                <option key={m.v} value={m.v}>
+                  {lang === 'en' ? m.en : m.es}
+                </option>
+              ))}
+            </select>
+          )}
+          <select
+            value={year}
+            onChange={handleYear}
+            className="px-2.5 py-1.5 rounded-xl border outline-none transition-colors"
+            style={selectStyle}
+            onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
+            onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+          >
+            {YEARS.map(y => (
+              <option key={y} value={String(y)}>{y}</option>
+            ))}
+          </select>
+        </div>
+      )}
     </div>
   )
 }

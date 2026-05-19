@@ -7,7 +7,7 @@ import { BRANCH_COLORS as B } from '../../utils/themes'
 // Palette fallback for dynamic categories
 const PALETTE = [B[0], B[1], B[2], B[3], B[5], B[6], B[7], B[8], B[9] ?? '#888']
 
-function buildCategories(movimientos, type) {
+export function buildCategories(movimientos, type) {
   const filtered = movimientos.filter(m => {
     const t = m.type ?? m.tipo
     return t === type && !isTransferencia(m)

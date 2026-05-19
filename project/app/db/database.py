@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import datetime
 
 from app.config import DEBUG, DB_PATH
 
@@ -100,6 +101,52 @@ def init_db():
         )
     """)
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fin_instrumentos (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            tipo              TEXT NOT NULL,
+            ticker            TEXT,
+            sociedad          TEXT,
+            nombre            TEXT NOT NULL,
+            cantidad          REAL NOT NULL DEFAULT 0,
+            costo_usd         REAL,
+            tipo_cambio       REAL,
+            precio_actual     REAL,
+            entidad           TEXT,
+            capital_ars       REAL,
+            tna               REAL,
+            fecha_inicio      TEXT,
+            fecha_vencimiento TEXT,
+            fecha             TEXT NOT NULL
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fin_objetivos (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre         TEXT NOT NULL UNIQUE,
+            meta           REAL NOT NULL,
+            moneda         TEXT NOT NULL DEFAULT 'ARS',
+            fecha_limite   TEXT,
+            cuota_mensual  REAL,
+            fecha_creacion TEXT NOT NULL
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fin_fire_filas (
+            mes               TEXT PRIMARY KEY,
+            ahorrado_override REAL
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fin_inflacion (
+            mes       TEXT PRIMARY KEY,
+            inflacion REAL NOT NULL
+        )
+    """)
+
     _seed_finanzas(cursor)
     _apply_migrations(cursor)
     _ensure_fin_data(cursor)
@@ -116,8 +163,24 @@ def _ensure_fin_data(cursor):
         "INSERT OR IGNORE INTO fin_categorias (nombre, color, tipo) VALUES ('Emergencia', NULL, 'both')"
     )
     cursor.execute(
+        "INSERT OR IGNORE INTO fin_categorias (nombre, color, tipo) VALUES ('Ahorro', NULL, 'both')"
+    )
+    cursor.execute(
         "INSERT OR IGNORE INTO fin_config (clave, valor) VALUES ('fondo_emergencia_meta', '500000')"
     )
+    today_mes = datetime.now().strftime("%Y-%m")
+    fire_defaults = [
+        ("fire_aumento_aporte",     "1.20"),
+        ("fire_rentabilidad_anual", "6.00"),
+        ("fire_fecha_nacimiento",   ""),
+        ("fire_aporte_inicial",     "0"),
+        ("fire_saldo_inicial",      "0"),
+        ("fire_inicio_mes",         today_mes),
+    ]
+    for clave, valor in fire_defaults:
+        cursor.execute(
+            "INSERT OR IGNORE INTO fin_config (clave, valor) VALUES (?, ?)", (clave, valor)
+        )
 
 
 def _seed_finanzas(cursor):
@@ -202,6 +265,36 @@ def _seed_finanzas(cursor):
     for entry in config:
         cursor.execute("INSERT OR IGNORE INTO fin_config (clave, valor) VALUES (?, ?)", entry)
 
+    ahora = datetime.now().isoformat()
+    instrumentos = [
+        # (tipo, ticker, nombre, cantidad, costo_usd, tipo_cambio, precio_actual, entidad, capital_ars, tna, fecha_inicio, fecha_vencimiento, fecha)
+        ("acciones", "GGAL",  "Galicia ADR",    50,      800.0,  1200.0,  16.50,    None, None,     None,  None,         None,         ahora),
+        ("acciones", "MELI",  "MercadoLibre",    2,     3600.0,  1180.0,1800.00,    None, None,     None,  None,         None,         ahora),
+        ("crypto",   "BTC",   "Bitcoin",       0.05,   6500.0,  1100.0, 65000.0,   None, None,     None,  None,         None,         ahora),
+        ("fci",      "ICBCAR","ICBC Renta ARS",  1250000, None,  None,      1.0,    None, None,     None,  None,         None,         ahora),
+        ("plazo_fijo", None,  "PF Galicia",     0,       None,  None,      None, "Galicia", 500000, 97.5, "2026-05-01", "2026-06-30", ahora),
+    ]
+    for inst in instrumentos:
+        cursor.execute(
+            """INSERT INTO fin_instrumentos
+               (tipo, ticker, nombre, cantidad, costo_usd, tipo_cambio, precio_actual,
+                entidad, capital_ars, tna, fecha_inicio, fecha_vencimiento, fecha)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            inst,
+        )
+
+    objetivos = [
+        # (nombre, meta, moneda, fecha_limite, cuota_mensual, fecha_creacion)
+        ("Viaje a Europa",      5000000, "ARS", "2027-06-30", 200000, ahora),
+        ("Fondo de Emergencia", 3000000, "ARS", None,         None,   ahora),
+    ]
+    for obj in objetivos:
+        cursor.execute(
+            """INSERT INTO fin_objetivos (nombre, meta, moneda, fecha_limite, cuota_mensual, fecha_creacion)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            obj,
+        )
+
     if DEBUG:
         print("_seed_finanzas: test data inserted")
 
@@ -280,3 +373,9 @@ def _apply_migrations(cursor):
         cursor.execute("ALTER TABLE hojas ADD COLUMN link_preview TEXT")
         if DEBUG:
             print("migration: hojas.link_preview added")
+
+    inst_cols = {row[1] for row in cursor.execute("PRAGMA table_info(fin_instrumentos)")}
+    if "sociedad" not in inst_cols:
+        cursor.execute("ALTER TABLE fin_instrumentos ADD COLUMN sociedad TEXT")
+        if DEBUG:
+            print("migration: fin_instrumentos.sociedad added")

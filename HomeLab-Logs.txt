@@ -1,107 +1,183 @@
 ## 1. Infraestructura y Red (Networking)
+
 Recuperamos un hardware antiguo y lo integramos a tu red actual.
 
 * **Host (Gabinete):** Ubuntu Server 24.04 corriendo en un AMD Athlon II.
-* **Conectividad:** Usamos un adaptador USB-a-Ethernet para darle red cableada.
-* **Puente de Red (Bridge):** Configuramos Windows en tu PC nueva para que comparta internet con el gabinete. La IP quedó fijada (por ahora) en `192.168.0.10`.
-* **Acceso Remoto:** Usamos el protocolo **SSH** (Secure Shell) para controlar todo desde PowerShell sin necesidad de periféricos físicos.
+* **Conectividad:** Adaptador USB-a-Ethernet (`enp0s7`) para red cableada hacia la PC Windows.
+* **Acceso remoto:** **SSH** desde PowerShell sin periféricos en el gabinete.
+
+### Arquitectura actual (post-recovery, mayo 2026)
+
+Tras un corte de luz, un **Network Bridge** de Windows dejó el stack corrupto (Git, Cursor, APIs HTTPS y `ping github.com` fallaban; rutas a `169.254.x.x`). Se eliminó el bridge por completo, se reseteó la red de Windows y se migró a **Internet Connection Sharing (ICS)** — mucho más estable (NAT, sin bridging L2).
+
+```text
+Router
+   ↓
+PC Windows (NAT / gateway ICS)
+   ↓ Ethernet 2
+Ubuntu Server
+```
+
+| Rol | Adaptador / host | Detalle |
+| :--- | :--- | :--- |
+| Internet en Windows | `Ethernet` | Adaptador principal |
+| Enlace al gabinete | `Ethernet 2` | ICS compartido desde Ethernet → Properties → Sharing |
+| Gateway ICS (Windows) | `192.168.137.1` | Mini-router NAT |
+| Ubuntu (DHCP ICS, transitorio) | `192.168.137.93` | IP que asignó ICS tras el recovery |
+| Ubuntu (estática objetivo) | `192.168.137.10/24` | Ver netplan abajo |
+
+**ICS en Windows:** en `Ethernet` → Properties → Sharing → activar *Allow other network users to connect through this computer's Internet connection* y elegir **Ethernet 2**.
+
+### Recovery de red en Windows (si vuelve a romperse)
+
+Ejecutar en CMD **como administrador**, luego reiniciar:
+
+```cmd
+netsh winsock reset
+netsh int ip reset
+netcfg -d
+ipconfig /flushdns
+shutdown /r /t 0
+```
+
+**No volver a usar Network Bridge** en este homelab — es frágil ante cortes de luz (duplicate IP, APIPA `169.254.x.x`, rutas zombie).
+
+### IP estática en Ubuntu (netplan)
+
+Archivo: `/etc/netplan/00-installer-config.yaml`
+
+```yaml
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    enp0s7:
+      dhcp4: no
+      addresses:
+        - 192.168.137.10/24
+      routes:
+        - to: default
+          via: 192.168.137.1
+      nameservers:
+        addresses:
+          - 8.8.8.8
+          - 1.1.1.1
+```
+
+Aplicar: `sudo netplan apply`
+
+### SSH y SCP (usar IP estática cuando netplan esté aplicado)
+
+```powershell
+ssh mtopas@192.168.137.10
+```
+
+```powershell
+scp -r ./project mtopas@192.168.137.10:~/
+```
+
+*(Antes del netplan estático la IP era `192.168.0.10` vía bridge; durante ICS transitorio: `192.168.137.93`.)*
+
+### Verificaciones útiles (en el gabinete)
+
+| Qué | Comando |
+| :--- | :--- |
+| IP | `ip a` |
+| Rutas | `ip route` |
+| Internet | `ping 8.8.8.8` |
+| DNS | `ping github.com` |
+| Contenedores | `sudo docker ps` |
+| Levantar stack | `cd ~/project && sudo docker compose up -d` |
+
+### Estado (post-migración Bridge → ICS)
+
+* **Windows:** red sana; Git, Cursor y APIs HTTPS OK.
+* **Ubuntu:** SSH, internet, Docker y comunicación con la PC OK.
+* **Pendiente ideal:** switch gigabit — `Router → Switch → PC + Ubuntu` (sin depender de Windows ni ICS).
 
 ---
 
 ## 2. Portabilidad y Contenedores (Docker)
-Este fue el salto de calidad. En lugar de instalar dependencias directamente en el sistema (que es sucio y difícil de replicar), usamos **Docker**.
 
-### Conceptos Clave:
-* **Dockerfile:** Es la "receta" de la imagen. Define que usamos Python 3.11, instala los `requirements.txt` y copia tu código.
-* **Docker Compose:** Es el "orquestador". En un solo archivo YAML definimos que queremos dos servicios (Backend y Bot) corriendo sobre la misma red interna.
+En lugar de instalar dependencias directamente en el sistema, usamos **Docker**.
 
+### Conceptos clave
 
+* **Dockerfile:** Receta de la imagen (Python 3.11, `requirements.txt`, código).
+* **Docker Compose:** Orquestador — backend y bot en la misma red interna vía un YAML.
 
 ---
 
-### 3. Variables de Entorno y Configuración "Pro"
-Implementamos el estándar de la industria para que tu código sea **portátil**.
+## 3. Variables de Entorno y Configuración "Pro"
 
-* **El problema:** En tu PC usabas `localhost`, pero en Docker el bot y el backend están en "cajas" distintas.
-* **La solución:** Usamos `os.getenv()`.
-    * En el **Bot**, el código busca la variable `API_BASE_URL`.
-    * Si no la encuentra (en tu PC), usa `http://localhost:8000`.
-    * Si la encuentra (en Docker), usa `http://backend:8000`.
-* **Docker DNS:** Docker tiene un servidor DNS interno. Por eso, el bot puede llamar al backend simplemente por su nombre de servicio definido en el `docker-compose.yml`.
+* **El problema:** En la PC usabas `localhost`; en Docker bot y backend están en contenedores distintos.
+* **La solución:** `os.getenv()` — el bot busca `API_BASE_URL`; si no existe usa `http://localhost:8000`, si existe (Docker) usa `http://backend:8000`.
+* **Docker DNS:** El bot llama al backend por el nombre de servicio del `docker-compose.yml`.
 
 ---
 
 ## 4. Persistencia de Datos (Volumes)
-Como los contenedores son volátiles (si los borrás, perdés lo de adentro), usamos **Volumes**.
-* Mapeamos `./database` del gabinete a `/app/database` dentro del contenedor.
-* Esto asegura que tu base de datos SQLite `app.db` y tus archivos en `uploads/` sobrevivan a reinicios o actualizaciones del código.
+
+Los contenedores son volátiles; usamos **volumes**:
+
+* `./database` del gabinete → `/app/database` en el contenedor.
+* La SQLite `app.db` y `uploads/` sobreviven reinicios y redeploys.
 
 ---
 
 ## 5. Guía de Comandos para el Futuro
 
-### Transferencia de archivos (Desde tu PC nueva):
-Si modificás el código en VS Code, mandalo al gabinete con este comando:
+### Transferencia de archivos (desde la PC)
+
 ```powershell
-scp -r ./project mtopas@192.168.0.10:~/
+scp -r ./project mtopas@192.168.137.10:~/
 ```
 
-### Gestión del Servidor (Vía SSH):
+### Gestión del servidor (vía SSH)
+
 | Acción | Comando |
 | :--- | :--- |
-| **Actualizar y Reiniciar** | `sudo docker-compose up -d --build` |
-| **Ver procesos vivos** | `sudo docker-compose ps` |
-| **Ver logs en tiempo real** | `sudo docker-compose logs -f [nombre_servicio]` |
-| **Apagar todo** | `sudo docker-compose down` |
-| **Limpiar basura de Docker** | `sudo docker image prune -f` |
+| **Actualizar y reiniciar** | `sudo docker compose up -d --build` |
+| **Ver procesos vivos** | `sudo docker compose ps` |
+| **Ver logs en tiempo real** | `sudo docker compose logs -f [nombre_servicio]` |
+| **Apagar todo** | `sudo docker compose down` |
+| **Limpiar imágenes huérfanas** | `sudo docker image prune -f` |
 | **Apagar el gabinete** | `sudo shutdown now` |
 
 ---
 
 ## 6. Por qué esto es mejor que un `venv`
-Aprendiste que pasar la carpeta `venv` es un error de novato porque contiene rutas absolutas de tu PC. Con Docker, el entorno se **construye nativamente** en el gabinete. No importa si tu PC es Windows y el servidor es Linux; la "receta" (Dockerfile) garantiza que el entorno sea idéntico.
 
-
+Pasar la carpeta `venv` es un error: rutas absolutas de Windows. Con Docker el entorno se **construye en el gabinete**; el Dockerfile garantiza el mismo entorno aunque la PC sea Windows y el servidor Linux.
 
 ---
 
 ## 7. Próximos pasos sugeridos
-1.  **Frontend:** Ahora que el backend vive en la IP `.10`, tenés que configurar tu React/Vite para que apunte a `http://192.168.0.10:8000`.
-2.  **IP Estática:** Si al reiniciar Windows la IP del gabinete cambia, el SSH se va a romper. Eventualmente, te convendría fijar la IP en la configuración de red de Ubuntu.
-3.  **Seguridad:** Como es un Home Lab interno, estamos bien, pero si algún día abrís puertos en tu router, habrá que configurar un Firewall (`ufw`).
+
+1. **Frontend:** Apuntar React/Vite a `http://192.168.137.10:8000` (API del gabinete en la red ICS).
+2. **Netplan:** Confirmar que `192.168.137.10` quedó aplicada tras reinicios (`ip a`); si ICS asigna otra IP, el SSH/SCP se rompe hasta reaplicar estática.
+3. **Switch gigabit (recomendado):** PC y Ubuntu al router vía switch — elimina ICS y la dependencia de Windows para internet del servidor.
+4. **Seguridad:** Homelab interno por ahora; si abrís puertos en el router, configurar `ufw`.
 
 ---
 
-Plan claro para subir de nivel (priorizado)
-🔴 Nivel 1 — Dejar de ser frágil (URGENTE)
-Eliminar dependencia de Windows
-Conectar el servidor directo al router
-IP fija desde router o Ubuntu
-Firewall básico (ufw)
-Permitir solo SSH
-Bloquear todo lo demás
-SSH hardening
-Deshabilitar password
-Solo claves
+## Plan para subir de nivel (priorizado)
 
-🟠 Nivel 2 — Convertirlo en sistema real
-Logs estructurados
-No solo docker logs
-Logs útiles para debug
-Backups automáticos
-Script + cron
-Copia de database/
-Health checks
-Endpoint /health
-Saber si tu backend está vivo
+### Nivel 1 — Dejar de ser frágil (URGENTE)
 
-🟡 Nivel 3 — Mentalidad pro
-Deploy automático
-Script o pipeline simple
-Nada de scp manual
-Separar entornos
-dev / prod
-Aunque sea en el mismo server
-Monitoreo básico
-CPU / RAM
-Caídas de contenedor
+* **Eliminar dependencia de Windows:** switch + cable directo al router (o IP fija en LAN del router).
+* **IP fija:** netplan en Ubuntu (`192.168.137.10`) o reserva DHCP en router cuando haya switch.
+* **Firewall básico (`ufw`):** permitir solo SSH; bloquear el resto.
+* **SSH hardening:** deshabilitar password; solo claves.
+
+### Nivel 2 — Convertirlo en sistema real
+
+* Logs estructurados (no solo `docker logs`).
+* Backups automáticos (`database/` + cron).
+* Health checks — endpoint `/health`.
+
+### Nivel 3 — Mentalidad pro
+
+* Deploy automático (script o pipeline; menos `scp` manual).
+* Separar dev / prod (aunque sea en el mismo server).
+* Monitoreo básico (CPU/RAM, caídas de contenedor).

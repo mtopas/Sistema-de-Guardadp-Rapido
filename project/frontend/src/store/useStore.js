@@ -46,6 +46,16 @@ export const useStore = create((set, get) => ({
   openMovement:  () => set({ movementOpen: true }),
   closeMovement: () => set({ movementOpen: false }),
 
+  // --- Agenda: evento modal ---
+  agendaEventoOpen:  false,
+  openAgendaEvento:  () => set({ agendaEventoOpen: true }),
+  closeAgendaEvento: () => set({ agendaEventoOpen: false }),
+
+  // --- Hábitos: nuevo hábito modal (triggered from TopBar CTA) ---
+  habitoModalOpen:  false,
+  openHabitoModal:  () => set({ habitoModalOpen: true }),
+  closeHabitoModal: () => set({ habitoModalOpen: false }),
+
   // Finanzas state
   selectedMes:        currentMes(),
   finMovimientos:     FINANZAS.movimientos.slice(),
@@ -434,6 +444,324 @@ export const useStore = create((set, get) => ({
       })
     } catch { /* offline ok */ }
     if (DEBUG) console.log('upsertFinInflacion:', mes, inflacion)
+  },
+
+  // ---------------------------------------------------------------------------
+  // Agenda
+  // ---------------------------------------------------------------------------
+  agendaCalendarios:     [],
+  agendaEventos:         [],
+  agendaListas:          [],
+  agendaTareas:          [],
+  agendaHorarioFacultad: [],
+
+  fetchAgendaCalendarios: async () => {
+    try {
+      const res = await fetch(`${API_URL}/agenda/calendarios`)
+      if (!res.ok) throw new Error('not ok')
+      set({ agendaCalendarios: await res.json() })
+    } catch { set({ agendaCalendarios: [] }) }
+  },
+
+  addAgendaCalendario: async (payload) => {
+    try {
+      const res = await fetch(`${API_URL}/agenda/calendarios`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) throw new Error('not ok')
+      const data = await res.json()
+      set(s => ({ agendaCalendarios: [...s.agendaCalendarios, data] }))
+      return data
+    } catch {
+      const mock = { id: `cal_${Date.now()}`, activo: true, ...payload }
+      set(s => ({ agendaCalendarios: [...s.agendaCalendarios, mock] }))
+      return mock
+    }
+  },
+
+  updateAgendaCalendario: async (id, patch) => {
+    set(s => ({ agendaCalendarios: s.agendaCalendarios.map(c => c.id === id ? { ...c, ...patch } : c) }))
+    try {
+      await fetch(`${API_URL}/agenda/calendarios/${id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      })
+    } catch { /* offline ok */ }
+  },
+
+  deleteAgendaCalendario: async (id) => {
+    set(s => ({ agendaCalendarios: s.agendaCalendarios.filter(c => c.id !== id) }))
+    try { await fetch(`${API_URL}/agenda/calendarios/${id}`, { method: 'DELETE' }) } catch { /* noop */ }
+  },
+
+  fetchAgendaEventos: async (desde, hasta) => {
+    try {
+      const params = new URLSearchParams()
+      if (desde) params.set('desde', desde)
+      if (hasta) params.set('hasta', hasta)
+      const res = await fetch(`${API_URL}/agenda/eventos?${params}`)
+      if (!res.ok) throw new Error('not ok')
+      set({ agendaEventos: await res.json() })
+    } catch { set({ agendaEventos: [] }) }
+  },
+
+  addAgendaEvento: async (payload) => {
+    try {
+      const res = await fetch(`${API_URL}/agenda/eventos`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) throw new Error('not ok')
+      const data = await res.json()
+      set(s => ({ agendaEventos: [...s.agendaEventos, data] }))
+      return data
+    } catch {
+      const mock = { id: `evt_${Date.now()}`, calendario_color: '#2563eb', calendario_nombre: '', ...payload }
+      set(s => ({ agendaEventos: [...s.agendaEventos, mock] }))
+      return mock
+    }
+  },
+
+  updateAgendaEvento: async (id, patch) => {
+    set(s => ({ agendaEventos: s.agendaEventos.map(e => e.id === id ? { ...e, ...patch } : e) }))
+    try {
+      await fetch(`${API_URL}/agenda/eventos/${id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      })
+    } catch { /* offline ok */ }
+  },
+
+  deleteAgendaEvento: async (id) => {
+    set(s => ({ agendaEventos: s.agendaEventos.filter(e => e.id !== id) }))
+    try { await fetch(`${API_URL}/agenda/eventos/${id}`, { method: 'DELETE' }) } catch { /* noop */ }
+  },
+
+  fetchAgendaListas: async () => {
+    try {
+      const res = await fetch(`${API_URL}/agenda/listas`)
+      if (!res.ok) throw new Error('not ok')
+      set({ agendaListas: await res.json() })
+    } catch { set({ agendaListas: [] }) }
+  },
+
+  addAgendaLista: async (payload) => {
+    try {
+      const res = await fetch(`${API_URL}/agenda/listas`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) throw new Error('not ok')
+      const data = await res.json()
+      set(s => ({ agendaListas: [...s.agendaListas, data] }))
+      return data
+    } catch {
+      const mock = { id: `lst_${Date.now()}`, ...payload }
+      set(s => ({ agendaListas: [...s.agendaListas, mock] }))
+      return mock
+    }
+  },
+
+  updateAgendaLista: async (id, patch) => {
+    set(s => ({ agendaListas: s.agendaListas.map(l => l.id === id ? { ...l, ...patch } : l) }))
+    try {
+      await fetch(`${API_URL}/agenda/listas/${id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      })
+    } catch { /* offline ok */ }
+  },
+
+  deleteAgendaLista: async (id) => {
+    set(s => ({
+      agendaListas:  s.agendaListas.filter(l => l.id !== id),
+      agendaTareas:  s.agendaTareas.filter(t => t.lista_id !== id),
+    }))
+    try { await fetch(`${API_URL}/agenda/listas/${id}`, { method: 'DELETE' }) } catch { /* noop */ }
+  },
+
+  fetchAgendaTareas: async () => {
+    try {
+      const res = await fetch(`${API_URL}/agenda/tareas`)
+      if (!res.ok) throw new Error('not ok')
+      set({ agendaTareas: await res.json() })
+    } catch { set({ agendaTareas: [] }) }
+  },
+
+  addAgendaTarea: async (payload) => {
+    try {
+      const res = await fetch(`${API_URL}/agenda/tareas`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) throw new Error('not ok')
+      const data = await res.json()
+      set(s => ({ agendaTareas: [...s.agendaTareas, data] }))
+      return data
+    } catch {
+      const mock = { id: `tarea_${Date.now()}`, completada: false, lista_color: '#7c3aed', lista_nombre: '', ...payload }
+      set(s => ({ agendaTareas: [...s.agendaTareas, mock] }))
+      return mock
+    }
+  },
+
+  updateAgendaTarea: async (id, patch) => {
+    set(s => ({ agendaTareas: s.agendaTareas.map(t => t.id === id ? { ...t, ...patch } : t) }))
+    try {
+      await fetch(`${API_URL}/agenda/tareas/${id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      })
+    } catch { /* offline ok */ }
+  },
+
+  deleteAgendaTarea: async (id) => {
+    set(s => ({ agendaTareas: s.agendaTareas.filter(t => t.id !== id) }))
+    try { await fetch(`${API_URL}/agenda/tareas/${id}`, { method: 'DELETE' }) } catch { /* noop */ }
+  },
+
+  fetchAgendaHorarioFacultad: async () => {
+    try {
+      const res = await fetch(`${API_URL}/agenda/horario-facultad`)
+      if (!res.ok) throw new Error('not ok')
+      set({ agendaHorarioFacultad: await res.json() })
+    } catch { set({ agendaHorarioFacultad: [] }) }
+  },
+
+  addAgendaHorarioFacultad: async (payload) => {
+    try {
+      const res = await fetch(`${API_URL}/agenda/horario-facultad`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) throw new Error('not ok')
+      const data = await res.json()
+      set(s => ({ agendaHorarioFacultad: [...s.agendaHorarioFacultad, data] }))
+      return data
+    } catch {
+      const mock = { id: `hf_${Date.now()}`, ...payload }
+      set(s => ({ agendaHorarioFacultad: [...s.agendaHorarioFacultad, mock] }))
+      return mock
+    }
+  },
+
+  updateAgendaHorarioFacultad: async (id, patch) => {
+    set(s => ({ agendaHorarioFacultad: s.agendaHorarioFacultad.map(h => h.id === id ? { ...h, ...patch } : h) }))
+    try {
+      await fetch(`${API_URL}/agenda/horario-facultad/${id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      })
+    } catch { /* offline ok */ }
+  },
+
+  deleteAgendaHorarioFacultad: async (id) => {
+    set(s => ({ agendaHorarioFacultad: s.agendaHorarioFacultad.filter(h => h.id !== id) }))
+    try { await fetch(`${API_URL}/agenda/horario-facultad/${id}`, { method: 'DELETE' }) } catch { /* noop */ }
+  },
+
+  // ---------------------------------------------------------------------------
+  // Hábitos
+  // ---------------------------------------------------------------------------
+  habitos:          [],
+  habitosRegistros: [],
+
+  fetchHabitos: async () => {
+    try {
+      const res = await fetch(`${API_URL}/habitos`)
+      if (!res.ok) throw new Error('not ok')
+      set({ habitos: await res.json() })
+    } catch { set({ habitos: [] }) }
+  },
+
+  fetchHabitosRegistros: async (fechaDesde, fechaHasta) => {
+    try {
+      const params = new URLSearchParams()
+      if (fechaDesde) params.set('fecha_desde', fechaDesde)
+      if (fechaHasta) params.set('fecha_hasta', fechaHasta)
+      const res = await fetch(`${API_URL}/habitos/registros?${params}`)
+      if (!res.ok) throw new Error('not ok')
+      const data = await res.json()
+      if (fechaDesde || fechaHasta) {
+        // merge: replace registros in the fetched range, keep the rest
+        set(s => {
+          const fuera = s.habitosRegistros.filter(r =>
+            (fechaDesde && r.fecha < fechaDesde) || (fechaHasta && r.fecha > fechaHasta)
+          )
+          return { habitosRegistros: [...fuera, ...data] }
+        })
+      } else {
+        set({ habitosRegistros: data })
+      }
+    } catch { /* keep existing */ }
+  },
+
+  addHabito: async (payload) => {
+    try {
+      const res = await fetch(`${API_URL}/habitos`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) throw new Error('not ok')
+      const data = await res.json()
+      set(s => ({ habitos: [...s.habitos, data] }))
+      return data
+    } catch {
+      const mock = { id: `h_${Date.now()}`, activo: true, creado_en: new Date().toISOString(), ...payload }
+      set(s => ({ habitos: [...s.habitos, mock] }))
+      return mock
+    }
+  },
+
+  updateHabito: async (id, patch) => {
+    set(s => ({ habitos: s.habitos.map(h => h.id === id ? { ...h, ...patch } : h) }))
+    try {
+      await fetch(`${API_URL}/habitos/${id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      })
+    } catch { /* offline ok */ }
+  },
+
+  deleteHabito: async (id) => {
+    set(s => ({
+      habitos:          s.habitos.filter(h => h.id !== id),
+      habitosRegistros: s.habitosRegistros.filter(r => r.habito_id !== id),
+    }))
+    try { await fetch(`${API_URL}/habitos/${id}`, { method: 'DELETE' }) } catch { /* noop */ }
+  },
+
+  upsertHabitoRegistro: async (habitoId, fecha, valor, nota) => {
+    const key = `${habitoId}-${fecha}`
+    // optimistic: update or insert in local slice
+    set(s => {
+      const existing = s.habitosRegistros.find(r => r.habito_id === habitoId && r.fecha === fecha)
+      if (existing) {
+        return { habitosRegistros: s.habitosRegistros.map(r =>
+          r.habito_id === habitoId && r.fecha === fecha ? { ...r, valor, nota } : r
+        )}
+      }
+      const mock = { id: `reg_${Date.now()}`, habito_id: habitoId, fecha, valor, nota, creado_en: new Date().toISOString() }
+      return { habitosRegistros: [...s.habitosRegistros, mock] }
+    })
+    try {
+      const res = await fetch(`${API_URL}/habitos/${habitoId}/registro`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fecha, valor, nota }),
+      })
+      if (!res.ok) throw new Error('not ok')
+      const data = await res.json()
+      set(s => ({ habitosRegistros: s.habitosRegistros.map(r =>
+        r.habito_id === habitoId && r.fecha === fecha ? data : r
+      )}))
+    } catch { /* offline ok — optimistic update stays */ }
+    if (DEBUG) console.log('upsertHabitoRegistro:', key, valor)
+  },
+
+  deleteHabitoRegistro: async (registroId, habitoId, fecha) => {
+    set(s => ({ habitosRegistros: s.habitosRegistros.filter(r => !(r.habito_id === habitoId && r.fecha === fecha)) }))
+    try { await fetch(`${API_URL}/habitos/registros/${registroId}`, { method: 'DELETE' }) } catch { /* noop */ }
   },
 
   // Legacy alias — kept for backward compat

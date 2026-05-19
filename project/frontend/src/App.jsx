@@ -11,16 +11,25 @@ import CaptureScreen  from './screens/CaptureScreen'
 import DetailScreen   from './screens/DetailScreen'
 import SettingsScreen from './screens/SettingsScreen'
 import FinanzasScreen from './screens/FinanzasScreen'
+import AgendaScreen   from './screens/AgendaScreen'
+import HabitosScreen  from './screens/HabitosScreen'
 
 export default function App() {
-  const fetchCategorias      = useStore(s => s.fetchCategorias)
-  const fetchHojas           = useStore(s => s.fetchHojas)
-  const fetchFinMovimientos  = useStore(s => s.fetchFinMovimientos)
-  const fetchFinCuentas      = useStore(s => s.fetchFinCuentas)
-  const fetchFinCategorias   = useStore(s => s.fetchFinCategorias)
-  const fetchFinConfig       = useStore(s => s.fetchFinConfig)
-  const fetchFinNotas        = useStore(s => s.fetchFinNotas)
-  const fetchFinEmergencia   = useStore(s => s.fetchFinEmergencia)
+  const fetchCategorias           = useStore(s => s.fetchCategorias)
+  const fetchHojas                = useStore(s => s.fetchHojas)
+  const fetchFinMovimientos       = useStore(s => s.fetchFinMovimientos)
+  const fetchFinCuentas           = useStore(s => s.fetchFinCuentas)
+  const fetchFinCategorias        = useStore(s => s.fetchFinCategorias)
+  const fetchFinConfig            = useStore(s => s.fetchFinConfig)
+  const fetchFinNotas             = useStore(s => s.fetchFinNotas)
+  const fetchFinEmergencia        = useStore(s => s.fetchFinEmergencia)
+  const fetchAgendaCalendarios    = useStore(s => s.fetchAgendaCalendarios)
+  const fetchAgendaEventos        = useStore(s => s.fetchAgendaEventos)
+  const fetchAgendaListas         = useStore(s => s.fetchAgendaListas)
+  const fetchAgendaTareas         = useStore(s => s.fetchAgendaTareas)
+  const fetchAgendaHorarioFacultad = useStore(s => s.fetchAgendaHorarioFacultad)
+  const fetchHabitos              = useStore(s => s.fetchHabitos)
+  const fetchHabitosRegistros     = useStore(s => s.fetchHabitosRegistros)
 
   useEffect(() => {
     fetchCategorias()
@@ -31,6 +40,13 @@ export default function App() {
     fetchFinConfig()
     fetchFinNotas()
     fetchFinEmergencia()
+    fetchAgendaCalendarios()
+    fetchAgendaEventos()
+    fetchAgendaListas()
+    fetchAgendaTareas()
+    fetchAgendaHorarioFacultad()
+    fetchHabitos()
+    fetchHabitosRegistros()
   }, [])
 
   return (
@@ -46,6 +62,8 @@ export default function App() {
           <Route path="/capture"   element={<CaptureScreen />} />
           <Route path="/hoja/:id"  element={<DetailScreen />}  />
           <Route path="/finanzas"  element={<FinanzasScreen />} />
+          <Route path="/agenda"    element={<AgendaScreen />}   />
+          <Route path="/habitos"   element={<HabitosScreen />}  />
           <Route path="/settings"  element={<SettingsScreen />} />
         </Routes>
       </Layout>

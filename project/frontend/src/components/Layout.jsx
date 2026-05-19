@@ -1,19 +1,41 @@
+import { useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Home, Settings } from 'lucide-react'
 import Sidebar from './Sidebar'
 import FAB from './FAB'
 import ScrollArea from './ScrollArea'
+import { useStore } from '../store/useStore'
+
+const ARCOIRIS_ACCENTS = {
+  '/':         { accent: '#7c3aed', light: '#a78bfa', deep: '#6d28d9' },
+  '/finanzas': { accent: '#d97706', light: '#fbbf24', deep: '#b45309' },
+  '/agenda':   { accent: '#2563eb', light: '#60a5fa', deep: '#1d4ed8' },
+  '/habitos':  { accent: '#059669', light: '#34d399', deep: '#047857' },
+}
 
 export default function Layout({ children }) {
   const navigate = useNavigate()
   const location = useLocation()
   const path     = location.pathname
+  const theme    = useStore(s => s.theme)
+
+  useEffect(() => {
+    if (theme !== 'arcoiris') return
+    const key = Object.keys(ARCOIRIS_ACCENTS).find(k => path.startsWith(k)) || '/'
+    const { accent, light, deep } = ARCOIRIS_ACCENTS[key]
+    const root = document.documentElement
+    root.style.setProperty('--accent', accent)
+    root.style.setProperty('--accent-light', light)
+    root.style.setProperty('--accent-deep', deep)
+  }, [path, theme])
 
   // Full-screen modules (Bóveda, Finanzas) own their layout and hide the Bóveda sidebar.
   const isBrowse         = path === '/'
   const isFinanzas       = path.startsWith('/finanzas')
-  const hideSidebar      = isBrowse || isFinanzas
-  const managesOwnLayout = isBrowse || isFinanzas
+  const isAgenda         = path.startsWith('/agenda')
+  const isHabitos        = path.startsWith('/habitos')
+  const hideSidebar      = isBrowse || isFinanzas || isAgenda || isHabitos
+  const managesOwnLayout = isBrowse || isFinanzas || isAgenda || isHabitos
 
   return (
     <div className="flex h-screen overflow-hidden text-app-text">

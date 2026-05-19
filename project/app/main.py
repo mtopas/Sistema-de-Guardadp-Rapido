@@ -66,6 +66,35 @@ from app.db.crud import (
     # Inflación
     fin_obtener_inflacion,
     fin_upsert_inflacion,
+    # Agenda
+    agenda_obtener_calendarios,
+    agenda_crear_calendario,
+    agenda_actualizar_calendario,
+    agenda_eliminar_calendario,
+    agenda_obtener_eventos,
+    agenda_crear_evento,
+    agenda_actualizar_evento,
+    agenda_eliminar_evento,
+    agenda_obtener_listas,
+    agenda_crear_lista,
+    agenda_actualizar_lista,
+    agenda_eliminar_lista,
+    agenda_obtener_tareas,
+    agenda_crear_tarea,
+    agenda_actualizar_tarea,
+    agenda_eliminar_tarea,
+    agenda_obtener_horario_facultad,
+    agenda_crear_horario_facultad,
+    agenda_actualizar_horario_facultad,
+    agenda_eliminar_horario_facultad,
+    # Hábitos
+    habitos_obtener,
+    habitos_crear,
+    habitos_actualizar,
+    habitos_eliminar,
+    habitos_registros_obtener,
+    habitos_registros_upsert,
+    habitos_registros_eliminar,
 )
 from app.db.database import init_db
 from app.models.categoria import CategoriaCreate
@@ -691,3 +720,340 @@ def obtener_fin_inflacion():
 def upsert_fin_inflacion(mes: str, body: FinInflacionUpsert):
     fin_upsert_inflacion(mes, body.inflacion)
     return {"mes": mes, "inflacion": body.inflacion}
+
+
+# ---------------------------------------------------------------------------
+# Agenda — Pydantic models
+# ---------------------------------------------------------------------------
+
+class AgendaCalendarioCreate(BaseModel):
+    nombre: str
+    color: str = "#2563eb"
+
+class AgendaCalendarioPatch(BaseModel):
+    nombre: Optional[str] = None
+    color: Optional[str] = None
+    activo: Optional[bool] = None
+
+class AgendaEventoCreate(BaseModel):
+    titulo: str
+    fecha_inicio: str
+    descripcion: Optional[str] = None
+    fecha_fin: Optional[str] = None
+    todo_el_dia: bool = False
+    se_repite: bool = False
+    regla_repeticion: Optional[str] = None
+    calendario_id: Optional[int] = None
+
+class AgendaEventoPatch(BaseModel):
+    titulo: Optional[str] = None
+    descripcion: Optional[str] = None
+    fecha_inicio: Optional[str] = None
+    fecha_fin: Optional[str] = None
+    todo_el_dia: Optional[bool] = None
+    se_repite: Optional[bool] = None
+    regla_repeticion: Optional[str] = None
+    calendario_id: Optional[int] = None
+
+class AgendaListaCreate(BaseModel):
+    nombre: str
+    color: str = "#7c3aed"
+
+class AgendaListaPatch(BaseModel):
+    nombre: Optional[str] = None
+    color: Optional[str] = None
+
+class AgendaTareaCreate(BaseModel):
+    titulo: str
+    lista_id: Optional[int] = None
+    descripcion: Optional[str] = None
+    fecha_opcional: Optional[str] = None
+    hora_opcional: Optional[str] = None
+    duracion_estimada: Optional[int] = None
+
+class AgendaTareaPatch(BaseModel):
+    titulo: Optional[str] = None
+    descripcion: Optional[str] = None
+    fecha_opcional: Optional[str] = None
+    hora_opcional: Optional[str] = None
+    hora_bloque: Optional[str] = None
+    duracion_estimada: Optional[int] = None
+    completada: Optional[bool] = None
+    lista_id: Optional[int] = None
+
+class AgendaHorarioCreate(BaseModel):
+    dia_semana: int
+    hora_inicio: str
+    hora_fin: str
+    materia: str
+    descripcion: Optional[str] = None
+
+class AgendaHorarioPatch(BaseModel):
+    dia_semana: Optional[int] = None
+    hora_inicio: Optional[str] = None
+    hora_fin: Optional[str] = None
+    materia: Optional[str] = None
+    descripcion: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Agenda — Calendarios
+# ---------------------------------------------------------------------------
+
+@app.get("/agenda/calendarios")
+def listar_agenda_calendarios():
+    return agenda_obtener_calendarios()
+
+@app.post("/agenda/calendarios")
+def crear_agenda_calendario(body: AgendaCalendarioCreate):
+    return agenda_crear_calendario(body.nombre, body.color)
+
+@app.patch("/agenda/calendarios/{cal_id}")
+def actualizar_agenda_calendario(cal_id: int, body: AgendaCalendarioPatch):
+    campos = {k: v for k, v in body.model_dump().items() if v is not None}
+    result = agenda_actualizar_calendario(cal_id, campos)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Calendario no encontrado")
+    return result
+
+@app.delete("/agenda/calendarios/{cal_id}")
+def eliminar_agenda_calendario(cal_id: int):
+    if not agenda_eliminar_calendario(cal_id):
+        raise HTTPException(status_code=404, detail="Calendario no encontrado")
+    return {"mensaje": "Calendario eliminado"}
+
+
+# ---------------------------------------------------------------------------
+# Agenda — Eventos
+# ---------------------------------------------------------------------------
+
+@app.get("/agenda/eventos")
+def listar_agenda_eventos(
+    desde: Optional[str] = Query(None),
+    hasta: Optional[str] = Query(None),
+):
+    return agenda_obtener_eventos(fecha_desde=desde, fecha_hasta=hasta)
+
+@app.post("/agenda/eventos")
+def crear_agenda_evento(body: AgendaEventoCreate):
+    return agenda_crear_evento(
+        titulo=body.titulo,
+        fecha_inicio=body.fecha_inicio,
+        descripcion=body.descripcion,
+        fecha_fin=body.fecha_fin,
+        todo_el_dia=body.todo_el_dia,
+        se_repite=body.se_repite,
+        regla_repeticion=body.regla_repeticion,
+        calendario_id=body.calendario_id,
+    )
+
+@app.patch("/agenda/eventos/{evt_id}")
+def actualizar_agenda_evento(evt_id: int, body: AgendaEventoPatch):
+    campos = {k: v for k, v in body.model_dump().items() if v is not None}
+    result = agenda_actualizar_evento(evt_id, campos)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Evento no encontrado")
+    return result
+
+@app.delete("/agenda/eventos/{evt_id}")
+def eliminar_agenda_evento_endpoint(evt_id: int):
+    if not agenda_eliminar_evento(evt_id):
+        raise HTTPException(status_code=404, detail="Evento no encontrado")
+    return {"mensaje": "Evento eliminado"}
+
+
+# ---------------------------------------------------------------------------
+# Agenda — Listas de tareas
+# ---------------------------------------------------------------------------
+
+@app.get("/agenda/listas")
+def listar_agenda_listas():
+    return agenda_obtener_listas()
+
+@app.post("/agenda/listas")
+def crear_agenda_lista(body: AgendaListaCreate):
+    return agenda_crear_lista(body.nombre, body.color)
+
+@app.patch("/agenda/listas/{lista_id}")
+def actualizar_agenda_lista(lista_id: int, body: AgendaListaPatch):
+    campos = {k: v for k, v in body.model_dump().items() if v is not None}
+    result = agenda_actualizar_lista(lista_id, campos)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Lista no encontrada")
+    return result
+
+@app.delete("/agenda/listas/{lista_id}")
+def eliminar_agenda_lista_endpoint(lista_id: int):
+    if not agenda_eliminar_lista(lista_id):
+        raise HTTPException(status_code=404, detail="Lista no encontrada")
+    return {"mensaje": "Lista eliminada"}
+
+
+# ---------------------------------------------------------------------------
+# Agenda — Tareas
+# ---------------------------------------------------------------------------
+
+@app.get("/agenda/tareas")
+def listar_agenda_tareas(
+    lista_id: Optional[int] = Query(None),
+    pendientes: bool = Query(False),
+):
+    return agenda_obtener_tareas(lista_id=lista_id, solo_pendientes=pendientes)
+
+@app.post("/agenda/tareas")
+def crear_agenda_tarea(body: AgendaTareaCreate):
+    return agenda_crear_tarea(
+        titulo=body.titulo,
+        lista_id=body.lista_id,
+        descripcion=body.descripcion,
+        fecha_opcional=body.fecha_opcional,
+        hora_opcional=body.hora_opcional,
+        duracion_estimada=body.duracion_estimada,
+    )
+
+@app.patch("/agenda/tareas/{tarea_id}")
+def actualizar_agenda_tarea(tarea_id: int, body: AgendaTareaPatch):
+    campos = {k: v for k, v in body.model_dump().items() if v is not None}
+    if body.completada is not None:
+        campos["completada"] = int(body.completada)
+    result = agenda_actualizar_tarea(tarea_id, campos)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Tarea no encontrada")
+    return result
+
+@app.delete("/agenda/tareas/{tarea_id}")
+def eliminar_agenda_tarea_endpoint(tarea_id: int):
+    if not agenda_eliminar_tarea(tarea_id):
+        raise HTTPException(status_code=404, detail="Tarea no encontrada")
+    return {"mensaje": "Tarea eliminada"}
+
+
+# ---------------------------------------------------------------------------
+# Agenda — Horario facultad
+# ---------------------------------------------------------------------------
+
+@app.get("/agenda/horario-facultad")
+def listar_agenda_horario_facultad():
+    return agenda_obtener_horario_facultad()
+
+@app.post("/agenda/horario-facultad")
+def crear_agenda_horario(body: AgendaHorarioCreate):
+    return agenda_crear_horario_facultad(
+        dia_semana=body.dia_semana,
+        hora_inicio=body.hora_inicio,
+        hora_fin=body.hora_fin,
+        materia=body.materia,
+        descripcion=body.descripcion,
+    )
+
+@app.patch("/agenda/horario-facultad/{hf_id}")
+def actualizar_agenda_horario(hf_id: int, body: AgendaHorarioPatch):
+    campos = {k: v for k, v in body.model_dump().items() if v is not None}
+    result = agenda_actualizar_horario_facultad(hf_id, campos)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Horario no encontrado")
+    return result
+
+@app.delete("/agenda/horario-facultad/{hf_id}")
+def eliminar_agenda_horario(hf_id: int):
+    if not agenda_eliminar_horario_facultad(hf_id):
+        raise HTTPException(status_code=404, detail="Horario no encontrado")
+    return {"mensaje": "Horario eliminado"}
+
+
+# ---------------------------------------------------------------------------
+# Hábitos — Pydantic models
+# ---------------------------------------------------------------------------
+
+class HabitoCreate(BaseModel):
+    nombre: str
+    descripcion: Optional[str] = None
+    color: str = "#7c3aed"
+    categoria: Optional[str] = None
+    frecuencia_tipo: str = "diario"
+    dias_semana: Optional[str] = None
+    hora: Optional[str] = None
+
+class HabitoPatch(BaseModel):
+    nombre: Optional[str] = None
+    descripcion: Optional[str] = None
+    color: Optional[str] = None
+    categoria: Optional[str] = None
+    frecuencia_tipo: Optional[str] = None
+    dias_semana: Optional[str] = None
+    hora: Optional[str] = None
+    activo: Optional[bool] = None
+
+class HabitoRegistroUpsert(BaseModel):
+    fecha: str
+    valor: float
+    nota: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Hábitos — Routes
+# ---------------------------------------------------------------------------
+
+@app.get("/habitos")
+def listar_habitos():
+    return habitos_obtener()
+
+@app.post("/habitos")
+def crear_habito(body: HabitoCreate):
+    return habitos_crear(
+        nombre=body.nombre,
+        descripcion=body.descripcion,
+        color=body.color,
+        categoria=body.categoria,
+        frecuencia_tipo=body.frecuencia_tipo,
+        dias_semana=body.dias_semana,
+        hora=body.hora,
+    )
+
+@app.patch("/habitos/{habito_id}")
+def actualizar_habito(habito_id: int, body: HabitoPatch):
+    campos = {k: v for k, v in body.model_dump().items() if v is not None}
+    if body.activo is not None:
+        campos["activo"] = int(body.activo)
+    result = habitos_actualizar(habito_id, campos)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Hábito no encontrado")
+    return result
+
+@app.delete("/habitos/{habito_id}")
+def eliminar_habito_endpoint(habito_id: int):
+    if not habitos_eliminar(habito_id):
+        raise HTTPException(status_code=404, detail="Hábito no encontrado")
+    return {"mensaje": "Hábito eliminado"}
+
+
+# ---------------------------------------------------------------------------
+# Hábitos — Registros
+# ---------------------------------------------------------------------------
+
+@app.get("/habitos/registros")
+def listar_habitos_registros(
+    habito_id: Optional[int] = Query(None),
+    fecha_desde: Optional[str] = Query(None),
+    fecha_hasta: Optional[str] = Query(None),
+):
+    return habitos_registros_obtener(
+        habito_id=habito_id,
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
+    )
+
+@app.put("/habitos/{habito_id}/registro")
+def upsert_habito_registro(habito_id: int, body: HabitoRegistroUpsert):
+    return habitos_registros_upsert(
+        habito_id=habito_id,
+        fecha=body.fecha,
+        valor=body.valor,
+        nota=body.nota,
+    )
+
+@app.delete("/habitos/registros/{registro_id}")
+def eliminar_habito_registro(registro_id: int):
+    if not habitos_registros_eliminar(registro_id):
+        raise HTTPException(status_code=404, detail="Registro no encontrado")
+    return {"mensaje": "Registro eliminado"}

@@ -147,7 +147,94 @@ def init_db():
         )
     """)
 
+    # --- Agenda tables ---
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS agenda_calendarios (
+            id     INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT NOT NULL,
+            color  TEXT NOT NULL DEFAULT '#2563eb',
+            activo INTEGER NOT NULL DEFAULT 1
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS agenda_eventos (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            titulo           TEXT NOT NULL,
+            descripcion      TEXT,
+            fecha_inicio     TEXT NOT NULL,
+            fecha_fin        TEXT,
+            todo_el_dia      INTEGER NOT NULL DEFAULT 0,
+            se_repite        INTEGER NOT NULL DEFAULT 0,
+            regla_repeticion TEXT,
+            calendario_id    INTEGER REFERENCES agenda_calendarios(id)
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS agenda_listas (
+            id     INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT NOT NULL,
+            color  TEXT NOT NULL DEFAULT '#7c3aed'
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS agenda_tareas (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            titulo            TEXT NOT NULL,
+            descripcion       TEXT,
+            fecha_opcional    TEXT,
+            hora_opcional     TEXT,
+            hora_bloque       TEXT,
+            duracion_estimada INTEGER,
+            completada        INTEGER NOT NULL DEFAULT 0,
+            lista_id          INTEGER REFERENCES agenda_listas(id)
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS agenda_horario_facultad (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            dia_semana  INTEGER NOT NULL,
+            hora_inicio TEXT NOT NULL,
+            hora_fin    TEXT NOT NULL,
+            materia     TEXT NOT NULL,
+            descripcion TEXT
+        )
+    """)
+
+    # --- Hábitos tables ---
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS habitos (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre          TEXT NOT NULL,
+            descripcion     TEXT,
+            color           TEXT NOT NULL DEFAULT '#7c3aed',
+            categoria       TEXT,
+            frecuencia_tipo TEXT NOT NULL DEFAULT 'diario',
+            dias_semana     TEXT,
+            hora            TEXT,
+            activo          INTEGER NOT NULL DEFAULT 1,
+            creado_en       TEXT NOT NULL
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS habitos_registros (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            habito_id INTEGER NOT NULL REFERENCES habitos(id) ON DELETE CASCADE,
+            fecha     TEXT NOT NULL,
+            valor     REAL NOT NULL,
+            nota      TEXT,
+            creado_en TEXT NOT NULL,
+            UNIQUE(habito_id, fecha)
+        )
+    """)
+
     _seed_finanzas(cursor)
+    _seed_agenda(cursor)
+    _seed_habitos(cursor)
     _apply_migrations(cursor)
     _ensure_fin_data(cursor)
     conn.commit()
@@ -181,6 +268,55 @@ def _ensure_fin_data(cursor):
         cursor.execute(
             "INSERT OR IGNORE INTO fin_config (clave, valor) VALUES (?, ?)", (clave, valor)
         )
+
+
+def _seed_agenda(cursor):
+    cursor.execute("SELECT COUNT(*) FROM agenda_calendarios")
+    if cursor.fetchone()[0] > 0:
+        return
+
+    calendarios = [
+        ("Personal", "#7c3aed", 1),
+        ("Trabajo",  "#2563eb", 1),
+        ("Facultad", "#059669", 1),
+    ]
+    for c in calendarios:
+        cursor.execute(
+            "INSERT INTO agenda_calendarios (nombre, color, activo) VALUES (?, ?, ?)", c
+        )
+
+    listas = [
+        ("Personal", "#7c3aed"),
+        ("Trabajo",  "#2563eb"),
+    ]
+    for l in listas:
+        cursor.execute("INSERT INTO agenda_listas (nombre, color) VALUES (?, ?)", l)
+
+    if DEBUG:
+        print("_seed_agenda: default calendars and lists inserted")
+
+
+def _seed_habitos(cursor):
+    cursor.execute("SELECT COUNT(*) FROM habitos")
+    if cursor.fetchone()[0] > 0:
+        return
+
+    ahora = datetime.now().isoformat()
+    habitos = [
+        # (nombre, descripcion, color, categoria, frecuencia_tipo, dias_semana, hora)
+        ("Meditar 10 min", "Cierra los ojos, enfocate en la respiración.", "#7c3aed", "Bienestar", "diario",   None,        "08:00"),
+        ("Correr",         "30 min mínimo al ritmo que sea.",              "#059669", "Salud",     "semanal",  "[1,3,5]",   "07:00"),
+        ("Leer 30 min",    "Ficción o no ficción, lo que tengas ganas.",   "#2563eb", "Aprendizaje","diario",  None,        "22:00"),
+    ]
+    for h in habitos:
+        cursor.execute(
+            """INSERT INTO habitos (nombre, descripcion, color, categoria, frecuencia_tipo, dias_semana, hora, activo, creado_en)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)""",
+            (*h, ahora),
+        )
+
+    if DEBUG:
+        print("_seed_habitos: sample habits inserted")
 
 
 def _seed_finanzas(cursor):

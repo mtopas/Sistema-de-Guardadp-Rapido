@@ -20,6 +20,20 @@ const MODULES = [
     ctaKey:   'addMovement',
     ctaStore: 'openMovement',
   },
+  {
+    match:    (p) => p.startsWith('/agenda'),
+    path:     '/agenda',
+    titleKey: 'agenda',
+    ctaKey:   'addEvento',
+    ctaStore: 'openAgendaEvento',
+  },
+  {
+    match:    (p) => p.startsWith('/habitos'),
+    path:     '/habitos',
+    titleKey: 'habitos',
+    ctaKey:   'addHabito',
+    ctaStore: 'openHabitoModal',
+  },
 ]
 
 function currentModuleIndex(path) {
@@ -75,18 +89,22 @@ export default function TopBar({ searchQuery = '', onSearchChange }) {
   const location    = useLocation()
   const userName     = useStore(s => s.userName)
   const lang         = useStore(s => s.lang)
-  const openCapture  = useStore(s => s.openCapture)
-  const openMovement = useStore(s => s.openMovement)
+  const openCapture      = useStore(s => s.openCapture)
+  const openMovement     = useStore(s => s.openMovement)
+  const openAgendaEvento = useStore(s => s.openAgendaEvento)
+  const openHabitoModal  = useStore(s => s.openHabitoModal)
   const initial      = userName ? userName.trim()[0].toUpperCase() : '?'
 
-  const modIdx       = currentModuleIndex(location.pathname)
-  const currentMod   = MODULES[modIdx]
-  const nextMod      = MODULES[(modIdx + 1) % MODULES.length]
-  const title        = (t(lang, currentMod.titleKey) || 'SGR').toUpperCase()
-  const cycleToNext  = () => navigate(nextMod.path)
+  const modIdx      = currentModuleIndex(location.pathname)
+  const currentMod  = MODULES[modIdx]
+  const prevMod     = MODULES[(modIdx - 1 + MODULES.length) % MODULES.length]
+  const nextMod     = MODULES[(modIdx + 1) % MODULES.length]
+  const title       = (t(lang, currentMod.titleKey) || 'SGR').toUpperCase()
+  const cycleNext   = () => navigate(nextMod.path)
+  const cyclePrev   = (e) => { e.preventDefault(); navigate(prevMod.path) }
 
   const ctaLabel     = t(lang, currentMod.ctaKey)
-  const ctaActions   = { openCapture, openMovement }
+  const ctaActions   = { openCapture, openMovement, openAgendaEvento, openHabitoModal }
   const runCta       = () => ctaActions[currentMod.ctaStore]?.()
 
   return (
@@ -99,12 +117,13 @@ export default function TopBar({ searchQuery = '', onSearchChange }) {
         WebkitBackdropFilter: 'blur(12px)',
       }}
     >
-      {/* Module title — click to cycle modules */}
+      {/* Module title — left click = prev, right click = next */}
       <button
         type="button"
-        onClick={cycleToNext}
-        aria-label={`Cambiar a ${t(lang, nextMod.titleKey)}`}
-        title={`Ir a ${t(lang, nextMod.titleKey)}`}
+        onClick={cycleNext}
+        onContextMenu={cyclePrev}
+        aria-label={`Ir a ${t(lang, prevMod.titleKey)}`}
+        title={`← ${t(lang, prevMod.titleKey)}  /  ${t(lang, nextMod.titleKey)} →`}
         className="flex items-center rounded-md select-none transition-transform duration-150 hover:scale-[1.03] active:scale-95 focus:outline-none cursor-pointer"
       >
         <span

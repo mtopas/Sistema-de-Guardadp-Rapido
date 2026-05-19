@@ -821,3 +821,622 @@ def fin_upsert_inflacion(mes: str, inflacion: Optional[float]):
     conn.close()
     if DEBUG:
         print(f"fin_upsert_inflacion: mes={mes} inflacion={inflacion}")
+
+
+# ---------------------------------------------------------------------------
+# Agenda — Calendarios
+# ---------------------------------------------------------------------------
+
+def agenda_obtener_calendarios() -> list:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, nombre, color, activo FROM agenda_calendarios ORDER BY id")
+    rows = cursor.fetchall()
+    conn.close()
+    return [{"id": r[0], "nombre": r[1], "color": r[2], "activo": bool(r[3])} for r in rows]
+
+
+def agenda_crear_calendario(nombre: str, color: str = "#2563eb") -> dict:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO agenda_calendarios (nombre, color, activo) VALUES (?, ?, 1)",
+        (nombre.strip(), color),
+    )
+    cid = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    if DEBUG:
+        print(f"agenda_crear_calendario: id={cid} nombre={nombre}")
+    return {"id": cid, "nombre": nombre.strip(), "color": color, "activo": True}
+
+
+_CAL_UPDATABLE = frozenset({"nombre", "color", "activo"})
+
+
+def agenda_actualizar_calendario(cal_id: int, campos: dict) -> Optional[dict]:
+    safe = {k: v for k, v in campos.items() if k in _CAL_UPDATABLE}
+    if not safe:
+        return None
+    conn = get_connection()
+    cursor = conn.cursor()
+    sets = ", ".join(f"{k} = ?" for k in safe)
+    vals = list(safe.values()) + [cal_id]
+    cursor.execute(f"UPDATE agenda_calendarios SET {sets} WHERE id = ?", vals)
+    conn.commit()
+    cursor.execute("SELECT id, nombre, color, activo FROM agenda_calendarios WHERE id = ?", (cal_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return {"id": row[0], "nombre": row[1], "color": row[2], "activo": bool(row[3])} if row else None
+
+
+def agenda_eliminar_calendario(cal_id: int) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM agenda_calendarios WHERE id = ?", (cal_id,))
+    deleted = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted
+
+
+# ---------------------------------------------------------------------------
+# Agenda — Eventos
+# ---------------------------------------------------------------------------
+
+def _evento_dict(r) -> dict:
+    return {
+        "id":                r[0],
+        "titulo":            r[1],
+        "descripcion":       r[2],
+        "fecha_inicio":      r[3],
+        "fecha_fin":         r[4],
+        "todo_el_dia":       bool(r[5]),
+        "se_repite":         bool(r[6]),
+        "regla_repeticion":  r[7],
+        "calendario_id":     r[8],
+        "calendario_color":  r[9] or "#2563eb",
+        "calendario_nombre": r[10] or "",
+    }
+
+
+def agenda_obtener_eventos(
+    fecha_desde: Optional[str] = None,
+    fecha_hasta: Optional[str] = None,
+) -> list:
+    conn = get_connection()
+    cursor = conn.cursor()
+    query = """
+        SELECT e.id, e.titulo, e.descripcion, e.fecha_inicio, e.fecha_fin,
+               e.todo_el_dia, e.se_repite, e.regla_repeticion, e.calendario_id,
+               COALESCE(c.color, '#2563eb'), COALESCE(c.nombre, '')
+        FROM agenda_eventos e
+        LEFT JOIN agenda_calendarios c ON c.id = e.calendario_id
+    """
+    params = []
+    if fecha_desde and fecha_hasta:
+        query += " WHERE e.fecha_inicio >= ? AND e.fecha_inicio <= ?"
+        params = [fecha_desde, fecha_hasta]
+    elif fecha_desde:
+        query += " WHERE e.fecha_inicio >= ?"
+        params = [fecha_desde]
+    query += " ORDER BY e.fecha_inicio"
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    conn.close()
+    return [_evento_dict(r) for r in rows]
+
+
+def agenda_crear_evento(
+    titulo: str,
+    fecha_inicio: str,
+    descripcion: Optional[str] = None,
+    fecha_fin: Optional[str] = None,
+    todo_el_dia: bool = False,
+    se_repite: bool = False,
+    regla_repeticion: Optional[str] = None,
+    calendario_id: Optional[int] = None,
+) -> dict:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """INSERT INTO agenda_eventos
+           (titulo, descripcion, fecha_inicio, fecha_fin, todo_el_dia,
+            se_repite, regla_repeticion, calendario_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (titulo.strip(), descripcion, fecha_inicio, fecha_fin,
+         int(todo_el_dia), int(se_repite), regla_repeticion, calendario_id),
+    )
+    eid = cursor.lastrowid
+    conn.commit()
+    cursor.execute(
+        """SELECT e.id, e.titulo, e.descripcion, e.fecha_inicio, e.fecha_fin,
+                  e.todo_el_dia, e.se_repite, e.regla_repeticion, e.calendario_id,
+                  COALESCE(c.color, '#2563eb'), COALESCE(c.nombre, '')
+           FROM agenda_eventos e
+           LEFT JOIN agenda_calendarios c ON c.id = e.calendario_id
+           WHERE e.id = ?""",
+        (eid,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if DEBUG:
+        print(f"agenda_crear_evento: id={eid} titulo={titulo}")
+    return _evento_dict(row)
+
+
+_EVT_UPDATABLE = frozenset({
+    "titulo", "descripcion", "fecha_inicio", "fecha_fin",
+    "todo_el_dia", "se_repite", "regla_repeticion", "calendario_id",
+})
+
+
+def agenda_actualizar_evento(evt_id: int, campos: dict) -> Optional[dict]:
+    safe = {k: v for k, v in campos.items() if k in _EVT_UPDATABLE}
+    if not safe:
+        return None
+    conn = get_connection()
+    cursor = conn.cursor()
+    sets = ", ".join(f"{k} = ?" for k in safe)
+    vals = list(safe.values()) + [evt_id]
+    cursor.execute(f"UPDATE agenda_eventos SET {sets} WHERE id = ?", vals)
+    conn.commit()
+    cursor.execute(
+        """SELECT e.id, e.titulo, e.descripcion, e.fecha_inicio, e.fecha_fin,
+                  e.todo_el_dia, e.se_repite, e.regla_repeticion, e.calendario_id,
+                  COALESCE(c.color, '#2563eb'), COALESCE(c.nombre, '')
+           FROM agenda_eventos e
+           LEFT JOIN agenda_calendarios c ON c.id = e.calendario_id
+           WHERE e.id = ?""",
+        (evt_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return _evento_dict(row) if row else None
+
+
+def agenda_eliminar_evento(evt_id: int) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM agenda_eventos WHERE id = ?", (evt_id,))
+    deleted = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted
+
+
+# ---------------------------------------------------------------------------
+# Agenda — Listas de tareas
+# ---------------------------------------------------------------------------
+
+def agenda_obtener_listas() -> list:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, nombre, color FROM agenda_listas ORDER BY id")
+    rows = cursor.fetchall()
+    conn.close()
+    return [{"id": r[0], "nombre": r[1], "color": r[2]} for r in rows]
+
+
+def agenda_crear_lista(nombre: str, color: str = "#7c3aed") -> dict:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO agenda_listas (nombre, color) VALUES (?, ?)",
+        (nombre.strip(), color),
+    )
+    lid = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    if DEBUG:
+        print(f"agenda_crear_lista: id={lid} nombre={nombre}")
+    return {"id": lid, "nombre": nombre.strip(), "color": color}
+
+
+_LISTA_UPDATABLE = frozenset({"nombre", "color"})
+
+
+def agenda_actualizar_lista(lista_id: int, campos: dict) -> Optional[dict]:
+    safe = {k: v for k, v in campos.items() if k in _LISTA_UPDATABLE}
+    if not safe:
+        return None
+    conn = get_connection()
+    cursor = conn.cursor()
+    sets = ", ".join(f"{k} = ?" for k in safe)
+    vals = list(safe.values()) + [lista_id]
+    cursor.execute(f"UPDATE agenda_listas SET {sets} WHERE id = ?", vals)
+    conn.commit()
+    cursor.execute("SELECT id, nombre, color FROM agenda_listas WHERE id = ?", (lista_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return {"id": row[0], "nombre": row[1], "color": row[2]} if row else None
+
+
+def agenda_eliminar_lista(lista_id: int) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM agenda_tareas WHERE lista_id = ?", (lista_id,))
+    cursor.execute("DELETE FROM agenda_listas WHERE id = ?", (lista_id,))
+    deleted = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted
+
+
+# ---------------------------------------------------------------------------
+# Agenda — Tareas
+# ---------------------------------------------------------------------------
+
+def _tarea_dict(r) -> dict:
+    return {
+        "id":                r[0],
+        "titulo":            r[1],
+        "descripcion":       r[2],
+        "fecha_opcional":    r[3],
+        "hora_opcional":     r[4],
+        "hora_bloque":       r[5],
+        "duracion_estimada": r[6],
+        "completada":        bool(r[7]),
+        "lista_id":          r[8],
+        "lista_color":       r[9] or "#7c3aed",
+        "lista_nombre":      r[10] or "",
+    }
+
+
+def agenda_obtener_tareas(
+    lista_id: Optional[int] = None,
+    solo_pendientes: bool = False,
+) -> list:
+    conn = get_connection()
+    cursor = conn.cursor()
+    query = """
+        SELECT t.id, t.titulo, t.descripcion, t.fecha_opcional, t.hora_opcional,
+               t.hora_bloque, t.duracion_estimada, t.completada, t.lista_id,
+               COALESCE(l.color, '#7c3aed'), COALESCE(l.nombre, '')
+        FROM agenda_tareas t
+        LEFT JOIN agenda_listas l ON l.id = t.lista_id
+        WHERE 1=1
+    """
+    params = []
+    if lista_id is not None:
+        query += " AND t.lista_id = ?"
+        params.append(lista_id)
+    if solo_pendientes:
+        query += " AND t.completada = 0"
+    query += " ORDER BY t.fecha_opcional ASC, t.id ASC"
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    conn.close()
+    return [_tarea_dict(r) for r in rows]
+
+
+def agenda_crear_tarea(
+    titulo: str,
+    lista_id: Optional[int] = None,
+    descripcion: Optional[str] = None,
+    fecha_opcional: Optional[str] = None,
+    hora_opcional: Optional[str] = None,
+    duracion_estimada: Optional[int] = None,
+) -> dict:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """INSERT INTO agenda_tareas
+           (titulo, descripcion, fecha_opcional, hora_opcional, duracion_estimada, completada, lista_id)
+           VALUES (?, ?, ?, ?, ?, 0, ?)""",
+        (titulo.strip(), descripcion, fecha_opcional, hora_opcional, duracion_estimada, lista_id),
+    )
+    tid = cursor.lastrowid
+    conn.commit()
+    cursor.execute(
+        """SELECT t.id, t.titulo, t.descripcion, t.fecha_opcional, t.hora_opcional,
+                  t.hora_bloque, t.duracion_estimada, t.completada, t.lista_id,
+                  COALESCE(l.color, '#7c3aed'), COALESCE(l.nombre, '')
+           FROM agenda_tareas t
+           LEFT JOIN agenda_listas l ON l.id = t.lista_id
+           WHERE t.id = ?""",
+        (tid,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if DEBUG:
+        print(f"agenda_crear_tarea: id={tid} titulo={titulo}")
+    return _tarea_dict(row)
+
+
+_TAREA_UPDATABLE = frozenset({
+    "titulo", "descripcion", "fecha_opcional", "hora_opcional",
+    "hora_bloque", "duracion_estimada", "completada", "lista_id",
+})
+
+
+def agenda_actualizar_tarea(tarea_id: int, campos: dict) -> Optional[dict]:
+    safe = {k: v for k, v in campos.items() if k in _TAREA_UPDATABLE}
+    if not safe:
+        return None
+    conn = get_connection()
+    cursor = conn.cursor()
+    sets = ", ".join(f"{k} = ?" for k in safe)
+    vals = list(safe.values()) + [tarea_id]
+    cursor.execute(f"UPDATE agenda_tareas SET {sets} WHERE id = ?", vals)
+    conn.commit()
+    cursor.execute(
+        """SELECT t.id, t.titulo, t.descripcion, t.fecha_opcional, t.hora_opcional,
+                  t.hora_bloque, t.duracion_estimada, t.completada, t.lista_id,
+                  COALESCE(l.color, '#7c3aed'), COALESCE(l.nombre, '')
+           FROM agenda_tareas t
+           LEFT JOIN agenda_listas l ON l.id = t.lista_id
+           WHERE t.id = ?""",
+        (tarea_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return _tarea_dict(row) if row else None
+
+
+def agenda_eliminar_tarea(tarea_id: int) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM agenda_tareas WHERE id = ?", (tarea_id,))
+    deleted = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted
+
+
+# ---------------------------------------------------------------------------
+# Agenda — Horario facultad
+# ---------------------------------------------------------------------------
+
+def agenda_obtener_horario_facultad() -> list:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """SELECT id, dia_semana, hora_inicio, hora_fin, materia, descripcion
+           FROM agenda_horario_facultad ORDER BY dia_semana, hora_inicio"""
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {"id": r[0], "dia_semana": r[1], "hora_inicio": r[2],
+         "hora_fin": r[3], "materia": r[4], "descripcion": r[5]}
+        for r in rows
+    ]
+
+
+def agenda_crear_horario_facultad(
+    dia_semana: int,
+    hora_inicio: str,
+    hora_fin: str,
+    materia: str,
+    descripcion: Optional[str] = None,
+) -> dict:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """INSERT INTO agenda_horario_facultad
+           (dia_semana, hora_inicio, hora_fin, materia, descripcion)
+           VALUES (?, ?, ?, ?, ?)""",
+        (dia_semana, hora_inicio, hora_fin, materia.strip(), descripcion),
+    )
+    hid = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    if DEBUG:
+        print(f"agenda_crear_horario_facultad: id={hid} materia={materia}")
+    return {
+        "id": hid, "dia_semana": dia_semana, "hora_inicio": hora_inicio,
+        "hora_fin": hora_fin, "materia": materia.strip(), "descripcion": descripcion,
+    }
+
+
+_HF_UPDATABLE = frozenset({"dia_semana", "hora_inicio", "hora_fin", "materia", "descripcion"})
+
+
+def agenda_actualizar_horario_facultad(hf_id: int, campos: dict) -> Optional[dict]:
+    safe = {k: v for k, v in campos.items() if k in _HF_UPDATABLE}
+    if not safe:
+        return None
+    conn = get_connection()
+    cursor = conn.cursor()
+    sets = ", ".join(f"{k} = ?" for k in safe)
+    vals = list(safe.values()) + [hf_id]
+    cursor.execute(f"UPDATE agenda_horario_facultad SET {sets} WHERE id = ?", vals)
+    conn.commit()
+    cursor.execute(
+        "SELECT id, dia_semana, hora_inicio, hora_fin, materia, descripcion FROM agenda_horario_facultad WHERE id = ?",
+        (hf_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return (
+        {"id": row[0], "dia_semana": row[1], "hora_inicio": row[2],
+         "hora_fin": row[3], "materia": row[4], "descripcion": row[5]}
+        if row else None
+    )
+
+
+def agenda_eliminar_horario_facultad(hf_id: int) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM agenda_horario_facultad WHERE id = ?", (hf_id,))
+    deleted = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted
+
+
+# ---------------------------------------------------------------------------
+# Hábitos
+# ---------------------------------------------------------------------------
+
+def _habito_dict(r) -> dict:
+    return {
+        "id":              r[0],
+        "nombre":          r[1],
+        "descripcion":     r[2],
+        "color":           r[3],
+        "categoria":       r[4],
+        "frecuencia_tipo": r[5],
+        "dias_semana":     r[6],
+        "hora":            r[7],
+        "activo":          bool(r[8]),
+        "creado_en":       r[9],
+    }
+
+
+def habitos_obtener() -> list:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """SELECT id, nombre, descripcion, color, categoria, frecuencia_tipo,
+                  dias_semana, hora, activo, creado_en
+           FROM habitos ORDER BY id"""
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [_habito_dict(r) for r in rows]
+
+
+def habitos_crear(
+    nombre: str,
+    descripcion: Optional[str] = None,
+    color: str = "#7c3aed",
+    categoria: Optional[str] = None,
+    frecuencia_tipo: str = "diario",
+    dias_semana: Optional[str] = None,
+    hora: Optional[str] = None,
+) -> dict:
+    conn = get_connection()
+    cursor = conn.cursor()
+    creado_en = datetime.now().isoformat()
+    cursor.execute(
+        """INSERT INTO habitos (nombre, descripcion, color, categoria, frecuencia_tipo,
+                                dias_semana, hora, activo, creado_en)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)""",
+        (nombre.strip(), descripcion, color, categoria, frecuencia_tipo, dias_semana, hora, creado_en),
+    )
+    hid = cursor.lastrowid
+    conn.commit()
+    cursor.execute(
+        "SELECT id, nombre, descripcion, color, categoria, frecuencia_tipo, dias_semana, hora, activo, creado_en FROM habitos WHERE id = ?",
+        (hid,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if DEBUG:
+        print(f"habitos_crear: id={hid} nombre={nombre}")
+    return _habito_dict(row)
+
+
+_HABITO_UPDATABLE = frozenset({"nombre", "descripcion", "color", "categoria", "frecuencia_tipo", "dias_semana", "hora", "activo"})
+
+
+def habitos_actualizar(habito_id: int, campos: dict) -> Optional[dict]:
+    safe = {k: v for k, v in campos.items() if k in _HABITO_UPDATABLE}
+    if not safe:
+        return None
+    conn = get_connection()
+    cursor = conn.cursor()
+    sets = ", ".join(f"{k} = ?" for k in safe)
+    vals = list(safe.values()) + [habito_id]
+    cursor.execute(f"UPDATE habitos SET {sets} WHERE id = ?", vals)
+    conn.commit()
+    cursor.execute(
+        "SELECT id, nombre, descripcion, color, categoria, frecuencia_tipo, dias_semana, hora, activo, creado_en FROM habitos WHERE id = ?",
+        (habito_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return _habito_dict(row) if row else None
+
+
+def habitos_eliminar(habito_id: int) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM habitos WHERE id = ?", (habito_id,))
+    deleted = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted
+
+
+# ---------------------------------------------------------------------------
+# Hábitos — Registros de completación
+# ---------------------------------------------------------------------------
+
+def _registro_dict(r) -> dict:
+    return {
+        "id":        r[0],
+        "habito_id": r[1],
+        "fecha":     r[2],
+        "valor":     r[3],
+        "nota":      r[4],
+        "creado_en": r[5],
+    }
+
+
+def habitos_registros_obtener(
+    habito_id: Optional[int] = None,
+    fecha_desde: Optional[str] = None,
+    fecha_hasta: Optional[str] = None,
+) -> list:
+    conn = get_connection()
+    cursor = conn.cursor()
+    query = "SELECT id, habito_id, fecha, valor, nota, creado_en FROM habitos_registros"
+    params = []
+    conds = []
+    if habito_id:
+        conds.append("habito_id = ?")
+        params.append(habito_id)
+    if fecha_desde:
+        conds.append("fecha >= ?")
+        params.append(fecha_desde)
+    if fecha_hasta:
+        conds.append("fecha <= ?")
+        params.append(fecha_hasta)
+    if conds:
+        query += " WHERE " + " AND ".join(conds)
+    query += " ORDER BY fecha DESC"
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    conn.close()
+    return [_registro_dict(r) for r in rows]
+
+
+def habitos_registros_upsert(
+    habito_id: int,
+    fecha: str,
+    valor: float,
+    nota: Optional[str] = None,
+) -> dict:
+    conn = get_connection()
+    cursor = conn.cursor()
+    creado_en = datetime.now().isoformat()
+    cursor.execute(
+        """INSERT INTO habitos_registros (habito_id, fecha, valor, nota, creado_en)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(habito_id, fecha) DO UPDATE SET valor = excluded.valor, nota = excluded.nota""",
+        (habito_id, fecha, valor, nota, creado_en),
+    )
+    rid = cursor.lastrowid
+    conn.commit()
+    cursor.execute(
+        "SELECT id, habito_id, fecha, valor, nota, creado_en FROM habitos_registros WHERE habito_id = ? AND fecha = ?",
+        (habito_id, fecha),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if DEBUG:
+        print(f"habitos_registros_upsert: habito_id={habito_id} fecha={fecha} valor={valor}")
+    return _registro_dict(row)
+
+
+def habitos_registros_eliminar(registro_id: int) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM habitos_registros WHERE id = ?", (registro_id,))
+    deleted = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted

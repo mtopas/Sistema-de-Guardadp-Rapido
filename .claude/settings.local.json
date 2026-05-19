@@ -8,7 +8,8 @@
       "Bash(python -c \"from app.db.database import init_db; from app.db.crud import fin_obtener_instrumentos, fin_crear_objetivo, fin_obtener_fire_filas; print\\('imports OK'\\)\")",
       "Bash(node -e \"const fs = require\\('fs'\\); const code = fs.readFileSync\\('src/components/finanzas/FireRightPanel.jsx','utf8'\\); console.log\\('chars:', code.length, '| lines:', code.split\\('\\\\n'\\).length\\)\")",
       "Bash(node -e ' *)",
-      "Bash(npx vite *)"
+      "Bash(npx vite *)",
+      "Bash"
     ]
   },
   "enabledPlugins": {

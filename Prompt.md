@@ -197,7 +197,7 @@ Títulos / marca: Bricolage Grotesque (display variable de Mathieu Triay — anc
 Body: Outfit (geo sans limpia, casi cuadrada)
 
 
-## Finanzas
+# Finanzas
 
 Analiza la sección finanzas de ClaudeDesign y project\README.md.
 
@@ -535,3 +535,262 @@ Sin ajuste por inflación, los números nominales engañan: si en enero ganabas 
 - Ver si el salario real creció o cayó.
 - Saber si los gastos realmente subieron o solo acompañaron la inflación.
 - Entender cuánto valen en términos reales los pesos ahorrados.
+
+### Agenda
+
+Módulo de gestión de tiempo y tareas. Cuatro tabs; **HOY** es el default al entrar a `/agenda`.
+
+Rutas: `/agenda/*`. Entidades principales: calendarios, eventos, listas de tareas, tareas, horario facultad.
+
+**BD:**
+- `agenda_calendarios` — id, nombre, color, activo
+- `agenda_eventos` — id, titulo, descripcion, fecha_inicio, fecha_fin, todo_el_dia, se_repite, regla_repeticion, calendario_id
+- `agenda_listas` — id, nombre, color
+- `agenda_tareas` — id, titulo, descripcion, fecha_opcional, hora_opcional, hora_bloque, duracion_estimada, completada, lista_id
+- `agenda_horario_facultad` — id, dia_semana, hora_inicio, hora_fin, materia, descripcion
+
+**Distinción visual en el calendario:**
+- Eventos → chip sólido con color del calendario; con hora si la tiene
+- Tareas con fecha → chip con borde punteado del color de la lista + mini ☐
+- Facultad → capa de fondo opacada; solo visible en vistas horarias (HOY, Semana, Día)
+
+---
+
+#### HOY (default)
+
+Foco del día: qué tenés hoy, qué está por venir, time blocking.
+
+**Panel izquierdo**
+- Lista de tareas pendientes de los **próximos 15 días** (ordenadas por fecha)
+- Checkbox inline para marcar completa desde acá
+- Cada tarea muestra su lista de origen (color de lista)
+- Botón ⊕ "Agendar" por task → mini timepicker de hora → el bloque aparece en la grilla del panel central
+- Si la hora del bloque pasa sin completar la tarea: el bloque desaparece automáticamente, la tarea vuelve a pendientes
+
+**Panel central**
+- Grilla horaria del día actual (hora × hora, 6h–23h)
+- Capas visibles: eventos del calendario + bloques de tareas asignadas + horario facultad (fondo, opacado)
+- Indicador de hora actual (línea con dot en acento)
+- Click en slot vacío: crear evento rápido
+
+**Panel derecho**
+- Cards de eventos y tareas del día (estilo "Tu día" del ClaudeDesign)
+- Detalle/edición al seleccionar un bloque de la grilla
+
+---
+
+#### Mes
+
+Vista calendario mensual (+ Semana como vista secundaria).
+
+**Panel izquierdo**
+- Mini calendario navegable
+- Lista de calendarios: toggle on/off, color, botón `+ Nuevo`
+
+**Panel central**
+- Header: `[◀] Mayo 2026 [▶]` + `[Hoy]` + switcher `Mes / Semana`
+- Grid 6×7 (Mes) o grilla horaria por columna de día (Semana)
+- Click en día vacío: `EventoModal` con fecha pre-cargada
+- Click en evento/tarea: abre panel derecho con detalle
+
+**Panel derecho (xl)**
+- Detalle y edición del evento o tarea seleccionado
+- Default (sin selección): próximos 5 eventos
+
+---
+
+#### Tareas
+
+Gestión pura de listas y checklists, sin el calendario de fondo.
+
+**Panel izquierdo**
+- Mini calendario (contexto de fechas)
+- Listas de tareas: crear (nombre + color picker), renombrar inline, eliminar
+
+**Panel central**
+- Lista seleccionada → tareas con checkbox, título, descripción, fecha/hora opcional
+- Filtro: Pendientes / Completadas / Todas
+- Ordenar por fecha o por creación
+
+**Panel derecho (xl)**
+- Detalle de la tarea seleccionada: todos los campos editables
+- Botón eliminar tarea
+
+---
+
+#### Revisión
+
+Retrospectiva semanal. Equivalente al "Anual" de Finanzas pero para productividad.
+
+**Panel izquierdo**
+- Selector de semana (← →); label de rango de fechas
+
+**Panel central**
+- Tareas completadas esa semana (con lista de origen)
+- Tareas sin completar esa semana
+- Tareas pendientes hace +7 días (alertas en rojo)
+- % tiempo planificado vs. no planificado (calculado desde eventos de la semana)
+
+**Panel derecho (xl)**
+- Desglose de tiempo por calendario (Personal, Trabajo, etc.)
+- Facultad como segmento propio con su % de la semana
+
+#### Horario Facultad
+
+No es un calendario normal — es una **capa de fondo** de horarios recurrentes semanales.
+- **No aparece** en la vista Mes (demasiado ruido visual)
+- **Sí aparece** en HOY: opacado, diferenciado del resto con icono 🎓
+- Gestión desde botón "Facultad" en la barra de tabs → `HorarioFacultadModal`
+- Campos: materia, día de semana, hora inicio/fin, descripción/aula
+
+# Hábitos
+
+Módulo de seguimiento de hábitos. Tres tabs; **HOY** es el default al entrar a `/habitos`.
+
+Rutas: `/habitos`. Entidades principales: hábitos, registros de completación.
+
+**BD:**
+- `habitos` — id, nombre, descripcion, color, categoria, frecuencia_tipo ('diario' | 'semanal'), dias_semana (JSON array, null si diario), hora (nullable), activo, creado_en
+- `habitos_registros` — id, habito_id, fecha, valor (0.5 = parcial · 1.0 = total), nota (nullable), creado_en
+
+**API:** prefijo `/habitos/*` — hábitos CRUD, registros GET/POST/DELETE.
+
+---
+
+## Layout
+
+Tres paneles igual que Finanzas y Agenda:
+
+- **Panel izquierdo:** lista de hábitos + streak + resumen del día + botón “+ Nuevo hábito” → `NuevoHabitoModal`
+- **Panel central:** cambia según tab activa
+- **Panel derecho (xl):** detalle del hábito seleccionado — descripción, estadísticas, rachas, registros recientes
+
+---
+
+## Modelo de frecuencia
+
+- **Diario:** todos los días de la semana
+- **Días específicos:** array de días (ej: martes y jueves)
+- **Hora opcional:** si se asigna, el hábito aparece en ese slot de la grilla de Agenda HOY
+
+---
+
+## Completar un hábito
+
+Click en la celda de la grilla → mini popup:
+- **Total** (verde, valor 1.0): completado al 100%
+- **Parcial** (amarillo, valor 0.5): completado parcialmente
+- Campo de nota corta (opcional; si pierde foco sin texto, queda vacío)
+- Micro-animación al confirmar
+
+**Racha:** días consecutivos con valor > 0 (parcial también mantiene la racha).
+**Porcentaje:** `suma(valores) / días_programados * 100`.
+
+---
+
+## Tabs
+
+### HOY (default)
+
+**Panel izquierdo**
+- Lista de todos los hábitos activos
+- Chip por hábito: nombre, color, streak si ≥ 3 días, estado de hoy (hecho · pendiente · no toca hoy)
+- Resumen rápido: X de Y completados hoy + barra de progreso
+- Botón “+ Nuevo hábito” → `NuevoHabitoModal`
+
+**Panel central**
+- Grilla mensual del mes actual:
+  - **Un solo scroll container** horizontal (fix al problema del ClaudeDesign)
+  - Columna nombre: `position: sticky left`
+  - Columna % del mes: `position: sticky right`
+  - Días futuros: celdas grises sin interacción
+  - Día actual: highlight con accent
+  - Celda completada total: verde · parcial: amarillo · pendiente: borde punteado · sin programar: guión
+- Header: mes anterior / mes actual / mes siguiente + botón “Hoy”
+
+**Panel derecho (xl)**
+- Detalle del hábito seleccionado en la grilla
+- Descripción/propósito del hábito (campo `descripcion`)
+- Racha actual, racha máxima, % del mes
+- Registros recientes con nota si tienen
+- Botón editar → `NuevoHabitoModal` en modo edición
+- Botón eliminar hábito
+
+---
+
+### Progreso
+
+**Panel central**
+- **Resumen global:** % cumplimiento esta semana · este mes · vs mes anterior
+- **Heatmap** de los últimos 3 meses (estilo GitHub): cada celda = un día, coloreada por % de hábitos completados ese día
+- **Mensaje de momentum** basado en tendencia reciente:
+  - “Venís excelente esta semana — mejor racha del mes”
+  - “Ojo, estás cayendo — 3 días sin completar tus hábitos”
+  - “Buen recovery — retomaste después de fallar ayer” (concepto “nunca perder dos veces”: no castiga, foco en recuperar)
+- **Afirmaciones de identidad** (stats presentadas como logros):
+  - “Meditaste X de los últimos 14 días”
+  - “Llevas Y semanas siendo consistente con [hábito]”
+- **Sparkline** últimos 6 meses de % general
+- Filtro por categoría
+
+**Panel derecho (xl)**
+- Tabla de todos los hábitos: racha actual · racha máxima · % mes actual · % mes anterior · tendencia ↑↓
+- Mejor hábito del mes (más consistente)
+- Hábito con más fallas
+
+---
+
+### Historial
+
+**Panel izquierdo**
+- Selector de período (mes · trimestre · año)
+- Filtro por hábito o categoría
+
+**Panel central**
+- Vista de días pasados: para cada día, qué se completó (total/parcial) y qué no
+- Rachas rotas marcadas visualmente (“rompí la cadena acá”)
+- Nota del registro visible en hover sobre cada celda
+
+---
+
+## Integración con Agenda
+
+- **Con hora:** el hábito aparece en la grilla horaria de Agenda HOY en ese slot, como evento del calendario especial “Hábitos” (no editable desde Agenda)
+- **Sin hora:** aparece en la sección “Hábitos de hoy” del panel izquierdo de Agenda HOY, con checkbox inline
+- Completación **unidireccional**: se gestiona desde Hábitos; Agenda HOY es solo lectura
+- El calendario “Hábitos” en Agenda es auto-generado y **no aparece en la vista Mes** (mismo patrón que Facultad)
+- Accent Arcoíris en `/habitos`: verde `#059669` (ya definido en el spec de temas)
+
+---
+
+## Modal: Nuevo / Editar Hábito (`NuevoHabitoModal`)
+
+Campos:
+- Nombre
+- Descripción / propósito (se muestra en hover en la grilla y en el panel derecho)
+- Color
+- Categoría (libre, texto)
+- Frecuencia: **Diario** | **Días específicos** (selector de días de la semana)
+- Hora (opcional)
+
+# PRÓXIMAMENTE
+
+## Conectar con el Bot
+
+## Notifiaciones
+
+## Mejoras
+
+### Boveda
+
+Podemos poner que cuando se abra un link de una nota, se abra el link pero con un cuadro flotante para que se tomen apuntes? Un cuado que no se vaya si aprieto algo en el link que se abrió. Como para ver un vídeo y tomar apuntes o cosas así.
+
+### Finanznas
+
+### Agenda
+
+### Hábitos
+
+## Mejorar el panel de atajo de CNTRL + M
+
+## Personalizar Click Izquierdo y derecho para que sea más util para el programa.

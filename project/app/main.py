@@ -87,6 +87,7 @@ from app.db.crud import (
     agenda_crear_horario_facultad,
     agenda_actualizar_horario_facultad,
     agenda_eliminar_horario_facultad,
+    agenda_resumen_semana,
     # Hábitos
     habitos_obtener,
     habitos_crear,
@@ -959,6 +960,14 @@ def eliminar_agenda_horario(hf_id: int):
     if not agenda_eliminar_horario_facultad(hf_id):
         raise HTTPException(status_code=404, detail="Horario no encontrado")
     return {"mensaje": "Horario eliminado"}
+
+
+@app.get("/agenda/revision")
+def obtener_agenda_revision(
+    desde: str = Query(...),
+    hasta: str = Query(...),
+):
+    return agenda_resumen_semana(desde, hasta)
 
 
 # ---------------------------------------------------------------------------

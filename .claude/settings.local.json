@@ -9,7 +9,23 @@
       "Bash(node -e \"const fs = require\\('fs'\\); const code = fs.readFileSync\\('src/components/finanzas/FireRightPanel.jsx','utf8'\\); console.log\\('chars:', code.length, '| lines:', code.split\\('\\\\n'\\).length\\)\")",
       "Bash(node -e ' *)",
       "Bash(npx vite *)",
-      "Bash"
+      "Bash",
+      "Skill(update-config)",
+      "PowerShell(Get-Content '.claude\\\\settings.local.json' | ConvertFrom-Json | Select-Object -ExpandProperty hooks | Select-Object -ExpandProperty PostToolUse | ForEach-Object { $_.hooks[0].command })"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$ErrorActionPreference='SilentlyContinue'; $j=[Console]::In.ReadToEnd()|ConvertFrom-Json; $fp=[string]$j.tool_input.file_path; if($fp -match 'project[/\\\\]' -and $fp -notmatch 'project[/\\\\]README\\.md$'){$o=[ordered]@{hookSpecificOutput=[ordered]@{hookEventName='PostToolUse';additionalContext='RECORDATORIO: Verificar si project/README.md necesita actualizacion (arquitectura, features implementadas, pendientes, modelos de datos, estructura de archivos).'}};$o|ConvertTo-Json -Compress}",
+            "shell": "powershell"
+          }
+        ]
+      }
     ]
   },
   "enabledPlugins": {

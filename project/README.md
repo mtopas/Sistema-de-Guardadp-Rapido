@@ -242,18 +242,30 @@ Seed por defecto: 3 hábitos de ejemplo (Meditar, Correr, Leer).
 - **Accent Arcoíris** `/habitos` = verde `#059669`.
 - Store: slice completo (`habitos`, `habitosRegistros`, acciones CRUD + `upsertHabitoRegistro`) con fallback offline.
 
+### Bot Telegram — hecho
+
+- **Bóveda:** texto libre y fotos → categoría → `POST /hojas`. Prefijos rápidos: `t:` crea tarea, `e:` crea evento.
+- **Agenda:** `/hoy` (eventos + tareas + hábitos integrados), `/dia <fecha>`, `/tarea` (con parsing de fecha), `/evento` (duración configurable + selección de calendario inline), `/pendientes` (con lista), `/semana`, `/bloquear <N> <HH:MM>`, `/revision`.
+- **Hábitos:** `/habitos` (Total/Parcial/Deshacer inline), `/hecho <nombre>` (fuzzy match), `/ayer`, `/racha`, `/nota`. Cache 60 s.
+- **Infraestructura:** healthcheck al arrancar, `chat_id` persistido en `chat_id.json`, check-in nocturno 21:00 vía `job_queue`.
+- **General:** `/help`, `/cancel`, parsers de fecha/hora/duración, port Python de `calcStreak`/`isScheduled`.
+- Código: `mybot/bot.py` + `mybot/agenda_handlers.py`. Backend: `GET /agenda/revision` en `main.py` + `crud.py`.
+
 ### No implementado
 
-- Patrimonio como tab separada.
-- Bot Finanzas (captura solo Bóveda vía Telegram).
-- Tests automatizados.
+El detalle completo de pendientes por módulo está en los archivos de roadmap:
+
+- **Agenda:** `Agenda-Roadmap.md` — bot (nuevos comandos, mejoras), frontend (bugs P0, UX, rendimiento, a11y), backend, notificaciones.
+- **Hábitos:** `Habitos.md` §8–§14 — bot, notificaciones, backend, frontend.
+- **Global:** Bot Finanzas (captura de movimientos vía Telegram), patrimonio como tab separada, tests automatizados.
 
 ---
 
 ## Convenciones para agentes
 
 1. **Leer primero** `../Prompt.md` para la tab o feature pedida; este README para arquitectura y estado.
-2. **No re-explorar** rutas ya listadas abajo si el cambio es acotado.
+2. **Roadmap / pendientes:** `Agenda-Roadmap.md` (Agenda + Bot), `Habitos.md` §8–§14 (Hábitos + Bot).
+3. **No re-explorar** rutas ya listadas abajo si el cambio es acotado.
 3. **Offline:** toda acción del store debe funcionar si `fetch` falla (update optimista local + try/catch).
 4. **i18n:** strings en `frontend/src/utils/i18n.js` (`t(lang, key)`), no hardcodear copy visible.
 5. **Estilos:** variables CSS del tema; clases Tailwind `app-*`; cards usan `panel-strong`, `label`, `serif`, `mono`, `tnum`.
@@ -308,7 +320,11 @@ project/
 │   │       └── CompletarModal.jsx
 │   ├── data/finanzas.js     # Mock + isTransferencia
 │   └── utils/themes.js, i18n.js, detectType.js
-├── mybot/bot.py
+├── mybot/bot.py             # Entry point + handlers Bóveda
+├── mybot/agenda_handlers.py # Handlers Agenda + Hábitos (commands + callbacks)
+├── Agenda.md                # Documentación técnica del módulo Agenda
+├── Agenda-Roadmap.md        # Pendientes Agenda (bot, frontend, backend, notificaciones)
+├── Habitos.md               # Documentación + roadmap del módulo Hábitos
 ├── database/app.db
 └── uploads/
 ```

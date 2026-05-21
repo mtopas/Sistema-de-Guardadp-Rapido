@@ -1266,6 +1266,73 @@ def agenda_eliminar_horario_facultad(hf_id: int) -> bool:
     return deleted
 
 
+def agenda_resumen_semana(desde: str, hasta: str) -> dict:
+    """Resumen semanal para /revision del bot y tab Revisión."""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Tareas completadas en el rango (con fecha en el rango)
+    cursor.execute(
+        """SELECT COUNT(*) FROM agenda_tareas
+           WHERE completada = 1 AND fecha_opcional >= ? AND fecha_opcional <= ?""",
+        (desde, hasta),
+    )
+    completadas = cursor.fetchone()[0]
+
+    # Tareas incompletas con fecha en el rango
+    cursor.execute(
+        """SELECT COUNT(*) FROM agenda_tareas
+           WHERE completada = 0 AND fecha_opcional >= ? AND fecha_opcional <= ?""",
+        (desde, hasta),
+    )
+    incompletas = cursor.fetchone()[0]
+
+    # Tareas vencidas: fecha < desde y no completadas
+    cursor.execute(
+        """SELECT COUNT(*) FROM agenda_tareas
+           WHERE completada = 0 AND fecha_opcional IS NOT NULL AND fecha_opcional < ?""",
+        (desde,),
+    )
+    vencidas = cursor.fetchone()[0]
+
+    # Minutos de eventos por calendario
+    cursor.execute(
+        """SELECT c.nombre, c.color,
+                  SUM(
+                    CAST((strftime('%s', e.fecha_fin) - strftime('%s', e.fecha_inicio)) / 60 AS INTEGER)
+                  ) as minutos
+           FROM agenda_eventos e
+           LEFT JOIN agenda_calendarios c ON c.id = e.calendario_id
+           WHERE e.fecha_inicio >= ? AND e.fecha_inicio <= ?
+             AND e.todo_el_dia = 0 AND e.fecha_fin IS NOT NULL
+           GROUP BY e.calendario_id""",
+        (desde, hasta),
+    )
+    rows = cursor.fetchall()
+    por_calendario = [
+        {"nombre": r[0] or "Sin calendario", "color": r[1] or "#2563eb", "minutos": r[2] or 0}
+        for r in rows
+    ]
+
+    # Total eventos en el rango
+    cursor.execute(
+        "SELECT COUNT(*) FROM agenda_eventos WHERE fecha_inicio >= ? AND fecha_inicio <= ?",
+        (desde, hasta),
+    )
+    total_eventos = cursor.fetchone()[0]
+
+    conn.close()
+    return {
+        "desde": desde,
+        "hasta": hasta,
+        "completadas": completadas,
+        "incompletas": incompletas,
+        "vencidas": vencidas,
+        "total_eventos": total_eventos,
+        "por_calendario": por_calendario,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Hábitos
 # ---------------------------------------------------------------------------

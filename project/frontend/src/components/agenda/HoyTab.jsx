@@ -1,23 +1,11 @@
-import { useState, useEffect } from 'react'
-import { Clock, CheckCircle2, Circle, Plus, X, GraduationCap } from 'lucide-react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { Clock, CheckCircle2, Circle, Plus, X, GraduationCap, ChevronLeft, ChevronRight } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
 import TareaModal from './TareaModal'
-import { buildRegistrosMap, isScheduled, toISODate, todayStatus } from '../habitos/habitosUtils'
-
-const HOURS = Array.from({ length: 18 }, (_, i) => i + 6) // 6:00 – 23:00
-const HOUR_HEIGHT = 56 // px per hour
-
-function timeToMinutes(timeStr) {
-  if (!timeStr) return null
-  const [h, m] = timeStr.split(':').map(Number)
-  return h * 60 + (m || 0)
-}
-
-function minutesToTop(minutes) {
-  const startMinutes = 6 * 60
-  return ((minutes - startMinutes) / 60) * HOUR_HEIGHT
-}
+import EventoModal from './EventoModal'
+import { buildRegistrosMap, isScheduled } from '../habitos/habitosUtils'
+import { toLocalISODate, HOURS, HOUR_HEIGHT, timeToMinutes, minutesToTop } from './agendaUtils'
 
 export default function HoyTab() {
   const lang                  = useStore(s => s.lang)
@@ -28,90 +16,131 @@ export default function HoyTab() {
   const habitos               = useStore(s => s.habitos)
   const habitosRegistros      = useStore(s => s.habitosRegistros)
   const upsertHabitoRegistro  = useStore(s => s.upsertHabitoRegistro)
+  const deleteHabitoRegistro  = useStore(s => s.deleteHabitoRegistro)
 
-  const [schedulingId, setSchedulingId] = useState(null) // tarea_id being scheduled
+  const [viewDate, setViewDate]         = useState(new Date())
+  const [schedulingId, setSchedulingId] = useState(null)
   const [horaInput, setHoraInput]       = useState('')
   const [newTareaOpen, setNewTareaOpen] = useState(false)
+  const [newEventoHora, setNewEventoHora] = useState(null) // string HH:MM | null
   const [nowLine, setNowLine]           = useState(0)
+  const gridRef                         = useRef(null)
 
-  const today = new Date()
-  const todayISO = today.toISOString().slice(0, 10)
-  const todayDow = (today.getDay() + 6) % 7 // Mon=0
+  const todayActual = new Date()
+  const viewISO     = toLocalISODate(viewDate)
+  const todayISO    = toLocalISODate(todayActual)
+  const isToday     = viewISO === todayISO
+  const todayDow    = (viewDate.getDay() + 6) % 7 // Mon=0
 
   // Live "now" indicator
   useEffect(() => {
     const update = () => {
-      const now = today.getHours() * 60 + today.getMinutes()
-      setNowLine(minutesToTop(now))
+      const now = new Date()
+      setNowLine(minutesToTop(now.getHours() * 60 + now.getMinutes()))
     }
     update()
     const id = setInterval(update, 60000)
     return () => clearInterval(id)
   }, [])
 
-  // Tareas próximas 15 días, pendientes
-  const cutoff = new Date(today)
-  cutoff.setDate(cutoff.getDate() + 15)
-  const cutoffISO = cutoff.toISOString().slice(0, 10)
-  const pending = agendaTareas.filter(t =>
-    !t.completada && (!t.fecha_opcional || t.fecha_opcional <= cutoffISO)
-  ).sort((a, b) => {
-    if (!a.fecha_opcional && !b.fecha_opcional) return 0
-    if (!a.fecha_opcional) return 1
-    if (!b.fecha_opcional) return -1
-    return a.fecha_opcional.localeCompare(b.fecha_opcional)
-  })
+  // Scroll to current hour on mount
+  useEffect(() => {
+    if (!gridRef.current || !isToday) return
+    const now = new Date()
+    const top = minutesToTop(now.getHours() * 60 + now.getMinutes())
+    const scrollTo = Math.max(0, top - gridRef.current.clientHeight / 3)
+    gridRef.current.scrollTop = scrollTo
+  }, [isToday])
 
-  // Eventos de hoy
-  const todayEventos = agendaEventos.filter(e => e.fecha_inicio?.slice(0, 10) === todayISO)
+  // Day navigation
+  const prevDay = () => setViewDate(d => { const n = new Date(d); n.setDate(n.getDate() - 1); return n })
+  const nextDay = () => setViewDate(d => { const n = new Date(d); n.setDate(n.getDate() + 1); return n })
+  const goToday = () => setViewDate(new Date())
 
-  // Tareas con bloque asignado hoy
-  const bloqueadas = agendaTareas.filter(t => t.fecha_opcional === todayISO && t.hora_bloque)
+  // Filters (memoized)
+  const cutoff = useMemo(() => {
+    const c = new Date(todayActual)
+    c.setDate(c.getDate() + 15)
+    return toLocalISODate(c)
+  }, [todayISO])
 
-  // Facultad hoy
-  const facultadHoy = agendaHorarioFacultad.filter(h => h.dia_semana === todayDow)
+  const pending = useMemo(() =>
+    agendaTareas.filter(t =>
+      !t.completada && (!t.fecha_opcional || t.fecha_opcional <= cutoff)
+    ).sort((a, b) => {
+      if (!a.fecha_opcional && !b.fecha_opcional) return 0
+      if (!a.fecha_opcional) return 1
+      if (!b.fecha_opcional) return -1
+      return a.fecha_opcional.localeCompare(b.fecha_opcional)
+    }),
+    [agendaTareas, cutoff]
+  )
 
-  // Hábitos de hoy
-  const registrosMap     = buildRegistrosMap(habitosRegistros)
-  const habitosHoy       = habitos.filter(h => h.activo && isScheduled(h, today) && !h.hora)
-  const habitosConHora   = habitos.filter(h => h.activo && isScheduled(h, today) && !!h.hora)
+  const todayEventos = useMemo(() =>
+    agendaEventos.filter(e => e.fecha_inicio?.slice(0, 10) === viewISO),
+    [agendaEventos, viewISO]
+  )
 
-  const handleHabitoCheck = (habito) => {
-    const reg = registrosMap[`${habito.id}-${todayISO}`]
+  const bloqueadas = useMemo(() =>
+    agendaTareas.filter(t => t.fecha_opcional === viewISO && t.hora_bloque),
+    [agendaTareas, viewISO]
+  )
+
+  const facultadHoy = useMemo(() =>
+    agendaHorarioFacultad.filter(h => h.dia_semana === todayDow),
+    [agendaHorarioFacultad, todayDow]
+  )
+
+  const registrosMap = useMemo(() => buildRegistrosMap(habitosRegistros), [habitosRegistros])
+
+  const habitosHoy = useMemo(() =>
+    habitos.filter(h => h.activo && isScheduled(h, viewDate) && !h.hora),
+    [habitos, viewDate]
+  )
+
+  const habitosConHora = useMemo(() =>
+    habitos.filter(h => h.activo && isScheduled(h, viewDate) && !!h.hora),
+    [habitos, viewDate]
+  )
+
+  const todayEventosAllDay = useMemo(() =>
+    todayEventos.filter(e => e.todo_el_dia),
+    [todayEventos]
+  )
+
+  const handleHabitoCheck = useCallback((habito) => {
+    const reg = registrosMap[`${habito.id}-${viewISO}`]
     if (reg && reg.valor > 0) {
-      // toggle off
-      upsertHabitoRegistro(habito.id, todayISO, 0, null)
+      deleteHabitoRegistro(reg.id, habito.id, viewISO)
     } else {
-      upsertHabitoRegistro(habito.id, todayISO, 1.0, null)
+      upsertHabitoRegistro(habito.id, viewISO, 1.0, null)
     }
-  }
+  }, [registrosMap, viewISO, deleteHabitoRegistro, upsertHabitoRegistro])
 
-  const handleToggle = (tarea) => {
+  const handleToggle = useCallback((tarea) => {
     updateAgendaTarea(tarea.id, { completada: !tarea.completada })
-  }
+  }, [updateAgendaTarea])
 
-  const handleAgendar = async (id) => {
+  const handleAgendar = useCallback(async (id) => {
     if (!horaInput) return
-    await updateAgendaTarea(id, {
-      hora_bloque: horaInput,
-      fecha_opcional: todayISO,
-    })
+    await updateAgendaTarea(id, { hora_bloque: horaInput, fecha_opcional: viewISO })
     setSchedulingId(null)
     setHoraInput('')
-  }
+  }, [horaInput, viewISO, updateAgendaTarea])
 
   // Clean expired blocks
   useEffect(() => {
-    const now = today.getHours() * 60 + today.getMinutes()
+    if (!bloqueadas.length || !isToday) return
+    const nowMin = new Date().getHours() * 60 + new Date().getMinutes()
     bloqueadas.forEach(t => {
       const blockMin = timeToMinutes(t.hora_bloque)
-      if (blockMin !== null && blockMin < now && !t.completada) {
+      if (blockMin !== null && blockMin < nowMin && !t.completada) {
         updateAgendaTarea(t.id, { hora_bloque: null })
       }
     })
-  }, [])
+  }, [bloqueadas, isToday]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const dayLabel = today.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })
+  const dayLabel = viewDate.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })
 
   return (
     <div className="flex flex-1 min-h-0 overflow-hidden">
@@ -147,17 +176,11 @@ export default function HoyTab() {
                       style={{ color: tarea.completada ? 'var(--accent)' : 'var(--mute)' }}
                       onClick={() => handleToggle(tarea)}
                     >
-                      {tarea.completada
-                        ? <CheckCircle2 size={14} />
-                        : <Circle size={14} />
-                      }
+                      {tarea.completada ? <CheckCircle2 size={14} /> : <Circle size={14} />}
                     </button>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5 mb-0.5">
-                        <span
-                          className="w-1.5 h-1.5 rounded-full shrink-0"
-                          style={{ background: tarea.lista_color }}
-                        />
+                        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: tarea.lista_color }} />
                         <span className="text-[12px] font-medium truncate" style={{ color: 'var(--text)' }}>
                           {tarea.titulo}
                         </span>
@@ -170,8 +193,6 @@ export default function HoyTab() {
                       )}
                     </div>
                   </div>
-
-                  {/* Schedule button */}
                   {schedulingId === tarea.id ? (
                     <div className="flex items-center gap-1.5 mt-2">
                       <input
@@ -179,10 +200,7 @@ export default function HoyTab() {
                         value={horaInput}
                         onChange={e => setHoraInput(e.target.value)}
                         className="flex-1 px-2 py-1 rounded-lg border text-[11px] outline-none"
-                        style={{
-                          background: 'var(--bg)', borderColor: 'var(--accent)',
-                          color: 'var(--text)', fontFamily: 'var(--font-mono)',
-                        }}
+                        style={{ background: 'var(--bg)', borderColor: 'var(--accent)', color: 'var(--text)', fontFamily: 'var(--font-mono)' }}
                         autoFocus
                       />
                       <button
@@ -192,11 +210,7 @@ export default function HoyTab() {
                       >
                         OK
                       </button>
-                      <button
-                        className="icon-btn"
-                        style={{ width: 22, height: 22 }}
-                        onClick={() => setSchedulingId(null)}
-                      >
+                      <button className="icon-btn" style={{ width: 22, height: 22 }} onClick={() => setSchedulingId(null)}>
                         <X size={11} />
                       </button>
                     </div>
@@ -222,18 +236,15 @@ export default function HoyTab() {
             <div className="label mt-3 mb-2">{t(lang, 'habitosDeHoy')}</div>
             <div className="flex flex-col gap-1">
               {habitosHoy.map(h => {
-                const reg   = registrosMap[`${h.id}-${todayISO}`]
-                const done  = reg && reg.valor > 0
+                const reg = registrosMap[`${h.id}-${viewISO}`]
+                const done = reg && reg.valor > 0
                 const partial = reg && reg.valor > 0 && reg.valor < 1
                 return (
                   <div key={h.id} className="flex items-center gap-2.5 px-1 py-1">
                     <button
                       onClick={() => handleHabitoCheck(h)}
                       className="shrink-0 transition-colors w-4 h-4 rounded-md border grid place-items-center"
-                      style={{
-                        background: done ? h.color : 'transparent',
-                        borderColor: done ? h.color : 'var(--border)',
-                      }}
+                      style={{ background: done ? h.color : 'transparent', borderColor: done ? h.color : 'var(--border)' }}
                     >
                       {done && !partial && (
                         <svg width="9" height="7" viewBox="0 0 9 7" fill="none">
@@ -259,36 +270,71 @@ export default function HoyTab() {
 
       {/* Center: hour grid */}
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-        {/* Header */}
-        <div className="px-5 py-3 border-b shrink-0" style={{ borderColor: 'var(--border)' }}>
-          <div className="label capitalize">{t(lang, 'agendaTuDia')}</div>
-          <div className="text-[18px] serif italic mt-0.5 capitalize">{dayLabel}</div>
+        {/* Header with day navigation */}
+        <div className="px-5 py-3 border-b shrink-0 flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
+          <div>
+            <div className="label capitalize">{t(lang, 'agendaTuDia')}</div>
+            <div className="text-[18px] serif italic mt-0.5 capitalize">{dayLabel}</div>
+          </div>
+          <div className="flex items-center gap-1">
+            <button className="icon-btn" style={{ width: 28, height: 28 }} onClick={prevDay}>
+              <ChevronLeft size={15} />
+            </button>
+            {!isToday && (
+              <button
+                className="btn text-[11px] px-2.5 py-1"
+                onClick={goToday}
+              >
+                {t(lang, 'agendaHoy2')}
+              </button>
+            )}
+            <button className="icon-btn" style={{ width: 28, height: 28 }} onClick={nextDay}>
+              <ChevronRight size={15} />
+            </button>
+          </div>
         </div>
 
+        {/* All-day chips */}
+        {todayEventosAllDay.length > 0 && (
+          <div className="px-5 py-1.5 border-b flex flex-wrap gap-1.5 shrink-0" style={{ borderColor: 'var(--border)' }}>
+            {todayEventosAllDay.map(e => (
+              <div
+                key={e.id}
+                className="flex items-center gap-1 px-2 py-0.5 rounded text-[10.5px] font-medium"
+                style={{
+                  background: `color-mix(in oklch, ${e.calendario_color} 20%, transparent)`,
+                  color: e.calendario_color,
+                }}
+              >
+                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: e.calendario_color }} />
+                {e.titulo}
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Scrollable hour grid */}
-        <div className="flex-1 overflow-y-auto panel-scroll px-5 pt-3 pb-8 relative">
-          {/* Grid */}
+        <div ref={gridRef} className="flex-1 overflow-y-auto panel-scroll px-5 pt-3 pb-8 relative">
           <div className="relative" style={{ height: HOURS.length * HOUR_HEIGHT }}>
+            {/* Hour lines + click targets */}
             {HOURS.map(h => (
               <div
                 key={h}
-                className="absolute left-0 right-0 flex items-start gap-3"
-                style={{ top: (h - 6) * HOUR_HEIGHT }}
+                className="absolute left-0 right-0 flex items-start gap-3 group"
+                style={{ top: (h - 6) * HOUR_HEIGHT, height: HOUR_HEIGHT }}
               >
-                <span
-                  className="mono text-[10.5px] w-10 shrink-0 text-right pt-0.5"
-                  style={{ color: 'var(--mute)' }}
-                >
+                <span className="mono text-[10.5px] w-10 shrink-0 text-right pt-0.5" style={{ color: 'var(--mute)' }}>
                   {String(h).padStart(2, '0')}:00
                 </span>
                 <div
-                  className="flex-1 border-t"
-                  style={{ borderColor: 'var(--border)', marginTop: 8 }}
+                  className="flex-1 border-t cursor-pointer hover:bg-[var(--surface)] rounded-sm transition-colors"
+                  style={{ borderColor: 'var(--border)', marginTop: 8, height: HOUR_HEIGHT - 8 }}
+                  onClick={() => setNewEventoHora(`${String(h).padStart(2, '0')}:00`)}
                 />
               </div>
             ))}
 
-            {/* Facultad layer (background) */}
+            {/* Facultad layer */}
             {facultadHoy.map(hf => {
               const startMin = timeToMinutes(hf.hora_inicio)
               const endMin   = timeToMinutes(hf.hora_fin)
@@ -298,19 +344,12 @@ export default function HoyTab() {
               return (
                 <div
                   key={hf.id}
-                  className="absolute left-14 right-0 rounded-md flex items-start px-2 py-1 overflow-hidden"
-                  style={{
-                    top, height,
-                    background: 'color-mix(in oklch, #059669 10%, transparent)',
-                    borderLeft: '2px solid #059669',
-                    opacity: 0.55,
-                  }}
+                  className="absolute left-14 right-0 rounded-md flex items-start px-2 py-1 overflow-hidden pointer-events-none"
+                  style={{ top, height, background: 'color-mix(in oklch, #059669 10%, transparent)', borderLeft: '2px solid #059669', opacity: 0.55 }}
                 >
                   <div className="flex items-center gap-1">
                     <GraduationCap size={10} style={{ color: '#059669' }} />
-                    <span className="text-[10px] truncate font-medium" style={{ color: '#059669' }}>
-                      {hf.materia}
-                    </span>
+                    <span className="text-[10px] truncate font-medium" style={{ color: '#059669' }}>{hf.materia}</span>
                   </div>
                 </div>
               )
@@ -319,21 +358,15 @@ export default function HoyTab() {
             {/* Event blocks */}
             {todayEventos.filter(e => !e.todo_el_dia && e.fecha_inicio).map(evento => {
               const startMin = timeToMinutes(evento.fecha_inicio.slice(11, 16))
-              const endMin   = evento.fecha_fin
-                ? timeToMinutes(evento.fecha_fin.slice(11, 16))
-                : startMin + 60
+              const endMin   = evento.fecha_fin ? timeToMinutes(evento.fecha_fin.slice(11, 16)) : startMin + 60
               if (startMin === null) return null
               const top    = minutesToTop(startMin)
               const height = Math.max(((endMin - startMin) / 60) * HOUR_HEIGHT, 20)
               return (
                 <div
                   key={evento.id}
-                  className="absolute left-14 right-0 rounded-md px-2 py-1 overflow-hidden"
-                  style={{
-                    top, height,
-                    background: `color-mix(in oklch, ${evento.calendario_color} 22%, transparent)`,
-                    borderLeft: `2.5px solid ${evento.calendario_color}`,
-                  }}
+                  className="absolute left-14 right-0 rounded-md px-2 py-1 overflow-hidden cursor-pointer"
+                  style={{ top, height, background: `color-mix(in oklch, ${evento.calendario_color} 22%, transparent)`, borderLeft: `2.5px solid ${evento.calendario_color}` }}
                 >
                   <div className="mono text-[9.5px] opacity-80" style={{ color: evento.calendario_color }}>
                     {evento.fecha_inicio.slice(11, 16)}
@@ -355,12 +388,8 @@ export default function HoyTab() {
               return (
                 <div
                   key={tarea.id}
-                  className="absolute left-14 right-8 rounded-md px-2 py-1 overflow-hidden flex items-center gap-1.5"
-                  style={{
-                    top, height,
-                    background: `color-mix(in oklch, ${tarea.lista_color} 15%, var(--surface))`,
-                    border: `1.5px dashed ${tarea.lista_color}`,
-                  }}
+                  className="absolute left-14 right-8 rounded-md px-2 py-1 overflow-hidden flex items-center gap-1.5 block-new"
+                  style={{ top, height, background: `color-mix(in oklch, ${tarea.lista_color} 15%, var(--surface))`, border: `1.5px dashed ${tarea.lista_color}`, transformOrigin: 'top' }}
                 >
                   <button
                     onClick={() => updateAgendaTarea(tarea.id, { completada: true, hora_bloque: null })}
@@ -368,9 +397,7 @@ export default function HoyTab() {
                   >
                     <Circle size={12} />
                   </button>
-                  <span className="text-[11px] font-medium truncate" style={{ color: 'var(--text)' }}>
-                    {tarea.titulo}
-                  </span>
+                  <span className="text-[11px] font-medium truncate" style={{ color: 'var(--text)' }}>{tarea.titulo}</span>
                   <button
                     className="ml-auto shrink-0"
                     style={{ color: 'var(--mute)' }}
@@ -388,18 +415,13 @@ export default function HoyTab() {
               if (startMin === null) return null
               const top    = minutesToTop(startMin)
               const height = Math.max(HOUR_HEIGHT * 0.75, 28)
-              const reg    = registrosMap[`${h.id}-${todayISO}`]
+              const reg    = registrosMap[`${h.id}-${viewISO}`]
               const done   = reg && reg.valor > 0
               return (
                 <div
                   key={h.id}
                   className="absolute left-14 right-0 rounded-md px-2 py-1 flex items-center gap-1.5 cursor-pointer"
-                  style={{
-                    top, height,
-                    background: `color-mix(in oklch, ${h.color} ${done ? 25 : 15}%, var(--surface))`,
-                    border: `1.5px solid color-mix(in oklch, ${h.color} 50%, transparent)`,
-                    opacity: done ? 0.7 : 1,
-                  }}
+                  style={{ top, height, background: `color-mix(in oklch, ${h.color} ${done ? 25 : 15}%, var(--surface))`, border: `1.5px solid color-mix(in oklch, ${h.color} 50%, transparent)`, opacity: done ? 0.7 : 1 }}
                   onClick={() => handleHabitoCheck(h)}
                 >
                   <span className="w-2 h-2 rounded-full shrink-0" style={{ background: h.color }} />
@@ -414,12 +436,12 @@ export default function HoyTab() {
             })}
 
             {/* Now indicator */}
-            {nowLine > 0 && nowLine < HOURS.length * HOUR_HEIGHT && (
+            {isToday && nowLine > 0 && nowLine < HOURS.length * HOUR_HEIGHT && (
               <div
                 className="absolute left-12 right-0 flex items-center gap-1 pointer-events-none"
                 style={{ top: nowLine }}
               >
-                <div className="w-2 h-2 rounded-full shrink-0" style={{ background: 'var(--accent)' }} />
+                <div className="w-2 h-2 rounded-full shrink-0 now-dot" style={{ background: 'var(--accent)' }} />
                 <div className="flex-1 border-t-2" style={{ borderColor: 'var(--accent)' }} />
               </div>
             )}
@@ -458,20 +480,17 @@ export default function HoyTab() {
                   <div className="text-[12.5px] font-medium truncate">{e.titulo}</div>
                 </div>
               ))}
-              {bloqueadas.map(t => (
+              {bloqueadas.map(tarea => (
                 <div
-                  key={t.id}
+                  key={tarea.id}
                   className="rounded-xl border px-3 py-2.5"
-                  style={{
-                    borderColor: `color-mix(in oklch, ${t.lista_color} 40%, var(--border))`,
-                    background: `color-mix(in oklch, ${t.lista_color} 6%, var(--surface))`,
-                  }}
+                  style={{ borderColor: `color-mix(in oklch, ${tarea.lista_color} 40%, var(--border))`, background: `color-mix(in oklch, ${tarea.lista_color} 6%, var(--surface))` }}
                 >
                   <div className="flex items-center gap-1.5 mb-1">
-                    <Circle size={10} style={{ color: t.lista_color }} />
-                    <span className="mono text-[10.5px]" style={{ color: 'var(--subtext)' }}>{t.hora_bloque}</span>
+                    <Circle size={10} style={{ color: tarea.lista_color }} />
+                    <span className="mono text-[10.5px]" style={{ color: 'var(--subtext)' }}>{tarea.hora_bloque}</span>
                   </div>
-                  <div className="text-[12.5px] font-medium truncate">{t.titulo}</div>
+                  <div className="text-[12.5px] font-medium truncate">{tarea.titulo}</div>
                 </div>
               ))}
             </div>
@@ -479,7 +498,14 @@ export default function HoyTab() {
         </div>
       </aside>
 
-      {newTareaOpen && <TareaModal onClose={() => setNewTareaOpen(false)} defaultFecha={todayISO} />}
+      {newTareaOpen && <TareaModal onClose={() => setNewTareaOpen(false)} defaultFecha={viewISO} />}
+      {newEventoHora !== null && (
+        <EventoModal
+          defaultFecha={viewISO}
+          defaultHora={newEventoHora}
+          onClose={() => setNewEventoHora(null)}
+        />
+      )}
     </div>
   )
 }

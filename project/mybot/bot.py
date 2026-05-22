@@ -18,6 +18,7 @@ from telegram.ext import (
 )
 
 import agenda_handlers as ah
+import finanzas_handlers as fh
 
 
 TOKEN    = os.environ.get("TELEGRAM_BOT_TOKEN", "")
@@ -62,14 +63,21 @@ def _register_chat_id(bot_data: dict, chat_id: int):
 # ──────────────────────────────────────────────────────────────
 
 def _healthcheck():
-    try:
-        r = requests.get(f"{API_BASE}/habitos", timeout=10)
-        r.raise_for_status()
-        print(f"[bot] Healthcheck OK — API en {API_BASE}")
-        return True
-    except Exception as e:
-        print(f"[bot] ADVERTENCIA: API no responde ({e}). Reintentando al recibir mensajes.")
-        return False
+    import time
+    delays = [1, 2, 4, 8]
+    for attempt, delay in enumerate(delays, start=1):
+        try:
+            r = requests.get(f"{API_BASE}/habitos", timeout=10)
+            r.raise_for_status()
+            print(f"[bot] Healthcheck OK — API en {API_BASE} (intento {attempt})")
+            return True
+        except Exception as e:
+            if attempt < len(delays):
+                print(f"[bot] Healthcheck intento {attempt} fallido ({e}). Reintentando en {delay}s…")
+                time.sleep(delay)
+            else:
+                print(f"[bot] ADVERTENCIA: API no responde tras {attempt} intentos ({e}). Reintentando al recibir mensajes.")
+    return False
 
 
 # ──────────────────────────────────────────────────────────────
@@ -165,9 +173,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await ah.handle_agenda_step(update, context, texto):
         return
 
-    # ── Quick capture por prefijo (t: / e:) ──────────────────
+    # ── Pasos de Finanzas ─────────────────────────────────────
+    if await fh.handle_finanzas_step(update, context, texto):
+        return
+
+    # ── Quick captures por prefijo ────────────────────────────
     if step is None:
         if await ah.handle_quick_capture(update, context, texto):
+            return
+        if await fh.handle_fin_quick_capture(update, context, texto):
             return
 
     # ── Photo title ───────────────────────────────────────────
@@ -281,6 +295,19 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ──────────────────────────────────────────────────────────────
+# Dispatcher de callbacks (Finanzas primero, Agenda como fallback)
+# ──────────────────────────────────────────────────────────────
+
+async def _dispatch_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    data  = query.data or ""
+    if await fh.handle_finanzas_callback(update, context, data):
+        await query.answer()
+        return
+    await ah.handle_callback(update, context)
+
+
+# ──────────────────────────────────────────────────────────────
 # Arranque
 # ──────────────────────────────────────────────────────────────
 
@@ -304,14 +331,25 @@ def main():
     app.add_handler(CommandHandler("cancel", cmd_cancel))
 
     # ── Comandos Agenda ───────────────────────────────────────
-    app.add_handler(CommandHandler("hoy",       ah.cmd_hoy))
-    app.add_handler(CommandHandler("dia",       ah.cmd_dia))
+    app.add_handler(CommandHandler("hoy",        ah.cmd_hoy))
+    app.add_handler(CommandHandler("dia",        ah.cmd_dia))
+    app.add_handler(CommandHandler("planificar", ah.cmd_planificar))
+    app.add_handler(CommandHandler("asignar",    ah.cmd_asignar))
     app.add_handler(CommandHandler("tarea",     ah.cmd_tarea))
     app.add_handler(CommandHandler("evento",    ah.cmd_evento))
     app.add_handler(CommandHandler("semana",    ah.cmd_semana))
     app.add_handler(CommandHandler("pendientes", ah.cmd_pendientes))
     app.add_handler(CommandHandler("bloquear",  ah.cmd_bloquear))
     app.add_handler(CommandHandler("revision",  ah.cmd_revision))
+
+    # ── Comandos Finanzas ─────────────────────────────────────
+    app.add_handler(CommandHandler("mov",      fh.cmd_mov))
+    app.add_handler(CommandHandler("saldo",    fh.cmd_saldo))
+    app.add_handler(CommandHandler("mes",      fh.cmd_mes))
+    app.add_handler(CommandHandler("ahorro",   fh.cmd_ahorro))
+    app.add_handler(CommandHandler("ultimo",   fh.cmd_ultimo))
+    app.add_handler(CommandHandler("dolar",    fh.cmd_dolar))
+    app.add_handler(CommandHandler("objetivo", fh.cmd_objetivo))
 
     # ── Comandos Hábitos ──────────────────────────────────────
     app.add_handler(CommandHandler("habitos",   ah.cmd_habitos))
@@ -321,7 +359,7 @@ def main():
     app.add_handler(CommandHandler("nota",      ah.cmd_nota))
 
     # ── Callbacks de botones inline ───────────────────────────
-    app.add_handler(CallbackQueryHandler(ah.handle_callback))
+    app.add_handler(CallbackQueryHandler(_dispatch_callback))
 
     # ── Texto libre y fotos → Bóveda ─────────────────────────
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { X, Trash2, Plus } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
@@ -48,6 +48,12 @@ export default function HorarioFacultadModal({ onClose }) {
   })
   const [saving, setSaving] = useState(false)
 
+  useEffect(() => {
+    const h = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [onClose])
+
   const handleAdd = async () => {
     if (!form.materia.trim()) return
     setSaving(true)
@@ -59,7 +65,7 @@ export default function HorarioFacultadModal({ onClose }) {
   const sorted = [...agendaHorarioFacultad].sort((a, b) => a.dia_semana - b.dia_semana || a.hora_inicio.localeCompare(b.hora_inicio))
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }}>
       <div
         className="w-full max-w-lg rounded-2xl border shadow-2xl p-6"
         style={{ background: 'var(--panel-bg)', borderColor: 'var(--border)', maxHeight: '80vh', overflowY: 'auto' }}

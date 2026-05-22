@@ -5,6 +5,7 @@ import { t } from '../../utils/i18n'
 import MiniCalendar from './MiniCalendar'
 import EventoModal from './EventoModal'
 import TareaModal from './TareaModal'
+import { toLocalISODate } from './agendaUtils'
 
 const WEEKDAYS_ES = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
 const HOURS_SEMANA = Array.from({ length: 16 }, (_, i) => i + 7) // 7–22
@@ -298,12 +299,12 @@ export default function MesTab() {
                   </div>
                   {/* Day columns */}
                   {weekDays.map((d, ci) => {
-                    const iso = d.toISOString().slice(0, 10)
+                    const iso = toLocalISODate(d)
                     const dayEntries = byDate[iso] || []
                     return (
                       <div key={ci} className="relative border-l" style={{ borderColor: 'var(--border)' }}>
                         {HOURS_SEMANA.map(h => (
-                          <div key={h} style={{ height: 48 }} className="border-t" style2={{ borderColor: 'var(--border)' }} />
+                          <div key={h} className="border-t" style={{ height: 48, borderColor: 'var(--border)' }} />
                         ))}
                         {dayEntries.filter(e => e.type === 'evento' && !e.item.todo_el_dia).map((entry, j) => {
                           const startMin = parseInt(entry.item.fecha_inicio?.slice(11, 13) || 0, 10) * 60 +

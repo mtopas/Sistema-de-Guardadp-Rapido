@@ -5,7 +5,9 @@ from app.config import DEBUG, DB_PATH
 
 
 def get_connection():
-    return sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
 
 
 def _get_columns(cursor, table):
@@ -515,3 +517,51 @@ def _apply_migrations(cursor):
         cursor.execute("ALTER TABLE fin_instrumentos ADD COLUMN sociedad TEXT")
         if DEBUG:
             print("migration: fin_instrumentos.sociedad added")
+
+    # --- agenda_eventos: add ON DELETE CASCADE on calendario_id ---
+    # SQLite doesn't support ALTER TABLE to add FK constraints; recreate the table.
+    cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='agenda_eventos'")
+    row = cursor.fetchone()
+    if row and "ON DELETE CASCADE" not in row[0]:
+        cursor.execute("""
+            CREATE TABLE agenda_eventos_new (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                titulo           TEXT NOT NULL,
+                descripcion      TEXT,
+                fecha_inicio     TEXT NOT NULL,
+                fecha_fin        TEXT,
+                todo_el_dia      INTEGER NOT NULL DEFAULT 0,
+                se_repite        INTEGER NOT NULL DEFAULT 0,
+                regla_repeticion TEXT,
+                calendario_id    INTEGER REFERENCES agenda_calendarios(id) ON DELETE CASCADE
+            )
+        """)
+        cursor.execute("""
+            INSERT INTO agenda_eventos_new
+            SELECT id, titulo, descripcion, fecha_inicio, fecha_fin,
+                   todo_el_dia, se_repite, regla_repeticion, calendario_id
+            FROM agenda_eventos
+        """)
+        cursor.execute("DROP TABLE agenda_eventos")
+        cursor.execute("ALTER TABLE agenda_eventos_new RENAME TO agenda_eventos")
+        if DEBUG:
+            print("migration: agenda_eventos rebuilt with ON DELETE CASCADE")
+
+    # --- agenda_tareas / agenda_eventos: creado_en, actualizado_en ---
+    for tabla in ('agenda_tareas', 'agenda_eventos'):
+        cols = _get_columns(cursor, tabla)
+        if 'creado_en' not in cols:
+            cursor.execute(f"ALTER TABLE {tabla} ADD COLUMN creado_en TEXT")
+            cursor.execute(f"UPDATE {tabla} SET creado_en = datetime('now') WHERE creado_en IS NULL")
+            if DEBUG:
+                print(f"migration: {tabla}.creado_en added")
+        if 'actualizado_en' not in cols:
+            cursor.execute(f"ALTER TABLE {tabla} ADD COLUMN actualizado_en TEXT")
+            cursor.execute(f"UPDATE {tabla} SET actualizado_en = datetime('now') WHERE actualizado_en IS NULL")
+            if DEBUG:
+                print(f"migration: {tabla}.actualizado_en added")
+
+    # --- Index para eventos por fecha ---
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_eventos_inicio ON agenda_eventos(fecha_inicio)"
+    )

@@ -770,6 +770,7 @@ class AgendaTareaCreate(BaseModel):
     descripcion: Optional[str] = None
     fecha_opcional: Optional[str] = None
     hora_opcional: Optional[str] = None
+    hora_bloque: Optional[str] = None
     duracion_estimada: Optional[int] = None
 
 class AgendaTareaPatch(BaseModel):
@@ -833,6 +834,14 @@ def listar_agenda_eventos(
     desde: Optional[str] = Query(None),
     hasta: Optional[str] = Query(None),
 ):
+    if not desde:
+        from datetime import date, timedelta
+        today = date.today()
+        desde = (today.replace(day=1) - timedelta(days=32)).strftime('%Y-%m-01')
+    if not hasta:
+        from datetime import date, timedelta
+        today = date.today()
+        hasta = (today.replace(day=1) + timedelta(days=62)).strftime('%Y-%m-28')
     return agenda_obtener_eventos(fecha_desde=desde, fecha_hasta=hasta)
 
 @app.post("/agenda/eventos")
@@ -909,6 +918,7 @@ def crear_agenda_tarea(body: AgendaTareaCreate):
         descripcion=body.descripcion,
         fecha_opcional=body.fecha_opcional,
         hora_opcional=body.hora_opcional,
+        hora_bloque=body.hora_bloque,
         duracion_estimada=body.duracion_estimada,
     )
 

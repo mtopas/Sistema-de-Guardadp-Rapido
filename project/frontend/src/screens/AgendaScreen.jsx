@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { GraduationCap } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import TopBar from '../components/TopBar'
@@ -10,24 +11,43 @@ import RevisionTab from '../components/agenda/RevisionTab'
 import EventoModal from '../components/agenda/EventoModal'
 import HorarioFacultadModal from '../components/agenda/HorarioFacultadModal'
 
+const VALID_TABS = ['hoy', 'mes', 'tareas', 'revision']
+
 export default function AgendaScreen() {
   const agendaEventoOpen  = useStore(s => s.agendaEventoOpen)
   const closeAgendaEvento = useStore(s => s.closeAgendaEvento)
 
-  const [tab, setTab]             = useState('hoy')
+  const location  = useLocation()
+  const navigate  = useNavigate()
+  const params    = new URLSearchParams(location.search)
+  const tabParam  = params.get('tab')
+  const initTab   = VALID_TABS.includes(tabParam) ? tabParam : 'hoy'
+
+  const [tab, setTab] = useState(initTab)
   const [facultadOpen, setFacultadOpen] = useState(false)
+
+  const handleTabChange = (newTab) => {
+    setTab(newTab)
+    const sp = new URLSearchParams(location.search)
+    sp.set('tab', newTab)
+    navigate(`/agenda?${sp.toString()}`, { replace: true })
+  }
+
+  // Sync tab if URL changes externally
+  useEffect(() => {
+    const p = new URLSearchParams(location.search)
+    const t = p.get('tab')
+    if (VALID_TABS.includes(t) && t !== tab) setTab(t)
+  }, [location.search])
 
   return (
     <div className="flex flex-col w-full h-full">
       <TopBar />
-
-      {/* Tabs bar */}
       <div
         className="flex items-center justify-between px-5 py-2.5 border-b shrink-0"
         style={{ borderColor: 'var(--border)', background: 'var(--panel-bg)' }}
       >
-        <AgendaTabs active={tab} onChange={setTab} />
-
+        <AgendaTabs active={tab} onChange={handleTabChange} />
         <button
           className="flex items-center gap-1.5 text-[11.5px] px-2.5 py-1.5 rounded-lg border transition-colors"
           style={{ borderColor: 'var(--border)', color: 'var(--subtext)' }}
@@ -40,12 +60,11 @@ export default function AgendaScreen() {
         </button>
       </div>
 
-      {/* Tab content */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
-        {tab === 'hoy'      && <HoyTab />}
-        {tab === 'mes'      && <MesTab />}
-        {tab === 'tareas'   && <TareasTab />}
-        {tab === 'revision' && <RevisionTab />}
+        <div className={tab === 'hoy'      ? 'contents' : 'hidden'}><HoyTab /></div>
+        <div className={tab === 'mes'      ? 'contents' : 'hidden'}><MesTab /></div>
+        <div className={tab === 'tareas'   ? 'contents' : 'hidden'}><TareasTab /></div>
+        <div className={tab === 'revision' ? 'contents' : 'hidden'}><RevisionTab /></div>
       </div>
 
       {agendaEventoOpen && <EventoModal onClose={closeAgendaEvento} />}

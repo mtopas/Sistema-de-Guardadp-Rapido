@@ -166,12 +166,12 @@ API bajo `/fin/*` — cuentas, categorías, movimientos GET con/sin `?mes=`, PAT
 | Tabla | Uso |
 |-------|-----|
 | `agenda_calendarios` | Calendarios con color y toggle activo/inactivo |
-| `agenda_eventos` | Eventos con fecha inicio/fin, todo_el_dia, se_repite, calendario_id |
+| `agenda_eventos` | Eventos con fecha inicio/fin, todo_el_dia, se_repite, calendario_id, creado_en, actualizado_en |
 | `agenda_listas` | Listas de tareas con color |
-| `agenda_tareas` | Tareas con fecha/hora opcional, hora_bloque (time blocking), duracion_estimada, completada, lista_id |
+| `agenda_tareas` | Tareas con fecha/hora opcional, hora_bloque (time blocking), duracion_estimada, completada, lista_id, creado_en, actualizado_en |
 | `agenda_horario_facultad` | Horario recurrente por día de semana; visible solo en vistas horarias |
 
-API bajo `/agenda/*` — calendarios, eventos, listas, tareas, horario-facultad. Seed por defecto: 3 calendarios (Personal, Trabajo, Facultad) + 2 listas (Personal, Trabajo).
+API bajo `/agenda/*` — calendarios, eventos, listas, tareas, horario-facultad. Seed por defecto: 3 calendarios (Personal, Trabajo, Facultad) + 2 listas (Personal, Trabajo). Índice `idx_eventos_inicio` en `agenda_eventos(fecha_inicio)`.
 
 ---
 
@@ -222,12 +222,19 @@ Seed por defecto: 3 hábitos de ejemplo (Meditar, Correr, Leer).
 
 ### Agenda — hecho
 
-- **HOY (default):** grilla horaria 6–23h; tareas pendientes próximos 15 días con checkbox y time blocking; indicador "ahora" en tiempo real; capa horario facultad opacada; bloque expirado sin completar → se borra automáticamente al montar. Integración hábitos: sección + bloques en grilla.
-- **Mes:** vista 6×7 + semana; chips sólidos eventos, chips punteados tareas; toggle calendarios; click → `EventoModal`.
+- **HOY (default):** grilla horaria 6–23h; navegación de día (prev/next + botón "hoy"); scroll automático a la hora actual al montar; click en slot vacío → `EventoModal` prellenado con hora; chips all-day encima de la grilla; tareas pendientes próximos 15 días con checkbox y time blocking; indicador "ahora" en tiempo real (pulso animado `.now-dot`); capa horario facultad opacada; bloques con animación `.block-new`. Integración hábitos: sección + bloques en grilla. Filtros memoizados con `useMemo`.
+- **Mes:** vista 6×7 + semana; chips sólidos eventos, chips punteados tareas; toggle calendarios; click → `EventoModal`. Bordes de hora en vista Semana corregidos (`style2` → `style`).
 - **Tareas:** gestión de listas (crear/renombrar/colorear/eliminar); filtro pendientes/completadas/todas; detalle en panel derecho.
-- **Revisión:** selector de semana; completadas vs incompletas; vencidas +7 días; % tiempo planificado; distribución por calendario (incluyendo Facultad).
-- **Horario Facultad:** CRUD vía `HorarioFacultadModal`; visible solo en HOY; no aparece en Mes.
-- Store: slice completo con fallback offline en cada acción.
+- **Revisión:** selector de semana; completadas vs incompletas; vencidas +7 días; sparkline de completadas por día (L–D); botón exportar Markdown; % tiempo planificado con denominador correcto (16h despierto × 7 = 6720 min, incluye bloques de tareas); distribución por calendario (incluyendo Facultad).
+- **Horario Facultad:** CRUD vía `HorarioFacultadModal`; visible solo en HOY; no aparece en Mes. Modal con Escape + backdrop blur.
+- **AgendaModalShell:** shell reutilizable para modales de Agenda (header, footer, Escape, Ctrl+Enter, backdrop blur). Usado en `EventoModal` y `TareaModal`.
+- **`agendaUtils.js`:** `toLocalISODate` + `HOURS`, `HOUR_HEIGHT`, `timeToMinutes`, `minutesToTop` (compartidas entre HoyTab y otros).
+- **Tab en URL:** `AgendaScreen` lee/escribe `?tab=` en search params vía `useLocation`/`useNavigate`; permite deep-link y navegación con back/forward.
+- **CSS animations:** `index.css` — `.tab-enter`, `.now-dot` (pulso), `.block-new` (scaleY), `.modal-overlay` (fade-in).
+- Store: slice completo con fallback offline en cada acción. Desmarcar hábito en HOY usa `deleteHabitoRegistro` (DELETE real, sin registros fantasma). `showToast` al guardar en modales.
+- **Fechas TZ-safe:** `toLocalISODate()` en `agendaUtils.js` reemplaza `toISOString().slice(0,10)` en todos los tabs; evita desfase en UTC−3 pasadas las 21 h.
+- **BD:** `agenda_eventos.calendario_id` tiene `ON DELETE CASCADE` (migración automática en `_apply_migrations`); `PRAGMA foreign_keys = ON` activado en `get_connection()`. Migraciones: `creado_en`/`actualizado_en` en `agenda_tareas` y `agenda_eventos`; índice `idx_eventos_inicio`. `actualizado_en` se actualiza en cada PATCH.
+- **API:** `GET /agenda/eventos` tiene defaults de rango automáticos (mes actual ±2 meses) cuando no se pasan params. `POST /agenda/tareas` acepta `hora_bloque`.
 
 ### Hábitos — hecho
 
@@ -245,27 +252,31 @@ Seed por defecto: 3 hábitos de ejemplo (Meditar, Correr, Leer).
 ### Bot Telegram — hecho
 
 - **Bóveda:** texto libre y fotos → categoría → `POST /hojas`. Prefijos rápidos: `t:` crea tarea, `e:` crea evento.
-- **Agenda:** `/hoy` (eventos + tareas + hábitos integrados), `/dia <fecha>`, `/tarea` (con parsing de fecha), `/evento` (duración configurable + selección de calendario inline), `/pendientes` (con lista), `/semana`, `/bloquear <N> <HH:MM>`, `/revision`.
+- **Agenda:** `/hoy` (eventos + tareas + hábitos integrados), `/dia <fecha>`, `/planificar` (organización del día: ocupado + slots libres + asignación con inline keyboards), `/asignar`, `/tarea` (con parsing de fecha), `/evento` (duración configurable + selección de calendario inline), `/pendientes [lista]` (con lista; acepta filtro por nombre de lista), `/semana`, `/bloquear <N> <HH:MM>`, `/revision`.
 - **Hábitos:** `/habitos` (Total/Parcial/Deshacer inline), `/hecho <nombre>` (fuzzy match), `/ayer`, `/racha`, `/nota`. Cache 60 s.
-- **Infraestructura:** healthcheck al arrancar, `chat_id` persistido en `chat_id.json`, check-in nocturno 21:00 vía `job_queue`.
+- **Finanzas:** `/mov` (flujo guiado con inline keyboards: tipo → monto → desc → cuenta → categoría → confirmación con preview), `/saldo` (cuentas + equivalente USD), `/mes [YYYY-MM]` (ingresos/gastos/tasa ahorro), `/ahorro` (total mes + objetivos), `/ultimo` (últimos 5 con botón eliminar), `/dolar [valor]` (ver/actualizar tipo de cambio), `/objetivo [nombre]` (progreso con barra). Captura rápida `$: gasto 4500 Super Coto uala` con fuzzy match de cuenta. Seguridad: `BOT_ALLOWED_CHAT_IDS` en `.env`.
+- **Infraestructura:** healthcheck al arrancar con backoff exponencial (1→2→4→8 s, 4 intentos); `chat_id` persistido en `chat_id.json`, check-in nocturno 21:00 vía `job_queue`. Dispatcher de callbacks: Finanzas tiene prioridad sobre Agenda/Hábitos.
 - **General:** `/help`, `/cancel`, parsers de fecha/hora/duración, port Python de `calcStreak`/`isScheduled`.
-- Código: `mybot/bot.py` + `mybot/agenda_handlers.py`. Backend: `GET /agenda/revision` en `main.py` + `crud.py`.
+- Código: `mybot/bot.py` + `mybot/agenda_handlers.py` + `mybot/finanzas_handlers.py`.
 
 ### No implementado
 
 El detalle completo de pendientes por módulo está en los archivos de roadmap:
 
-- **Agenda:** `Agenda-Roadmap.md` — bot (nuevos comandos, mejoras), frontend (bugs P0, UX, rendimiento, a11y), backend, notificaciones.
-- **Hábitos:** `Habitos.md` §8–§14 — bot, notificaciones, backend, frontend.
-- **Global:** Bot Finanzas (captura de movimientos vía Telegram), patrimonio como tab separada, tests automatizados.
+- **Bóveda:** `Boveda-Roadmap.md` — bot, grafo interactivo, menú contextual, backend, notificaciones.
+- **Finanzas:** `Finanzas-Roadmap.md` — bot, frontend, backend, notificaciones.
+- **Agenda:** `Agenda-Roadmap.md` — bot (menor), frontend, backend, notificaciones.
+- **Hábitos:** `Habitos-Roadmap.md` — bugs P0, frontend, backend, notificaciones.
+- **Global:** patrimonio como tab separada, tests automatizados.
 
 ---
 
 ## Convenciones para agentes
 
 1. **Leer primero** `../Prompt.md` para la tab o feature pedida; este README para arquitectura y estado.
-2. **Roadmap / pendientes:** `Agenda-Roadmap.md` (Agenda + Bot), `Habitos.md` §8–§14 (Hábitos + Bot).
-3. **No re-explorar** rutas ya listadas abajo si el cambio es acotado.
+2. **Documentación por módulo** (qué está hecho, cómo funciona): `Boveda.md`, `Finanzas.md`, `Agenda.md`, `Habitos.md`.
+3. **Roadmap / pendientes** (qué falta, bugs, ideas): `Boveda-Roadmap.md`, `Finanzas-Roadmap.md`, `Agenda-Roadmap.md`, `Habitos-Roadmap.md`.
+4. **No re-explorar** rutas ya listadas abajo si el cambio es acotado.
 3. **Offline:** toda acción del store debe funcionar si `fetch` falla (update optimista local + try/catch).
 4. **i18n:** strings en `frontend/src/utils/i18n.js` (`t(lang, key)`), no hardcodear copy visible.
 5. **Estilos:** variables CSS del tema; clases Tailwind `app-*`; cards usan `panel-strong`, `label`, `serif`, `mono`, `tnum`.
@@ -302,6 +313,8 @@ project/
 │   │   │   ├── FireTab.jsx, FireRightPanel.jsx
 │   │   │   └── AnualTab.jsx, AnualRightPanel.jsx
 │   │   ├── agenda/
+│   │   │   ├── agendaUtils.js        # toLocalISODate, HOURS, HOUR_HEIGHT, timeToMinutes, minutesToTop
+│   │   │   ├── AgendaModalShell.jsx  # Shell reutilizable: Escape, Ctrl+Enter, backdrop blur
 │   │   │   ├── AgendaTabs.jsx, MiniCalendar.jsx
 │   │   │   ├── HoyTab.jsx       # Incluye integración hábitos
 │   │   │   ├── MesTab.jsx
@@ -320,11 +333,17 @@ project/
 │   │       └── CompletarModal.jsx
 │   ├── data/finanzas.js     # Mock + isTransferencia
 │   └── utils/themes.js, i18n.js, detectType.js
-├── mybot/bot.py             # Entry point + handlers Bóveda
-├── mybot/agenda_handlers.py # Handlers Agenda + Hábitos (commands + callbacks)
+├── mybot/bot.py                  # Entry point + handlers Bóveda + dispatcher callbacks
+├── mybot/agenda_handlers.py      # Handlers Agenda + Hábitos (commands + callbacks)
+├── mybot/finanzas_handlers.py    # Handlers Finanzas (commands + callbacks + captura $:)
+├── Boveda.md                # Documentación técnica del módulo Bóveda
+├── Boveda-Roadmap.md        # Pendientes Bóveda
+├── Finanzas.md              # Documentación técnica del módulo Finanzas
+├── Finanzas-Roadmap.md      # Pendientes Finanzas
 ├── Agenda.md                # Documentación técnica del módulo Agenda
-├── Agenda-Roadmap.md        # Pendientes Agenda (bot, frontend, backend, notificaciones)
-├── Habitos.md               # Documentación + roadmap del módulo Hábitos
+├── Agenda-Roadmap.md        # Pendientes Agenda
+├── Habitos.md               # Documentación técnica del módulo Hábitos
+├── Habitos-Roadmap.md       # Pendientes Hábitos
 ├── database/app.db
 └── uploads/
 ```

@@ -13,6 +13,7 @@ STEP_AGENDA_CHOOSE_LISTA       = "agenda_choose_lista"
 STEP_AGENDA_CHOOSE_CALENDARIO  = "agenda_choose_calendario"
 STEP_HABITO_NOTA               = "habito_nota"
 STEP_AYER_VALOR                = "ayer_valor"
+STEP_PLANIFICAR_NUEVA_TAREA    = "planificar_nueva_tarea"
 
 HABITOS_CACHE_TTL = 60  # segundos
 
@@ -22,9 +23,21 @@ HABITOS_CACHE_TTL = 60  # segundos
 HELP_TEXT = """\
 🤖 *SGR — comandos disponibles*
 
+💰 *Finanzas*
+/mov — nuevo movimiento (flujo guiado con botones)
+/saldo — saldo de todas las cuentas + equivalente USD
+/mes [YYYY-MM] — ingresos, gastos y tasa ahorro del mes
+/ahorro — total ahorrado este mes + objetivos
+/ultimo — últimos 5 movimientos (con botón para eliminar)
+/dolar [valor] — ver o actualizar el tipo de cambio manual
+/objetivo [nombre] — listar objetivos o ver progreso de uno
+`$: gasto 4500 Super Coto uala` — captura rápida de movimiento
+
 📅 *Agenda*
 /hoy — eventos, tareas y hábitos de hoy
 /dia <fecha> — igual a /hoy para otro día (hoy/mañana/viernes/2026-05-25)
+/planificar — organiza el día: ve lo ocupado, los huecos libres y asigná tareas
+/asignar <letra o nombre> <HH:MM> — asigna tarea del último /planificar a una hora
 /tarea <texto> — nueva tarea; acepta fecha (mañana, viernes…)
 /evento <texto> — nuevo evento; reconoce hora (14:30), fecha, duración (2h)
 /pendientes — todas las tareas pendientes
@@ -591,6 +604,158 @@ def _build_revision(resumen: dict) -> str:
     return "\n".join(lines)
 
 
+def _time_to_minutes(t: str) -> int:
+    """'HH:MM' → minutos desde medianoche."""
+    try:
+        h, m = map(int, t.split(":"))
+        return h * 60 + m
+    except Exception:
+        return 0
+
+
+def _minutes_to_time(m: int) -> str:
+    """Minutos desde medianoche → 'HH:MM'."""
+    return f"{m // 60:02d}:{m % 60:02d}"
+
+
+def _dur_str(minutos: int) -> str:
+    h = minutos // 60
+    m = minutos % 60
+    if h and m:
+        return f"{h}h {m}m"
+    return f"{h}h" if h else f"{m}m"
+
+
+def _calc_slots_libres(eventos_hoy: list, tareas_bloqueadas: list,
+                       inicio_h: int = 6, fin_h: int = 23) -> list:
+    """
+    Devuelve lista de slots libres [{desde, hasta, minutos}] en el rango dado,
+    excluyendo los bloques ocupados por eventos y tareas con hora_bloque.
+    Solo muestra slots de al menos 15 minutos.
+    """
+    ocupados = []
+
+    for e in eventos_hoy:
+        h_i = _hora_display(e.get("fecha_inicio", ""))
+        h_f = _hora_display(e.get("fecha_fin", ""))
+        if h_i and h_f:
+            a, b = _time_to_minutes(h_i), _time_to_minutes(h_f)
+            if b > a:
+                ocupados.append((a, b))
+
+    for t in tareas_bloqueadas:
+        hora = t.get("hora_bloque")
+        if hora:
+            a = _time_to_minutes(hora)
+            dur = t.get("duracion_estimada") or 30
+            ocupados.append((a, a + dur))
+
+    ocupados.sort()
+    merged = []
+    for start, end in ocupados:
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append([start, end])
+
+    inicio_min = inicio_h * 60
+    fin_min = fin_h * 60
+    slots = []
+    cursor = inicio_min
+
+    for occ_s, occ_e in merged:
+        if occ_s > cursor:
+            dur = occ_s - cursor
+            if dur >= 15:
+                slots.append({
+                    "desde": _minutes_to_time(cursor),
+                    "hasta": _minutes_to_time(occ_s),
+                    "minutos": dur,
+                })
+        cursor = max(cursor, occ_e)
+
+    if cursor < fin_min:
+        dur = fin_min - cursor
+        if dur >= 15:
+            slots.append({
+                "desde": _minutes_to_time(cursor),
+                "hasta": _minutes_to_time(fin_min),
+                "minutos": dur,
+            })
+
+    return slots
+
+
+_LETRAS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+
+def _build_planificar(eventos_hoy: list, tareas_hoy: list, tareas_sin_bloque: list):
+    """Returns (texto, InlineKeyboardMarkup | None)"""
+    hoy = _today_iso()
+    lines = [f"🗓 *Planificá el día — {_fecha_display(hoy)}*\n"]
+
+    # Bloques ocupados ordenados
+    bloques = []
+    for e in eventos_hoy:
+        h_i = _hora_display(e.get("fecha_inicio", ""))
+        h_f = _hora_display(e.get("fecha_fin", ""))
+        if h_i:
+            bloques.append((h_i, h_f or "?", e["titulo"], "evento"))
+    for t in tareas_hoy:
+        hora = t.get("hora_bloque")
+        if hora:
+            dur = t.get("duracion_estimada") or 30
+            h_f = _minutes_to_time(_time_to_minutes(hora) + dur)
+            bloques.append((hora, h_f, t["titulo"], "tarea"))
+    bloques.sort(key=lambda b: b[0])
+
+    if bloques:
+        lines.append("⏰ *Ocupado*")
+        for h_i, h_f, titulo, tipo in bloques:
+            icon = "📅" if tipo == "evento" else "📋"
+            rango = f"{h_i}–{h_f}" if h_f != "?" else h_i
+            lines.append(f"  {icon} {rango}  {titulo}")
+    else:
+        lines.append("⏰ Sin nada agendado todavía")
+
+    # Slots libres
+    tareas_bloqueadas = [t for t in tareas_hoy if t.get("hora_bloque")]
+    slots = _calc_slots_libres(eventos_hoy, tareas_bloqueadas)
+
+    lines.append("")
+    if slots:
+        lines.append("🕓 *Tiempo libre*")
+        for i, s in enumerate(slots, 1):
+            lines.append(f"  {i}. {s['desde']}–{s['hasta']}  ({_dur_str(s['minutos'])})")
+    else:
+        lines.append("🕓 Sin tiempo libre disponible")
+
+    # Tareas sin asignar
+    lines.append("")
+    if tareas_sin_bloque:
+        lines.append("📋 *Sin hora asignada*")
+        for i, t in enumerate(tareas_sin_bloque[:10]):
+            lista = t.get("lista_nombre") or ""
+            sufijo = f" [{lista}]" if lista else ""
+            lines.append(f"  {_LETRAS[i]}. {t['titulo']}{sufijo}")
+        lines.append("")
+        lines.append("_Tap un hueco libre para asignar una tarea, o usá /asignar A 10:30_")
+    else:
+        lines.append("📋 Todas las tareas tienen hora asignada")
+
+    # Botones: uno por slot libre (máx 5)
+    botones = [
+        [InlineKeyboardButton(
+            f"📌 {s['desde']} ({_dur_str(s['minutos'])} libre)",
+            callback_data=f"pl:{s['desde']}",
+        )]
+        for s in slots[:5]
+    ]
+
+    markup = InlineKeyboardMarkup(botones) if botones else None
+    return "\n".join(lines), markup
+
+
 # ──────────────────────────────────────────────────────────────
 # Handlers de comandos
 # ──────────────────────────────────────────────────────────────
@@ -763,6 +928,7 @@ async def cmd_semana(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_pendientes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     api = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    lista_filter = ' '.join(context.args).lower().strip() if context.args else None
     try:
         tareas = _get_tareas_pendientes(api)
     except Exception as e:
@@ -770,6 +936,8 @@ async def cmd_pendientes(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     pendientes = [t for t in tareas if not t.get("completada")]
+    if lista_filter:
+        pendientes = [t for t in pendientes if lista_filter in (t.get('lista_nombre', '') or '').lower()]
     if not pendientes:
         await update.message.reply_text("No hay tareas pendientes. 🎉")
         return
@@ -977,6 +1145,94 @@ async def cmd_bloquear(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"No pude bloquear la tarea: {e}")
 
 
+async def cmd_planificar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    api = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    try:
+        hoy      = _today_iso()
+        tareas   = _get_tareas_pendientes(api)
+        eventos  = _get_eventos_rango(api, hoy, hoy)
+    except Exception as e:
+        await update.message.reply_text(f"No pude conectar con la API: {e}")
+        return
+
+    tareas_sin_bloque = [t for t in tareas if not t.get("hora_bloque")]
+    # Guardar en user_data para /asignar y callbacks
+    context.user_data["planificar_tareas"]  = tareas_sin_bloque
+    context.user_data["planificar_eventos"] = eventos
+    context.user_data["planificar_tareas_todas"] = tareas
+
+    text, markup = _build_planificar(eventos, tareas, tareas_sin_bloque)
+    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=markup)
+
+
+async def cmd_asignar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /asignar A 10:30  →  asigna tarea A del último /planificar a las 10:30
+    /asignar 2 10:30  →  asigna por número del último /hoy
+    /asignar comprar 10:30  →  fuzzy match entre pendientes
+    """
+    api  = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    args = context.args or []
+
+    if len(args) < 2:
+        await update.message.reply_text(
+            "Uso: /asignar <letra, número o nombre> <HH:MM>\n"
+            "Ejemplo: /asignar A 10:30  /asignar 2 14:00  /asignar estudiar 16:00"
+        )
+        return
+
+    hora_raw = args[-1]
+    if not re.match(r"^\d{1,2}:\d{2}$", hora_raw):
+        await update.message.reply_text("El formato de hora debe ser HH:MM")
+        return
+    hora = f"{int(hora_raw.split(':')[0]):02d}:{hora_raw.split(':')[1]}"
+    identificador = " ".join(args[:-1]).strip()
+
+    tarea = None
+
+    # Letra del último /planificar
+    if len(identificador) == 1 and identificador.upper() in _LETRAS:
+        idx = _LETRAS.index(identificador.upper())
+        planificar_tareas = context.user_data.get("planificar_tareas", [])
+        if idx < len(planificar_tareas):
+            tarea = planificar_tareas[idx]
+
+    # Número del último /hoy
+    if not tarea and identificador.isdigit():
+        n = int(identificador) - 1
+        last = context.user_data.get("last_hoy_tareas", [])
+        if 0 <= n < len(last):
+            tarea = last[n]
+
+    # Fuzzy match entre pendientes
+    if not tarea:
+        try:
+            todas = _get_tareas_pendientes(api)
+        except Exception as e:
+            await update.message.reply_text(f"No pude cargar las tareas: {e}")
+            return
+        id_lower = identificador.lower()
+        for t in todas:
+            if id_lower in t["titulo"].lower():
+                tarea = t
+                break
+
+    if not tarea:
+        await update.message.reply_text(f"No encontré ninguna tarea que coincida con \"{identificador}\".")
+        return
+
+    hoy = _today_iso()
+    try:
+        _patch_tarea_bloque(api, tarea["id"], hora, hoy)
+        await update.message.reply_text(
+            f"⏰ *{tarea['titulo']}* agendada a las {hora}.\n"
+            f"Usá /planificar para ver el día actualizado.",
+            parse_mode="Markdown",
+        )
+    except Exception as e:
+        await update.message.reply_text(f"No pude asignar la tarea: {e}")
+
+
 async def cmd_revision(update: Update, context: ContextTypes.DEFAULT_TYPE):
     api = context.bot_data.get("api_base", "http://127.0.0.1:8000")
     hoy   = date.today()
@@ -1030,7 +1286,64 @@ async def handle_agenda_step(update: Update, context: ContextTypes.DEFAULT_TYPE,
             )
         except Exception as e:
             await update.message.reply_text(f"No pude crear la tarea: {e}")
+        # Si vino de /planificar, también asignar hora_bloque
+        hora_bloque = ud.get("agenda_draft_hora_bloque")
+        if hora_bloque:
+            try:
+                r = requests.get(f"{api}/agenda/tareas", params={"pendientes": "true"}, timeout=15)
+                r.raise_for_status()
+                todas = r.json()
+                match = next((t for t in todas if t["titulo"].strip() == titulo.strip()), None)
+                if match:
+                    _patch_tarea_bloque(api, match["id"], hora_bloque, _today_iso())
+            except Exception:
+                pass
         ud.clear()
+        return True
+
+    if step == STEP_PLANIFICAR_NUEVA_TAREA:
+        api   = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+        hora  = ud.get("planificar_slot_hora", "")
+        titulo = texto.strip()
+        if not titulo:
+            await update.message.reply_text("El título no puede estar vacío.")
+            return True
+        try:
+            listas = _get_listas(api)
+        except Exception as e:
+            await update.message.reply_text(f"No pude cargar las listas: {e}")
+            ud.clear()
+            return True
+
+        if not listas:
+            await update.message.reply_text("No hay listas creadas. Creá una desde la app.")
+            ud.clear()
+            return True
+
+        if len(listas) == 1:
+            try:
+                t = _post_tarea(api, titulo, listas[0]["id"], fecha_opcional=_today_iso())
+                _patch_tarea_bloque(api, t["id"], hora, _today_iso())
+                await update.message.reply_text(
+                    f"✅ *{titulo}* creada y agendada a las {hora}.\n"
+                    f"Usá /planificar para ver el día actualizado.",
+                    parse_mode="Markdown",
+                )
+            except Exception as e:
+                await update.message.reply_text(f"No pude crear la tarea: {e}")
+            ud.clear()
+            return True
+
+        # Múltiples listas: pedir selección
+        ud["agenda_draft_tarea"]       = titulo
+        ud["agenda_tarea_fecha"]       = _today_iso()
+        ud["agenda_draft_hora_bloque"] = hora
+        ud["agenda_listas_cache"]      = listas
+        ud["step"]                     = STEP_AGENDA_CHOOSE_LISTA
+        lines = ["¿En qué lista la agrego?"]
+        for i, l in enumerate(listas, 1):
+            lines.append(f"{i}. {l['nombre']}")
+        await update.message.reply_text("\n".join(lines))
         return True
 
     return False
@@ -1231,6 +1544,59 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
         except Exception as e:
             await query.message.reply_text(f"No pude deshacer el hábito: {e}")
+
+    # ── Planificar: slot libre seleccionado ─────────────────
+    elif data.startswith("pl:"):
+        hora = data[3:]
+        tareas_sin_bloque = context.user_data.get("planificar_tareas", [])
+        if not tareas_sin_bloque:
+            await query.message.reply_text("Usá /planificar primero para ver las tareas sin asignar.")
+            return
+        lines = [f"📌 *¿Qué agendás a las {hora}?*\n"]
+        botones = []
+        for i, t in enumerate(tareas_sin_bloque[:10]):
+            lines.append(f"  {_LETRAS[i]}. {t['titulo']}")
+            titulo_short = t["titulo"][:28] + ("…" if len(t["titulo"]) > 28 else "")
+            botones.append([InlineKeyboardButton(
+                f"{_LETRAS[i]}. {titulo_short}",
+                callback_data=f"pa:{t['id']}:{hora}",
+            )])
+        botones.append([InlineKeyboardButton("✏️ Nueva tarea…", callback_data=f"pn:{hora}")])
+        await query.edit_message_text(
+            "\n".join(lines), parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(botones),
+        )
+
+    # ── Planificar: asignar tarea existente a slot ───────────
+    elif data.startswith("pa:"):
+        _, tarea_id_str, hora = data.split(":", 2)
+        tarea_id = int(tarea_id_str)
+        hoy = _today_iso()
+        try:
+            t = _patch_tarea_bloque(api, tarea_id, hora, hoy)
+            # Refrescar /planificar
+            tareas   = _get_tareas_pendientes(api)
+            eventos  = context.user_data.get("planificar_eventos") or _get_eventos_rango(api, hoy, hoy)
+            tareas_sin_bloque = [x for x in tareas if not x.get("hora_bloque")]
+            context.user_data["planificar_tareas"]      = tareas_sin_bloque
+            context.user_data["planificar_tareas_todas"] = tareas
+            text, markup = _build_planificar(eventos, tareas, tareas_sin_bloque)
+            await query.edit_message_text(text, parse_mode="Markdown", reply_markup=markup)
+            await query.message.reply_text(
+                f"⏰ *{t['titulo']}* agendada a las {hora}.", parse_mode="Markdown"
+            )
+        except Exception as e:
+            await query.message.reply_text(f"No pude asignar la tarea: {e}")
+
+    # ── Planificar: nueva tarea en slot ──────────────────────
+    elif data.startswith("pn:"):
+        hora = data[3:]
+        context.user_data["planificar_slot_hora"] = hora
+        context.user_data["step"] = STEP_PLANIFICAR_NUEVA_TAREA
+        await query.message.reply_text(
+            f"¿Cómo se llama la nueva tarea para las *{hora}*?",
+            parse_mode="Markdown",
+        )
 
     # ── Crear evento en calendario seleccionado ──────────────
     elif data.startswith("ce:"):

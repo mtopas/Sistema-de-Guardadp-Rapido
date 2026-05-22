@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, Clock } from 'lucide-react'
+import { ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, Clock, Download } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
+import { toLocalISODate } from './agendaUtils'
 
 function getWeekBounds(offset) {
   const today = new Date()
-  const dow = (today.getDay() + 6) % 7 // Mon=0
+  const dow   = (today.getDay() + 6) % 7
   const monday = new Date(today)
   monday.setDate(today.getDate() - dow + offset * 7)
   monday.setHours(0, 0, 0, 0)
@@ -15,8 +16,47 @@ function getWeekBounds(offset) {
   return { monday, sunday }
 }
 
-function isoDate(d) {
-  return d.toISOString().slice(0, 10)
+function Sparkline({ data, width = 120, height = 32 }) {
+  const max = Math.max(...data, 1)
+  const points = data.map((v, i) => {
+    const x = data.length > 1 ? (i / (data.length - 1)) * width : width / 2
+    const y = height - (v / max) * height
+    return `${x},${y}`
+  }).join(' ')
+  return (
+    <svg width={width} height={height} style={{ overflow: 'visible' }}>
+      <polyline points={points} fill="none" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      {data.map((v, i) => (
+        <circle
+          key={i}
+          cx={data.length > 1 ? (i / (data.length - 1)) * width : width / 2}
+          cy={height - (v / max) * height}
+          r="2.5"
+          fill="var(--accent)"
+          opacity={v > 0 ? 1 : 0.25}
+        />
+      ))}
+    </svg>
+  )
+}
+
+function exportMarkdown(weekLabel, completadas, incompletas, vencidas, porCalendario) {
+  const lines = [
+    `# Revisión semanal — ${weekLabel}`,
+    ``,
+    `## Tareas`,
+    `- ✅ Completadas: ${completadas.length}`,
+    `- ⏳ Sin completar: ${incompletas.length}`,
+    vencidas.length ? `- 🔴 Vencidas: ${vencidas.length}` : '',
+    ``,
+    `## Tiempo por calendario`,
+    ...Object.values(porCalendario).map(c => `- **${c.nombre}:** ${(c.minutes / 60).toFixed(1)}h`),
+  ].filter(l => l !== undefined)
+  const blob = new Blob([lines.join('\n')], { type: 'text/markdown' })
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement('a')
+  a.href = url; a.download = `revision-${weekLabel.replace(/\s/g, '-')}.md`; a.click()
+  URL.revokeObjectURL(url)
 }
 
 export default function RevisionTab() {
@@ -26,47 +66,56 @@ export default function RevisionTab() {
   const agendaCalendarios = useStore(s => s.agendaCalendarios)
   const agendaHorarioFacultad = useStore(s => s.agendaHorarioFacultad)
 
-  const [weekOff, setWeekOff] = useState(-1) // -1 = last week
+  const [weekOff, setWeekOff] = useState(-1)
 
   const { monday, sunday } = getWeekBounds(weekOff)
-  const mondayISO = isoDate(monday)
-  const sundayISO = isoDate(sunday)
+  const mondayISO = toLocalISODate(monday)
+  const sundayISO = toLocalISODate(sunday)
 
   const weekLabel = `${monday.toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })} – ${sunday.toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' })}`
 
-  // Tasks in the week
-  const tareasSemana = agendaTareas.filter(t => t.fecha_opcional && t.fecha_opcional >= mondayISO && t.fecha_opcional <= sundayISO)
-  const completadas  = tareasSemana.filter(t => t.completada)
-  const incompletas  = tareasSemana.filter(t => !t.completada)
+  const tareasSemana  = agendaTareas.filter(t => t.fecha_opcional && t.fecha_opcional >= mondayISO && t.fecha_opcional <= sundayISO)
+  const completadas   = tareasSemana.filter(t => t.completada)
+  const incompletas   = tareasSemana.filter(t => !t.completada)
 
-  // Overdue: pendientes con fecha < hoy y fecha < monday (older than 7 days ago)
   const today = new Date()
   const sevenAgo = new Date(today)
   sevenAgo.setDate(today.getDate() - 7)
   const vencidas = agendaTareas.filter(t =>
-    !t.completada && t.fecha_opcional && t.fecha_opcional < isoDate(sevenAgo)
+    !t.completada && t.fecha_opcional && t.fecha_opcional < toLocalISODate(sevenAgo)
   )
 
-  // Time planned: events + task blocks in the week
   const eventosWeek = agendaEventos.filter(e => {
     const d = e.fecha_inicio?.slice(0, 10)
     return d && d >= mondayISO && d <= sundayISO
   })
 
-  const totalMinutesInWeek = 7 * 24 * 60
-  const plannedMinutes = eventosWeek.reduce((acc, e) => {
+  // Bloques de tareas en la semana
+  const bloquesWeek = agendaTareas.filter(t =>
+    t.hora_bloque && t.fecha_opcional && t.fecha_opcional >= mondayISO && t.fecha_opcional <= sundayISO
+  )
+
+  // % tiempo planificado — denominador: 16h despierto × 7 días = 6720 min
+  const AWAKE_MINUTES_WEEK = 16 * 60 * 7
+
+  const plannedMinutosEventos = eventosWeek.reduce((acc, e) => {
     if (e.todo_el_dia) return acc + 60
     const start = e.fecha_inicio ? (parseInt(e.fecha_inicio.slice(11, 13)) * 60 + parseInt(e.fecha_inicio.slice(14, 16) || 0)) : 0
     const end   = e.fecha_fin   ? (parseInt(e.fecha_fin.slice(11, 13))   * 60 + parseInt(e.fecha_fin.slice(14, 16)   || 0)) : start + 60
     return acc + Math.max(0, end - start)
   }, 0)
 
-  const pctPlanned = Math.min(100, Math.round((plannedMinutes / totalMinutesInWeek) * 100))
+  const plannedMinutosBloques = bloquesWeek.reduce((acc, t) => {
+    return acc + (t.duracion_estimada || 30)
+  }, 0)
 
-  // Time by calendar
+  const plannedMinutes = plannedMinutosEventos + plannedMinutosBloques
+  const pctPlanned     = Math.min(100, Math.round((plannedMinutes / AWAKE_MINUTES_WEEK) * 100))
+
+  // Tiempo por calendario
   const calStats = {}
   eventosWeek.forEach(e => {
-    const cal = agendaCalendarios.find(c => c.id === e.calendario_id)
+    const cal    = agendaCalendarios.find(c => c.id === e.calendario_id)
     const nombre = cal?.nombre || 'Sin calendario'
     const color  = cal?.color  || 'var(--accent)'
     if (!calStats[nombre]) calStats[nombre] = { nombre, color, minutes: 0 }
@@ -75,7 +124,6 @@ export default function RevisionTab() {
     calStats[nombre].minutes += Math.max(0, end - start)
   })
 
-  // Facultad contribution (estimated: count slots × duration)
   const facultadMinutes = agendaHorarioFacultad.reduce((acc, h) => {
     const [sh, sm] = h.hora_inicio.split(':').map(Number)
     const [eh, em] = h.hora_fin.split(':').map(Number)
@@ -86,6 +134,14 @@ export default function RevisionTab() {
   }
 
   const totalTracked = Object.values(calStats).reduce((s, c) => s + c.minutes, 0)
+
+  // Sparkline: completadas por día (lun–dom)
+  const sparkData = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(monday)
+    d.setDate(monday.getDate() + i)
+    const iso = toLocalISODate(d)
+    return completadas.filter(t => t.fecha_opcional === iso).length
+  })
 
   return (
     <div className="flex flex-1 min-h-0 overflow-hidden">
@@ -108,7 +164,19 @@ export default function RevisionTab() {
 
       {/* Center */}
       <div className="flex-1 min-w-0 overflow-y-auto panel-scroll px-6 py-5">
-        <div className="label mb-4 capitalize">{weekLabel}</div>
+        <div className="flex items-center justify-between mb-4">
+          <div className="label capitalize">{weekLabel}</div>
+          <button
+            className="flex items-center gap-1.5 text-[11.5px] px-2.5 py-1.5 rounded-lg border transition-colors"
+            style={{ borderColor: 'var(--border)', color: 'var(--subtext)' }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)' }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--subtext)' }}
+            onClick={() => exportMarkdown(weekLabel, completadas, incompletas, vencidas, calStats)}
+          >
+            <Download size={12} />
+            Exportar
+          </button>
+        </div>
 
         <div className="grid grid-cols-2 gap-4 mb-6">
           {/* Completadas */}
@@ -123,10 +191,10 @@ export default function RevisionTab() {
             </div>
             {completadas.length > 0 && (
               <div className="mt-3 flex flex-col gap-1">
-                {completadas.slice(0, 4).map(t => (
-                  <div key={t.id} className="flex items-center gap-2 text-[11.5px]" style={{ color: 'var(--text-2)' }}>
-                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: t.lista_color }} />
-                    <span className="truncate line-through opacity-60">{t.titulo}</span>
+                {completadas.slice(0, 4).map(tt => (
+                  <div key={tt.id} className="flex items-center gap-2 text-[11.5px]" style={{ color: 'var(--text-2)' }}>
+                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: tt.lista_color }} />
+                    <span className="truncate line-through opacity-60">{tt.titulo}</span>
                   </div>
                 ))}
                 {completadas.length > 4 && (
@@ -148,14 +216,32 @@ export default function RevisionTab() {
             <div className="text-[11.5px] mt-1" style={{ color: 'var(--subtext)' }}>tareas sin completar</div>
             {incompletas.length > 0 && (
               <div className="mt-3 flex flex-col gap-1">
-                {incompletas.slice(0, 4).map(t => (
-                  <div key={t.id} className="flex items-center gap-2 text-[11.5px]" style={{ color: 'var(--text-2)' }}>
-                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: t.lista_color }} />
-                    <span className="truncate">{t.titulo}</span>
+                {incompletas.slice(0, 4).map(tt => (
+                  <div key={tt.id} className="flex items-center gap-2 text-[11.5px]" style={{ color: 'var(--text-2)' }}>
+                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: tt.lista_color }} />
+                    <span className="truncate">{tt.titulo}</span>
                   </div>
                 ))}
               </div>
             )}
+          </div>
+        </div>
+
+        {/* Sparkline */}
+        <div className="panel-strong p-4 rounded-xl mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <div className="label">Tareas completadas por día</div>
+            <Sparkline data={sparkData} width={140} height={28} />
+          </div>
+          <div className="flex justify-between">
+            {['L','M','X','J','V','S','D'].map((d, i) => (
+              <div key={d} className="flex flex-col items-center gap-1">
+                <span className="text-[10px] tnum font-semibold" style={{ color: sparkData[i] > 0 ? 'var(--accent)' : 'var(--mute)' }}>
+                  {sparkData[i]}
+                </span>
+                <span className="text-[9.5px]" style={{ color: 'var(--mute)' }}>{d}</span>
+              </div>
+            ))}
           </div>
         </div>
 
@@ -180,21 +266,20 @@ export default function RevisionTab() {
 
         {/* % tiempo */}
         <div className="panel-strong p-4 rounded-xl mb-6">
-          <div className="label mb-3">{t(lang, 'agendaTiempoPlan')}</div>
+          <div className="label mb-1">{t(lang, 'agendaTiempoPlan')}</div>
+          <div className="text-[11px] mb-3" style={{ color: 'var(--mute)' }}>
+            {Math.round(plannedMinutes / 60)}h planificadas de {AWAKE_MINUTES_WEEK / 60}h despierto
+          </div>
           <div className="flex items-end gap-3 mb-2">
             <div className="text-[32px] font-bold tnum" style={{ color: 'var(--accent)' }}>{pctPlanned}%</div>
-            <div className="text-[12px] mb-2" style={{ color: 'var(--subtext)' }}>
-              {Math.round(plannedMinutes / 60)}h planificadas
-            </div>
+            {plannedMinutosBloques > 0 && (
+              <div className="text-[11px] mb-2" style={{ color: 'var(--subtext)' }}>
+                ({Math.round(plannedMinutosEventos/60)}h eventos + {Math.round(plannedMinutosBloques/60)}h bloques)
+              </div>
+            )}
           </div>
           <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--surface)' }}>
-            <div
-              className="h-full rounded-full transition-all"
-              style={{ width: `${pctPlanned}%`, background: 'var(--accent)' }}
-            />
-          </div>
-          <div className="text-[11px] mt-1.5" style={{ color: 'var(--mute)' }}>
-            {100 - pctPlanned}% {t(lang, 'agendaTiempoNoPlan').replace('% ', '')}
+            <div className="h-full rounded-full transition-all" style={{ width: `${pctPlanned}%`, background: 'var(--accent)' }} />
           </div>
         </div>
       </div>
@@ -219,10 +304,7 @@ export default function RevisionTab() {
                     <span className="mono text-[11px]" style={{ color: 'var(--subtext)' }}>{hrs}h</span>
                   </div>
                   <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--surface)' }}>
-                    <div
-                      className="h-full rounded-full"
-                      style={{ width: `${pct}%`, background: cal.color }}
-                    />
+                    <div className="h-full rounded-full" style={{ width: `${pct}%`, background: cal.color }} />
                   </div>
                   <div className="text-[10.5px] mt-0.5 text-right" style={{ color: 'var(--mute)' }}>{pct}%</div>
                 </div>

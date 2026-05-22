@@ -975,6 +975,7 @@ def agenda_actualizar_evento(evt_id: int, campos: dict) -> Optional[dict]:
     safe = {k: v for k, v in campos.items() if k in _EVT_UPDATABLE}
     if not safe:
         return None
+    safe['actualizado_en'] = datetime.now().isoformat()
     conn = get_connection()
     cursor = conn.cursor()
     sets = ", ".join(f"{k} = ?" for k in safe)
@@ -1116,15 +1117,16 @@ def agenda_crear_tarea(
     descripcion: Optional[str] = None,
     fecha_opcional: Optional[str] = None,
     hora_opcional: Optional[str] = None,
+    hora_bloque: Optional[str] = None,
     duracion_estimada: Optional[int] = None,
 ) -> dict:
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
         """INSERT INTO agenda_tareas
-           (titulo, descripcion, fecha_opcional, hora_opcional, duracion_estimada, completada, lista_id)
-           VALUES (?, ?, ?, ?, ?, 0, ?)""",
-        (titulo.strip(), descripcion, fecha_opcional, hora_opcional, duracion_estimada, lista_id),
+           (titulo, descripcion, fecha_opcional, hora_opcional, hora_bloque, duracion_estimada, completada, lista_id)
+           VALUES (?, ?, ?, ?, ?, ?, 0, ?)""",
+        (titulo.strip(), descripcion, fecha_opcional, hora_opcional, hora_bloque, duracion_estimada, lista_id),
     )
     tid = cursor.lastrowid
     conn.commit()
@@ -1154,6 +1156,7 @@ def agenda_actualizar_tarea(tarea_id: int, campos: dict) -> Optional[dict]:
     safe = {k: v for k, v in campos.items() if k in _TAREA_UPDATABLE}
     if not safe:
         return None
+    safe['actualizado_en'] = datetime.now().isoformat()
     conn = get_connection()
     cursor = conn.cursor()
     sets = ", ".join(f"{k} = ?" for k in safe)

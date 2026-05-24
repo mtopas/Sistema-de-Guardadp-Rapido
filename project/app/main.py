@@ -10,13 +10,14 @@ import httpx
 from bs4 import BeautifulSoup
 from typing import Any, List, Optional
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator, model_validator
 
 from app.config import DEBUG
+from app.paths import dist_directory, uploads_directory
 from app.db.crud import (
     actualizar_apuntes,
     actualizar_icono,
@@ -240,9 +241,8 @@ class FinFireFilaUpsert(BaseModel):
 class FinInflacionUpsert(BaseModel):
     inflacion: Optional[float] = None
 
-DIST_DIR    = Path("frontend/dist")
-UPLOADS_DIR = Path("uploads")
-UPLOADS_DIR.mkdir(exist_ok=True)
+DIST_DIR    = dist_directory()
+UPLOADS_DIR = uploads_directory()
 
 
 @asynccontextmanager
@@ -1275,7 +1275,12 @@ class HabitoRegistroBatch(BaseModel):
 # ---------------------------------------------------------------------------
 
 @app.get("/habitos")
-def listar_habitos():
+def listar_habitos(request: Request):
+    accept = request.headers.get("accept", "")
+    if "text/html" in accept and "application/json" not in accept.split(",")[0]:
+        index = DIST_DIR / "index.html"
+        if index.exists():
+            return FileResponse(str(index))
     return habitos_obtener()
 
 @app.post("/habitos")
@@ -1360,3 +1365,35 @@ def eliminar_habito_registro(registro_id: int):
 def batch_upsert_registros(body: HabitoRegistroBatch):
     items = [r.model_dump() for r in body.registros]
     return habitos_registros_batch_upsert(items)
+
+
+# --- SPA (UI empaquetada / producción en :8000) ---
+
+_SPA_API_PREFIXES = (
+    "categorias",
+    "hojas",
+    "fin/",
+    "agenda/",
+    "habitos/",
+    "preview",
+    "upload",
+    "assets/",
+    "uploads/",
+)
+
+
+def _wants_html(request: Request) -> bool:
+    accept = request.headers.get("accept", "")
+    return "text/html" in accept and "application/json" not in accept.split(",")[0]
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+def spa_fallback(full_path: str, request: Request):
+    if not _wants_html(request):
+        raise HTTPException(status_code=404, detail="Not Found")
+    if any(full_path.startswith(p) for p in _SPA_API_PREFIXES):
+        raise HTTPException(status_code=404, detail="Not Found")
+    index = DIST_DIR / "index.html"
+    if not index.exists():
+        raise HTTPException(status_code=404, detail="Frontend no compilado")
+    return FileResponse(str(index))

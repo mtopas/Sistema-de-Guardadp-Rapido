@@ -1,9 +1,12 @@
 import os
 
-# Si existe la variable en Docker la usa, si no, usa la ruta local
-DB_PATH = os.getenv("DB_PATH", "./database/app.db")
+from app.paths import is_frozen, resolve_db_path
 
-DEBUG = True  # set to False in production
+# Docker / override manual; si no, dev → project/database, .exe → %APPDATA%\SGR\database
+DB_PATH = os.getenv("DB_PATH") or resolve_db_path()
+
+_DEBUG_DEFAULT = "0" if is_frozen() else "1"
+DEBUG = os.getenv("SGR_DEBUG", _DEBUG_DEFAULT).lower() in ("1", "true", "yes")
 
 API_BASE_URL = "http://127.0.0.1:8000"
 MAX_IMAGE_SIZE_MB = 5

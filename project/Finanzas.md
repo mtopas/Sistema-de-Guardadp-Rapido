@@ -39,13 +39,15 @@ useStore.js ──fetch──► FastAPI /fin/* ──► crud.py ──► SQLi
 | Pantalla | `screens/FinanzasScreen.jsx` |
 | Tabs | `components/finanzas/DashboardTabs.jsx` |
 | Componentes | `components/finanzas/*` (22 archivos) |
-| Reglas / mock | `data/finanzas.js` (`isTransferencia`, `fmtARS`, `fmtUSD`, `FINANZAS`) |
+| Helpers | `data/finanzas.js` (`isTransferencia`, `fmtARS`, `fmtUSD`) — **sin mock** |
 | Store | `store/useStore.js` (prefijo `fin*`, `selectedMes`, modales) |
 | API | `app/main.py` rutas `/fin/*` |
 | SQL | `app/db/crud.py`, esquema en `app/db/database.py` |
-| Bot | `mybot/bot.py` — **sin** `/fin/*` implementado aún |
+| Bot | `mybot/finanzas_handlers.py` + `mybot/bot.py` |
 
 **Carga inicial (`App.jsx`):** al montar se llama `fetchFinMovimientos` (mes actual), cuentas, categorías, config, notas, emergencia. `fetchFinMovimientosAll` se llama al entrar a Datos/Anual/FIRE/Ahorro.
+
+**Sin mock de datos:** `data/finanzas.js` solo exporta helpers (`fmtARS`, `fmtUSD`, `isTransferencia`). El mock `FINANZAS` con cuentas y movimientos hardcodeados fue eliminado; sin backend la app muestra estado vacío.
 
 ---
 
@@ -123,7 +125,10 @@ Concepto **"líquido sin invertir"** en `AhorroTab` reconcilia parcialmente ambo
 
 - Filas mensuales con proyección (aporte compuesto, interés, saldo).
 - Overrides por mes en `fin_fire_filas` (`ahorrado_override`).
-- Config: % incremento mensual de ahorro, rentabilidad.
+- Config: `fire_meta_usd`, `fire_meta_edad`, `fire_aumento_aporte`, `fire_rentabilidad_anual`, `fire_fecha_nacimiento`, `fire_aporte_inicial`, `fire_saldo_inicial`, `fire_inicio_mes`.
+- Tabla compacta por defecto (36 meses futuros); botón **"Ver proyección completa"** expande hasta `fire_meta_edad` o 50 años.
+- Fila marcada con 🎯 cuando `row.edad === fire_meta_edad`.
+- `saveFinConfigBulk`: guarda toda la config FIRE en un solo PUT (evita race condition de PATCHes paralelos).
 
 ---
 
@@ -137,7 +142,7 @@ Concepto **"líquido sin invertir"** en `AhorroTab` reconcilia parcialmente ambo
 | Ahorro | `AhorroTab`, `AhorroRightPanel` |
 | Datos | `DatosTab`, `DatosRightPanel` |
 | Global | `MovementModal`, `MovimientosTableModal` (sort 3-clicks + filtro categoría) |
-| Panel izq. | `FinanzasLeftPanel` — saldos, ingresos/gastos mes, tasa ahorro, grupos cuenta, config dólar |
+| Panel izq. | `FinanzasLeftPanel` — saldos, ingresos/gastos mes, tasa ahorro, grupos cuenta, config dólar + **CRUD cuentas** |
 
 **Componentes huérfanos (no importados):** `IncomeExpenseCard.jsx`, `SubscriptionsCard.jsx`, `KPIsCard.jsx`, `FireProjectionCard.jsx`.
 
@@ -161,7 +166,10 @@ Concepto **"líquido sin invertir"** en `AhorroTab` reconcilia parcialmente ambo
 
 | Método | Ruta | Notas |
 |--------|------|-------|
-| GET/POST/PATCH/DELETE | `/fin/cuentas`, `.../saldo` | CRUD + actualizar saldos |
+| GET/POST | `/fin/cuentas` | Listar / crear cuenta |
+| PATCH | `/fin/cuentas/{id}` | Editar metadata (nombre, tipo, color, initials) |
+| PATCH | `/fin/cuentas/{id}/saldo` | Actualizar saldos ARS/USD |
+| DELETE | `/fin/cuentas/{id}` | Eliminar cuenta |
 | GET/POST/DELETE | `/fin/categorias` | Auto-create al crear movimiento si no existe |
 | GET | `/fin/movimientos?mes=YYYY-MM` | Mes actual vs histórico sin query |
 | POST/PATCH/DELETE | `/fin/movimientos` | PATCH resuelve cuenta/categoría por nombre |
@@ -257,6 +265,17 @@ Parsing: `{tipo?} {monto} {descripción…} {cuenta_hint?}` — el último token
 - Dashboard completo: donuts (con tooltip hover monto/% y highlight interactivo), tarjetas movimientos, modal ver todos (sort 3-clicks + filtro categoría + **export CSV**), cuotas, notas, panel der.
 - Datos: histórico, edición inline on blur con **debounce 300ms**, delete sin confirmación, orden por fecha. `scope="col"` en headers.
 - Anual, FIRE, Ahorro con paneles y CRUD instrumentos/objetivos.
+- **FIRE mejorado:**
+  - `ProyeccionRow` → un solo grid por columna (edad + año + card Total + card /mes·4% alineados); fuente USD auto-escala por longitud (`usdFontSize`); ARS equivalente abreviado (`fmtARSShort`: `$560M ARS`) con `whiteSpace: nowrap`.
+  - Tabla: toggle **"Ver proyección completa"** expande hasta `fire_meta_edad` o 50 años (default 36 meses). `expanded` state antes del `useMemo` que lo consume.
+  - `FireRightPanel`: campos `fire_meta_usd` y `fire_meta_edad`; botón Guardar con estados `saving/ok/err`; usa `saveFinConfigBulk` (un solo PUT).
+  - `fire_inicio_mes` usa `||` (no `??`) para no iterar desde `''` si el campo está vacío.
+- **CRUD cuentas (`FinanzasLeftPanel`):**
+  - Por cuenta en configOpen: ícono lápiz → form inline (nombre, tipo, siglas, swatches de color `BRANCH_COLORS`); ícono papelera → confirm inline `¿Sí?/X`.
+  - Botón **"+ Nueva cuenta"** expande form con mismo layout.
+  - Store: `createFinCuenta` (optimista), `editFinCuentaMeta` (optimista), `deleteFinCuenta` (optimista).
+  - Backend: `fin_editar_cuenta` en `crud.py`; `FinCuentaUpdate` model + `PATCH /fin/cuentas/{id}` en `main.py`.
+- **`data/finanzas.js`:** eliminado el export `FINANZAS` (mock con cuentas/movimientos hardcodeados — era dead code, nunca importado). Solo quedan `fmtARS`, `fmtUSD`, `isTransferencia`.
 - **`MovementModal`:** `Ctrl+Enter` guarda; validación visual "Ahorro sin objetivo"; chips de plantillas rápidas (Alquiler, SUBE, Spotify, etc.); autocompletar última cuenta/categoría desde `localStorage`.
 - **Code-split:** `AnualTab`, `FireTab`, `AhorroTab`, `DatosTab` con `React.lazy` + `Suspense`.
 - **`finActiveTab`** en store Zustand; `normalizeMovimiento()` centralizado.
@@ -278,9 +297,8 @@ Parsing: `{tipo?} {monto} {descripción…} {cuenta_hint?}` — el último token
 | Ítem | Detalle |
 |------|---------|
 | Emergencia → objetivo | Migración pendiente (`GET /fin/emergencia` sigue en código) |
-| FIRE hitos por edad | Recálculo desde saldo real pendiente |
 | Instrumentos avanzados | Ventas parciales, splits, dividendos |
-| Dual schema movimientos | `type/amount/cat` vs `tipo/monto/categoria_nombre` — `normalizeMovimiento()` existe pero no se usa aún en todos los consumidores |
+| Dual schema movimientos | `type/amount/cat` vs `tipo/monto/categoria_nombre` — `normalizeMovimiento()` existe pero no se aplica en todos los consumidores |
 | TopBar búsqueda | `searchQuery` en `FinanzasScreen` existe pero no filtra nada todavía |
 | Campana notificaciones | Badge visual, sin handler (requiere `fin_alertas`) |
 

@@ -33,12 +33,12 @@ function mesLabel(m) {
 }
 
 export default function FireRightPanel() {
-  const lang           = useStore(s => s.lang)
-  const finConfig      = useStore(s => s.finConfig)
-  const updateConfig   = useStore(s => s.updateFinConfig)
-  const finFireFilas   = useStore(s => s.finFireFilas)
-  const finMovAll      = useStore(s => s.finMovimientosAll)
-  const finObjetivos   = useStore(s => s.finObjetivos)
+  const lang              = useStore(s => s.lang)
+  const finConfig         = useStore(s => s.finConfig)
+  const saveConfigBulk    = useStore(s => s.saveFinConfigBulk)
+  const finFireFilas      = useStore(s => s.finFireFilas)
+  const finMovAll         = useStore(s => s.finMovimientosAll)
+  const finObjetivos      = useStore(s => s.finObjetivos)
 
   const cfg = finConfig ?? {}
 
@@ -49,6 +49,8 @@ export default function FireRightPanel() {
     fire_aporte_inicial:     String(cfg.fire_aporte_inicial     ?? '0'),
     fire_saldo_inicial:      String(cfg.fire_saldo_inicial      ?? '0'),
     fire_inicio_mes:         cfg.fire_inicio_mes ?? '',
+    fire_meta_usd:           String(cfg.fire_meta_usd           ?? '500000'),
+    fire_meta_edad:          String(cfg.fire_meta_edad           ?? ''),
   })
 
   useEffect(() => {
@@ -60,21 +62,38 @@ export default function FireRightPanel() {
       fire_aporte_inicial:     String(finConfig.fire_aporte_inicial     ?? '0'),
       fire_saldo_inicial:      String(finConfig.fire_saldo_inicial      ?? '0'),
       fire_inicio_mes:         finConfig.fire_inicio_mes ?? '',
+      fire_meta_usd:           String(finConfig.fire_meta_usd           ?? '500000'),
+      fire_meta_edad:          String(finConfig.fire_meta_edad           ?? ''),
     })
   }, [finConfig])
 
+  const [saveState, setSaveState] = useState('idle') // 'idle' | 'saving' | 'ok' | 'err'
+
   const setF = (k, v) => setForm(p => ({ ...p, [k]: v }))
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (saveState === 'saving') return
     const updates = {
       fire_aumento_aporte:     parseFloat(form.fire_aumento_aporte)     || 1.20,
       fire_rentabilidad_anual: parseFloat(form.fire_rentabilidad_anual) || 6.00,
       fire_fecha_nacimiento:   form.fire_fecha_nacimiento,
       fire_aporte_inicial:     parseFloat(form.fire_aporte_inicial)     || 0,
       fire_saldo_inicial:      parseFloat(form.fire_saldo_inicial)      || 0,
-      fire_inicio_mes:         form.fire_inicio_mes,
+      fire_meta_usd:           parseFloat(form.fire_meta_usd)           || 500000,
     }
-    Object.entries(updates).forEach(([k, v]) => updateConfig(k, v))
+    if (form.fire_inicio_mes) updates.fire_inicio_mes = form.fire_inicio_mes
+    const metaEdad = parseInt(form.fire_meta_edad)
+    if (!isNaN(metaEdad) && metaEdad > 0) updates.fire_meta_edad = metaEdad
+
+    setSaveState('saving')
+    try {
+      await saveConfigBulk(updates)
+      setSaveState('ok')
+    } catch {
+      setSaveState('err')
+    } finally {
+      setTimeout(() => setSaveState('idle'), 2000)
+    }
   }
 
   const inp = (label, key, type = 'text', placeholder = '') => (
@@ -125,8 +144,8 @@ export default function FireRightPanel() {
     const saldoInicial       = cfg.fire_saldo_inicial  ?? 0
     const aumentoMensual     = (cfg.fire_aumento_aporte    ?? 1.20) / 100
     const rentabilidadMensual = (cfg.fire_rentabilidad_anual ?? 6.00) / 100 / 12
-    const inicioMes           = cfg.fire_inicio_mes ?? currentMes
-    const dolar               = cfg.dolar_oficial   ?? 1245
+    const inicioMes           = cfg.fire_inicio_mes || currentMes
+    const dolar               = cfg.dolar_mep ?? cfg.dolar_oficial ?? cfg.dolar_default ?? 1245
     const metaUSD             = cfg.fire_meta_usd   ?? 500000
 
     let prevAporte     = aporteInicial
@@ -210,7 +229,9 @@ export default function FireRightPanel() {
       <div className="label">{t(lang, 'fireConfigTitle')}</div>
 
       <div className="flex flex-col gap-2.5">
-        {inp(t(lang,'fireAumentoAporte'),    'fire_aumento_aporte',     'number', '1.20')}
+        {inp(t(lang,'fireMetaUSD'),           'fire_meta_usd',           'number', '500000')}
+        {inp(t(lang,'fireMetaEdad'),          'fire_meta_edad',          'number', '45')}
+        {inp(t(lang,'fireAumentoAporte'),     'fire_aumento_aporte',     'number', '1.20')}
         {inp(t(lang,'fireRentabilidad'),      'fire_rentabilidad_anual', 'number', '6.00')}
         {inp(t(lang,'fireFechaNac'),          'fire_fecha_nacimiento',   'date')}
         {inp(t(lang,'fireAporteInicial'),     'fire_aporte_inicial',     'number', '0')}
@@ -220,10 +241,23 @@ export default function FireRightPanel() {
 
       <button
         onClick={handleSave}
+        disabled={saveState === 'saving'}
         className="w-full py-2 rounded-xl text-[12.5px] font-semibold mt-1"
-        style={{ background: 'var(--cta-bg)', color: 'var(--cta-text)', border: 'none', cursor: 'pointer' }}
+        style={{
+          background: saveState === 'ok'  ? 'var(--success, #22c55e)'
+                    : saveState === 'err' ? '#ef4444'
+                    : 'var(--cta-bg)',
+          color: 'var(--cta-text)',
+          border: 'none',
+          cursor: saveState === 'saving' ? 'wait' : 'pointer',
+          opacity: saveState === 'saving' ? 0.7 : 1,
+          transition: 'background 0.2s',
+        }}
       >
-        {t(lang, 'fireGuardarConfig')}
+        {saveState === 'saving' ? 'Guardando…'
+         : saveState === 'ok'  ? 'Guardado ✓'
+         : saveState === 'err' ? 'Error al guardar'
+         : t(lang, 'fireGuardarConfig')}
       </button>
     </div>
   )

@@ -115,6 +115,19 @@ function monthsUntil(fechaNac, edad) {
   return { meses, anio: cumple.getFullYear() }
 }
 
+function fmtARSShort(n) {
+  if (n >= 1_000_000) return '$' + (n / 1_000_000).toLocaleString('es-AR', { maximumFractionDigits: 1 }) + 'M'
+  if (n >= 1_000)     return '$' + (n / 1_000).toLocaleString('es-AR',     { maximumFractionDigits: 0 }) + 'K'
+  return '$' + Math.round(n).toLocaleString('es-AR')
+}
+
+function usdFontSize(n) {
+  const len = fmtUSD(n).length
+  if (len >= 13) return 9
+  if (len >= 11) return 10
+  return 12
+}
+
 function ProyeccionRow({ lang, saldoHoy, aporteHoy, aumentoMensual, rentabilidadMensual, dolar, fechaNac }) {
   const AGES = [25, 30, 35, 40, 45, 50]
 
@@ -127,7 +140,7 @@ function ProyeccionRow({ lang, saldoHoy, aporteHoy, aumentoMensual, rentabilidad
         const saldoFinal = projectBalance(saldoHoy, aporteHoy, aumentoMensual, rentabilidadMensual, meses)
         const saldoUSD   = saldoFinal / dolar
         const retiroUSD  = saldoUSD * 0.04 / 12
-        return { edad, anio, meses, saldoUSD, retiroUSD }
+        return { edad, anio, meses, saldoUSD, retiroUSD, saldoARS: saldoFinal, retiroARS: retiroUSD * dolar }
       })
       .filter(Boolean)
   }, [saldoHoy, aporteHoy, aumentoMensual, rentabilidadMensual, dolar, fechaNac])
@@ -162,43 +175,33 @@ function ProyeccionRow({ lang, saldoHoy, aporteHoy, aumentoMensual, rentabilidad
         Proyectado desde el saldo real de hoy · regla del 4% SWR
       </div>
 
-      {/* Header: edad + año */}
-      <div className="grid gap-3 mb-2" style={{ gridTemplateColumns: `repeat(${proyecciones.length}, 1fr)` }}>
-        {proyecciones.map(({ edad, anio }) => (
-          <div key={edad} className="flex flex-col items-center gap-0.5">
-            <div className="text-[15px] font-bold serif italic" style={{ color: 'var(--text)' }}>
-              {edad}
-            </div>
-            <div className="text-[9px] mono" style={{ color: 'var(--subtext)' }}>
-              {anio}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Row 1: total acumulado */}
-      <div className="grid gap-3 mb-2" style={{ gridTemplateColumns: `repeat(${proyecciones.length}, 1fr)` }}>
-        {proyecciones.map(({ edad, saldoUSD }) => (
-          <div key={edad} style={{ ...colBase, background: 'color-mix(in oklch, var(--accent) 18%, var(--surface))' }}>
-            <div className="text-[9px] mono uppercase tracking-wide" style={{ color: 'rgba(255,255,255,0.55)' }}>
-              Total
-            </div>
-            <div className="serif italic font-semibold tnum" style={{ fontSize: 12, color: '#ffffff' }}>
-              {fmtUSD(saldoUSD)}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Row 2: retiro mensual 4% SWR */}
       <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${proyecciones.length}, 1fr)` }}>
-        {proyecciones.map(({ edad, retiroUSD }) => (
-          <div key={edad} style={{ ...colBase, background: 'color-mix(in oklch, var(--accent) 35%, var(--surface))' }}>
-            <div className="text-[9px] mono uppercase tracking-wide" style={{ color: 'rgba(255,255,255,0.55)' }}>
-              /mes · 4%
+        {proyecciones.map(({ edad, anio, saldoUSD, saldoARS, retiroUSD, retiroARS }) => (
+          <div key={edad} className="flex flex-col gap-2">
+            {/* Edad + año */}
+            <div className="flex flex-col items-center gap-0.5">
+              <div className="text-[15px] font-bold serif italic" style={{ color: 'var(--text)' }}>{edad}</div>
+              <div className="text-[9px] mono" style={{ color: 'var(--subtext)' }}>{anio}</div>
             </div>
-            <div className="serif italic font-semibold tnum" style={{ fontSize: 12, color: '#ffffff' }}>
-              {fmtUSD(retiroUSD)}
+            {/* Total acumulado */}
+            <div style={{ ...colBase, background: 'color-mix(in oklch, var(--accent) 18%, var(--surface))' }}>
+              <div className="text-[9px] mono uppercase tracking-wide" style={{ color: 'rgba(255,255,255,0.55)' }}>Total</div>
+              <div className="serif italic font-semibold tnum" style={{ fontSize: usdFontSize(saldoUSD), color: '#ffffff', whiteSpace: 'nowrap' }}>
+                {fmtUSD(saldoUSD)}
+              </div>
+              <div className="mono tnum" style={{ fontSize: 9, color: 'rgba(255,255,255,0.5)', marginTop: 1, whiteSpace: 'nowrap' }}>
+                {fmtARSShort(saldoARS)} ARS
+              </div>
+            </div>
+            {/* Retiro mensual 4% SWR */}
+            <div style={{ ...colBase, background: 'color-mix(in oklch, var(--accent) 35%, var(--surface))' }}>
+              <div className="text-[9px] mono uppercase tracking-wide" style={{ color: 'rgba(255,255,255,0.55)' }}>/mes · 4%</div>
+              <div className="serif italic font-semibold tnum" style={{ fontSize: usdFontSize(retiroUSD), color: '#ffffff', whiteSpace: 'nowrap' }}>
+                {fmtUSD(retiroUSD)}
+              </div>
+              <div className="mono tnum" style={{ fontSize: 9, color: 'rgba(255,255,255,0.5)', marginTop: 1, whiteSpace: 'nowrap' }}>
+                {fmtARSShort(retiroARS)} ARS
+              </div>
             </div>
           </div>
         ))}
@@ -222,20 +225,21 @@ export default function FireTab() {
   useEffect(() => { fetchFireFilas(); fetchAll(); fetchObj() }, [])
 
   const cfg = finConfig ?? {}
-  const aumentoMensual     = (cfg.fire_aumento_aporte    ?? 1.20)  / 100
-  const rentabilidadAnual  = (cfg.fire_rentabilidad_anual ?? 6.00)
+  const aumentoMensual      = (cfg.fire_aumento_aporte    ?? 1.20)  / 100
+  const rentabilidadAnual   = (cfg.fire_rentabilidad_anual ?? 6.00)
   const rentabilidadMensual = rentabilidadAnual / 100 / 12
   const aporteInicial       = cfg.fire_aporte_inicial ?? 0
   const saldoInicial        = cfg.fire_saldo_inicial  ?? 0
   const fechaNac            = cfg.fire_fecha_nacimiento ?? ''
-  const dolar               = cfg.dolar_oficial ?? 1245
+  const dolar               = cfg.dolar_mep ?? cfg.dolar_oficial ?? cfg.dolar_default ?? 1245
+  const fireMetaEdad        = cfg.fire_meta_edad ? Number(cfg.fire_meta_edad) : null
 
   const currentMes = useMemo(() => {
     const d = new Date()
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
   }, [])
 
-  const inicioMes = cfg.fire_inicio_mes ?? currentMes
+  const inicioMes = cfg.fire_inicio_mes || currentMes
 
   // Compute ahorrado FIRE per month from movimientos (residual after objetivos)
   const objetivoNombres = useMemo(() => new Set(finObjetivos.map(o => o.nombre)), [finObjetivos])
@@ -253,12 +257,20 @@ export default function FireTab() {
     return map
   }, [finMovAll, objetivoNombres])
 
-  // Generate all rows
+  // Generate all rows — always up to fire_meta_edad (default 50) + 1 mes
   const endMes = useMemo(() => {
+    const targetEdad = fireMetaEdad ?? 50
+    let target = targetEdad * 12  // fallback si no hay fechaNac
+    if (fechaNac) {
+      const nac = new Date(fechaNac)
+      const cumple = new Date(nac.getFullYear() + targetEdad, nac.getMonth(), nac.getDate())
+      const hoy = new Date()
+      target = Math.max(12, (cumple.getFullYear() - hoy.getFullYear()) * 12 + (cumple.getMonth() - hoy.getMonth()) + 1)
+    }
     let m = currentMes
-    for (let i = 0; i < 36; i++) m = nextMes(m)
+    for (let i = 0; i < target; i++) m = nextMes(m)
     return m
-  }, [currentMes])
+  }, [currentMes, fechaNac, fireMetaEdad])
 
   const rows = useMemo(() => {
     const result = []
@@ -353,8 +365,9 @@ export default function FireTab() {
             </thead>
             <tbody>
               {rows.map((row, i) => {
-                const isCurrent = row.isCurrent
-                const isFuture  = row.isFuture
+                const isCurrent  = row.isCurrent
+                const isFuture   = row.isFuture
+                const isMetaEdad = fireMetaEdad != null && row.edad === fireMetaEdad
                 const bg = isCurrent
                   ? 'color-mix(in oklch, var(--accent) 12%, transparent)'
                   : isFuture
@@ -365,11 +378,16 @@ export default function FireTab() {
                   <tr
                     key={row.mes}
                     ref={isCurrent ? currentRef : null}
-                    style={{ borderBottom: '1px solid var(--border)', background: bg }}
+                    style={{
+                      borderBottom: '1px solid var(--border)',
+                      background: bg,
+                      ...(isMetaEdad && { outline: '2px solid #f59e0b', outlineOffset: '-2px' }),
+                    }}
                   >
                     {fechaNac && (
-                      <td style={{ ...TD_LEFT, color: 'var(--subtext)' }}>
+                      <td style={{ ...TD_LEFT, color: isMetaEdad ? '#f59e0b' : 'var(--subtext)', fontWeight: isMetaEdad ? 700 : 400 }}>
                         {row.edad != null ? row.edad : '—'}
+                        {isMetaEdad && <span className="ml-1" title="Meta edad FIRE">🎯</span>}
                       </td>
                     )}
                     <td style={{ ...TD_LEFT, fontWeight: isCurrent ? 700 : 400, color: isCurrent ? 'var(--accent)' : isFuture ? 'var(--subtext)' : 'var(--text)' }}>

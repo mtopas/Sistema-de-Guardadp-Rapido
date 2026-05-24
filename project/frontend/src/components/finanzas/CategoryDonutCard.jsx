@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
-import { FINANZAS, fmtARS, isTransferencia } from '../../data/finanzas'
+import { fmtARS, isTransferencia } from '../../data/finanzas'
 import { BRANCH_COLORS as B } from '../../utils/themes'
 
 // Palette fallback for dynamic categories
@@ -14,10 +14,7 @@ export function buildCategories(movimientos, type) {
   })
 
   if (filtered.length === 0) {
-    // use mock data
-    const mockData = type === 'income' ? (FINANZAS.ingresosCategorias ?? []) : FINANZAS.categorias
-    const total = mockData.reduce((a, c) => a + c.amount, 0)
-    return { cats: mockData, total }
+    return { cats: [], total: 0 }
   }
 
   const map = {}

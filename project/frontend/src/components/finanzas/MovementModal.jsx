@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { X, ArrowDown, ArrowUp, Calendar as CalIcon, Zap } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
-import { FINANZAS, fmtARS } from '../../data/finanzas'
+import { fmtARS } from '../../data/finanzas'
 
 const CURRENCIES = [
   { id: 'ARS', label: 'ARS', symbol: '$'   },
@@ -46,13 +46,13 @@ export default function MovementModal() {
   const finObjetivos  = useStore(s => s.finObjetivos)
 
   const cuentas = useMemo(() => {
-    if (!finCuentas || finCuentas.length === 0) return FINANZAS.cuentas.flatMap(g => g.items)
+    if (!finCuentas || finCuentas.length === 0) return []
     if (finCuentas[0]?.items) return finCuentas.flatMap(g => g.items)
     return finCuentas
   }, [finCuentas])
 
   const categorias = useMemo(() => {
-    if (!finCategorias || finCategorias.length === 0) return FINANZAS.categorias
+    if (!finCategorias || finCategorias.length === 0) return []
     return finCategorias
   }, [finCategorias])
 

@@ -5,29 +5,18 @@ import Sidebar from './Sidebar'
 import FAB from './FAB'
 import ScrollArea from './ScrollArea'
 import { useStore } from '../store/useStore'
-
-const ARCOIRIS_ACCENTS = {
-  '/':         { accent: '#7c3aed', light: '#a78bfa', deep: '#6d28d9' },
-  '/finanzas': { accent: '#d97706', light: '#fbbf24', deep: '#b45309' },
-  '/agenda':   { accent: '#2563eb', light: '#60a5fa', deep: '#1d4ed8' },
-  '/habitos':  { accent: '#059669', light: '#34d399', deep: '#047857' },
-}
+import { pathToSection } from '../utils/themes'
 
 export default function Layout({ children }) {
-  const navigate = useNavigate()
-  const location = useLocation()
-  const path     = location.pathname
-  const theme    = useStore(s => s.theme)
+  const navigate           = useNavigate()
+  const location           = useLocation()
+  const path               = location.pathname
+  const setCurrentSection  = useStore(s => s.setCurrentSection)
 
+  // Apply the section's saved theme whenever the route changes
   useEffect(() => {
-    if (theme !== 'arcoiris') return
-    const key = Object.keys(ARCOIRIS_ACCENTS).find(k => path.startsWith(k)) || '/'
-    const { accent, light, deep } = ARCOIRIS_ACCENTS[key]
-    const root = document.documentElement
-    root.style.setProperty('--accent', accent)
-    root.style.setProperty('--accent-light', light)
-    root.style.setProperty('--accent-deep', deep)
-  }, [path, theme])
+    setCurrentSection(pathToSection(path))
+  }, [path, setCurrentSection])
 
   // Full-screen modules (Bóveda, Finanzas) own their layout and hide the Bóveda sidebar.
   const isBrowse         = path === '/'

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useStore } from '../store/useStore'
-import { THEMES, TONES, FONT_PAIRS } from '../utils/themes'
+import { THEMES, TONES, FONT_PAIRS, SECTION_NAMES } from '../utils/themes'
 
 const AGENDA_SHORTCUTS = {
   hoy:      [['Click celda', 'Nuevo evento'], ['Drag bloque', 'Mover en grilla'], ['Ctrl+Enter', 'Guardar modal']],
@@ -24,12 +24,13 @@ const kbdStyle = {
 
 export default function TweaksPanel() {
   const [open, setOpen] = useState(false)
-  const theme          = useStore(s => s.theme)
-  const tone           = useStore(s => s.tone)
-  const fontPair       = useStore(s => s.fontPair)
-  const setTheme       = useStore(s => s.setTheme)
-  const setTone        = useStore(s => s.setTone)
-  const setFontPair    = useStore(s => s.setFontPair)
+  const theme           = useStore(s => s.theme)
+  const tone            = useStore(s => s.tone)
+  const fontPair        = useStore(s => s.fontPair)
+  const setTheme        = useStore(s => s.setTheme)
+  const setTone         = useStore(s => s.setTone)
+  const setFontPair     = useStore(s => s.setFontPair)
+  const currentSection  = useStore(s => s.currentSection)
   const agendaActiveTab = useStore(s => s.agendaActiveTab)
 
   const { pathname } = useLocation()
@@ -159,8 +160,12 @@ export default function TweaksPanel() {
         <div style={{
           fontSize: 10, fontWeight: 600, letterSpacing: '.06em',
           textTransform: 'uppercase', color: 'var(--subtext)',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         }}>
-          Tema
+          <span>Tema</span>
+          <span style={{ fontWeight: 400, letterSpacing: 0, textTransform: 'none', fontSize: 10, fontStyle: 'italic' }}>
+            {SECTION_NAMES[currentSection] ?? 'Bóveda'}
+          </span>
         </div>
 
         {/* Themes grid */}

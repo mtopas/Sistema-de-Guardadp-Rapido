@@ -1,4 +1,5 @@
-import { useNavigate, useLocation, useRef, useState, useEffect } from 'react'
+import { useRef, useState, useEffect } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { Search, Bell, Plus, Settings, Target, CheckCircle2, Calendar, CheckSquare } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { t } from '../utils/i18n'

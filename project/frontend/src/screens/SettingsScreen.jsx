@@ -1,12 +1,14 @@
 import { Check } from 'lucide-react'
 import { useStore } from '../store/useStore'
-import { THEMES } from '../utils/themes'
+import { THEMES, SECTION_NAMES } from '../utils/themes'
 import { t } from '../utils/i18n'
 
+const SECTIONS = ['boveda', 'finanzas', 'agenda', 'habitos']
+
 export default function SettingsScreen() {
-  const theme       = useStore(s => s.theme)
-  const setTheme    = useStore(s => s.setTheme)
-  const lang        = useStore(s => s.lang)
+  const sectionThemes    = useStore(s => s.sectionThemes)
+  const setThemeForSection = useStore(s => s.setThemeForSection)
+  const lang             = useStore(s => s.lang)
   const setLang     = useStore(s => s.setLang)
   const userName    = useStore(s => s.userName)
   const setUserName = useStore(s => s.setUserName)
@@ -70,35 +72,44 @@ export default function SettingsScreen() {
         </div>
       </section>
 
-      {/* Themes */}
+      {/* Themes — per section */}
       <section>
-        <h3 className="text-[10px] uppercase tracking-widest mb-3" style={{ color: 'var(--subtext)' }}>
+        <h3 className="text-[10px] uppercase tracking-widest mb-4" style={{ color: 'var(--subtext)' }}>
           {t(lang, 'colorTheme')}
         </h3>
-        <div className="grid grid-cols-2 gap-2">
-          {Object.entries(THEMES).map(([key, th]) => {
-            const active = theme === key
-            return (
-              <button key={key} onClick={() => setTheme(key)}
-                className="relative flex items-center gap-3 p-3 rounded-xl border transition-all duration-150 active:scale-[0.97]"
-                style={{
-                  background: th['--bg'],
-                  borderColor: active ? th['--accent'] : th['--border'],
-                  boxShadow: active ? `0 0 0 1px ${th['--accent']}` : 'none',
-                }}
-              >
-                <div className="flex gap-1 flex-shrink-0">
-                  <div className="w-4 h-4 rounded-full border" style={{ background: th['--surface'], borderColor: th['--border'] }} />
-                  <div className="w-4 h-4 rounded-full" style={{ background: `linear-gradient(135deg, ${th['--accent']}, ${th['--accent-light']})` }} />
-                  <div className="w-4 h-4 rounded-full" style={{ background: th['--accent-deep'] }} />
-                </div>
-                <span className="text-xs flex-1 text-left font-medium truncate" style={{ color: th['--text'], fontFamily: th['--font-sans'] }}>
-                  {th.name}
-                </span>
-                {active && <Check size={13} style={{ color: th['--accent'], flexShrink: 0 }} />}
-              </button>
-            )
-          })}
+        <div className="flex flex-col gap-6">
+          {SECTIONS.map(section => (
+            <div key={section}>
+              <p className="text-[11px] font-semibold mb-2" style={{ color: 'var(--text-2)' }}>
+                {SECTION_NAMES[section]}
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {Object.entries(THEMES).map(([key, th]) => {
+                  const active = sectionThemes[section] === key
+                  return (
+                    <button key={key} onClick={() => setThemeForSection(section, key)}
+                      className="relative flex items-center gap-3 p-3 rounded-xl border transition-all duration-150 active:scale-[0.97]"
+                      style={{
+                        background: th['--bg'],
+                        borderColor: active ? th['--accent'] : th['--border'],
+                        boxShadow: active ? `0 0 0 1px ${th['--accent']}` : 'none',
+                      }}
+                    >
+                      <div className="flex gap-1 flex-shrink-0">
+                        <div className="w-4 h-4 rounded-full border" style={{ background: th['--surface'], borderColor: th['--border'] }} />
+                        <div className="w-4 h-4 rounded-full" style={{ background: `linear-gradient(135deg, ${th['--accent']}, ${th['--accent-light']})` }} />
+                        <div className="w-4 h-4 rounded-full" style={{ background: th['--accent-deep'] }} />
+                      </div>
+                      <span className="text-xs flex-1 text-left font-medium truncate" style={{ color: th['--text'], fontFamily: th['--font-sans'] }}>
+                        {th.name}
+                      </span>
+                      {active && <Check size={13} style={{ color: th['--accent'], flexShrink: 0 }} />}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
         </div>
       </section>
     </div>

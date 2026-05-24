@@ -255,7 +255,7 @@ def _ensure_fin_data(cursor):
         "INSERT OR IGNORE INTO fin_categorias (nombre, color, tipo) VALUES ('Ahorro', NULL, 'both')"
     )
     cursor.execute(
-        "INSERT OR IGNORE INTO fin_config (clave, valor) VALUES ('fondo_emergencia_meta', '500000')"
+        "INSERT OR IGNORE INTO fin_config (clave, valor) VALUES ('fondo_emergencia_meta', '0')"
     )
     today_mes = datetime.now().strftime("%Y-%m")
     fire_defaults = [
@@ -265,6 +265,8 @@ def _ensure_fin_data(cursor):
         ("fire_aporte_inicial",     "0"),
         ("fire_saldo_inicial",      "0"),
         ("fire_inicio_mes",         today_mes),
+        ("fire_meta_usd",           "0"),
+        ("tasa_ahorro_objetivo",    "30"),
     ]
     for clave, valor in fire_defaults:
         cursor.execute(
@@ -273,170 +275,15 @@ def _ensure_fin_data(cursor):
 
 
 def _seed_agenda(cursor):
-    cursor.execute("SELECT COUNT(*) FROM agenda_calendarios")
-    if cursor.fetchone()[0] > 0:
-        return
-
-    calendarios = [
-        ("Personal", "#7c3aed", 1),
-        ("Trabajo",  "#2563eb", 1),
-        ("Facultad", "#059669", 1),
-    ]
-    for c in calendarios:
-        cursor.execute(
-            "INSERT INTO agenda_calendarios (nombre, color, activo) VALUES (?, ?, ?)", c
-        )
-
-    listas = [
-        ("Personal", "#7c3aed"),
-        ("Trabajo",  "#2563eb"),
-    ]
-    for l in listas:
-        cursor.execute("INSERT INTO agenda_listas (nombre, color) VALUES (?, ?)", l)
-
-    if DEBUG:
-        print("_seed_agenda: default calendars and lists inserted")
+    pass
 
 
 def _seed_habitos(cursor):
-    cursor.execute("SELECT COUNT(*) FROM habitos")
-    if cursor.fetchone()[0] > 0:
-        return
-
-    ahora = datetime.now().isoformat()
-    habitos = [
-        # (nombre, descripcion, color, categoria, frecuencia_tipo, dias_semana, hora)
-        ("Meditar 10 min", "Cierra los ojos, enfocate en la respiración.", "#7c3aed", "Bienestar", "diario",   None,        "08:00"),
-        ("Correr",         "30 min mínimo al ritmo que sea.",              "#059669", "Salud",     "semanal",  "[1,3,5]",   "07:00"),
-        ("Leer 30 min",    "Ficción o no ficción, lo que tengas ganas.",   "#2563eb", "Aprendizaje","diario",  None,        "22:00"),
-    ]
-    for h in habitos:
-        cursor.execute(
-            """INSERT INTO habitos (nombre, descripcion, color, categoria, frecuencia_tipo, dias_semana, hora, activo, creado_en)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)""",
-            (*h, ahora),
-        )
-
-    if DEBUG:
-        print("_seed_habitos: sample habits inserted")
+    pass
 
 
 def _seed_finanzas(cursor):
-    cursor.execute("SELECT COUNT(*) FROM fin_cuentas")
-    if cursor.fetchone()[0] > 0:
-        return  # Already seeded
-
-    cuentas = [
-        ("Ualá",         "wallet", "#7C3AED", "UA", 284500.0, 0.0),
-        ("Mercado Pago", "wallet", "#2563EB", "MP", 412000.0, 0.0),
-        ("Brubank",      "wallet", "#059669", "BB",  78000.0, 120.0),
-        ("Galicia",      "bank",   "#DC2626", "GA", 920000.0, 0.0),
-        ("Galicia USD",  "bank",   "#D97706", "G$",      0.0, 1360.0),
-        ("En mano",      "cash",   "#6B7280", "$$", 148000.0, 0.0),
-    ]
-    for c in cuentas:
-        cursor.execute(
-            "INSERT INTO fin_cuentas (nombre, tipo, color, initials, saldo_ars, saldo_usd) VALUES (?, ?, ?, ?, ?, ?)",
-            c,
-        )
-
-    categorias = [
-        ("Comida",        None, "expense"),
-        ("Alquiler",      None, "expense"),
-        ("Transporte",    None, "expense"),
-        ("Suscripciones", None, "expense"),
-        ("Salud",         None, "expense"),
-        ("Ocio",          None, "expense"),
-        ("Trabajo",       None, "income"),
-        ("Freelance",     None, "income"),
-        ("Dividendos",    None, "income"),
-        ("Otros",         None, "both"),
-    ]
-    for cat in categorias:
-        cursor.execute(
-            "INSERT INTO fin_categorias (nombre, color, tipo) VALUES (?, ?, ?)",
-            cat,
-        )
-
-    cursor.execute("SELECT id, nombre FROM fin_cuentas")
-    cm = {row[1]: row[0] for row in cursor.fetchall()}
-    cursor.execute("SELECT id, nombre FROM fin_categorias")
-    catm = {row[1]: row[0] for row in cursor.fetchall()}
-
-    movimientos = [
-        # (fecha, monto, tipo, descripcion, icono, cuenta_id, cuotas, categoria_id, moneda, nota, audit)
-        ("2026-05-01T09:00:00",  1500000, "income",  "Sueldo",                 "💼", cm["Galicia"],     None, catm["Trabajo"],       "ARS", None, 0),
-        ("2026-05-03T11:00:00",   350000, "income",  "Proyecto web",           "💻", cm["Ualá"],        None, catm["Freelance"],      "ARS", None, 0),
-        ("2026-05-05T10:00:00",   130000, "income",  "Dividendos broker",      "📈", cm["Galicia USD"], None, catm["Dividendos"],     "ARS", None, 0),
-        ("2026-05-06T14:00:00",  -120000, "expense", "Compra Amazon",          "📦", cm["Brubank"],     6,    catm["Otros"],          "ARS", None, 0),
-        ("2026-05-07T20:30:00",   -12000, "expense", "Teatro",                 "🎭", cm["Galicia"],     None, catm["Ocio"],           "ARS", None, 0),
-        ("2026-05-08T13:00:00",   -15000, "expense", "Delivery Mercado Libre", "🛒", cm["Ualá"],        None, catm["Comida"],         "ARS", None, 0),
-        ("2026-05-09T22:00:00",    -7800, "expense", "Netflix",                "📺", cm["Galicia"],     None, catm["Suscripciones"],  "ARS", None, 0),
-        ("2026-05-10T08:00:00",  -380000, "expense", "Alquiler Mayo",          "🏠", cm["Galicia"],     None, catm["Alquiler"],       "ARS", None, 0),
-        ("2026-05-11T09:30:00",    -4500, "expense", "Spotify Familiar",       "📡", cm["Galicia"],     None, catm["Suscripciones"],  "ARS", None, 0),
-        ("2026-05-11T11:00:00",    -6300, "expense", "Farmacia",               "💊", cm["Mercado Pago"],None, catm["Salud"],          "ARS", None, 0),
-        ("2026-05-11T15:00:00",    -1900, "expense", "iCloud 200GB",           "☁️", cm["Ualá"],        None, catm["Suscripciones"],  "ARS", None, 0),
-        ("2026-05-12T12:00:00",   -34200, "expense", "Supermercado Coto",      "🛒", cm["Galicia"],     None, catm["Comida"],         "ARS", None, 0),
-        ("2026-05-12T21:00:00",   -18500, "expense", "Cine + cena",            "🎬", cm["Ualá"],        None, catm["Ocio"],           "ARS", None, 0),
-        ("2026-05-13T12:30:00",    -8400, "expense", "Almuerzo La Birra",      "🍱", cm["Ualá"],        None, catm["Comida"],         "ARS", None, 0),
-        ("2026-05-13T16:00:00",    -2000, "expense", "SUBE recarga",           "🚇", cm["Mercado Pago"],None, catm["Transporte"],     "ARS", None, 0),
-        ("2026-05-13T18:00:00",   480000, "income",  "Honorarios proyecto",    "💼", cm["Galicia"],     None, catm["Trabajo"],        "ARS", None, 1),
-        ("2026-05-14T09:00:00",   -12000, "expense", "Médico clínico",         "🏥", cm["Mercado Pago"],None, catm["Salud"],          "ARS", None, 0),
-        ("2026-05-14T11:00:00",   -45000, "expense", "Nafta",                  "⛽", cm["En mano"],     None, catm["Transporte"],     "ARS", None, 0),
-        ("2026-05-14T19:00:00",   -77500, "expense", "Ropa y zapatillas",      "👟", cm["Ualá"],        3,    catm["Otros"],          "ARS", None, 0),
-    ]
-    for mov in movimientos:
-        cursor.execute(
-            """INSERT INTO fin_movimientos
-               (fecha, monto, tipo, descripcion, icono, cuenta_id, cuotas, categoria_id, moneda, nota, audit)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            mov,
-        )
-
-    config = [
-        ("dolar_oficial",             "1245"),
-        ("fire_meta_usd",             "500000"),
-        ("fire_year",                 "2041"),
-        ("fire_monthly_usd",          "2400"),
-        ("tasa_ahorro_objetivo",      "40"),
-        ("dolar_oficial_updated_at",  ""),
-        ("mes_cierre",                "25"),
-    ]
-    for entry in config:
-        cursor.execute("INSERT OR IGNORE INTO fin_config (clave, valor) VALUES (?, ?)", entry)
-
-    ahora = datetime.now().isoformat()
-    instrumentos = [
-        # (tipo, ticker, nombre, cantidad, costo_usd, tipo_cambio, precio_actual, entidad, capital_ars, tna, fecha_inicio, fecha_vencimiento, fecha)
-        ("acciones", "GGAL",  "Galicia ADR",    50,      800.0,  1200.0,  16.50,    None, None,     None,  None,         None,         ahora),
-        ("acciones", "MELI",  "MercadoLibre",    2,     3600.0,  1180.0,1800.00,    None, None,     None,  None,         None,         ahora),
-        ("crypto",   "BTC",   "Bitcoin",       0.05,   6500.0,  1100.0, 65000.0,   None, None,     None,  None,         None,         ahora),
-        ("fci",      "ICBCAR","ICBC Renta ARS",  1250000, None,  None,      1.0,    None, None,     None,  None,         None,         ahora),
-        ("plazo_fijo", None,  "PF Galicia",     0,       None,  None,      None, "Galicia", 500000, 97.5, "2026-05-01", "2026-06-30", ahora),
-    ]
-    for inst in instrumentos:
-        cursor.execute(
-            """INSERT INTO fin_instrumentos
-               (tipo, ticker, nombre, cantidad, costo_usd, tipo_cambio, precio_actual,
-                entidad, capital_ars, tna, fecha_inicio, fecha_vencimiento, fecha)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            inst,
-        )
-
-    objetivos = [
-        # (nombre, meta, moneda, fecha_limite, cuota_mensual, fecha_creacion)
-        ("Viaje a Europa",      5000000, "ARS", "2027-06-30", 200000, ahora),
-        ("Fondo de Emergencia", 3000000, "ARS", None,         None,   ahora),
-    ]
-    for obj in objetivos:
-        cursor.execute(
-            """INSERT INTO fin_objetivos (nombre, meta, moneda, fecha_limite, cuota_mensual, fecha_creacion)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            obj,
-        )
-
-    if DEBUG:
-        print("_seed_finanzas: test data inserted")
+    pass
 
 
 def _apply_migrations(cursor):
@@ -585,7 +432,7 @@ def _apply_migrations(cursor):
     )
 
     # --- fin_config: claves nuevas ---
-    for clave, default in [("dolar_oficial_updated_at", ""), ("mes_cierre", "25")]:
+    for clave, default in [("dolar_oficial_updated_at", ""), ("mes_cierre", "25"), ("dolar_default", "")]:
         cursor.execute(
             "INSERT OR IGNORE INTO fin_config (clave, valor) VALUES (?, ?)",
             (clave, default),

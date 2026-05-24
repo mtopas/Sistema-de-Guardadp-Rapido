@@ -363,6 +363,27 @@ def fin_eliminar_cuenta(cuenta_id: int) -> bool:
     return deleted
 
 
+def fin_editar_cuenta(cuenta_id: int, nombre: str, tipo: str, color: Optional[str], initials: Optional[str]) -> Optional[dict]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE fin_cuentas SET nombre = ?, tipo = ?, color = ?, initials = ? WHERE id = ?",
+        (nombre.strip(), tipo, color, initials, cuenta_id),
+    )
+    updated = cursor.rowcount > 0
+    conn.commit()
+    if updated:
+        cursor.execute(
+            "SELECT id, nombre, tipo, color, initials, saldo_ars, saldo_usd FROM fin_cuentas WHERE id = ?",
+            (cuenta_id,),
+        )
+        r = cursor.fetchone()
+        conn.close()
+        return {"id": r[0], "name": r[1], "tipo": r[2], "color": r[3], "initials": r[4], "ars": r[5], "usd": r[6]}
+    conn.close()
+    return None
+
+
 def fin_actualizar_cuenta_saldo(cuenta_id: int, saldo_ars: float, saldo_usd: float) -> Optional[dict]:
     conn = get_connection()
     cursor = conn.cursor()

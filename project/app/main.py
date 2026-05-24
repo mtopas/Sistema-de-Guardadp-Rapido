@@ -37,6 +37,7 @@ from app.db.crud import (
     # Finanzas
     fin_obtener_cuentas,
     fin_crear_cuenta,
+    fin_editar_cuenta,
     fin_actualizar_cuenta_saldo,
     fin_eliminar_cuenta,
     fin_buscar_cuenta_por_nombre,
@@ -125,6 +126,13 @@ class FinCuentaCreate(BaseModel):
 class FinCuentaSaldoUpdate(BaseModel):
     saldo_ars: float = 0
     saldo_usd: float = 0
+
+
+class FinCuentaUpdate(BaseModel):
+    nombre: str
+    tipo: str = "wallet"
+    color: Optional[str] = None
+    initials: Optional[str] = None
 
 
 class FinCategoriaCreate(BaseModel):
@@ -485,6 +493,14 @@ def actualizar_saldo_cuenta(cuenta_id: int, body: FinCuentaSaldoUpdate):
     return result
 
 
+@app.patch("/fin/cuentas/{cuenta_id}")
+def editar_fin_cuenta(cuenta_id: int, body: FinCuentaUpdate):
+    result = fin_editar_cuenta(cuenta_id, body.nombre, body.tipo, body.color, body.initials)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Cuenta no encontrada")
+    return result
+
+
 @app.delete("/fin/cuentas/{cuenta_id}")
 def eliminar_fin_cuenta(cuenta_id: int):
     if not fin_eliminar_cuenta(cuenta_id):
@@ -671,6 +687,30 @@ def actualizar_fin_config(updates: dict):
         from datetime import datetime as _dt
         updates.setdefault("dolar_oficial_updated_at", _dt.now().isoformat())
     return fin_actualizar_config(updates)
+
+
+@app.get("/fin/dolar/cotizacion")
+def obtener_cotizacion_dolar():
+    """Fetch dólar MEP + oficial compra from dolarapi.com; caches in fin_config for offline use."""
+    from datetime import datetime as _dt
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            resp = client.get("https://dolarapi.com/v1/dolares")
+            resp.raise_for_status()
+            items = resp.json()
+        oficial = next((x for x in items if x.get("casa") == "oficial"), None)
+        bolsa   = next((x for x in items if x.get("casa") == "bolsa"),   None)
+        mep      = (bolsa.get("compra") or bolsa.get("venta"))  if bolsa   else None
+        ofi_comp = oficial.get("compra")                        if oficial else None
+        updates: dict = {"dolar_actualizado_at": _dt.now().isoformat()}
+        if mep      is not None:
+            updates["dolar_mep"]     = mep
+            updates["dolar_default"] = mep  # pisa el fallback con el último valor real
+        if ofi_comp is not None: updates["dolar_oficial_compra"] = ofi_comp
+        fin_actualizar_config(updates)
+    except Exception:
+        pass  # return cached values if network fails
+    return fin_obtener_config()
 
 
 # ---------------------------------------------------------------------------
@@ -1037,7 +1077,8 @@ def exportar_agenda_ics(
                 lines.append(f"DTEND:{dtend}")
         lines.append(f"SUMMARY:{e['titulo'].replace(chr(10), ' ')}")
         if e.get("descripcion"):
-            lines.append(f"DESCRIPTION:{e['descripcion'].replace(chr(10), '\\n')}")
+            desc = e["descripcion"].replace(chr(10), "\\n")
+            lines.append(f"DESCRIPTION:{desc}")
         lines.append("END:VEVENT")
 
     lines.append("END:VCALENDAR")

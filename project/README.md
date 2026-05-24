@@ -78,7 +78,7 @@ Modal Hábitos en `HabitosScreen`: `NuevoHabitoModal` (CTA TopBar `openHabitoMod
 
 **Piezas clave:** `LeftPanel` (árbol + búsqueda), `NetworkGraph` (fuerza D3, datos desde store), `RightPanel` (detalle + TipTap), `CaptureModal` (autodetect `detectType.js`, Ctrl+Enter).
 
-**Temas:** `utils/themes.js` — mapas de variables CSS (`--bg`, `--accent`, …), **tonos** (`TONES`) y **pares tipográficos** (`FONT_PAIRS`, 6 presets). Persistencia en `localStorage`. Tema Arcoíris cambia acento por ruta.
+**Temas:** `utils/themes.js` — mapas de variables CSS (`--bg`, `--accent`, …), **tonos** (`TONES`) y **pares tipográficos** (`FONT_PAIRS`, 6 presets). **Temas y tonos son por sección** (`sgr-theme-{section}`, `sgr-tone-{section}` en `localStorage`); la tipografía es global. `setCurrentSection` en el store aplica el tema de la sección al navegar. Tema Arcoíris cambia acento por ruta (lógica centralizada en `_applyArcoirisAccent` en el store).
 
 ### Módulo Finanzas
 
@@ -92,16 +92,15 @@ Modal Hábitos en `HabitosScreen`: `NuevoHabitoModal` (CTA TopBar `openHabitoMod
 | Ahorro | Totales, barra distribución, acordeón instrumentos | Objetivos + barra meta FIRE del mes | Oculto |
 | Datos | Tabla histórica inline editable | KPIs histórico | Oculto |
 
-**Panel izquierdo** (`FinanzasLeftPanel`): saldo cuentas, ingresos/gastos del mes, tasa ahorro, grupos Billeteras/Bancos/En mano, dólar oficial manual (`fin_config.dolar_oficial`).
+**Panel izquierdo** (`FinanzasLeftPanel`): saldo cuentas, ingresos/gastos del mes, tasa ahorro, grupos Billeteras/Bancos/En mano, widget cotización dólar (MEP + oficial compra) con botón "↻ Actualizar" que llama a `GET /fin/dolar/cotizacion`.
 
 **Reglas de negocio compartidas** (`data/finanzas.js`):
 - `isTransferencia(m)` — categoría `transferencia` (case-insensitive) excluida de totales.
-- Mock `FINANZAS` si falla el API (mismo patrón en todo el módulo).
-- Helpers `fmtARS` / `fmtUSD`.
+- Helpers `fmtARS` / `fmtUSD`. Sin mock — sin backend la app muestra estado vacío.
 
 **Categoría `Ahorro` (exacta):** gasto suma al ahorro; ingreso resta (retiro a disponible). Objetivos matchean por **descripción = nombre del objetivo**; movimientos sin objetivo → **sin asignar** pero suman al total bruto.
 
-**Dólar:** `fin_config.dolar_oficial` — conversión manual ARS ↔ USD en Ahorro/Anual; sin API de cotización.
+**Dólar:** `fin_config.dolar_mep` (MEP, fuente principal) y `fin_config.dolar_oficial_compra` (oficial compra, referencia). Se obtienen vía `GET /fin/dolar/cotizacion` → `dolarapi.com`; se cachean en `fin_config` para uso offline. FIRE, Ahorro y Anual usan `dolar_mep ?? dolar_oficial` (fallback al valor manual previo). `dolar_actualizado_at` auto-stamped al actualizar.
 
 ### Módulo Agenda
 
@@ -171,7 +170,7 @@ API bajo `/fin/*` — cuentas, categorías, movimientos GET con/sin `?mes=`, PAT
 | `agenda_tareas` | Tareas con fecha/hora opcional, hora_bloque (time blocking), duracion_estimada, completada, lista_id, creado_en, actualizado_en |
 | `agenda_horario_facultad` | Horario recurrente por día de semana; visible solo en vistas horarias |
 
-API bajo `/agenda/*` — calendarios, eventos, listas, tareas, horario-facultad. Seed por defecto: 3 calendarios (Personal, Trabajo, Facultad) + 2 listas (Personal, Trabajo). Índice `idx_eventos_inicio` en `agenda_eventos(fecha_inicio)`.
+API bajo `/agenda/*` — calendarios, eventos, listas, tareas, horario-facultad. Sin seed — arranca vacío. Índice `idx_eventos_inicio` en `agenda_eventos(fecha_inicio)`.
 
 ---
 
@@ -191,7 +190,7 @@ API bajo `/habitos/*`:
 - `PUT /habitos/{id}/registro` — upsert registro para una fecha
 - `DELETE /habitos/registros/{id}` — eliminar registro
 
-Seed por defecto: 3 hábitos de ejemplo (Meditar, Correr, Leer).
+Sin seed — arranca vacío.
 
 ---
 

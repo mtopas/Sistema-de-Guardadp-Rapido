@@ -1,9 +1,10 @@
 import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowDown, ArrowUp, Settings, ChevronDown, ChevronUp, CalendarClock } from 'lucide-react'
+import { ArrowDown, ArrowUp, Settings, ChevronDown, ChevronUp, CalendarClock, Plus, Trash2, Pencil, X, Check } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
-import { FINANZAS, fmtARS, fmtUSD, isTransferencia } from '../../data/finanzas'
+import { fmtARS, fmtUSD, isTransferencia } from '../../data/finanzas'
+import { BRANCH_COLORS } from '../../utils/themes'
 
 const FIN_KEYWORDS = /pagar|cuota|vencimiento|cobro|débito|debito|transferir|tarjeta|impuesto|factura|alquiler|servicio|préstamo|prestamo/i
 
@@ -40,18 +41,27 @@ export default function FinanzasLeftPanel() {
   const finCuentas       = useStore(s => s.finCuentas)
   const finMovimientos   = useStore(s => s.finMovimientos)
   const finConfig        = useStore(s => s.finConfig)
-  const updateFinConfig  = useStore(s => s.updateFinConfig)
-  const updateFinCuenta  = useStore(s => s.updateFinCuenta)
-  const agendaTareas     = useStore(s => s.agendaTareas)
+  const fetchDolarCotizacion = useStore(s => s.fetchDolarCotizacion)
+  const updateFinCuenta    = useStore(s => s.updateFinCuenta)
+  const createFinCuenta    = useStore(s => s.createFinCuenta)
+  const editFinCuentaMeta  = useStore(s => s.editFinCuentaMeta)
+  const deleteFinCuenta    = useStore(s => s.deleteFinCuenta)
+  const agendaTareas       = useStore(s => s.agendaTareas)
 
   const [configOpen, setConfigOpen] = useState(false)
-  const [dolarInput, setDolarInput] = useState('')
-  // saldoEdits: { [cuenta.id]: { ars: string, usd: string } }
+  const [refreshState, setRefreshState] = useState('idle')
   const [saldoEdits, setSaldoEdits] = useState({})
+
+  const EMPTY_CUENTA = { nombre: '', tipo: 'wallet', color: BRANCH_COLORS[0], initials: '' }
+  const [newOpen, setNewOpen] = useState(false)
+  const [newForm, setNewForm] = useState(EMPTY_CUENTA)
+  const [editId, setEditId] = useState(null)
+  const [editForm, setEditForm] = useState(EMPTY_CUENTA)
+  const [deleteConfirm, setDeleteConfirm] = useState(null)
 
   // Normalise cuentas to grouped format (API may return flat or grouped)
   const cuentas = useMemo(() => {
-    if (!finCuentas || finCuentas.length === 0) return FINANZAS.cuentas
+    if (!finCuentas || finCuentas.length === 0) return []
     // If already grouped (array of { group, items })
     if (finCuentas[0]?.items) return finCuentas
     // Flat array — group by tipo
@@ -90,18 +100,25 @@ export default function FinanzasLeftPanel() {
     return cuentas.flatMap(g => g.items ?? []).reduce((a, c) => a + (c.usd ?? 0), 0)
   }, [cuentas])
 
-  const dolarRate = finConfig?.dolar_oficial ?? FINANZAS.blueRate
+  const dolarMEP         = finConfig?.dolar_mep            ?? null
+  const dolarOficialComp = finConfig?.dolar_oficial_compra  ?? null
+  const dolarRate        = finConfig?.dolar_oficial         ?? null
 
   const tareasFinancieras = useMemo(() =>
     agendaTareas.filter(t => !t.completada && FIN_KEYWORDS.test(t.titulo)).slice(0, 6),
     [agendaTareas]
   )
 
-  const handleDolarUpdate = () => {
-    const val = parseFloat(dolarInput)
-    if (!isNaN(val) && val > 0) {
-      updateFinConfig('dolar_oficial', val)
-      setDolarInput('')
+  const handleRefreshDolar = async () => {
+    if (refreshState === 'fetching') return
+    setRefreshState('fetching')
+    try {
+      await fetchDolarCotizacion()
+      setRefreshState('ok')
+    } catch {
+      setRefreshState('err')
+    } finally {
+      setTimeout(() => setRefreshState('idle'), 2500)
     }
   }
 
@@ -124,7 +141,7 @@ export default function FinanzasLeftPanel() {
         <div className="text-[11.5px] mt-1.5 flex items-center gap-2 flex-wrap" style={{ color: 'var(--subtext)' }}>
           <span className="mono tnum">≈ {fmtUSD(saldoUSD)}</span>
           <span className="opacity-50">·</span>
-          <span>{t(lang, 'finBlue')} {dolarRate} ARS/USD</span>
+          <span>MEP {(dolarMEP ?? dolarRate) != null ? `$${Math.round(dolarMEP ?? dolarRate).toLocaleString('es-AR')} ARS` : '—'}</span>
         </div>
 
         <div className="grid grid-cols-2 gap-2 mt-4">
@@ -142,7 +159,7 @@ export default function FinanzasLeftPanel() {
               </span>
             </div>
             <div className="text-[15px] font-semibold tnum" style={{ color: 'var(--text)' }}>
-              {fmtARS(ingresosMes || FINANZAS.ingresosMes)}
+              {fmtARS(ingresosMes)}
             </div>
           </div>
           <div
@@ -159,7 +176,7 @@ export default function FinanzasLeftPanel() {
               </span>
             </div>
             <div className="text-[15px] font-semibold tnum" style={{ color: 'var(--text)' }}>
-              {fmtARS(gastosMes || FINANZAS.gastosMes)}
+              {fmtARS(gastosMes)}
             </div>
           </div>
         </div>
@@ -262,54 +279,76 @@ export default function FinanzasLeftPanel() {
             className="mt-2 flex flex-col gap-3 p-3 rounded-xl border"
             style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}
           >
-            {/* Dólar rate */}
+            {/* Cotización dólar */}
             <div>
-              <label className="label block mb-1.5">{t(lang, 'dolarRate')}</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  value={dolarInput}
-                  onChange={e => setDolarInput(e.target.value)}
-                  placeholder={String(dolarRate)}
-                  className="flex-1 px-2.5 py-1.5 rounded-lg border outline-none text-[12px] mono tnum"
-                  style={{ borderColor: 'var(--border)', background: 'var(--bg)', color: 'var(--text)' }}
-                  onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
-                  onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
-                />
+              <div className="flex items-center justify-between mb-2">
+                <span className="label">Cotización</span>
                 <button
                   type="button"
-                  onClick={handleDolarUpdate}
-                  className="btn-fin"
-                  style={{ background: 'var(--cta-bg)', color: 'var(--cta-text)', border: 'none', fontWeight: 600 }}
+                  onClick={handleRefreshDolar}
+                  disabled={refreshState === 'fetching'}
+                  className="text-[10.5px] flex items-center gap-1 transition-colors"
+                  style={{
+                    color: refreshState === 'ok'  ? 'var(--success, #22c55e)'
+                         : refreshState === 'err' ? '#ef4444'
+                         : 'var(--accent)',
+                    opacity: refreshState === 'fetching' ? 0.6 : 1,
+                    background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                  }}
                 >
-                  {t(lang, 'updateDolar')}
+                  {refreshState === 'fetching' ? '…'
+                   : refreshState === 'ok'     ? '✓'
+                   : refreshState === 'err'    ? '✗'
+                   : '↻'} Actualizar
                 </button>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <div className="flex justify-between items-center px-2.5 py-1.5 rounded-lg" style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
+                  <span className="text-[11px]" style={{ color: 'var(--subtext)' }}>MEP <span className="opacity-60 text-[9px]">(FIRE)</span></span>
+                  <span className="text-[12px] font-semibold mono tnum" style={{ color: 'var(--text)' }}>
+                    {dolarMEP != null ? `$${Math.round(dolarMEP).toLocaleString('es-AR')}` : '—'}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center px-2.5 py-1.5 rounded-lg" style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
+                  <span className="text-[11px]" style={{ color: 'var(--subtext)' }}>Oficial compra</span>
+                  <span className="text-[12px] font-semibold mono tnum" style={{ color: 'var(--text)' }}>
+                    {dolarOficialComp != null ? `$${Math.round(dolarOficialComp).toLocaleString('es-AR')}` : '—'}
+                  </span>
+                </div>
+                {finConfig?.dolar_actualizado_at && (
+                  <div className="text-[10px] text-right" style={{ color: 'var(--subtext)' }}>
+                    {(() => {
+                      const diff = Date.now() - new Date(finConfig.dolar_actualizado_at).getTime()
+                      const mins = Math.floor(diff / 60000)
+                      if (mins < 1) return 'Actualizado ahora'
+                      if (mins < 60) return `Hace ${mins}m`
+                      const hs = Math.floor(mins / 60)
+                      if (hs < 24) return `Hace ${hs}h`
+                      return `Hace ${Math.floor(hs / 24)}d`
+                    })()}
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Account balances */}
+            {/* Account balances + CRUD */}
             <div>
               <div className="label mb-2">{t(lang, 'finSaldosCuenta')}</div>
               <div className="flex flex-col gap-2">
                 {cuentas.flatMap(g => g.items ?? []).map(cuenta => {
-                  const edit = saldoEdits[cuenta.id] ?? {}
-                  const arsVal = edit.ars ?? ''
-                  const usdVal = edit.usd ?? ''
+                  const sEdit = saldoEdits[cuenta.id] ?? {}
+                  const arsVal = sEdit.ars ?? ''
+                  const usdVal = sEdit.usd ?? ''
                   const hasUSD = (cuenta.usd ?? 0) > 0 || usdVal !== ''
+                  const isEditing = editId === cuenta.id
+                  const isDeleting = deleteConfirm === cuenta.id
 
-                  const inputStyle = {
-                    borderColor: 'var(--border)',
-                    background: 'var(--bg)',
-                    color: 'var(--text)',
-                  }
+                  const inputStyle = { borderColor: 'var(--border)', background: 'var(--bg)', color: 'var(--text)' }
 
-                  const setEdit = (field, val) =>
-                    setSaldoEdits(prev => ({
-                      ...prev,
-                      [cuenta.id]: { ...(prev[cuenta.id] ?? {}), [field]: val },
-                    }))
+                  const setSaldoEdit = (field, val) =>
+                    setSaldoEdits(prev => ({ ...prev, [cuenta.id]: { ...(prev[cuenta.id] ?? {}), [field]: val } }))
 
-                  const handleSave = () => {
+                  const handleSaldoSave = () => {
                     const newArs = parseFloat(String(arsVal).replace(',', '.'))
                     const newUsd = parseFloat(String(usdVal).replace(',', '.'))
                     updateFinCuenta(
@@ -320,10 +359,23 @@ export default function FinanzasLeftPanel() {
                     setSaldoEdits(prev => { const n = { ...prev }; delete n[cuenta.id]; return n })
                   }
 
+                  const startEdit = () => {
+                    setEditForm({ nombre: cuenta.name, tipo: cuenta.tipo ?? 'wallet', color: cuenta.color ?? BRANCH_COLORS[0], initials: cuenta.initials ?? '' })
+                    setEditId(cuenta.id)
+                    setDeleteConfirm(null)
+                  }
+
+                  const handleMetaSave = () => {
+                    if (!editForm.nombre.trim()) return
+                    editFinCuentaMeta(cuenta.id, editForm.nombre.trim(), editForm.tipo, editForm.color, editForm.initials.slice(0, 3).toUpperCase())
+                    setEditId(null)
+                  }
+
                   const dirty = arsVal !== '' || usdVal !== ''
 
                   return (
-                    <div key={cuenta.id} className="flex flex-col gap-1">
+                    <div key={cuenta.id} className="flex flex-col gap-1 pb-2" style={{ borderBottom: '1px solid var(--border)' }}>
+                      {/* Header row */}
                       <div className="flex items-center gap-1.5">
                         <div
                           className="w-5 h-5 rounded shrink-0 grid place-items-center text-[8px] font-bold text-white"
@@ -331,51 +383,188 @@ export default function FinanzasLeftPanel() {
                         >
                           {cuenta.initials?.[0] ?? '?'}
                         </div>
-                        <span className="text-[11.5px] font-medium flex-1" style={{ color: 'var(--text)' }}>
+                        <span className="text-[11.5px] font-medium flex-1 min-w-0 truncate" style={{ color: 'var(--text)' }}>
                           {cuenta.name}
                         </span>
-                        <span className="text-[10px] mono tnum" style={{ color: 'var(--subtext)' }}>
-                          {t(lang, 'finActual')}: {fmtARS(cuenta.ars ?? 0)}
+                        <span className="text-[10px] mono tnum shrink-0 mr-1" style={{ color: 'var(--subtext)' }}>
+                          {fmtARS(cuenta.ars ?? 0)}
                         </span>
+                        <button type="button" onClick={startEdit} title="Editar"
+                          className="shrink-0 p-0.5 rounded transition-colors"
+                          style={{ color: isEditing ? 'var(--accent)' : 'var(--subtext)' }}>
+                          <Pencil size={11} />
+                        </button>
+                        {!isDeleting
+                          ? <button type="button" onClick={() => { setDeleteConfirm(cuenta.id); setEditId(null) }} title="Eliminar"
+                              className="shrink-0 p-0.5 rounded transition-colors" style={{ color: 'var(--subtext)' }}>
+                              <Trash2 size={11} />
+                            </button>
+                          : <span className="flex items-center gap-1 text-[10px]" style={{ color: '#ef4444' }}>
+                              <button type="button" onClick={() => { deleteFinCuenta(cuenta.id); setDeleteConfirm(null) }}
+                                className="font-semibold">¿Sí?</button>
+                              <button type="button" onClick={() => setDeleteConfirm(null)}>
+                                <X size={10} />
+                              </button>
+                            </span>
+                        }
                       </div>
-                      <div className="flex gap-1.5">
-                        <input
-                          type="number"
-                          value={arsVal}
-                          onChange={e => setEdit('ars', e.target.value)}
+
+                      {/* Inline meta-edit form */}
+                      {isEditing && (
+                        <div className="flex flex-col gap-1.5 mt-1 p-2 rounded-lg" style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
+                          <input
+                            type="text"
+                            value={editForm.nombre}
+                            onChange={e => setEditForm(p => ({ ...p, nombre: e.target.value }))}
+                            placeholder="Nombre"
+                            className="min-w-0 w-full px-2 py-1 rounded-lg border outline-none text-[11px]"
+                            style={inputStyle}
+                            onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
+                            onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+                          />
+                          <div className="flex gap-1.5">
+                            <select
+                              value={editForm.tipo}
+                              onChange={e => setEditForm(p => ({ ...p, tipo: e.target.value }))}
+                              className="flex-1 min-w-0 px-2 py-1 rounded-lg border outline-none text-[11px]"
+                              style={inputStyle}
+                            >
+                              <option value="wallet">Wallet</option>
+                              <option value="bank">Banco</option>
+                              <option value="cash">Efectivo</option>
+                            </select>
+                            <input
+                              type="text"
+                              value={editForm.initials}
+                              onChange={e => setEditForm(p => ({ ...p, initials: e.target.value.slice(0, 3).toUpperCase() }))}
+                              placeholder="ABC"
+                              maxLength={3}
+                              className="w-14 px-2 py-1 rounded-lg border outline-none text-[11px] mono text-center"
+                              style={inputStyle}
+                              onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
+                              onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+                            />
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {BRANCH_COLORS.map(c => (
+                              <button key={c} type="button" onClick={() => setEditForm(p => ({ ...p, color: c }))}
+                                className="w-5 h-5 rounded-md transition-all"
+                                style={{ background: c, outline: editForm.color === c ? '2px solid var(--text)' : 'none', outlineOffset: 1 }}
+                              />
+                            ))}
+                          </div>
+                          <div className="flex gap-1.5">
+                            <button type="button" onClick={handleMetaSave}
+                              className="flex-1 py-1 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1"
+                              style={{ background: 'var(--cta-bg)', color: 'var(--cta-text)', border: 'none' }}>
+                              <Check size={11} /> Guardar
+                            </button>
+                            <button type="button" onClick={() => setEditId(null)}
+                              className="px-2 py-1 rounded-lg text-[11px]"
+                              style={{ background: 'var(--surface)', color: 'var(--subtext)', border: '1px solid var(--border)' }}>
+                              <X size={11} />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Saldo inputs */}
+                      <div className={hasUSD ? 'grid grid-cols-2 gap-1.5' : 'flex gap-1.5'}>
+                        <input type="number" value={arsVal}
+                          onChange={e => setSaldoEdit('ars', e.target.value)}
                           placeholder={`ARS ${Math.round(cuenta.ars ?? 0)}`}
-                          className="flex-1 px-2 py-1 rounded-lg border outline-none text-[11px] mono tnum"
+                          className="min-w-0 w-full px-2 py-1 rounded-lg border outline-none text-[11px] mono tnum"
                           style={inputStyle}
                           onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
                           onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
                         />
                         {hasUSD && (
-                          <input
-                            type="number"
-                            value={usdVal}
-                            onChange={e => setEdit('usd', e.target.value)}
+                          <input type="number" value={usdVal}
+                            onChange={e => setSaldoEdit('usd', e.target.value)}
                             placeholder={`USD ${cuenta.usd ?? 0}`}
-                            className="w-[72px] px-2 py-1 rounded-lg border outline-none text-[11px] mono tnum"
+                            className="min-w-0 w-full px-2 py-1 rounded-lg border outline-none text-[11px] mono tnum"
                             style={inputStyle}
                             onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
                             onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
                           />
                         )}
-                        {dirty && (
-                          <button
-                            type="button"
-                            onClick={handleSave}
-                            className="px-2 py-1 rounded-lg text-[11px] font-semibold transition-all"
-                            style={{ background: 'var(--cta-bg)', color: 'var(--cta-text)', border: 'none' }}
-                          >
-                            OK
-                          </button>
-                        )}
                       </div>
+                      {dirty && (
+                        <button type="button" onClick={handleSaldoSave}
+                          className="w-full py-1 rounded-lg text-[11px] font-semibold transition-all"
+                          style={{ background: 'var(--cta-bg)', color: 'var(--cta-text)', border: 'none' }}>
+                          OK
+                        </button>
+                      )}
                     </div>
                   )
                 })}
               </div>
+
+              {/* Nueva cuenta */}
+              <button type="button" onClick={() => { setNewOpen(v => !v); setNewForm(EMPTY_CUENTA) }}
+                className="mt-2 flex items-center gap-1.5 text-[11px] w-full py-1 rounded-lg transition-colors"
+                style={{ color: 'var(--accent)' }}>
+                <Plus size={12} /> Nueva cuenta
+              </button>
+
+              {newOpen && (
+                <div className="mt-1 flex flex-col gap-1.5 p-2 rounded-lg" style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
+                  <input type="text" value={newForm.nombre}
+                    onChange={e => setNewForm(p => ({ ...p, nombre: e.target.value }))}
+                    placeholder="Nombre"
+                    className="min-w-0 w-full px-2 py-1 rounded-lg border outline-none text-[11px]"
+                    style={{ borderColor: 'var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
+                    onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
+                    onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+                  />
+                  <div className="flex gap-1.5">
+                    <select value={newForm.tipo}
+                      onChange={e => setNewForm(p => ({ ...p, tipo: e.target.value }))}
+                      className="flex-1 min-w-0 px-2 py-1 rounded-lg border outline-none text-[11px]"
+                      style={{ borderColor: 'var(--border)', background: 'var(--surface)', color: 'var(--text)' }}>
+                      <option value="wallet">Wallet</option>
+                      <option value="bank">Banco</option>
+                      <option value="cash">Efectivo</option>
+                    </select>
+                    <input type="text" value={newForm.initials}
+                      onChange={e => setNewForm(p => ({ ...p, initials: e.target.value.slice(0, 3).toUpperCase() }))}
+                      placeholder="ABC" maxLength={3}
+                      className="w-14 px-2 py-1 rounded-lg border outline-none text-[11px] mono text-center"
+                      style={{ borderColor: 'var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
+                      onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
+                      onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {BRANCH_COLORS.map(c => (
+                      <button key={c} type="button" onClick={() => setNewForm(p => ({ ...p, color: c }))}
+                        className="w-5 h-5 rounded-md transition-all"
+                        style={{ background: c, outline: newForm.color === c ? '2px solid var(--text)' : 'none', outlineOffset: 1 }}
+                      />
+                    ))}
+                  </div>
+                  <div className="flex gap-1.5">
+                    <button type="button"
+                      disabled={!newForm.nombre.trim()}
+                      onClick={() => {
+                        if (!newForm.nombre.trim()) return
+                        createFinCuenta(newForm.nombre.trim(), newForm.tipo, newForm.color, newForm.initials.slice(0, 3).toUpperCase() || newForm.nombre.slice(0, 2).toUpperCase())
+                        setNewOpen(false)
+                        setNewForm(EMPTY_CUENTA)
+                      }}
+                      className="flex-1 py-1 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1"
+                      style={{ background: 'var(--cta-bg)', color: 'var(--cta-text)', border: 'none', opacity: newForm.nombre.trim() ? 1 : 0.4 }}>
+                      <Check size={11} /> Crear
+                    </button>
+                    <button type="button" onClick={() => setNewOpen(false)}
+                      className="px-2 py-1 rounded-lg text-[11px]"
+                      style={{ background: 'var(--surface)', color: 'var(--subtext)', border: '1px solid var(--border)' }}>
+                      <X size={11} />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

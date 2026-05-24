@@ -269,6 +269,28 @@ export const FONT_PAIRS = {
 
 export const DEFAULT_FONT_PAIR = 'sobrio'
 
+// Arcoíris accent colors per route (exported so store can apply them inline)
+export const ARCOIRIS_ACCENTS = {
+  '/':         { accent: '#7c3aed', light: '#a78bfa', deep: '#6d28d9' },
+  '/finanzas': { accent: '#d97706', light: '#fbbf24', deep: '#b45309' },
+  '/agenda':   { accent: '#2563eb', light: '#60a5fa', deep: '#1d4ed8' },
+  '/habitos':  { accent: '#059669', light: '#34d399', deep: '#047857' },
+}
+
+export const SECTION_NAMES = {
+  boveda:   'Bóveda',
+  finanzas: 'Finanzas',
+  agenda:   'Agenda',
+  habitos:  'Hábitos',
+}
+
+export function pathToSection(path) {
+  if (path.startsWith('/finanzas')) return 'finanzas'
+  if (path.startsWith('/agenda'))   return 'agenda'
+  if (path.startsWith('/habitos'))  return 'habitos'
+  return 'boveda'
+}
+
 export function applyFonts(fontKey) {
   const pair = FONT_PAIRS[fontKey] || FONT_PAIRS[DEFAULT_FONT_PAIR]
   const root = document.documentElement

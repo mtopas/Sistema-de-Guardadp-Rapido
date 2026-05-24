@@ -429,7 +429,7 @@ export default function AhorroTab() {
 
   useEffect(() => { fetchInst(); fetchAll() }, [])
 
-  const dolar = finConfig?.dolar_oficial ?? 1245
+  const dolar = finConfig?.dolar_mep ?? finConfig?.dolar_oficial ?? finConfig?.dolar_default ?? 1245
 
   const { totalUSD, totalARS, totalARS_PF } = useMemo(() => {
     let usd  = 0

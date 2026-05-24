@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 import { API_URL, DEBUG } from '../config'
-import { applyTheme, DEFAULT_THEME, DEFAULT_TONE, DEFAULT_FONT_PAIR, FONT_PAIRS, THEMES, TONES } from '../utils/themes'
-import { FINANZAS } from '../data/finanzas'
+import { applyTheme, DEFAULT_THEME, DEFAULT_TONE, DEFAULT_FONT_PAIR, FONT_PAIRS, THEMES, TONES, ARCOIRIS_ACCENTS, pathToSection } from '../utils/themes'
 
 function currentMes() {
   const d = new Date()
@@ -10,18 +9,42 @@ function currentMes() {
   return `${y}-${m}`
 }
 
-// Apply saved theme + tone + font pair immediately before first render
-// Migrate: if localStorage holds a key from an old set, fall back to default.
-const rawTheme    = localStorage.getItem('sgr-theme')
-const rawTone     = localStorage.getItem('sgr-tone')
+// Per-section themes — each module has its own independent theme + tone.
+// Migration: if no per-section key exists yet, fall back to the old global key.
+const _lgTheme   = localStorage.getItem('sgr-theme')
+const _lgTone    = localStorage.getItem('sgr-tone')
+const legacyTheme = (_lgTheme && THEMES[_lgTheme]) ? _lgTheme : DEFAULT_THEME
+const legacyTone  = (_lgTone  && TONES[_lgTone])   ? _lgTone  : DEFAULT_TONE
+
+const SECTION_KEYS = ['boveda', 'finanzas', 'agenda', 'habitos']
+function _readSectionTheme(s) { const v = localStorage.getItem(`sgr-theme-${s}`); return (v && THEMES[v]) ? v : legacyTheme }
+function _readSectionTone(s)  { const v = localStorage.getItem(`sgr-tone-${s}`);  return (v && TONES[v])  ? v : legacyTone  }
+
+const initialSectionThemes = Object.fromEntries(SECTION_KEYS.map(s => [s, _readSectionTheme(s)]))
+const initialSectionTones  = Object.fromEntries(SECTION_KEYS.map(s => [s, _readSectionTone(s)]))
+
 const rawFontPair = localStorage.getItem('sgr-font-pair')
-const savedTheme    = (rawTheme    && THEMES[rawTheme])         ? rawTheme    : DEFAULT_THEME
-const savedTone     = (rawTone     && TONES[rawTone])           ? rawTone     : DEFAULT_TONE
-const savedFontPair = (rawFontPair && FONT_PAIRS[rawFontPair])  ? rawFontPair : DEFAULT_FONT_PAIR
-if (rawTheme    && !THEMES[rawTheme])         localStorage.setItem('sgr-theme',     savedTheme)
-if (rawTone     && !TONES[rawTone])           localStorage.setItem('sgr-tone',      savedTone)
-if (rawFontPair && !FONT_PAIRS[rawFontPair])  localStorage.setItem('sgr-font-pair', savedFontPair)
-applyTheme(savedTheme, savedTone, savedFontPair)
+const savedFontPair = (rawFontPair && FONT_PAIRS[rawFontPair]) ? rawFontPair : DEFAULT_FONT_PAIR
+if (rawFontPair && !FONT_PAIRS[rawFontPair]) localStorage.setItem('sgr-font-pair', savedFontPair)
+
+// Apply arcoíris accent override inline (used in actions below)
+function _applyArcoirisAccent(theme) {
+  if (theme !== 'arcoiris') return
+  const path = window.location.pathname
+  const key  = Object.keys(ARCOIRIS_ACCENTS).find(k => path.startsWith(k)) || '/'
+  const { accent, light, deep } = ARCOIRIS_ACCENTS[key]
+  const root = document.documentElement
+  root.style.setProperty('--accent',       accent)
+  root.style.setProperty('--accent-light', light)
+  root.style.setProperty('--accent-deep',  deep)
+}
+
+// Apply the starting section's theme immediately before first render
+const startSection = pathToSection(window.location.pathname)
+const startTheme   = initialSectionThemes[startSection]
+const startTone    = initialSectionTones[startSection]
+applyTheme(startTheme, startTone, savedFontPair)
+_applyArcoirisAccent(startTheme)
 
 const savedLang     = localStorage.getItem('sgr-lang')     || 'es'
 const savedUserName = localStorage.getItem('sgr-username')  || ''
@@ -29,9 +52,12 @@ const savedUserName = localStorage.getItem('sgr-username')  || ''
 export const useStore = create((set, get) => ({
   hojas:      [],
   categorias: [],
-  theme:      savedTheme,
-  tone:       savedTone,
-  fontPair:   savedFontPair,
+  theme:          startTheme,
+  tone:           startTone,
+  fontPair:       savedFontPair,
+  sectionThemes:  initialSectionThemes,
+  sectionTones:   initialSectionTones,
+  currentSection: startSection,
   lang:       savedLang,
   userName:   savedUserName,
   toast:      null,
@@ -62,11 +88,11 @@ export const useStore = create((set, get) => ({
   selectedMes:        currentMes(),
   finActiveTab:       'dashboard',
   setFinActiveTab:    (tab) => set({ finActiveTab: tab }),
-  finMovimientos:     FINANZAS.movimientos.slice(),
-  finMovimientosAll:  FINANZAS.movimientos.slice(),
-  finCuentas:         FINANZAS.cuentas,
-  finCategorias:      FINANZAS.categorias,
-  finConfig:          { dolar_oficial: 1245, fire_meta_usd: 500000 },
+  finMovimientos:     [],
+  finMovimientosAll:  [],
+  finCuentas:         [],
+  finCategorias:      [],
+  finConfig:          {},
   finNotas:           [],
   finEmergenciaSaldo: 0,
 
@@ -94,8 +120,7 @@ export const useStore = create((set, get) => ({
       set({ finMovimientos: data })
       if (DEBUG) console.log('fetchFinMovimientos:', data.length)
     } catch {
-      set({ finMovimientos: FINANZAS.movimientos.slice() })
-      if (DEBUG) console.log('fetchFinMovimientos: using mock data')
+      if (DEBUG) console.log('fetchFinMovimientos: API error, keeping current state')
     }
   },
 
@@ -123,8 +148,7 @@ export const useStore = create((set, get) => ({
       set({ finMovimientosAll: data })
       if (DEBUG) console.log('fetchFinMovimientosAll:', data.length)
     } catch {
-      set({ finMovimientosAll: FINANZAS.movimientos.slice() })
-      if (DEBUG) console.log('fetchFinMovimientosAll: using mock data')
+      if (DEBUG) console.log('fetchFinMovimientosAll: API error, keeping current state')
     }
   },
 
@@ -201,6 +225,53 @@ export const useStore = create((set, get) => ({
     if (DEBUG) console.log('updateFinCuenta:', id, saldo_ars, saldo_usd)
   },
 
+  createFinCuenta: async (nombre, tipo, color, initials) => {
+    const optimistic = { id: Date.now(), name: nombre, tipo, color, initials, ars: 0, usd: 0 }
+    set(state => ({ finCuentas: [...state.finCuentas, optimistic] }))
+    try {
+      const res = await fetch(`${API_URL}/fin/cuentas`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nombre, tipo, color, initials, saldo_ars: 0, saldo_usd: 0 }),
+      })
+      if (!res.ok) throw new Error('not ok')
+      const created = await res.json()
+      set(state => ({ finCuentas: state.finCuentas.map(c => c.id === optimistic.id ? created : c) }))
+    } catch {
+      // keep optimistic
+    }
+    if (DEBUG) console.log('createFinCuenta:', nombre, tipo)
+  },
+
+  editFinCuentaMeta: async (id, nombre, tipo, color, initials) => {
+    set(state => ({
+      finCuentas: state.finCuentas.map(c => c.id === id ? { ...c, name: nombre, tipo, color, initials } : c),
+    }))
+    try {
+      const res = await fetch(`${API_URL}/fin/cuentas/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nombre, tipo, color, initials }),
+      })
+      if (!res.ok) throw new Error('not ok')
+      const updated = await res.json()
+      set(state => ({ finCuentas: state.finCuentas.map(c => c.id === id ? { ...c, ...updated } : c) }))
+    } catch {
+      // keep optimistic
+    }
+    if (DEBUG) console.log('editFinCuentaMeta:', id, nombre)
+  },
+
+  deleteFinCuenta: async (id) => {
+    set(state => ({ finCuentas: state.finCuentas.filter(c => c.id !== id) }))
+    try {
+      await fetch(`${API_URL}/fin/cuentas/${id}`, { method: 'DELETE' })
+    } catch {
+      // offline: optimistic delete stands
+    }
+    if (DEBUG) console.log('deleteFinCuenta:', id)
+  },
+
   fetchFinCuentas: async () => {
     try {
       const res = await fetch(`${API_URL}/fin/cuentas`)
@@ -209,8 +280,7 @@ export const useStore = create((set, get) => ({
       set({ finCuentas: data })
       if (DEBUG) console.log('fetchFinCuentas:', data)
     } catch {
-      set({ finCuentas: FINANZAS.cuentas })
-      if (DEBUG) console.log('fetchFinCuentas: using mock data')
+      if (DEBUG) console.log('fetchFinCuentas: API error, keeping current state')
     }
   },
 
@@ -222,8 +292,7 @@ export const useStore = create((set, get) => ({
       set({ finCategorias: data })
       if (DEBUG) console.log('fetchFinCategorias:', data)
     } catch {
-      set({ finCategorias: FINANZAS.categorias })
-      if (DEBUG) console.log('fetchFinCategorias: using mock data')
+      if (DEBUG) console.log('fetchFinCategorias: API error, keeping current state')
     }
   },
 
@@ -235,8 +304,7 @@ export const useStore = create((set, get) => ({
       set({ finConfig: data })
       if (DEBUG) console.log('fetchFinConfig:', data)
     } catch {
-      set({ finConfig: { dolar_oficial: FINANZAS.blueRate, fire_meta_usd: 500000 } })
-      if (DEBUG) console.log('fetchFinConfig: using mock data')
+      if (DEBUG) console.log('fetchFinConfig: API error, keeping current state')
     }
   },
 
@@ -254,6 +322,34 @@ export const useStore = create((set, get) => ({
       set(state => ({ finConfig: { ...state.finConfig, [clave]: valor } }))
     }
     if (DEBUG) console.log('updateFinConfig:', clave, valor)
+  },
+
+  saveFinConfigBulk: async (updates) => {
+    try {
+      const res = await fetch(`${API_URL}/fin/config`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      })
+      if (!res.ok) throw new Error('not ok')
+      const data = await res.json()
+      set({ finConfig: data })
+    } catch {
+      set(state => ({ finConfig: { ...state.finConfig, ...updates } }))
+    }
+    if (DEBUG) console.log('saveFinConfigBulk:', Object.keys(updates))
+  },
+
+  fetchDolarCotizacion: async () => {
+    try {
+      const res = await fetch(`${API_URL}/fin/dolar/cotizacion`)
+      if (!res.ok) throw new Error('not ok')
+      const data = await res.json()
+      set({ finConfig: data })
+      if (DEBUG) console.log('fetchDolarCotizacion: ok')
+    } catch {
+      if (DEBUG) console.log('fetchDolarCotizacion: API error, keeping current state')
+    }
   },
 
   fetchFinNotas: async () => {
@@ -786,7 +882,7 @@ export const useStore = create((set, get) => ({
   },
 
   // Legacy alias — kept for backward compat
-  movimientos: FINANZAS.movimientos.slice(),
+  movimientos: [],
   addMovimiento: (mov) => {
     const id = `m_${Date.now()}`
     const full = { id, ...mov }
@@ -807,28 +903,60 @@ export const useStore = create((set, get) => ({
     if (DEBUG) console.log('lang set:', l)
   },
 
-  // --- Theme ---
+  // --- Theme (per-section) ---
   setTheme: (key) => {
-    applyTheme(key, get().tone, get().fontPair)
-    localStorage.setItem('sgr-theme', key)
-    set({ theme: key })
-    if (DEBUG) console.log('theme set:', key)
+    const { currentSection, sectionTones, fontPair } = get()
+    applyTheme(key, sectionTones[currentSection], fontPair)
+    _applyArcoirisAccent(key)
+    localStorage.setItem(`sgr-theme-${currentSection}`, key)
+    set({ theme: key, sectionThemes: { ...get().sectionThemes, [currentSection]: key } })
+    if (DEBUG) console.log('theme set:', key, 'for', currentSection)
   },
 
-  // --- Tone (modificador del theme) ---
+  // --- Tone (per-section, modificador del theme) ---
   setTone: (key) => {
-    applyTheme(get().theme, key, get().fontPair)
-    localStorage.setItem('sgr-tone', key)
-    set({ tone: key })
-    if (DEBUG) console.log('tone set:', key)
+    const { currentSection, sectionThemes, fontPair } = get()
+    const theme = sectionThemes[currentSection]
+    applyTheme(theme, key, fontPair)
+    _applyArcoirisAccent(theme)
+    localStorage.setItem(`sgr-tone-${currentSection}`, key)
+    set({ tone: key, sectionTones: { ...get().sectionTones, [currentSection]: key } })
+    if (DEBUG) console.log('tone set:', key, 'for', currentSection)
   },
 
-  // --- Font pair (independiente del tema) ---
+  // --- Font pair (global — tipografía independiente de la sección) ---
   setFontPair: (key) => {
-    applyTheme(get().theme, get().tone, key)
+    const { currentSection, sectionThemes, sectionTones } = get()
+    const theme = sectionThemes[currentSection]
+    applyTheme(theme, sectionTones[currentSection], key)
+    _applyArcoirisAccent(theme)
     localStorage.setItem('sgr-font-pair', key)
     set({ fontPair: key })
     if (DEBUG) console.log('fontPair set:', key)
+  },
+
+  // --- Switch active section (called by Layout on route change) ---
+  setCurrentSection: (section) => {
+    const { sectionThemes, sectionTones, fontPair } = get()
+    const theme = sectionThemes[section]
+    const tone  = sectionTones[section]
+    applyTheme(theme, tone, fontPair)
+    _applyArcoirisAccent(theme)
+    set({ currentSection: section, theme, tone })
+  },
+
+  // --- Set theme for a specific section (used by SettingsScreen) ---
+  setThemeForSection: (section, key) => {
+    const { currentSection, sectionTones, fontPair } = get()
+    localStorage.setItem(`sgr-theme-${section}`, key)
+    const newSectionThemes = { ...get().sectionThemes, [section]: key }
+    set({ sectionThemes: newSectionThemes })
+    if (section === currentSection) {
+      applyTheme(key, sectionTones[section], fontPair)
+      _applyArcoirisAccent(key)
+      set({ theme: key })
+    }
+    if (DEBUG) console.log('themeForSection set:', key, 'for', section)
   },
 
   // --- Toast ---

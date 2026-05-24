@@ -30,7 +30,7 @@ python mybot/bot.py   # TELEGRAM_BOT_TOKEN en .env
 SQLite y migraciones: `init_db()` al arrancar el backend (`app/db/database.py`).
 
 ### Ejecutable Windows
-Ver **`project/BUILD.md`** — PyInstaller desde `project/` → `dist/SGR/`; datos en `%APPDATA%\SGR\`.
+Ver **`project/BUILD.md`** — PyInstaller desde `project/` → `dist/SGR/`; datos en `project/database/` (fuera de `dist/`).
 
 ---
 

@@ -37,7 +37,7 @@ npm run dev                      # :5173  →  API_URL en src/config.js
 
 Bot opcional: `python mybot/bot.py` + `TELEGRAM_BOT_TOKEN` en `.env`. Build producción: `npm run build` → `frontend/dist/` (el backend puede servir estáticos).
 
-**Ejecutable Windows (.exe):** ver [`BUILD.md`](BUILD.md) — PyInstaller → `dist/SGR/`; datos de usuario en `%APPDATA%\SGR\`.
+**Ejecutable Windows (.exe):** ver [`BUILD.md`](BUILD.md) — PyInstaller → `dist/SGR/`; mismos datos que en dev en `project/database/` y `project/uploads/`.
 
 ---
 

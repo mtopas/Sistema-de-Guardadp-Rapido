@@ -1,4 +1,4 @@
-"""Rutas de bundle (PyInstaller) y datos de usuario (%APPDATA%\\SGR en Windows)."""
+"""Rutas de bundle (PyInstaller) y datos de usuario (fuera de dist/)."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 APP_NAME = "SGR"
+PORTABLE_DIR_NAME = "SGR-data"
 
 
 def is_frozen() -> bool:
@@ -25,18 +26,41 @@ def project_dir() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-def user_data_dir() -> Path:
+def _exe_dir() -> Path:
+    return Path(sys.executable).resolve().parent
+
+
+def _find_repo_data_root() -> Path | None:
+    """
+    Si el .exe está en project/dist/SGR/, los datos viven en project/
+    (database/, uploads/) — fuera de dist, versionables con git.
+    """
+    start = _exe_dir()
+    for base in (start.parent.parent, start.parent.parent.parent):
+        if (base / "database").is_dir() or (base / "database" / "app.db").is_file():
+            return base
+    return None
+
+
+def data_root() -> Path:
+    """
+    Raíz de datos del usuario.
+    - Dev: project/
+    - .exe desde el repo: project/ (detectado subiendo desde dist/SGR/)
+    - .exe portable (solo copiaste dist/SGR): carpeta SGR-data/ al lado del .exe
+    - Override: SGR_DATA_DIR
+    """
     override = os.getenv("SGR_DATA_DIR")
     if override:
         root = Path(override)
-    elif sys.platform == "win32":
-        root = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / APP_NAME
-    elif sys.platform == "darwin":
-        root = Path.home() / "Library" / "Application Support" / APP_NAME
+    elif is_frozen():
+        found = _find_repo_data_root()
+        if found:
+            root = found
+        else:
+            root = _exe_dir().parent / PORTABLE_DIR_NAME
     else:
-        xdg = os.environ.get("XDG_DATA_HOME")
-        base = Path(xdg) if xdg else Path.home() / ".local" / "share"
-        root = base / APP_NAME
+        root = project_dir()
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -48,16 +72,13 @@ def dist_directory() -> Path:
 
 
 def uploads_directory() -> Path:
-    if is_frozen():
-        path = user_data_dir() / "uploads"
-    else:
-        path = project_dir() / "uploads"
+    path = data_root() / "uploads"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def database_directory() -> Path:
-    path = user_data_dir() / "database"
+    path = data_root() / "database"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -65,6 +86,4 @@ def database_directory() -> Path:
 def resolve_db_path() -> str:
     if os.getenv("DB_PATH"):
         return os.getenv("DB_PATH")
-    if is_frozen():
-        return str(database_directory() / "app.db")
-    return str(project_dir() / "database" / "app.db")
+    return str(database_directory() / "app.db")

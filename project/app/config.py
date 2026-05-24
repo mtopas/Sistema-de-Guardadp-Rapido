@@ -2,7 +2,7 @@ import os
 
 from app.paths import is_frozen, resolve_db_path
 
-# Docker / override manual; si no, dev → project/database, .exe → %APPDATA%\SGR\database
+# Docker / override manual; si no, project/database (dev y .exe desde el repo)
 DB_PATH = os.getenv("DB_PATH") or resolve_db_path()
 
 _DEBUG_DEFAULT = "0" if is_frozen() else "1"

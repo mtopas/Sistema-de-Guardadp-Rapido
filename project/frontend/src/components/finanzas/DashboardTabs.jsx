@@ -1,5 +1,6 @@
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
+import { MONTHS } from '../../utils/months'
 
 const TABS = [
   { id: 'dashboard', key: 'dashboard' },
@@ -7,21 +8,6 @@ const TABS = [
   { id: 'fire',      key: 'fire'      },
   { id: 'ahorro',    key: 'ahorro'    },
   { id: 'datos',     key: 'datos'     },
-]
-
-const MONTHS = [
-  { v: '01', es: 'Enero',      en: 'January'   },
-  { v: '02', es: 'Febrero',    en: 'February'  },
-  { v: '03', es: 'Marzo',      en: 'March'     },
-  { v: '04', es: 'Abril',      en: 'April'     },
-  { v: '05', es: 'Mayo',       en: 'May'       },
-  { v: '06', es: 'Junio',      en: 'June'      },
-  { v: '07', es: 'Julio',      en: 'July'      },
-  { v: '08', es: 'Agosto',     en: 'August'    },
-  { v: '09', es: 'Septiembre', en: 'September' },
-  { v: '10', es: 'Octubre',    en: 'October'   },
-  { v: '11', es: 'Noviembre',  en: 'November'  },
-  { v: '12', es: 'Diciembre',  en: 'December'  },
 ]
 
 const currentYear = new Date().getFullYear()

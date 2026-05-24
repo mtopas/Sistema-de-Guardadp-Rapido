@@ -3,6 +3,8 @@ import { X } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
 
+const MODAL_H = 190  // estimated height for flip calculation
+
 export default function CompletarModal({ habitoId, fecha, existingReg, anchorRect, onClose }) {
   const lang                 = useStore(s => s.lang)
   const upsertHabitoRegistro = useStore(s => s.upsertHabitoRegistro)
@@ -21,12 +23,35 @@ export default function CompletarModal({ habitoId, fecha, existingReg, anchorRec
     return () => document.removeEventListener('mousedown', handler)
   }, [onClose])
 
-  // Position near anchor
+  // Keyboard shortcuts: 1=total, 2=parcial, Escape=close, Enter=repeat last
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.target.tagName === 'INPUT') return
+      if (e.key === 'Escape') { onClose(); return }
+      if (e.key === '1') { handle(1.0); return }
+      if (e.key === '2') { handle(0.5); return }
+      if (e.key === 'Enter') {
+        // repeat last action: if existing, keep same value; else total
+        handle(existingReg?.valor ?? 1.0)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [nota, existingReg])
+
+  // Position: flip above anchor if not enough space below
   const style = {}
   if (anchorRect) {
+    const spaceBelow = window.innerHeight - anchorRect.bottom
+    const showAbove  = spaceBelow < MODAL_H + 16
+
     style.position = 'fixed'
-    style.top = Math.min(anchorRect.bottom + 4, window.innerHeight - 220)
-    style.left = Math.min(anchorRect.left, window.innerWidth - 240)
+    style.left     = Math.min(anchorRect.left, window.innerWidth - 244)
+    if (showAbove) {
+      style.bottom = window.innerHeight - anchorRect.top + 4
+    } else {
+      style.top = anchorRect.bottom + 4
+    }
   }
 
   async function handle(valor) {
@@ -58,9 +83,12 @@ export default function CompletarModal({ habitoId, fecha, existingReg, anchorRec
         <span className="text-[12px] font-semibold" style={{ color: 'var(--text)' }}>
           {t(lang, 'habitosCompletar')}
         </span>
-        <button onClick={onClose} className="icon-btn w-6 h-6">
-          <X size={13} />
-        </button>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px]" style={{ color: 'var(--mute)' }}>1/2/↩</span>
+          <button onClick={onClose} className="icon-btn w-6 h-6">
+            <X size={13} />
+          </button>
+        </div>
       </div>
 
       <div className="flex gap-2">
@@ -97,7 +125,10 @@ export default function CompletarModal({ habitoId, fecha, existingReg, anchorRec
         placeholder={t(lang, 'habitosNota')}
         className="w-full text-[12px] px-3 py-2 rounded-xl border outline-none bg-transparent"
         style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
-        onKeyDown={e => { if (e.key === 'Escape') onClose() }}
+        onKeyDown={e => {
+          if (e.key === 'Escape') onClose()
+          if (e.key === 'Enter') handle(existingReg?.valor ?? 1.0)
+        }}
       />
 
       {existingReg && (

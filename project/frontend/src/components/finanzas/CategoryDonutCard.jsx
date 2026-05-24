@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
 import { FINANZAS, fmtARS, isTransferencia } from '../../data/finanzas'
@@ -58,6 +58,9 @@ export default function DonutCard({ type = 'expense' }) {
   const title = type === 'income' ? t(lang, 'incomesByCategory') : t(lang, 'expensesByCategory')
   const accentColor = type === 'income' ? 'var(--income)' : 'var(--expense)'
 
+  const [hoveredCat, setHoveredCat] = useState(null)
+  const hoveredData = hoveredCat != null ? cats[hoveredCat] : null
+
   const R = 46
   const SW = 10
   const C = 2 * Math.PI * R
@@ -73,29 +76,53 @@ export default function DonutCard({ type = 'expense' }) {
             const dash   = (c.pct / 100) * C
             const offset = -((acc / 100) * C)
             acc += c.pct
+            const isHovered = hoveredCat === i
             return (
               <circle
                 key={i}
                 cx="50" cy="50" r={R}
                 fill="none"
                 stroke={c.color}
-                strokeWidth={SW}
+                strokeWidth={isHovered ? SW + 3 : SW}
                 strokeDasharray={`${dash} ${C - dash}`}
                 strokeDashoffset={offset}
                 strokeLinecap="butt"
+                style={{
+                  cursor: 'pointer',
+                  transition: 'stroke-width 0.15s ease, opacity 0.15s ease',
+                  opacity: hoveredCat != null && !isHovered ? 0.4 : 1,
+                }}
+                onMouseEnter={() => setHoveredCat(i)}
+                onMouseLeave={() => setHoveredCat(null)}
               />
             )
           })}
         </svg>
-        {/* Center label */}
+        {/* Center label — shows hovered category or total */}
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-          <div className="text-[9.5px] uppercase tracking-wider" style={{ color: 'var(--subtext)' }}>Total</div>
-          <div
-            className="serif italic font-semibold tnum leading-tight"
-            style={{ fontSize: 15, color: accentColor }}
-          >
-            {fmtARS(total)}
-          </div>
+          {hoveredData ? (
+            <>
+              <div className="text-[9px] uppercase tracking-wider truncate max-w-[80px] text-center"
+                style={{ color: hoveredData.color }}>
+                {hoveredData.name}
+              </div>
+              <div className="serif italic font-semibold tnum leading-tight"
+                style={{ fontSize: 14, color: hoveredData.color }}>
+                {fmtARS(hoveredData.amount)}
+              </div>
+              <div className="text-[10px] tnum" style={{ color: 'var(--subtext)' }}>
+                {hoveredData.pct}%
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-[9.5px] uppercase tracking-wider" style={{ color: 'var(--subtext)' }}>Total</div>
+              <div className="serif italic font-semibold tnum leading-tight"
+                style={{ fontSize: 15, color: accentColor }}>
+                {fmtARS(total)}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -113,14 +140,18 @@ export default function DonutCard({ type = 'expense' }) {
 
         <div className="flex flex-col gap-1.5 mt-1">
           {cats.map((c, i) => (
-            <div key={c.name} className="flex items-center gap-2">
-              <span
-                className="shrink-0 rounded-sm"
-                style={{ width: 8, height: 8, background: c.color }}
-              />
-              <span className="flex-1 truncate text-[12px]" style={{ color: 'var(--text)' }}>
-                {c.name}
-              </span>
+            <div
+              key={c.name}
+              className="flex items-center gap-2 rounded-lg px-1 transition-all cursor-default"
+              style={{
+                opacity: hoveredCat != null && hoveredCat !== i ? 0.45 : 1,
+                background: hoveredCat === i ? `color-mix(in oklch, ${c.color} 10%, transparent)` : 'transparent',
+              }}
+              onMouseEnter={() => setHoveredCat(i)}
+              onMouseLeave={() => setHoveredCat(null)}
+            >
+              <span className="shrink-0 rounded-sm" style={{ width: 8, height: 8, background: c.color }} />
+              <span className="flex-1 truncate text-[12px]" style={{ color: 'var(--text)' }}>{c.name}</span>
               <span className="mono tnum text-[11px] shrink-0" style={{ color: 'var(--subtext)', minWidth: 28, textAlign: 'right' }}>
                 {c.pct}%
               </span>

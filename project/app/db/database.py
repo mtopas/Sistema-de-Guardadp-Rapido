@@ -394,11 +394,13 @@ def _seed_finanzas(cursor):
         )
 
     config = [
-        ("dolar_oficial",        "1245"),
-        ("fire_meta_usd",        "500000"),
-        ("fire_year",            "2041"),
-        ("fire_monthly_usd",     "2400"),
-        ("tasa_ahorro_objetivo", "40"),
+        ("dolar_oficial",             "1245"),
+        ("fire_meta_usd",             "500000"),
+        ("fire_year",                 "2041"),
+        ("fire_monthly_usd",          "2400"),
+        ("tasa_ahorro_objetivo",      "40"),
+        ("dolar_oficial_updated_at",  ""),
+        ("mes_cierre",                "25"),
     ]
     for entry in config:
         cursor.execute("INSERT OR IGNORE INTO fin_config (clave, valor) VALUES (?, ?)", entry)
@@ -565,3 +567,41 @@ def _apply_migrations(cursor):
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_eventos_inicio ON agenda_eventos(fecha_inicio)"
     )
+
+    # --- hojas: índices de rendimiento ---
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_hojas_categoria ON hojas(categoria_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_hojas_fecha ON hojas(fecha DESC)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_hojas_tipo ON hojas(tipo)")
+
+    # --- fin_movimientos: índices de rendimiento ---
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_fin_mov_fecha ON fin_movimientos(fecha)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_fin_mov_categoria ON fin_movimientos(categoria_id)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_fin_mov_tipo_fecha ON fin_movimientos(tipo, fecha)"
+    )
+
+    # --- fin_config: claves nuevas ---
+    for clave, default in [("dolar_oficial_updated_at", ""), ("mes_cierre", "25")]:
+        cursor.execute(
+            "INSERT OR IGNORE INTO fin_config (clave, valor) VALUES (?, ?)",
+            (clave, default),
+        )
+
+    # --- habitos: archivado_en, notificar, minutos_antes ---
+    hab_cols = _get_columns(cursor, "habitos")
+    if "archivado_en" not in hab_cols:
+        cursor.execute("ALTER TABLE habitos ADD COLUMN archivado_en TEXT")
+        if DEBUG:
+            print("migration: habitos.archivado_en added")
+    if "notificar" not in hab_cols:
+        cursor.execute("ALTER TABLE habitos ADD COLUMN notificar INTEGER NOT NULL DEFAULT 0")
+        if DEBUG:
+            print("migration: habitos.notificar added")
+    if "minutos_antes" not in hab_cols:
+        cursor.execute("ALTER TABLE habitos ADD COLUMN minutos_antes INTEGER NOT NULL DEFAULT 0")
+        if DEBUG:
+            print("migration: habitos.minutos_antes added")

@@ -1,8 +1,11 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, Maximize2, Minimize2, X, Calendar, Pencil, FileText, Link as LinkIcon, Image as ImageIcon } from 'lucide-react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
+import Link from '@tiptap/extension-link'
+import Placeholder from '@tiptap/extension-placeholder'
 import { useStore } from '../store/useStore'
 import { t } from '../utils/i18n'
 import { BRANCH_COLORS } from '../utils/themes'
@@ -127,19 +130,26 @@ function NoteCard({ hoja, color, onClick }) {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function RightPanel({ openHojaId, onClose }) {
+  const navigate      = useNavigate()
   const hojas         = useStore(s => s.hojas)
   const categorias    = useStore(s => s.categorias)
   const updateApuntes = useStore(s => s.updateApuntes)
   const updateIcono   = useStore(s => s.updateIcono)
+  const updateHoja    = useStore(s => s.updateHoja)
   const showToast     = useStore(s => s.showToast)
   const lang          = useStore(s => s.lang)
+  const agendaEventos = useStore(s => s.agendaEventos)
 
-  const [expanded,       setExpanded]       = useState(false)
-  const [view,           setView]           = useState('latest') // 'latest' | 'note'
-  const [selHoja,        setSelHoja]        = useState(null)
-  const [saving,         setSaving]         = useState(false)
-  const [savedFlash,     setSavedFlash]     = useState(false)
-  const [iconPickerOpen, setIconPickerOpen] = useState(false)
+  const [expanded,        setExpanded]       = useState(false)
+  const [view,            setView]           = useState('latest') // 'latest' | 'note'
+  const [selHoja,         setSelHoja]        = useState(null)
+  const [saving,          setSaving]         = useState(false)
+  const [savedFlash,      setSavedFlash]     = useState(false)
+  const [saveError,       setSaveError]      = useState(false)
+  const [iconPickerOpen,  setIconPickerOpen] = useState(false)
+  const [editContenido,   setEditContenido]  = useState(false)
+  const [contenidoDraft,  setContenidoDraft] = useState('')
+  const [editCategoria,   setEditCategoria]  = useState(false)
   const iconPickerRef = useRef(null)
   const saveTimerRef  = useRef(null)
   const pendingRef    = useRef(null)
@@ -212,9 +222,10 @@ export default function RightPanel({ openHojaId, onClose }) {
     try {
       await updateApuntes(target.id, apuntes)
       setSavedFlash(true)
+      setSaveError(false)
       setTimeout(() => setSavedFlash(false), 1200)
     } catch (_) {
-      showToast('Error', 'error')
+      setSaveError(true)
     } finally {
       setSaving(false)
     }
@@ -235,9 +246,14 @@ export default function RightPanel({ openHojaId, onClose }) {
   }, [selHoja?.id, flushSave])
 
   const editor = useEditor({
-    extensions: [StarterKit, Underline],
+    extensions: [
+      StarterKit,
+      Underline,
+      Link.configure({ openOnClick: true, autolink: true, linkOnPaste: true }),
+      Placeholder.configure({ placeholder: 'Apuntes, #tags, ideas…' }),
+    ],
     content: editorInitContent,
-    editorProps: { attributes: { class: 'outline-none min-h-[140px] text-sm leading-relaxed' } },
+    editorProps: { attributes: { class: 'outline-none min-h-[140px] text-sm leading-relaxed tiptap-editor' } },
     onUpdate: ({ editor }) => {
       const imgPrefix = selHojaRef.current?.tipo === 'foto'
         ? (selHojaRef.current.apuntes?.match(/^(<img\b[^>]*\/?>)/i)?.[1] ?? '')
@@ -305,7 +321,13 @@ export default function RightPanel({ openHojaId, onClose }) {
           </span>
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0">
-          {view === 'note' && (saving || savedFlash) && (
+          {view === 'note' && saveError && !saving && (
+            <span className="text-[10px] flex items-center gap-1" style={{ color: 'var(--warning)' }}
+              title="El último guardado falló. Se reintentará al editar.">
+              ⚠ Sin guardar
+            </span>
+          )}
+          {view === 'note' && (saving || savedFlash) && !saveError && (
             <span className="text-[10px]" style={{ color: savedFlash ? dotColor : 'var(--subtext)' }}>
               {saving ? t(lang, 'saving') : t(lang, 'saved')}
             </span>
@@ -337,6 +359,41 @@ export default function RightPanel({ openHojaId, onClose }) {
         {/* Latest leaves */}
         {view === 'latest' && (
           <div className="px-3 py-3 space-y-2">
+            {/* Mini agenda widget */}
+            {(() => {
+              const todayISO = new Date().toISOString().slice(0, 10)
+              const todayEvts = agendaEventos
+                .filter(e => e.fecha_inicio?.slice(0, 10) === todayISO && !e.todo_el_dia)
+                .sort((a, b) => a.fecha_inicio.localeCompare(b.fecha_inicio))
+                .slice(0, 4)
+              if (!todayEvts.length) return null
+              return (
+                <div className="panel-strong rounded-xl p-3 mb-1">
+                  <button
+                    className="flex items-center gap-1.5 w-full mb-2"
+                    onClick={() => navigate('/agenda?tab=hoy')}
+                  >
+                    <Calendar size={11} style={{ color: 'var(--accent)' }} />
+                    <span className="text-[10.5px] uppercase tracking-widest font-semibold" style={{ color: 'var(--accent)' }}>
+                      Agenda hoy
+                    </span>
+                  </button>
+                  <div className="flex flex-col gap-1">
+                    {todayEvts.map(e => (
+                      <button
+                        key={e.id}
+                        className="flex items-center gap-2 text-left w-full rounded-lg px-1.5 py-1 hover:bg-[var(--surface)]"
+                        onClick={() => navigate('/agenda?tab=hoy')}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: e.calendario_color || 'var(--accent)' }} />
+                        <span className="text-[11.5px] flex-1 truncate" style={{ color: 'var(--text)' }}>{e.titulo}</span>
+                        <span className="mono text-[10px]" style={{ color: 'var(--mute)' }}>{e.fecha_inicio?.slice(11, 16)}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
             {latestHojas.length === 0 && (
               <p className="text-xs text-center mt-8" style={{ color: 'var(--subtext)' }}>
                 {t(lang, 'noHojas')}
@@ -402,25 +459,77 @@ export default function RightPanel({ openHojaId, onClose }) {
               </div>
             </div>
 
-            {/* Row 2: title */}
-            <h2
-              className="text-[18px] leading-tight font-semibold"
-              style={{ color: 'var(--text)', fontFamily: 'var(--font-serif)' }}
-            >
-              {title}
-            </h2>
+            {/* Row 2: title (editable on click) */}
+            {editContenido ? (
+              <input
+                autoFocus
+                className="text-[17px] leading-tight font-semibold w-full rounded-lg px-2 py-1 border outline-none"
+                style={{ color: 'var(--text)', fontFamily: 'var(--font-serif)', borderColor: dotColor, background: 'transparent' }}
+                value={contenidoDraft}
+                onChange={e => setContenidoDraft(e.target.value)}
+                onBlur={async () => {
+                  setEditContenido(false)
+                  if (contenidoDraft.trim() && contenidoDraft.trim() !== selHoja.contenido) {
+                    await updateHoja(selHoja.id, { contenido: contenidoDraft.trim() })
+                  }
+                }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') e.currentTarget.blur()
+                  if (e.key === 'Escape') { setEditContenido(false) }
+                }}
+              />
+            ) : (
+              <h2
+                className="text-[18px] leading-tight font-semibold cursor-text rounded-lg px-1 -mx-1 transition-colors"
+                style={{ color: 'var(--text)', fontFamily: 'var(--font-serif)' }}
+                title="Click para editar"
+                onClick={() => { setEditContenido(true); setContenidoDraft(selHoja.contenido ?? '') }}
+                onMouseEnter={e => e.currentTarget.style.background = 'color-mix(in oklch, var(--surface) 60%, transparent)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+              >
+                {title || '—'}
+              </h2>
+            )}
 
-            {/* Row 3: location breadcrumb */}
+            {/* Row 3: breadcrumb (clickeable → muestra select de categoría) */}
             <div className="flex items-center gap-1 text-[11px] flex-wrap" style={{ color: 'var(--subtext)' }}>
-              {breadcrumb.length === 0 && <span>—</span>}
-              {breadcrumb.map((c, idx) => (
-                <span key={c.id} className="inline-flex items-center gap-1">
-                  {idx > 0 && <ChevronRight size={10} style={{ opacity: 0.6 }} />}
-                  <span style={{ color: idx === breadcrumb.length - 1 ? dotColor : 'var(--subtext)' }}>
-                    {c.icono ? `${c.icono} ` : ''}{c.nombre}
-                  </span>
-                </span>
-              ))}
+              {editCategoria ? (
+                <>
+                  <select
+                    autoFocus
+                    value={selHoja.categoria_id}
+                    className="text-[11px] rounded-lg px-2 py-1 border outline-none"
+                    style={{ borderColor: dotColor, background: 'var(--surface)', color: 'var(--text)' }}
+                    onChange={async e => {
+                      const newCatId = parseInt(e.target.value)
+                      setEditCategoria(false)
+                      await updateHoja(selHoja.id, { categoria_id: newCatId })
+                    }}
+                    onBlur={() => setEditCategoria(false)}
+                  >
+                    {categorias.map(c => (
+                      <option key={c.id} value={c.id}>{c.icono ? `${c.icono} ` : ''}{c.nombre}</option>
+                    ))}
+                  </select>
+                </>
+              ) : (
+                <>
+                  {breadcrumb.length === 0 && <span>—</span>}
+                  {breadcrumb.map((c, idx) => (
+                    <span key={c.id} className="inline-flex items-center gap-1">
+                      {idx > 0 && <ChevronRight size={10} style={{ opacity: 0.6 }} />}
+                      <button
+                        className="hover:underline transition-colors"
+                        style={{ color: idx === breadcrumb.length - 1 ? dotColor : 'var(--subtext)' }}
+                        onClick={() => setEditCategoria(true)}
+                        title="Cambiar categoría"
+                      >
+                        {c.icono ? `${c.icono} ` : ''}{c.nombre}
+                      </button>
+                    </span>
+                  ))}
+                </>
+              )}
               <span className="mx-1.5" style={{ opacity: 0.5 }}>·</span>
               <Calendar size={10} />
               <span>

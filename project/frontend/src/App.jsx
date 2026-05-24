@@ -46,7 +46,9 @@ export default function App() {
     fetchAgendaTareas()
     fetchAgendaHorarioFacultad()
     fetchHabitos()
-    fetchHabitosRegistros()
+    const desde120 = new Date(); desde120.setDate(desde120.getDate() - 120)
+    const desdeStr = desde120.toISOString().slice(0, 10)
+    fetchHabitosRegistros(desdeStr)
   }, [])
 
   return (

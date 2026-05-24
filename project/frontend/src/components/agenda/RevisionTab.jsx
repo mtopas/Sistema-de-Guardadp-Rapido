@@ -1,8 +1,10 @@
 import { useState } from 'react'
-import { ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, Clock, Download } from 'lucide-react'
+import { ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, Clock, Download, Printer } from 'lucide-react'
 import { useStore } from '../../store/useStore'
+import { useShallow } from 'zustand/react/shallow'
 import { t } from '../../utils/i18n'
 import { toLocalISODate } from './agendaUtils'
+import { isScheduled } from '../habitos/habitosUtils'
 
 function getWeekBounds(offset) {
   const today = new Date()
@@ -60,23 +62,36 @@ function exportMarkdown(weekLabel, completadas, incompletas, vencidas, porCalend
 }
 
 export default function RevisionTab() {
-  const lang          = useStore(s => s.lang)
-  const agendaTareas  = useStore(s => s.agendaTareas)
-  const agendaEventos = useStore(s => s.agendaEventos)
-  const agendaCalendarios = useStore(s => s.agendaCalendarios)
-  const agendaHorarioFacultad = useStore(s => s.agendaHorarioFacultad)
+  const { lang, agendaTareas, agendaEventos, agendaCalendarios, agendaHorarioFacultad, habitos, finMovimientosAll } = useStore(
+    useShallow(s => ({
+      lang:                s.lang,
+      agendaTareas:        s.agendaTareas,
+      agendaEventos:       s.agendaEventos,
+      agendaCalendarios:   s.agendaCalendarios,
+      agendaHorarioFacultad: s.agendaHorarioFacultad,
+      habitos:             s.habitos,
+      finMovimientosAll:   s.finMovimientosAll,
+    }))
+  )
 
   const [weekOff, setWeekOff] = useState(-1)
 
-  const { monday, sunday } = getWeekBounds(weekOff)
-  const mondayISO = toLocalISODate(monday)
-  const sundayISO = toLocalISODate(sunday)
+  const { monday, sunday }             = getWeekBounds(weekOff)
+  const { monday: prevMonday, sunday: prevSunday } = getWeekBounds(weekOff - 1)
+  const mondayISO    = toLocalISODate(monday)
+  const sundayISO    = toLocalISODate(sunday)
+  const prevMondayISO = toLocalISODate(prevMonday)
+  const prevSundayISO = toLocalISODate(prevSunday)
 
   const weekLabel = `${monday.toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })} – ${sunday.toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' })}`
 
   const tareasSemana  = agendaTareas.filter(t => t.fecha_opcional && t.fecha_opcional >= mondayISO && t.fecha_opcional <= sundayISO)
   const completadas   = tareasSemana.filter(t => t.completada)
   const incompletas   = tareasSemana.filter(t => !t.completada)
+
+  const prevTareasSemana = agendaTareas.filter(t => t.fecha_opcional && t.fecha_opcional >= prevMondayISO && t.fecha_opcional <= prevSundayISO)
+  const prevCompletadas  = prevTareasSemana.filter(t => t.completada)
+  const completadasDelta = completadas.length - prevCompletadas.length
 
   const today = new Date()
   const sevenAgo = new Date(today)
@@ -109,7 +124,13 @@ export default function RevisionTab() {
     return acc + (t.duracion_estimada || 30)
   }, 0)
 
-  const plannedMinutes = plannedMinutosEventos + plannedMinutosBloques
+  // Hábitos con hora fija: 30 min cada uno por día programado en la semana
+  const plannedMinutosHabitos = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(monday); d.setDate(monday.getDate() + i)
+    return habitos.filter(h => h.activo && h.hora && isScheduled(h, d)).length
+  }).reduce((acc, n) => acc + n * 30, 0)
+
+  const plannedMinutes = plannedMinutosEventos + plannedMinutosBloques + plannedMinutosHabitos
   const pctPlanned     = Math.min(100, Math.round((plannedMinutes / AWAKE_MINUTES_WEEK) * 100))
 
   // Tiempo por calendario
@@ -136,6 +157,14 @@ export default function RevisionTab() {
   const totalTracked = Object.values(calStats).reduce((s, c) => s + c.minutes, 0)
 
   // Sparkline: completadas por día (lun–dom)
+  // Weekly financial summary (Finanzas ↔ Agenda)
+  const movsSemana = finMovimientosAll.filter(m => {
+    const fecha = m.fecha?.slice(0, 10)
+    return fecha && fecha >= mondayISO && fecha <= sundayISO
+  })
+  const ingresosWeek = movsSemana.filter(m => (m.tipo || m.type) === 'income' || (m.tipo || m.type) === 'ingreso').reduce((s, m) => s + Math.abs(m.monto ?? m.amount ?? 0), 0)
+  const gastosWeek   = movsSemana.filter(m => (m.tipo || m.type) === 'expense' || (m.tipo || m.type) === 'gasto').reduce((s, m) => s + Math.abs(m.monto ?? m.amount ?? 0), 0)
+
   const sparkData = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(monday)
     d.setDate(monday.getDate() + i)
@@ -153,7 +182,7 @@ export default function RevisionTab() {
             <ChevronLeft size={13} />
           </button>
           <div className="flex-1 text-[11px] text-center mono" style={{ color: 'var(--subtext)' }}>
-            {weekOff === -1 ? 'Semana pasada' : weekOff === 0 ? 'Esta semana' : `${weekOff > 0 ? '+' : ''}${weekOff} sem`}
+            {weekOff === -1 ? t(lang, 'agendaSemPasada') : weekOff === 0 ? t(lang, 'agendaEstaSem') : `${weekOff > 0 ? '+' : ''}${weekOff} sem`}
           </div>
           <button className="icon-btn" style={{ width: 26, height: 26 }} onClick={() => setWeekOff(w => w + 1)}>
             <ChevronRight size={13} />
@@ -166,16 +195,28 @@ export default function RevisionTab() {
       <div className="flex-1 min-w-0 overflow-y-auto panel-scroll px-6 py-5">
         <div className="flex items-center justify-between mb-4">
           <div className="label capitalize">{weekLabel}</div>
-          <button
-            className="flex items-center gap-1.5 text-[11.5px] px-2.5 py-1.5 rounded-lg border transition-colors"
-            style={{ borderColor: 'var(--border)', color: 'var(--subtext)' }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)' }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--subtext)' }}
-            onClick={() => exportMarkdown(weekLabel, completadas, incompletas, vencidas, calStats)}
-          >
-            <Download size={12} />
-            Exportar
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              className="flex items-center gap-1.5 text-[11.5px] px-2.5 py-1.5 rounded-lg border transition-colors"
+              style={{ borderColor: 'var(--border)', color: 'var(--subtext)' }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)' }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--subtext)' }}
+              onClick={() => exportMarkdown(weekLabel, completadas, incompletas, vencidas, calStats)}
+            >
+              <Download size={12} />
+              {t(lang, 'agendaExportar')}
+            </button>
+            <button
+              className="flex items-center gap-1.5 text-[11.5px] px-2.5 py-1.5 rounded-lg border transition-colors"
+              style={{ borderColor: 'var(--border)', color: 'var(--subtext)' }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)' }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--subtext)' }}
+              onClick={() => window.print()}
+            >
+              <Printer size={12} />
+              {t(lang, 'agendaPdfExport')}
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-4 mb-6">
@@ -189,6 +230,11 @@ export default function RevisionTab() {
             <div className="text-[11.5px] mt-1" style={{ color: 'var(--subtext)' }}>
               de {tareasSemana.length} tareas en la semana
             </div>
+            {prevTareasSemana.length > 0 && (
+              <div className="text-[10.5px] mt-0.5 mono" style={{ color: completadasDelta >= 0 ? 'var(--accent)' : '#ef4444' }}>
+                {completadasDelta >= 0 ? '+' : ''}{completadasDelta} {t(lang, 'agendaCompararSem')}
+              </div>
+            )}
             {completadas.length > 0 && (
               <div className="mt-3 flex flex-col gap-1">
                 {completadas.slice(0, 4).map(tt => (
@@ -230,7 +276,7 @@ export default function RevisionTab() {
         {/* Sparkline */}
         <div className="panel-strong p-4 rounded-xl mb-6">
           <div className="flex items-center justify-between mb-3">
-            <div className="label">Tareas completadas por día</div>
+            <div className="label">{t(lang, 'agendaCompletadasPorDia')}</div>
             <Sparkline data={sparkData} width={140} height={28} />
           </div>
           <div className="flex justify-between">
@@ -272,16 +318,51 @@ export default function RevisionTab() {
           </div>
           <div className="flex items-end gap-3 mb-2">
             <div className="text-[32px] font-bold tnum" style={{ color: 'var(--accent)' }}>{pctPlanned}%</div>
-            {plannedMinutosBloques > 0 && (
-              <div className="text-[11px] mb-2" style={{ color: 'var(--subtext)' }}>
-                ({Math.round(plannedMinutosEventos/60)}h eventos + {Math.round(plannedMinutosBloques/60)}h bloques)
-              </div>
-            )}
+            <div className="text-[11px] mb-2 flex flex-col gap-0.5" style={{ color: 'var(--subtext)' }}>
+              {plannedMinutosEventos > 0 && <span>{Math.round(plannedMinutosEventos/60)}h eventos</span>}
+              {plannedMinutosBloques > 0 && <span>{Math.round(plannedMinutosBloques/60)}h bloques</span>}
+              {plannedMinutosHabitos > 0 && <span>{Math.round(plannedMinutosHabitos/60)}h {t(lang, 'agendaHabitosEnPlan')}</span>}
+            </div>
           </div>
-          <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--surface)' }}>
+          <div
+            className="h-2 rounded-full overflow-hidden"
+            role="progressbar"
+            aria-valuenow={pctPlanned}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label={`${pctPlanned}% tiempo planificado`}
+            style={{ background: 'var(--surface)' }}
+          >
             <div className="h-full rounded-full transition-all" style={{ width: `${pctPlanned}%`, background: 'var(--accent)' }} />
           </div>
         </div>
+
+        {/* Finanzas ↔ Agenda: weekly financial summary */}
+        {(ingresosWeek > 0 || gastosWeek > 0) && (
+          <div className="panel-strong p-4 rounded-xl mb-6">
+            <div className="label mb-3">Finanzas · semana</div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <div className="text-[10.5px] mb-0.5" style={{ color: 'var(--subtext)' }}>Ingresos</div>
+                <div className="text-[16px] font-bold tnum" style={{ color: '#059669' }}>
+                  ${Math.round(ingresosWeek).toLocaleString('es-AR')}
+                </div>
+              </div>
+              <div>
+                <div className="text-[10.5px] mb-0.5" style={{ color: 'var(--subtext)' }}>Gastos</div>
+                <div className="text-[16px] font-bold tnum" style={{ color: '#ef4444' }}>
+                  ${Math.round(gastosWeek).toLocaleString('es-AR')}
+                </div>
+              </div>
+              <div>
+                <div className="text-[10.5px] mb-0.5" style={{ color: 'var(--subtext)' }}>Neto</div>
+                <div className="text-[16px] font-bold tnum" style={{ color: ingresosWeek - gastosWeek >= 0 ? '#059669' : '#ef4444' }}>
+                  ${Math.round(ingresosWeek - gastosWeek).toLocaleString('es-AR')}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Right: by calendar */}
@@ -303,7 +384,15 @@ export default function RevisionTab() {
                     </div>
                     <span className="mono text-[11px]" style={{ color: 'var(--subtext)' }}>{hrs}h</span>
                   </div>
-                  <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--surface)' }}>
+                  <div
+                    className="h-1.5 rounded-full overflow-hidden"
+                    role="progressbar"
+                    aria-valuenow={pct}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label={`${cal.nombre}: ${pct}%`}
+                    style={{ background: 'var(--surface)' }}
+                  >
                     <div className="h-full rounded-full" style={{ width: `${pct}%`, background: cal.color }} />
                   </div>
                   <div className="text-[10.5px] mt-0.5 text-right" style={{ color: 'var(--mute)' }}>{pct}%</div>

@@ -1,13 +1,15 @@
-import { useState } from 'react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { useLocation } from 'react-router-dom'
+import { ChevronLeft, ChevronRight, Edit2 } from 'lucide-react'
 import { useStore } from '../../store/useStore'
+import { useShallow } from 'zustand/react/shallow'
 import { t } from '../../utils/i18n'
 import MiniCalendar from './MiniCalendar'
 import EventoModal from './EventoModal'
 import TareaModal from './TareaModal'
+import AgendaContextMenu from './AgendaContextMenu'
 import { toLocalISODate } from './agendaUtils'
 
-const WEEKDAYS_ES = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
 const HOURS_SEMANA = Array.from({ length: 16 }, (_, i) => i + 7) // 7–22
 
 function buildMonthCells(year, month) {
@@ -38,21 +40,81 @@ function buildWeekDays(year, month, weekOffset) {
 }
 
 export default function MesTab() {
-  const lang              = useStore(s => s.lang)
-  const agendaEventos     = useStore(s => s.agendaEventos)
-  const agendaTareas      = useStore(s => s.agendaTareas)
-  const agendaCalendarios = useStore(s => s.agendaCalendarios)
-  const updateAgendaCalendario = useStore(s => s.updateAgendaCalendario)
+  const { lang, agendaEventos, agendaTareas, agendaCalendarios, agendaHorarioFacultad, updateAgendaCalendario, fetchAgendaEventos, deleteAgendaEvento, deleteAgendaTarea, addAgendaEvento } = useStore(
+    useShallow(s => ({
+      lang:                  s.lang,
+      agendaEventos:         s.agendaEventos,
+      agendaTareas:          s.agendaTareas,
+      agendaCalendarios:     s.agendaCalendarios,
+      agendaHorarioFacultad: s.agendaHorarioFacultad,
+      updateAgendaCalendario: s.updateAgendaCalendario,
+      fetchAgendaEventos:    s.fetchAgendaEventos,
+      deleteAgendaEvento:    s.deleteAgendaEvento,
+      deleteAgendaTarea:     s.deleteAgendaTarea,
+      addAgendaEvento:       s.addAgendaEvento,
+    }))
+  )
+
+  const location = useLocation()
+  const searchParams = new URLSearchParams(location.search)
+  const highlightId   = searchParams.get('highlight')
+  const highlightDate = searchParams.get('highlightDate')
 
   const today = new Date()
-  const [year, setYear]       = useState(today.getFullYear())
-  const [month, setMonth]     = useState(today.getMonth())
-  const [vista, setVista]     = useState('mes') // 'mes' | 'semana'
+
+  // Jump to the highlighted item's month on mount / when highlight changes
+  const [year, setYear]       = useState(() => {
+    if (highlightDate?.length >= 7) return parseInt(highlightDate.slice(0, 4))
+    return today.getFullYear()
+  })
+  const [month, setMonth]     = useState(() => {
+    if (highlightDate?.length >= 7) return parseInt(highlightDate.slice(5, 7)) - 1
+    return today.getMonth()
+  })
+  const [vista, setVista]     = useState(() => localStorage.getItem('sgr-agenda-vista') || 'mes')
   const [weekOff, setWeekOff] = useState(0)
 
-  const [newEvento, setNewEvento] = useState(null) // { fecha } | null
-  const [newTarea, setNewTarea]   = useState(null)
-  const [selected, setSelected]   = useState(null) // { type, item }
+  // Persist vista selection
+  const setVistaPersisted = (v) => { setVista(v); localStorage.setItem('sgr-agenda-vista', v) }
+
+  const [newEvento, setNewEvento]   = useState(null) // { fecha } | null
+  const [newTarea, setNewTarea]     = useState(null)
+  const [selected, setSelected]     = useState(null) // { type, item }
+  const [editSelected, setEditSelected] = useState(false)
+  const [contextMenu, setContextMenu] = useState(null) // { x, y, entry }
+  const lastFetchedMonth = useRef(null)
+
+  const openContextMenu = (e, entry) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setContextMenu({ x: e.clientX, y: e.clientY, entry })
+  }
+
+  const buildContextItems = (entry) => {
+    if (!entry) return []
+    if (entry.type === 'evento') {
+      return [
+        { label: 'Editar', onClick: () => { setSelected(entry); setEditSelected(true) } },
+        { label: 'Duplicar', onClick: () => addAgendaEvento({ ...entry.item, id: undefined, titulo: `${entry.item.titulo} (copia)`, se_repite: false, regla_repeticion: null }) },
+        { separator: true },
+        { label: 'Eliminar', danger: true, onClick: () => deleteAgendaEvento(entry.item.id) },
+      ]
+    }
+    return [
+      { label: 'Editar', onClick: () => { setSelected(entry); setEditSelected(true) } },
+      { separator: true },
+      { label: 'Eliminar', danger: true, onClick: () => deleteAgendaTarea(entry.item.id) },
+    ]
+  }
+
+  useEffect(() => {
+    const key = `${year}-${month}`
+    if (lastFetchedMonth.current === key) return
+    lastFetchedMonth.current = key
+    const desde = toLocalISODate(new Date(year, month - 1, 1))
+    const hasta  = toLocalISODate(new Date(year, month + 2, 0))
+    fetchAgendaEventos(desde, hasta)
+  }, [year, month, fetchAgendaEventos])
 
   const goMonth = (dir) => {
     let m = month + dir
@@ -67,6 +129,7 @@ export default function MesTab() {
   }
 
   const monthName = new Date(year, month, 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })
+  const WEEKDAYS = t(lang, 'agendaDiasLargos').split(',')
 
   // Build event/task map by ISO date
   const byDate = {}
@@ -176,7 +239,7 @@ export default function MesTab() {
                   fontWeight: vista === v ? 600 : 500,
                   boxShadow: vista === v ? '0 1px 0 var(--border)' : 'none',
                 }}
-                onClick={() => setVista(v)}
+                onClick={() => setVistaPersisted(v)}
               >
                 {label}
               </button>
@@ -188,7 +251,7 @@ export default function MesTab() {
           <div className="flex-1 flex flex-col overflow-hidden">
             {/* Weekday headers */}
             <div className="grid grid-cols-7 border-b shrink-0" style={{ borderColor: 'var(--border)' }}>
-              {WEEKDAYS_ES.map((d, i) => (
+              {WEEKDAYS.map((d, i) => (
                 <div key={d} className="px-3 py-2 text-[10.5px] uppercase tracking-widest"
                   style={{ color: i >= 5 ? 'var(--mute)' : 'var(--subtext)', borderLeft: i ? '1px solid var(--border)' : 'none' }}>
                   {d}
@@ -196,8 +259,8 @@ export default function MesTab() {
               ))}
             </div>
 
-            {/* Month cells */}
-            <div className="flex-1 overflow-y-auto panel-scroll grid grid-cols-7 grid-rows-6">
+            {/* Month cells — key triggers remount (fade-in) on month change */}
+            <div key={`${year}-${month}`} className="flex-1 overflow-y-auto panel-scroll grid grid-cols-7 grid-rows-6" style={{ animation: 'sgr-fade-in 180ms ease' }}>
               {cells.map((cell, i) => {
                 const row = Math.floor(i / 7), col = i % 7
                 const dim = cell.prev || cell.next
@@ -234,7 +297,7 @@ export default function MesTab() {
                       {entries.slice(0, 3).map((entry, j) => (
                         <div
                           key={j}
-                          className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] truncate"
+                          className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] truncate${String(entry.item.id) === highlightId ? ' sgr-highlight' : ''}`}
                           style={{
                             background: `color-mix(in oklch, ${entry.color} 18%, transparent)`,
                             borderLeft: entry.type === 'evento'
@@ -242,6 +305,7 @@ export default function MesTab() {
                               : `2px dashed ${entry.color}`,
                           }}
                           onClick={e => { e.stopPropagation(); setSelected(entry) }}
+                          onContextMenu={e => openContextMenu(e, entry)}
                         >
                           {entry.type === 'tarea' && (
                             <span style={{ fontSize: 9, color: entry.color, flexShrink: 0 }}>☐</span>
@@ -272,7 +336,7 @@ export default function MesTab() {
                 return (
                   <div key={i} className="px-2 py-2 text-center border-l" style={{ borderColor: 'var(--border)' }}>
                     <div className="text-[10.5px] uppercase" style={{ color: i >= 5 ? 'var(--mute)' : 'var(--subtext)' }}>
-                      {WEEKDAYS_ES[i].slice(0, 3)}
+                      {WEEKDAYS[i].slice(0, 3)}
                     </div>
                     <div
                       className={`text-[14px] font-semibold tnum mx-auto w-7 h-7 rounded-full grid place-items-center mt-0.5 ${isTodayCol ? 'grad-bg text-white' : ''}`}
@@ -284,6 +348,41 @@ export default function MesTab() {
                 )
               })}
             </div>
+
+            {/* All-day strip: task chips + todo-el-dia events */}
+            <div className="grid grid-cols-8 border-b shrink-0" style={{ borderColor: 'var(--border)', minHeight: 28 }}>
+              <div className="flex items-center justify-end pr-2">
+                <span className="mono text-[9px]" style={{ color: 'var(--mute)' }}>todo</span>
+              </div>
+              {weekDays.map((d, ci) => {
+                const iso = toLocalISODate(d)
+                const allDayEvts = (byDate[iso] || []).filter(e => e.type === 'evento' && e.item.todo_el_dia)
+                const tasks = agendaTareas.filter(tt => tt.fecha_opcional === iso)
+                if (!allDayEvts.length && !tasks.length) return <div key={ci} className="border-l" style={{ borderColor: 'var(--border)' }} />
+                return (
+                  <div key={ci} className="border-l p-0.5 flex flex-col gap-0.5" style={{ borderColor: 'var(--border)' }}>
+                    {allDayEvts.map((e, j) => (
+                      <div key={j} className="text-[9.5px] px-1 rounded truncate cursor-pointer"
+                        style={{ background: `color-mix(in oklch, ${e.color} 20%, transparent)`, borderLeft: `2px solid ${e.color}`, color: 'var(--text)' }}
+                        onClick={() => setSelected(e)}>
+                        {e.item.titulo}
+                      </div>
+                    ))}
+                    {tasks.slice(0, 2).map((tt, j) => (
+                      <div key={j} className="text-[9.5px] px-1 rounded truncate flex items-center gap-0.5 cursor-pointer"
+                        style={{ background: `color-mix(in oklch, ${tt.lista_color || 'var(--accent)'} 12%, transparent)`, borderLeft: `2px dashed ${tt.lista_color || 'var(--accent)'}`, color: 'var(--text)' }}
+                        onClick={() => setSelected({ type: 'tarea', color: tt.lista_color, item: tt })}>
+                        <span style={{ fontSize: 8 }}>☐</span> {tt.titulo}
+                      </div>
+                    ))}
+                    {tasks.length > 2 && (
+                      <div className="text-[9px] px-1" style={{ color: 'var(--mute)' }}>+{tasks.length - 2}</div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
             <div className="flex-1 overflow-y-auto panel-scroll">
               <div className="relative" style={{ height: HOURS_SEMANA.length * 48 }}>
                 <div className="grid grid-cols-8 absolute inset-0">
@@ -301,11 +400,28 @@ export default function MesTab() {
                   {weekDays.map((d, ci) => {
                     const iso = toLocalISODate(d)
                     const dayEntries = byDate[iso] || []
+                    const facultadDia = agendaHorarioFacultad.filter(f => f.dia_semana === ci)
                     return (
                       <div key={ci} className="relative border-l" style={{ borderColor: 'var(--border)' }}>
                         {HOURS_SEMANA.map(h => (
                           <div key={h} className="border-t" style={{ height: 48, borderColor: 'var(--border)' }} />
                         ))}
+                        {/* Facultad blocks */}
+                        {facultadDia.map((f, j) => {
+                          const [sh, sm] = f.hora_inicio.split(':').map(Number)
+                          const [eh, em] = f.hora_fin.split(':').map(Number)
+                          const top    = ((sh * 60 + sm - 7 * 60) / 60) * 48
+                          const height = Math.max(((eh * 60 + em - sh * 60 - sm) / 60) * 48, 16)
+                          return (
+                            <div key={j} className="absolute left-0 right-0 px-1 overflow-hidden"
+                              style={{ top, height, background: 'color-mix(in oklch, #059669 15%, transparent)', borderLeft: '2px solid #059669', opacity: 0.7 }}>
+                              <span className="text-[9.5px] truncate block font-medium" style={{ color: 'var(--text)' }}>
+                                {f.materia}
+                              </span>
+                            </div>
+                          )
+                        })}
+                        {/* Timed events */}
                         {dayEntries.filter(e => e.type === 'evento' && !e.item.todo_el_dia).map((entry, j) => {
                           const startMin = parseInt(entry.item.fecha_inicio?.slice(11, 13) || 0, 10) * 60 +
                             parseInt(entry.item.fecha_inicio?.slice(14, 16) || 0, 10)
@@ -315,8 +431,9 @@ export default function MesTab() {
                           const top    = ((startMin - 7 * 60) / 60) * 48
                           const height = Math.max(((endMin - startMin) / 60) * 48, 16)
                           return (
-                            <div key={j} className="absolute left-0.5 right-0.5 rounded px-1 overflow-hidden"
-                              style={{ top, height, background: `color-mix(in oklch, ${entry.color} 25%, transparent)`, borderLeft: `2px solid ${entry.color}` }}>
+                            <div key={j} className="absolute left-0.5 right-0.5 rounded px-1 overflow-hidden cursor-pointer"
+                              style={{ top, height, background: `color-mix(in oklch, ${entry.color} 25%, transparent)`, borderLeft: `2px solid ${entry.color}` }}
+                              onClick={() => setSelected(entry)}>
                               <span className="text-[10px] font-medium truncate block" style={{ color: 'var(--text)' }}>
                                 {entry.item.titulo}
                               </span>
@@ -338,10 +455,20 @@ export default function MesTab() {
         {selected ? (
           <div>
             <div className="flex items-center justify-between mb-3">
-              <div className="label">{selected.type === 'evento' ? 'Evento' : 'Tarea'}</div>
-              <button className="icon-btn" style={{ width: 22, height: 22 }} onClick={() => setSelected(null)}>
-                ×
-              </button>
+              <div className="label">{selected.type === 'evento' ? t(lang, 'agendaEventoLabel') : t(lang, 'agendaTareaLabel')}</div>
+              <div className="flex items-center gap-1">
+                <button
+                  className="icon-btn"
+                  style={{ width: 22, height: 22 }}
+                  title={t(lang, 'agendaEditar')}
+                  onClick={() => setEditSelected(true)}
+                >
+                  <Edit2 size={11} />
+                </button>
+                <button className="icon-btn" style={{ width: 22, height: 22 }} onClick={() => { setSelected(null); setEditSelected(false) }}>
+                  ×
+                </button>
+              </div>
             </div>
             <div className="panel-strong p-3 rounded-xl">
               <div className="flex items-center gap-2 mb-2">
@@ -357,11 +484,17 @@ export default function MesTab() {
                   {selected.item.fecha_fin && ` → ${selected.item.fecha_fin.slice(11, 16)}`}
                 </div>
               )}
+              {selected.type === 'tarea' && selected.item.fecha_opcional && (
+                <div className="mono text-[11px] mt-1" style={{ color: 'var(--subtext)' }}>
+                  {selected.item.fecha_opcional}
+                  {selected.item.hora_opcional && ` · ${selected.item.hora_opcional}`}
+                </div>
+              )}
             </div>
           </div>
         ) : (
           <div>
-            <div className="label mb-3">Próximos eventos</div>
+            <div className="label mb-3">{t(lang, 'agendaProxEventos')}</div>
             {agendaEventos.slice(0, 5).map(e => (
               <div key={e.id} className="flex gap-2.5 px-2 py-2 rounded-lg hover:bg-[var(--surface)] cursor-pointer mb-1"
                 onClick={() => setSelected({ type: 'evento', color: e.calendario_color, item: e })}>
@@ -382,6 +515,26 @@ export default function MesTab() {
         <EventoModal
           defaultFecha={newEvento.fecha}
           onClose={() => setNewEvento(null)}
+        />
+      )}
+      {editSelected && selected?.type === 'evento' && (
+        <EventoModal
+          evento={selected.item}
+          onClose={() => { setEditSelected(false); setSelected(null) }}
+        />
+      )}
+      {editSelected && selected?.type === 'tarea' && (
+        <TareaModal
+          tarea={selected.item}
+          onClose={() => { setEditSelected(false); setSelected(null) }}
+        />
+      )}
+      {contextMenu && (
+        <AgendaContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={buildContextItems(contextMenu.entry)}
+          onClose={() => setContextMenu(null)}
         />
       )}
     </div>

@@ -92,6 +92,36 @@ export function calcMonthPct(habito, registrosMap, year, month) {
   return scheduled > 0 ? Math.round((total / scheduled) * 100) : 0
 }
 
+/**
+ * Compute the all-time maximum streak for a habit.
+ * Walks ALL registros sorted by date and tracks the longest run of
+ * consecutive SCHEDULED days with valor > 0. Non-scheduled days are skipped.
+ */
+export function calcMaxStreak(habito, registrosMap) {
+  if (!habito.creado_en) return 0
+  const startISO = habito.creado_en.slice(0, 10)
+  const today    = new Date(); today.setHours(0, 0, 0, 0)
+
+  let maxStreak = 0
+  let cur       = 0
+  const d       = new Date(startISO + 'T00:00:00')
+
+  while (d <= today) {
+    if (isScheduled(habito, d)) {
+      const dateStr = toISODate(d)
+      const reg     = registrosMap[`${habito.id}-${dateStr}`]
+      if (reg && reg.valor > 0) {
+        cur++
+        if (cur > maxStreak) maxStreak = cur
+      } else if (d < today) {
+        cur = 0
+      }
+    }
+    d.setDate(d.getDate() + 1)
+  }
+  return maxStreak
+}
+
 /** Today's status for a habit: 'done' | 'partial' | 'pending' | 'off' */
 export function todayStatus(habito, registrosMap) {
   const today = new Date()

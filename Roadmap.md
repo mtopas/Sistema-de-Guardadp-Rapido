@@ -1,18 +1,12 @@
 # Roadmap — Sistema de Guardado Rápido
 
-## Current state *(updated 2026-04-14)*
-- ~~FastAPI backend with flat categories + hojas (text only)~~ → **full schema implemented (Phase 1 done)**
-- SQLite database with all Phase 1 columns migrated
-- Bare-bones HTML frontend (dev tool, not a product)
-- Working Telegram bot (text capture → category)
+## Current state *(updated 2026-05-23)*
 
-### Pre-flight fixes — DONE
-- `git init` + `.gitignore` in place
-- `requirements.txt` pinned (20 packages)
-- Deprecated `@app.on_event` replaced with `lifespan`
-- Debug `print` removed from `database.py`
-- 404 bug fixed on `GET /hojas/{id}`
-- XSS fixed in `index.html` (`innerHTML` → `textContent`)
+- **Backend:** FastAPI + SQLite, schema completo (Bóveda, Finanzas, Agenda, Hábitos)
+- **Frontend:** React PWA con 4 módulos (`/`, `/finanzas`, `/agenda`, `/habitos`)
+- **Bot Telegram:** cliente completo para Bóveda, Agenda, Finanzas y Hábitos — ver `project/Boveda.md §6`, `project/README.md`
+
+Pendientes por módulo: `project/*-Roadmap.md`. Documentación técnica: `project/*.md`.
 
 ---
 
@@ -149,19 +143,19 @@ This is a single React app served from one URL. The same codebase renders the mo
 
 ---
 
-## Phase 4 — Telegram Bot Polish + Image Support
-*Goal: Telegram becomes a full capture client, not just text.*
+## Phase 4 — Telegram Bot (Bóveda) ✅ DONE
 
-### What to do
-- Accept photos sent to the bot → upload to server → store as `tipo: foto`
-- Accept URLs → auto-detect if it's a YouTube/Vimeo link, store as `tipo: link`
-- Add inline keyboard buttons (Telegram supports this) instead of numbered text menus — much better UX
-- Add `/listar` command to browse recent hojas from Telegram
+*Completado mayo 2026. Detalle en `project/Boveda.md §6`.*
 
-### Technologies
-- **python-telegram-bot** (already in use)
-- **Pillow** — image validation/resizing on the server before saving
-- Server-side file storage: local folder on VPS, or **Cloudflare R2** (free for low volume) for object storage
+---
+
+## Phase 4b — Telegram Bot (pendiente global)
+
+*Mejoras transversales del bot que aún no están implementadas.*
+
+- **Pillow** — validación/redimensionado de imágenes en servidor antes de guardar
+- Editar hojas desde Telegram (hoy solo crear/eliminar)
+- Recordatorios vía bot (requiere pipeline de notificaciones)
 
 ---
 

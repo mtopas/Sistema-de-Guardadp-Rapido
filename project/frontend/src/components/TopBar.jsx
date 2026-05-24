@@ -1,7 +1,8 @@
-import { useNavigate, useLocation } from 'react-router-dom'
-import { Search, Bell, Plus, Settings } from 'lucide-react'
+import { useNavigate, useLocation, useRef, useState, useEffect } from 'react'
+import { Search, Bell, Plus, Settings, Target, CheckCircle2, Calendar, CheckSquare } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { t } from '../utils/i18n'
+import { API_URL } from '../config'
 
 // Top-level modules that can be cycled from the title.
 // Each entry: route to navigate to + i18n key for the title.
@@ -95,6 +96,89 @@ export default function TopBar({ searchQuery = '', onSearchChange }) {
   const openHabitoModal  = useStore(s => s.openHabitoModal)
   const initial      = userName ? userName.trim()[0].toUpperCase() : '?'
 
+  const isHabitos = location.pathname.startsWith('/habitos')
+  const isAgenda  = location.pathname.startsWith('/agenda')
+  const [bellOpen, setBellOpen]             = useState(false)
+  const [pendingHabitos, setPendingHabitos]   = useState([])
+  const [agendaNotifPending, setAgendaNotifPending] = useState([])
+  const notifShownRef = useRef(new Set())
+  const bellRef = useRef(null)
+  const searchRef = useRef(null)
+  const [agendaResults, setAgendaResults] = useState(null) // null | {eventos, tareas}
+
+  // Debounced agenda search
+  useEffect(() => {
+    if (!isAgenda || !searchQuery.trim()) { setAgendaResults(null); return }
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`${API_URL}/agenda/buscar?q=${encodeURIComponent(searchQuery.trim())}`)
+        if (res.ok) setAgendaResults(await res.json())
+      } catch { /* noop */ }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchQuery, isAgenda])
+
+  // Close agenda dropdown on outside click
+  useEffect(() => {
+    if (!agendaResults) return
+    const h = (e) => { if (searchRef.current && !searchRef.current.contains(e.target)) setAgendaResults(null) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [agendaResults])
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!bellOpen) return
+    const h = (e) => { if (bellRef.current && !bellRef.current.contains(e.target)) setBellOpen(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [bellOpen])
+
+  // Request browser notification permission once
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission()
+    }
+  }, [])
+
+  // Poll for upcoming agenda events every minute
+  useEffect(() => {
+    if (!isAgenda) return
+    const checkNotifs = async () => {
+      try {
+        const res = await fetch(`${API_URL}/agenda/notificaciones/pending?ventana_min=15`)
+        if (!res.ok) return
+        const data = await res.json()
+        setAgendaNotifPending(data)
+        if ('Notification' in window && Notification.permission === 'granted') {
+          data.forEach(e => {
+            if (!notifShownRef.current.has(e.id)) {
+              notifShownRef.current.add(e.id)
+              new Notification(e.titulo, { body: `Empieza a las ${e.fecha_inicio?.slice(11, 16) || ''}` })
+            }
+          })
+        }
+      } catch { /* noop */ }
+    }
+    checkNotifs()
+    const id = setInterval(checkNotifs, 60000)
+    return () => clearInterval(id)
+  }, [isAgenda])
+
+  async function handleBellClick() {
+    if (isAgenda) { setBellOpen(v => !v); return }
+    if (!isHabitos) return
+    if (bellOpen) { setBellOpen(false); return }
+    try {
+      const res = await fetch(`${API_URL}/habitos/pendientes-hoy`)
+      if (res.ok) {
+        const data = await res.json()
+        setPendingHabitos(data.filter(h => !h.registro_hoy || h.registro_hoy.valor === 0))
+      }
+    } catch { /* noop */ }
+    setBellOpen(true)
+  }
+
   const modIdx      = currentModuleIndex(location.pathname)
   const currentMod  = MODULES[modIdx]
   const prevMod     = MODULES[(modIdx - 1 + MODULES.length) % MODULES.length]
@@ -144,7 +228,7 @@ export default function TopBar({ searchQuery = '', onSearchChange }) {
       </button>
 
       {/* Search */}
-      <div className="flex-1 max-w-[520px] mx-auto relative">
+      <div ref={searchRef} className="flex-1 max-w-[520px] mx-auto relative">
         <div
           className="flex items-center gap-2 px-3 h-9 rounded-xl border transition-colors duration-150"
           style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
@@ -155,7 +239,7 @@ export default function TopBar({ searchQuery = '', onSearchChange }) {
           <input
             value={searchQuery}
             onChange={e => onSearchChange(e.target.value)}
-            placeholder={t(lang, 'searchPlaceholder')}
+            placeholder={isAgenda ? t(lang, 'agendaBuscarPlaceholder') : t(lang, 'searchPlaceholder')}
             className="flex-1 bg-transparent text-[13px] outline-none placeholder:opacity-60"
             style={{ color: 'var(--text)' }}
           />
@@ -164,13 +248,167 @@ export default function TopBar({ searchQuery = '', onSearchChange }) {
             <kbd className="px-1.5 py-0.5 rounded border text-[10px]" style={kbdStyle}>M</kbd>
           </div>
         </div>
+
+        {/* Agenda search dropdown */}
+        {isAgenda && agendaResults && (
+          <div
+            className="absolute top-full left-0 right-0 mt-1.5 rounded-xl border shadow-2xl z-50 overflow-hidden"
+            style={{ background: 'var(--panel-bg)', borderColor: 'var(--border)' }}
+          >
+            {agendaResults.eventos?.length === 0 && agendaResults.tareas?.length === 0 ? (
+              <div className="px-4 py-3 text-[12.5px] italic" style={{ color: 'var(--subtext)' }}>
+                {t(lang, 'agendaSinResultados')}
+              </div>
+            ) : (
+              <div className="max-h-[320px] overflow-y-auto">
+                {agendaResults.eventos?.slice(0, 5).map(e => (
+                  <button
+                    key={`e-${e.id}`}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors"
+                    style={{ color: 'var(--text)' }}
+                    onMouseEnter={ev => ev.currentTarget.style.background = 'var(--surface)'}
+                    onMouseLeave={ev => ev.currentTarget.style.background = 'transparent'}
+                    onClick={() => {
+                      const d = e.fecha_inicio?.slice(0, 10) || ''
+                      navigate(`/agenda?tab=mes&highlight=${e.id}&highlightDate=${d}`)
+                      setAgendaResults(null); onSearchChange('')
+                    }}
+                  >
+                    <Calendar size={13} style={{ color: e.calendario_color || 'var(--accent)', flexShrink: 0 }} />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[12.5px] font-medium truncate">{e.titulo}</div>
+                      {e.fecha_inicio && (
+                        <div className="text-[10.5px] mono" style={{ color: 'var(--subtext)' }}>{e.fecha_inicio.slice(0, 10)}</div>
+                      )}
+                    </div>
+                  </button>
+                ))}
+                {agendaResults.tareas?.slice(0, 5).map(tt => (
+                  <button
+                    key={`t-${tt.id}`}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors"
+                    style={{ color: 'var(--text)' }}
+                    onMouseEnter={ev => ev.currentTarget.style.background = 'var(--surface)'}
+                    onMouseLeave={ev => ev.currentTarget.style.background = 'transparent'}
+                    onClick={() => { navigate(`/agenda?tab=mes&highlight=${tt.id}&highlightDate=${tt.fecha_opcional || ''}`); setAgendaResults(null); onSearchChange('') }}
+                  >
+                    <CheckSquare size={13} style={{ color: tt.lista_color || 'var(--accent)', flexShrink: 0 }} />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[12.5px] font-medium truncate">{tt.titulo}</div>
+                      {tt.fecha_opcional && (
+                        <div className="text-[10.5px] mono" style={{ color: 'var(--subtext)' }}>{tt.fecha_opcional}</div>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Right cluster */}
       <div className="flex items-center gap-2">
-        <IconButton ariaLabel="Notificaciones" badge>
-          <Bell size={16} />
-        </IconButton>
+        {/* Bell — functional on /habitos, decorative elsewhere */}
+        <div ref={bellRef} className="relative">
+          <IconButton
+            ariaLabel={
+              isHabitos ? `Pendientes hoy${pendingHabitos.length > 0 ? ` (${pendingHabitos.length})` : ''}`
+              : isAgenda ? `Próximos eventos${agendaNotifPending.length > 0 ? ` (${agendaNotifPending.length})` : ''}`
+              : 'Notificaciones'
+            }
+            badge={isHabitos ? pendingHabitos.length > 0 : isAgenda ? agendaNotifPending.length > 0 : false}
+            onClick={(isHabitos || isAgenda) ? handleBellClick : undefined}
+          >
+            <Bell size={16} />
+          </IconButton>
+
+          {bellOpen && isAgenda && (
+            <div
+              className="absolute right-0 top-full mt-2 w-[260px] rounded-2xl shadow-2xl border z-50 overflow-hidden"
+              style={{ background: 'var(--panel-bg)', borderColor: 'var(--border)' }}
+            >
+              <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor: 'var(--border)' }}>
+                <Bell size={13} style={{ color: 'var(--accent)' }} />
+                <span className="text-[12px] font-semibold" style={{ color: 'var(--text)' }}>
+                  Próximos 15 min
+                </span>
+              </div>
+              {agendaNotifPending.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 px-4 py-5">
+                  <CheckCircle2 size={22} style={{ color: 'var(--success)' }} />
+                  <p className="text-[12px] text-center" style={{ color: 'var(--subtext)' }}>
+                    Sin eventos próximos
+                  </p>
+                </div>
+              ) : (
+                <div className="flex flex-col max-h-[280px] overflow-y-auto">
+                  {agendaNotifPending.map(e => (
+                    <button
+                      key={e.id}
+                      onClick={() => { navigate('/agenda?tab=hoy'); setBellOpen(false) }}
+                      className="flex items-center gap-3 px-4 py-2.5 text-left transition-colors"
+                      style={{ color: 'var(--text)' }}
+                      onMouseEnter={ev => ev.currentTarget.style.background = 'var(--surface)'}
+                      onMouseLeave={ev => ev.currentTarget.style.background = 'transparent'}
+                    >
+                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: e.calendario_color || 'var(--accent)' }} />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[12.5px] font-medium truncate">{e.titulo}</div>
+                        <div className="text-[10.5px] mono" style={{ color: 'var(--subtext)' }}>
+                          {e.fecha_inicio?.slice(11, 16)}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {bellOpen && isHabitos && (
+            <div
+              className="absolute right-0 top-full mt-2 w-[260px] rounded-2xl shadow-2xl border z-50 overflow-hidden"
+              style={{ background: 'var(--panel-bg)', borderColor: 'var(--border)' }}
+            >
+              <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor: 'var(--border)' }}>
+                <Target size={13} style={{ color: 'var(--accent)' }} />
+                <span className="text-[12px] font-semibold" style={{ color: 'var(--text)' }}>
+                  Hábitos pendientes hoy
+                </span>
+              </div>
+              {pendingHabitos.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 px-4 py-5">
+                  <CheckCircle2 size={22} style={{ color: 'var(--success)' }} />
+                  <p className="text-[12px] text-center" style={{ color: 'var(--subtext)' }}>
+                    ¡Todo completado por hoy!
+                  </p>
+                </div>
+              ) : (
+                <div className="flex flex-col max-h-[280px] overflow-y-auto">
+                  {pendingHabitos.map(h => (
+                    <button
+                      key={h.id}
+                      onClick={() => { navigate('/habitos'); setBellOpen(false) }}
+                      className="flex items-center gap-3 px-4 py-2.5 text-left transition-colors"
+                      style={{ color: 'var(--text)' }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--surface)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                    >
+                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: h.color }} />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[12.5px] font-medium truncate">{h.nombre}</div>
+                        {h.hora && (
+                          <div className="text-[10.5px] mono" style={{ color: 'var(--subtext)' }}>{h.hora}</div>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
         <div className="w-px h-6" style={{ background: 'var(--border)' }} />
 

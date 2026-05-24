@@ -1,6 +1,7 @@
 import time
 from datetime import date, datetime, timedelta
 import json
+from pathlib import Path
 import re
 import requests
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -16,6 +17,24 @@ STEP_AYER_VALOR                = "ayer_valor"
 STEP_PLANIFICAR_NUEVA_TAREA    = "planificar_nueva_tarea"
 
 HABITOS_CACHE_TTL = 60  # segundos
+
+_CHECKIN_CONFIG_FILE = Path(__file__).parent / "checkin_config.json"
+
+
+def _load_checkin_time() -> tuple[int, int]:
+    """Returns (hour, minute) for nightly check-in, default 21:00."""
+    try:
+        data = json.loads(_CHECKIN_CONFIG_FILE.read_text())
+        return data.get("hour", 21), data.get("minute", 0)
+    except Exception:
+        return 21, 0
+
+
+def _save_checkin_time(hour: int, minute: int):
+    try:
+        _CHECKIN_CONFIG_FILE.write_text(json.dumps({"hour": hour, "minute": minute}))
+    except Exception:
+        pass
 
 # ──────────────────────────────────────────────────────────────
 # Texto de ayuda
@@ -44,6 +63,7 @@ HELP_TEXT = """\
 /semana — resumen de los próximos 7 días
 /bloquear <N> <HH:MM> — bloquea la tarea #N del último /hoy en esa hora
 /revision — resumen de la semana pasada
+/checkin [HH:MM] — ver o cambiar la hora del check-in nocturno
 
 🌱 *Hábitos*
 /habitos — hábitos de hoy con botones Total / Parcial
@@ -1301,6 +1321,31 @@ async def handle_agenda_step(update: Update, context: ContextTypes.DEFAULT_TYPE,
         ud.clear()
         return True
 
+    if step == STEP_HABITO_NOTA:
+        api      = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+        hab_id   = ud.get("habito_nota_id")
+        fecha    = ud.get("habito_nota_fecha", _today_iso())
+        nombre   = ud.get("habito_nota_nombre", "hábito")
+        for k in ("step", "habito_nota_id", "habito_nota_fecha", "habito_nota_nombre"):
+            ud.pop(k, None)
+
+        if texto.lower().strip() in ("no", "skip", "n", "-", "nope", "nop"):
+            await update.message.reply_text("Ok, sin nota. 👍")
+            return True
+
+        try:
+            registros = _get_registros(api, fecha, fecha)
+            reg_map   = {r["habito_id"]: r for r in registros}
+            reg       = reg_map.get(hab_id)
+            valor     = reg["valor"] if reg else 1.0
+            _put_registro(api, hab_id, fecha, valor, nota=texto.strip())
+            await update.message.reply_text(
+                f"📝 Nota guardada en *{nombre}*: _{texto.strip()}_", parse_mode="Markdown"
+            )
+        except Exception as e:
+            await update.message.reply_text(f"No pude guardar la nota: {e}")
+        return True
+
     if step == STEP_PLANIFICAR_NUEVA_TAREA:
         api   = context.bot_data.get("api_base", "http://127.0.0.1:8000")
         hora  = ud.get("planificar_slot_hora", "")
@@ -1415,6 +1460,55 @@ async def handle_quick_capture(update: Update, context: ContextTypes.DEFAULT_TYP
     return False
 
 
+async def cmd_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /checkin          → muestra la hora actual del check-in
+    /checkin HH:MM    → cambia la hora del check-in nocturno
+    """
+    from datetime import time as dt_time
+    args = context.args or []
+
+    if not args:
+        h, m = _load_checkin_time()
+        await update.message.reply_text(
+            f"🌙 Check-in nocturno configurado para las *{h:02d}:{m:02d}*.\n"
+            f"Cambialo con `/checkin HH:MM`",
+            parse_mode="Markdown",
+        )
+        return
+
+    raw = args[0].strip()
+    match = re.match(r'^(\d{1,2}):(\d{2})$', raw)
+    if not match:
+        await update.message.reply_text(
+            "Formato inválido. Usá `/checkin HH:MM` (ej: `/checkin 22:00`)",
+            parse_mode="Markdown",
+        )
+        return
+
+    hour   = int(match.group(1))
+    minute = int(match.group(2))
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        await update.message.reply_text("Hora inválida. Hora entre 0–23, minutos entre 0–59.")
+        return
+
+    _save_checkin_time(hour, minute)
+
+    if context.job_queue:
+        for job in context.job_queue.get_jobs_by_name("check_in_noche"):
+            job.schedule_removal()
+        context.job_queue.run_daily(
+            check_in_noche,
+            time=dt_time(hour, minute, 0),
+            name="check_in_noche",
+        )
+
+    await update.message.reply_text(
+        f"✅ Check-in nocturno reprogramado para las *{hour:02d}:{minute:02d}*.",
+        parse_mode="Markdown",
+    )
+
+
 # ──────────────────────────────────────────────────────────────
 # Check-in nocturno (llamado por job_queue)
 # ──────────────────────────────────────────────────────────────
@@ -1509,6 +1603,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_text(text, parse_mode="Markdown", reply_markup=markup)
             except Exception:
                 pass
+            hab    = next((h for h in habitos if h["id"] == habito_id), None)
+            nombre = hab["nombre"] if hab else "hábito"
+            context.user_data["habito_nota_id"]     = habito_id
+            context.user_data["habito_nota_fecha"]  = _today_iso()
+            context.user_data["habito_nota_nombre"] = nombre
+            context.user_data["step"]               = STEP_HABITO_NOTA
+            await query.message.reply_text(
+                f"¿Querés agregar una nota a *{nombre}*? Respondé con texto o escribí *no* para saltar.",
+                parse_mode="Markdown",
+            )
         except Exception as e:
             await query.message.reply_text(f"No pude registrar el hábito: {e}")
 
@@ -1525,6 +1629,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_text(text, parse_mode="Markdown", reply_markup=markup)
             except Exception:
                 pass
+            hab    = next((h for h in habitos if h["id"] == habito_id), None)
+            nombre = hab["nombre"] if hab else "hábito"
+            context.user_data["habito_nota_id"]     = habito_id
+            context.user_data["habito_nota_fecha"]  = _today_iso()
+            context.user_data["habito_nota_nombre"] = nombre
+            context.user_data["step"]               = STEP_HABITO_NOTA
+            await query.message.reply_text(
+                f"¿Querés agregar una nota a *{nombre}*? Respondé con texto o escribí *no* para saltar.",
+                parse_mode="Markdown",
+            )
         except Exception as e:
             await query.message.reply_text(f"No pude registrar el hábito: {e}")
 

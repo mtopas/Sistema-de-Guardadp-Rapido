@@ -16,5 +16,8 @@ class HojaCreate(BaseModel):
 
 
 class HojaPatch(BaseModel):
-    apuntes: Optional[str] = None
-    icono:   Optional[str] = None
+    apuntes:     Optional[str] = None
+    icono:       Optional[str] = None
+    contenido:   Optional[str] = None
+    categoria_id: Optional[int] = None
+    tipo:        Optional[str] = None

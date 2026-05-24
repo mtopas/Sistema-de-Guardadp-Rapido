@@ -1,10 +1,38 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react'
+import { X, ArrowUp, ArrowDown, ArrowUpDown, Download } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
 import { fmtARS, fmtUSD } from '../../data/finanzas'
 import { buildCategories } from './CategoryDonutCard'
+
+function exportCSV(rows, type) {
+  const header = ['Fecha','Descripcion','Categoria','Monto','Moneda','Cuenta','Cuotas','Nota']
+  const escape = v => {
+    const s = String(v ?? '').replace(/"/g, '""')
+    return s.includes(',') || s.includes('\n') || s.includes('"') ? `"${s}"` : s
+  }
+  const lines = [
+    header.join(','),
+    ...rows.map(m => [
+      m.date ?? m.fecha ?? '',
+      escape(m.desc ?? m.descripcion ?? ''),
+      escape(m.cat  ?? m.categoria_nombre ?? ''),
+      Math.abs(m.amount ?? m.monto ?? 0),
+      m.moneda ?? 'ARS',
+      escape(m.method ?? m.cuenta_nombre ?? ''),
+      m.cuotas ?? '',
+      escape(m.nota ?? ''),
+    ].join(',')),
+  ]
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' })
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement('a')
+  a.href     = url
+  a.download = `movimientos-${type}-${new Date().toISOString().slice(0,10)}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
 
 // Sorting: 3-click cycle — asc → desc → default (fecha desc)
 function useColumnSort() {
@@ -175,9 +203,23 @@ export default function MovimientosTableModal({ open, onClose, type = 'expense' 
               </div>
             </div>
           </div>
-          <button type="button" onClick={onClose} className="icon-btn-fin" aria-label="Cerrar">
-            <X size={14} />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => exportCSV(rows, type)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11.5px] font-medium border transition-colors"
+              style={{ borderColor: 'var(--border)', color: 'var(--subtext)', background: 'transparent' }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--text)' }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--subtext)' }}
+              title={`Exportar ${rows.length} movimientos como CSV`}
+            >
+              <Download size={12} />
+              CSV
+            </button>
+            <button type="button" onClick={onClose} className="icon-btn-fin" aria-label="Cerrar">
+              <X size={14} />
+            </button>
+          </div>
         </div>
 
         {/* Filter bar */}

@@ -1,21 +1,26 @@
-import { Flame, Pencil, Trash2 } from 'lucide-react'
+import { useMemo, useState, useEffect } from 'react'
+import { Flame, Pencil, Trash2, AlertTriangle } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
-import { buildRegistrosMap, calcStreak, calcMonthPct, toISODate } from './habitosUtils'
+import { buildRegistrosMap, calcStreak, calcMaxStreak, calcMonthPct, toISODate, isScheduled } from './habitosUtils'
 
-export default function HabitosRightPanel({ selectedId, onEdit }) {
+export default function HabitosRightPanel({ selectedId, onEdit, forceVisible = false }) {
   const lang             = useStore(s => s.lang)
   const habitos          = useStore(s => s.habitos)
   const habitosRegistros = useStore(s => s.habitosRegistros)
   const deleteHabito     = useStore(s => s.deleteHabito)
+  const showToast        = useStore(s => s.showToast)
+
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  useEffect(() => { setConfirmDelete(false) }, [selectedId])
 
   const habito = habitos.find(h => h.id === selectedId)
 
   if (!habito) {
     return (
       <aside
-        className="hidden xl:flex w-[260px] shrink-0 h-full items-center justify-center"
-        style={{ borderLeft: '1px solid var(--border)' }}
+        className={`${forceVisible ? 'flex' : 'hidden xl:flex'} w-[260px] shrink-0 h-full items-center justify-center`}
+        style={{ borderLeft: forceVisible ? 'none' : '1px solid var(--border)' }}
       >
         <p className="text-[12px] text-center px-6" style={{ color: 'var(--mute)' }}>
           Seleccioná un hábito para ver el detalle
@@ -24,41 +29,40 @@ export default function HabitosRightPanel({ selectedId, onEdit }) {
     )
   }
 
-  const registrosMap = buildRegistrosMap(habitosRegistros)
+  const registrosMap = useMemo(() => buildRegistrosMap(habitosRegistros), [habitosRegistros])
   const today        = new Date()
   const year         = today.getFullYear()
   const month        = today.getMonth()
 
   const streak    = calcStreak(habito, registrosMap)
+  const maxStreak = calcMaxStreak(habito, registrosMap)
   const pctMes    = calcMonthPct(habito, registrosMap, year, month)
   const pctColor  = pctMes >= 80 ? 'var(--success)' : pctMes >= 50 ? 'var(--warning)' : 'var(--danger)'
 
-  // Recent registros (last 10, with nota)
+  // Recent registros (last 10)
   const recentRegs = habitosRegistros
     .filter(r => r.habito_id === habito.id)
     .sort((a, b) => b.fecha.localeCompare(a.fecha))
     .slice(0, 10)
 
-  // Max streak
-  let maxStreak = 0
-  let cur = 0
-  const allDates = habitosRegistros
-    .filter(r => r.habito_id === habito.id && r.valor > 0)
-    .map(r => r.fecha)
-    .sort()
-  for (let i = 0; i < allDates.length; i++) {
-    if (i === 0) { cur = 1; maxStreak = 1; continue }
-    const prev = new Date(allDates[i-1])
-    const curr = new Date(allDates[i])
-    const diff = (curr - prev) / 86400000
-    cur = diff === 1 ? cur + 1 : 1
-    if (cur > maxStreak) maxStreak = cur
-  }
+  // Sparkline: last 30 days (scheduled days only)
+  const sparkDays = useMemo(() => {
+    const days = []
+    const t0 = new Date(today); t0.setHours(0,0,0,0)
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(t0); d.setDate(t0.getDate() - i)
+      if (!isScheduled(habito, d)) continue
+      const dateStr = toISODate(d)
+      const reg = registrosMap[`${habito.id}-${dateStr}`]
+      days.push({ dateStr, valor: reg ? reg.valor : 0, isFuture: false })
+    }
+    return days
+  }, [habito, registrosMap])
 
   return (
     <aside
-      className="hidden xl:flex xl:flex-col w-[260px] shrink-0 h-full overflow-y-auto"
-      style={{ borderLeft: '1px solid var(--border)' }}
+      className={`${forceVisible ? 'flex' : 'hidden xl:flex'} flex-col w-[260px] shrink-0 h-full overflow-y-auto`}
+      style={{ borderLeft: forceVisible ? 'none' : '1px solid var(--border)' }}
     >
       <div className="p-4">
         {/* Header */}
@@ -127,6 +131,31 @@ export default function HabitosRightPanel({ selectedId, onEdit }) {
           </div>
         </div>
 
+        {/* Sparkline últimos 30 días programados */}
+        {sparkDays.length > 0 && (
+          <div className="mb-4">
+            <div className="label mb-2">Últimos 30 días</div>
+            <div className="flex items-end gap-0.5 h-6">
+              {sparkDays.map(({ dateStr, valor }) => (
+                <div
+                  key={dateStr}
+                  title={`${dateStr.slice(5).replace('-','/')}: ${valor >= 1 ? 'Total' : valor > 0 ? 'Parcial' : 'Sin completar'}`}
+                  className="flex-1 rounded-sm min-w-[3px] transition-all"
+                  style={{
+                    height: valor >= 1 ? '100%' : valor > 0 ? '55%' : '18%',
+                    background: valor >= 1
+                      ? habito.color
+                      : valor > 0
+                      ? 'var(--warning)'
+                      : 'var(--border)',
+                    opacity: valor > 0 ? 1 : 0.5,
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Recent logs */}
         <div className="mb-4">
           <div className="label mb-2">{t(lang, 'habitosRegistros')}</div>
@@ -155,22 +184,52 @@ export default function HabitosRightPanel({ selectedId, onEdit }) {
         </div>
 
         {/* Actions */}
-        <div className="flex gap-2 pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
-          <button
-            onClick={() => onEdit(habito)}
-            className="flex-1 btn flex items-center justify-center gap-1.5"
+        {confirmDelete ? (
+          <div
+            className="rounded-xl p-3 flex flex-col gap-2 border"
+            style={{ borderColor: 'color-mix(in oklch, var(--danger) 40%, transparent)', background: 'color-mix(in oklch, var(--danger) 8%, transparent)' }}
           >
-            <Pencil size={13} />
-            Editar
-          </button>
-          <button
-            onClick={() => { if (window.confirm(`¿Eliminar "${habito.nombre}"?`)) deleteHabito(habito.id) }}
-            className="icon-btn w-9 h-9"
-            style={{ color: 'var(--danger)' }}
-          >
-            <Trash2 size={14} />
-          </button>
-        </div>
+            <div className="flex items-center gap-1.5 text-[12px] font-medium" style={{ color: 'var(--danger)' }}>
+              <AlertTriangle size={13} />
+              ¿Eliminar "{habito.nombre}"?
+            </div>
+            <div className="text-[11px]" style={{ color: 'var(--subtext)' }}>
+              Se borrarán todos sus registros. Esta acción no se puede deshacer.
+            </div>
+            <div className="flex gap-2 mt-1">
+              <button
+                className="flex-1 btn"
+                onClick={() => setConfirmDelete(false)}
+              >
+                Cancelar
+              </button>
+              <button
+                className="flex-1 py-1.5 px-3 rounded-lg text-[12px] font-semibold text-white transition-opacity"
+                style={{ background: 'var(--danger)' }}
+                onClick={() => { deleteHabito(habito.id); showToast(`"${habito.nombre}" eliminado`); setConfirmDelete(false) }}
+              >
+                Eliminar
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex gap-2 pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
+            <button
+              onClick={() => onEdit(habito)}
+              className="flex-1 btn flex items-center justify-center gap-1.5"
+            >
+              <Pencil size={13} />
+              Editar
+            </button>
+            <button
+              onClick={() => setConfirmDelete(true)}
+              className="icon-btn w-9 h-9"
+              style={{ color: 'var(--danger)' }}
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        )}
       </div>
     </aside>
   )

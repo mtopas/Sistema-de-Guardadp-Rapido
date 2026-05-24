@@ -29,6 +29,7 @@ export default function TareaModal({ tarea, defaultListaId, defaultFecha, onClos
   const [duracion, setDuracion]       = useState(tarea?.duracion_estimada || '')
   const [listaId, setListaId]         = useState(tarea?.lista_id || defaultListaId || agendaListas[0]?.id || null)
   const [saving, setSaving]           = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   const handleSave = useCallback(async () => {
     if (!titulo.trim()) return
@@ -43,30 +44,45 @@ export default function TareaModal({ tarea, defaultListaId, defaultFecha, onClos
     }
     if (tarea) {
       await updateAgendaTarea(tarea.id, payload)
-      showToast('Tarea actualizada')
+      showToast(t(lang, 'agendaTareaActualizada'))
     } else {
       await addAgendaTarea(payload)
-      showToast('Tarea creada')
+      showToast(t(lang, 'agendaTareaCreada'))
     }
     setSaving(false)
     onClose()
   }, [titulo, descripcion, fecha, hora, duracion, listaId, tarea, addAgendaTarea, updateAgendaTarea, showToast, onClose])
 
+  const handleDelete = () => {
+    if (!confirmDelete) { setConfirmDelete(true); return }
+    deleteAgendaTarea(tarea.id)
+    onClose()
+  }
+
   const deleteBtn = tarea ? (
     <button
       className="text-[12px] px-3 py-1.5 rounded-lg border transition-colors"
-      style={{ borderColor: 'var(--border)', color: 'var(--subtext)' }}
-      onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
-      onMouseLeave={e => e.currentTarget.style.color = 'var(--subtext)'}
-      onClick={() => { deleteAgendaTarea(tarea.id); onClose() }}
+      style={{
+        borderColor: confirmDelete ? '#ef4444' : 'var(--border)',
+        color: confirmDelete ? '#ef4444' : 'var(--subtext)',
+        background: confirmDelete ? 'color-mix(in oklch, #ef4444 10%, transparent)' : 'transparent',
+      }}
+      onMouseEnter={e => { e.currentTarget.style.color = '#ef4444'; e.currentTarget.style.borderColor = '#ef4444' }}
+      onMouseLeave={e => {
+        if (!confirmDelete) {
+          e.currentTarget.style.color = 'var(--subtext)'
+          e.currentTarget.style.borderColor = 'var(--border)'
+        }
+      }}
+      onClick={handleDelete}
     >
-      {t(lang, 'agendaEliminar')}
+      {confirmDelete ? t(lang, 'agendaEliminarSi') : t(lang, 'agendaEliminar')}
     </button>
   ) : undefined
 
   return (
     <AgendaModalShell
-      title={tarea ? 'Editar tarea' : t(lang, 'agendaTareaNueva')}
+      title={tarea ? t(lang, 'agendaEditarTarea') : t(lang, 'agendaTareaNueva')}
       onClose={onClose}
       onSave={titulo.trim() ? handleSave : undefined}
       saving={saving}

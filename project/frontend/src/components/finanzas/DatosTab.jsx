@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { Trash2 } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
@@ -93,6 +93,7 @@ export default function DatosTab() {
 
   const [editing, setEditing] = useState(null) // { id, field }
   const [editVal, setEditVal] = useState('')
+  const debounceRef = useRef(null)
 
   const startEdit = (mov, field) => {
     const raw = getVal(mov, field)
@@ -100,18 +101,26 @@ export default function DatosTab() {
     setEditVal(field === 'monto' ? String(Math.abs(raw)) : String(raw))
   }
 
-  const commit = async (mov) => {
+  const commit = useCallback(async (mov) => {
     if (!editing || editing.id !== mov.id) return
     const { field } = editing
     let value = editVal
     if (field === 'monto')  value = Number(editVal) || 0
     if (field === 'cuotas') value = editVal === '' ? '' : (Number(editVal) || '')
-    await updateMov(mov.id, { [patchKey(mov, field)]: value })
+    // Debounce rapid PATCH calls by 300ms
+    clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      updateMov(mov.id, { [patchKey(mov, field)]: value })
+    }, 300)
     setEditing(null)
-  }
+  }, [editing, editVal, updateMov])
 
-  const commitDirect = (mov, field, value) =>
-    updateMov(mov.id, { [patchKey(mov, field)]: value })
+  const commitDirect = useCallback((mov, field, value) => {
+    clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      updateMov(mov.id, { [patchKey(mov, field)]: value })
+    }, 300)
+  }, [updateMov])
 
   const onKeyDown = (e, mov) => {
     if (e.key === 'Enter')  commit(mov)
@@ -272,17 +281,18 @@ export default function DatosTab() {
           <col style={{ width: 68  }} />  {/* cuotas */}
           <col style={{ width: 36  }} />  {/* delete */}
         </colgroup>
+        <caption className="sr-only">Historial de movimientos</caption>
         <thead>
           <tr>
-            <th style={TH}>{t(lang, 'colFecha')}</th>
-            <th style={TH}>{t(lang, 'colTipo')}</th>
-            <th style={{ ...TH, textAlign: 'right' }}>{t(lang, 'colMonto')}</th>
-            <th style={TH}>{t(lang, 'colMoneda')}</th>
-            <th style={TH}>{t(lang, 'colMetodo')}</th>
-            <th style={TH}>{t(lang, 'colCategoria')}</th>
-            <th style={TH}>{t(lang, 'colDesc')}</th>
-            <th style={TH}>{t(lang, 'colCuotas')}</th>
-            <th style={TH}></th>
+            <th scope="col" style={TH}>{t(lang, 'colFecha')}</th>
+            <th scope="col" style={TH}>{t(lang, 'colTipo')}</th>
+            <th scope="col" style={{ ...TH, textAlign: 'right' }}>{t(lang, 'colMonto')}</th>
+            <th scope="col" style={TH}>{t(lang, 'colMoneda')}</th>
+            <th scope="col" style={TH}>{t(lang, 'colMetodo')}</th>
+            <th scope="col" style={TH}>{t(lang, 'colCategoria')}</th>
+            <th scope="col" style={TH}>{t(lang, 'colDesc')}</th>
+            <th scope="col" style={TH}>{t(lang, 'colCuotas')}</th>
+            <th scope="col" style={TH}></th>
           </tr>
         </thead>
         <tbody>

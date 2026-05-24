@@ -8,20 +8,24 @@ from pathlib import Path
 
 import httpx
 from bs4 import BeautifulSoup
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator, model_validator
 
 from app.config import DEBUG
 from app.db.crud import (
     actualizar_apuntes,
     actualizar_icono,
+    actualizar_hoja,
     actualizar_link_preview,
+    actualizar_categoria,
+    buscar_hojas,
     categoria_existe,
+    categoria_tiene_hojas,
     crear_categoria,
     crear_hoja,
     eliminar_categoria,
@@ -29,6 +33,7 @@ from app.db.crud import (
     obtener_categorias,
     obtener_hoja_por_id,
     obtener_hojas,
+    obtener_hojas_recientes,
     # Finanzas
     fin_obtener_cuentas,
     fin_crear_cuenta,
@@ -88,17 +93,21 @@ from app.db.crud import (
     agenda_actualizar_horario_facultad,
     agenda_eliminar_horario_facultad,
     agenda_resumen_semana,
+    agenda_buscar,
     # Hábitos
     habitos_obtener,
     habitos_crear,
     habitos_actualizar,
     habitos_eliminar,
+    habitos_pendientes_hoy,
+    habitos_stats,
     habitos_registros_obtener,
     habitos_registros_upsert,
+    habitos_registros_batch_upsert,
     habitos_registros_eliminar,
 )
 from app.db.database import init_db
-from app.models.categoria import CategoriaCreate
+from app.models.categoria import CategoriaCreate, CategoriaPatch
 from app.models.hoja import HojaCreate, HojaPatch
 
 
@@ -280,8 +289,22 @@ def crear_categoria_endpoint(body: CategoriaCreate):
     return {"id": cid, "nombre": nombre, "padre_id": body.padre_id, "icono": body.icono}
 
 
+@app.patch("/categorias/{categoria_id}")
+def actualizar_categoria_endpoint(categoria_id: int, body: CategoriaPatch):
+    campos = {k: v for k, v in body.model_dump().items() if v is not None}
+    result = actualizar_categoria(categoria_id, campos)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Categoría no encontrada o nombre duplicado")
+    return result
+
+
 @app.delete("/categorias/{categoria_id}")
-def eliminar_categoria_endpoint(categoria_id: int):
+def eliminar_categoria_endpoint(categoria_id: int, forzar: bool = Query(False)):
+    if not forzar and categoria_tiene_hojas(categoria_id):
+        raise HTTPException(
+            status_code=409,
+            detail="La categoría tiene hojas. Usá ?forzar=true para eliminar de todos modos."
+        )
     if not eliminar_categoria(categoria_id):
         raise HTTPException(status_code=404, detail="Categoría no encontrada")
     return {"mensaje": "Categoría eliminada"}
@@ -332,8 +355,19 @@ async def refrescar_preview(hoja_id: int):
     return {"link_preview": preview}
 
 
+@app.get("/hojas/recientes")
+def listar_hojas_recientes(limit: int = Query(20, ge=1, le=100)):
+    return obtener_hojas_recientes(limit)
+
+
 @app.get("/hojas")
-def listar_hojas():
+def listar_hojas(
+    q:            Optional[str] = Query(None),
+    tipo:         Optional[str] = Query(None),
+    categoria_id: Optional[int] = Query(None),
+):
+    if q or tipo or categoria_id:
+        return buscar_hojas(q=q, tipo=tipo, categoria_id=categoria_id)
     return obtener_hojas()
 
 
@@ -347,20 +381,28 @@ def obtener_hoja(hoja_id: int):
 
 @app.patch("/hojas/{hoja_id}")
 def actualizar_hoja_endpoint(hoja_id: int, data: HojaPatch):
-    if obtener_hoja_por_id(hoja_id) is None:
+    campos = {k: v for k, v in data.model_dump().items() if k in data.model_fields_set}
+    # Delegate specific fields to legacy functions for backward compat, rest to generic
+    if not campos:
+        raise HTTPException(status_code=400, detail="Sin campos para actualizar")
+    result = actualizar_hoja(hoja_id, campos)
+    if result is None:
         raise HTTPException(status_code=404, detail="Hoja no encontrada")
-    fecha_actualizado = None
-    if "apuntes" in data.model_fields_set:
-        fecha_actualizado = actualizar_apuntes(hoja_id, data.apuntes)
-    if "icono" in data.model_fields_set:
-        fecha_actualizado = actualizar_icono(hoja_id, data.icono)
-    return {"mensaje": "Hoja actualizada", "fecha_actualizado": fecha_actualizado}
+    return {"mensaje": "Hoja actualizada", "fecha_actualizado": result.get("fecha_actualizado")}
 
 
 @app.delete("/hojas/{hoja_id}")
 def eliminar_hoja_endpoint(hoja_id: int):
-    if not eliminar_hoja(hoja_id):
+    contenido = eliminar_hoja(hoja_id)
+    if contenido is None:
         raise HTTPException(status_code=404, detail="Hoja no encontrada")
+    # Delete orphan upload file if this was a foto hoja
+    if contenido and contenido.startswith("/uploads/"):
+        archivo = UPLOADS_DIR / Path(contenido).name
+        if archivo.exists():
+            archivo.unlink(missing_ok=True)
+            if DEBUG:
+                print(f"eliminar_hoja: archivo borrado {archivo}")
     return {"mensaje": "Hoja eliminada"}
 
 
@@ -478,6 +520,55 @@ def eliminar_fin_categoria(cat_id: int):
 # Finanzas — Movimientos
 # ---------------------------------------------------------------------------
 
+@app.get("/fin/movimientos/resumen")
+def resumen_fin_movimientos(mes: Optional[str] = Query(None)):
+    """Agregados server-side: ingresos, gastos, por_categoria. Excluye transferencias."""
+    from app.db.database import get_connection
+    from datetime import date as _date
+    conn = get_connection()
+    cursor = conn.cursor()
+    m = mes or _date.today().strftime("%Y-%m")
+    cursor.execute(
+        """SELECT id, fecha, monto, tipo, descripcion, icono, cuenta_id, cuotas,
+                  categoria_id, moneda, nota, audit
+           FROM fin_movimientos WHERE fecha LIKE ?""",
+        (f"{m}%",),
+    )
+    rows = cursor.fetchall()
+    # get category names
+    cursor.execute("SELECT id, nombre FROM fin_categorias")
+    cat_map = {r[0]: r[1] for r in cursor.fetchall()}
+    conn.close()
+
+    ingresos = gastos = 0.0
+    por_categoria: dict = {}
+    for r in rows:
+        cat_nombre = cat_map.get(r[8], "")
+        if cat_nombre.lower() == "transferencia":
+            continue
+        monto = r[2] or 0.0
+        tipo  = r[3]
+        if tipo == "income":
+            ingresos += monto
+        else:
+            gastos += abs(monto)
+        cat_key = cat_nombre or "Sin categoría"
+        por_categoria.setdefault(cat_key, {"categoria": cat_key, "ingresos": 0.0, "gastos": 0.0})
+        if tipo == "income":
+            por_categoria[cat_key]["ingresos"] += monto
+        else:
+            por_categoria[cat_key]["gastos"] += abs(monto)
+
+    return {
+        "mes":            m,
+        "ingresos":       round(ingresos, 2),
+        "gastos":         round(gastos, 2),
+        "balance":        round(ingresos - gastos, 2),
+        "tasa_ahorro":    round((ingresos - gastos) / ingresos * 100, 1) if ingresos > 0 else 0,
+        "por_categoria":  sorted(por_categoria.values(), key=lambda x: x["gastos"], reverse=True),
+    }
+
+
 @app.get("/fin/movimientos")
 def listar_fin_movimientos(mes: Optional[str] = Query(None)):
     return fin_obtener_movimientos(mes)
@@ -575,6 +666,10 @@ def obtener_fin_config():
 
 @app.put("/fin/config")
 def actualizar_fin_config(updates: dict):
+    # Auto-stamp when dolar_oficial is updated
+    if "dolar_oficial" in updates:
+        from datetime import datetime as _dt
+        updates.setdefault("dolar_oficial_updated_at", _dt.now().isoformat())
     return fin_actualizar_config(updates)
 
 
@@ -736,6 +831,13 @@ class AgendaCalendarioPatch(BaseModel):
     color: Optional[str] = None
     activo: Optional[bool] = None
 
+_HM_RE = re.compile(r'^([01]\d|2[0-3]):[0-5]\d$')
+
+def _validate_hm(v: Optional[str], field: str) -> Optional[str]:
+    if v is not None and not _HM_RE.match(v):
+        raise ValueError(f"{field} debe ser HH:MM (ej. 09:30)")
+    return v
+
 class AgendaEventoCreate(BaseModel):
     titulo: str
     fecha_inicio: str
@@ -745,6 +847,12 @@ class AgendaEventoCreate(BaseModel):
     se_repite: bool = False
     regla_repeticion: Optional[str] = None
     calendario_id: Optional[int] = None
+
+    @model_validator(mode='after')
+    def check_fechas(self):
+        if self.fecha_fin and self.fecha_inicio and self.fecha_fin < self.fecha_inicio:
+            raise ValueError("fecha_fin debe ser posterior a fecha_inicio")
+        return self
 
 class AgendaEventoPatch(BaseModel):
     titulo: Optional[str] = None
@@ -773,6 +881,10 @@ class AgendaTareaCreate(BaseModel):
     hora_bloque: Optional[str] = None
     duracion_estimada: Optional[int] = None
 
+    @field_validator('hora_opcional', 'hora_bloque', mode='before')
+    @classmethod
+    def validate_horas(cls, v): return _validate_hm(v, 'hora')
+
 class AgendaTareaPatch(BaseModel):
     titulo: Optional[str] = None
     descripcion: Optional[str] = None
@@ -783,12 +895,27 @@ class AgendaTareaPatch(BaseModel):
     completada: Optional[bool] = None
     lista_id: Optional[int] = None
 
+    @field_validator('hora_opcional', 'hora_bloque', mode='before')
+    @classmethod
+    def validate_horas(cls, v): return _validate_hm(v, 'hora')
+
 class AgendaHorarioCreate(BaseModel):
     dia_semana: int
     hora_inicio: str
     hora_fin: str
     materia: str
     descripcion: Optional[str] = None
+
+    @field_validator('hora_inicio', 'hora_fin', mode='before')
+    @classmethod
+    def validate_horas(cls, v): return _validate_hm(v, 'hora')
+
+    @field_validator('dia_semana', mode='before')
+    @classmethod
+    def validate_dia(cls, v):
+        if not (0 <= int(v) <= 6):
+            raise ValueError("dia_semana debe ser 0 (Lun) a 6 (Dom)")
+        return v
 
 class AgendaHorarioPatch(BaseModel):
     dia_semana: Optional[int] = None
@@ -870,6 +997,69 @@ def eliminar_agenda_evento_endpoint(evt_id: int):
     if not agenda_eliminar_evento(evt_id):
         raise HTTPException(status_code=404, detail="Evento no encontrado")
     return {"mensaje": "Evento eliminado"}
+
+
+@app.get("/agenda/export.ics")
+def exportar_agenda_ics(
+    desde: Optional[str] = Query(None),
+    hasta: Optional[str] = Query(None),
+):
+    eventos = agenda_obtener_eventos(fecha_desde=desde, fecha_hasta=hasta)
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//SGR//Agenda//ES",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+    ]
+    for e in eventos:
+        uid = f"sgr-{e['id']}-{e['fecha_inicio'][:10].replace('-','')}@sgr"
+        def _dt(s):
+            if not s:
+                return None
+            s = s.replace("-", "").replace(":", "")
+            if "T" in s:
+                return s[:15]
+            return s[:8]
+
+        lines.append("BEGIN:VEVENT")
+        lines.append(f"UID:{uid}")
+        dtstart = _dt(e["fecha_inicio"])
+        if e.get("todo_el_dia"):
+            lines.append(f"DTSTART;VALUE=DATE:{dtstart}")
+        else:
+            lines.append(f"DTSTART:{dtstart}")
+        if e.get("fecha_fin"):
+            dtend = _dt(e["fecha_fin"])
+            if e.get("todo_el_dia"):
+                lines.append(f"DTEND;VALUE=DATE:{dtend}")
+            else:
+                lines.append(f"DTEND:{dtend}")
+        lines.append(f"SUMMARY:{e['titulo'].replace(chr(10), ' ')}")
+        if e.get("descripcion"):
+            lines.append(f"DESCRIPTION:{e['descripcion'].replace(chr(10), '\\n')}")
+        lines.append("END:VEVENT")
+
+    lines.append("END:VCALENDAR")
+    content = "\r\n".join(lines) + "\r\n"
+    return Response(
+        content,
+        media_type="text/calendar; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="agenda.ics"'},
+    )
+
+
+@app.get("/agenda/notificaciones/pending")
+def agenda_notificaciones_pending(ventana_min: int = Query(15)):
+    """Events starting within the next `ventana_min` minutes."""
+    from datetime import datetime, timedelta
+    now   = datetime.now()
+    hasta = now + timedelta(minutes=ventana_min)
+    eventos = agenda_obtener_eventos(
+        fecha_desde=now.strftime('%Y-%m-%dT%H:%M'),
+        fecha_hasta=hasta.strftime('%Y-%m-%dT%H:%M'),
+    )
+    return [e for e in eventos if not e.get("todo_el_dia")]
 
 
 # ---------------------------------------------------------------------------
@@ -972,6 +1162,11 @@ def eliminar_agenda_horario(hf_id: int):
     return {"mensaje": "Horario eliminado"}
 
 
+@app.get("/agenda/buscar")
+def buscar_agenda(q: str = Query(..., min_length=1)):
+    return agenda_buscar(q)
+
+
 @app.get("/agenda/revision")
 def obtener_agenda_revision(
     desde: str = Query(...),
@@ -1002,11 +1197,36 @@ class HabitoPatch(BaseModel):
     dias_semana: Optional[str] = None
     hora: Optional[str] = None
     activo: Optional[bool] = None
+    notificar: Optional[bool] = None
+    minutos_antes: Optional[int] = None
 
 class HabitoRegistroUpsert(BaseModel):
     fecha: str
     valor: float
     nota: Optional[str] = None
+
+    @field_validator("valor")
+    @classmethod
+    def valor_valido(cls, v):
+        if v not in (0.5, 1.0):
+            raise ValueError("valor debe ser 0.5 o 1.0")
+        return v
+
+class HabitoRegistroBatchItem(BaseModel):
+    habito_id: int
+    fecha: str
+    valor: float
+    nota: Optional[str] = None
+
+    @field_validator("valor")
+    @classmethod
+    def valor_valido(cls, v):
+        if v not in (0.5, 1.0):
+            raise ValueError("valor debe ser 0.5 o 1.0")
+        return v
+
+class HabitoRegistroBatch(BaseModel):
+    registros: List[HabitoRegistroBatchItem]
 
 
 # ---------------------------------------------------------------------------
@@ -1034,6 +1254,8 @@ def actualizar_habito(habito_id: int, body: HabitoPatch):
     campos = {k: v for k, v in body.model_dump().items() if v is not None}
     if body.activo is not None:
         campos["activo"] = int(body.activo)
+    if body.notificar is not None:
+        campos["notificar"] = int(body.notificar)
     result = habitos_actualizar(habito_id, campos)
     if result is None:
         raise HTTPException(status_code=404, detail="Hábito no encontrado")
@@ -1044,6 +1266,21 @@ def eliminar_habito_endpoint(habito_id: int):
     if not habitos_eliminar(habito_id):
         raise HTTPException(status_code=404, detail="Hábito no encontrado")
     return {"mensaje": "Hábito eliminado"}
+
+
+@app.get("/habitos/pendientes-hoy")
+def listar_habitos_pendientes_hoy(fecha: Optional[str] = Query(None)):
+    from datetime import date as _date
+    hoy = fecha or _date.today().isoformat()
+    return habitos_pendientes_hoy(hoy)
+
+
+@app.get("/habitos/{habito_id}/stats")
+def get_habito_stats(habito_id: int):
+    result = habitos_stats(habito_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Hábito no encontrado")
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1076,3 +1313,9 @@ def eliminar_habito_registro(registro_id: int):
     if not habitos_registros_eliminar(registro_id):
         raise HTTPException(status_code=404, detail="Registro no encontrado")
     return {"mensaje": "Registro eliminado"}
+
+
+@app.post("/habitos/registros/batch")
+def batch_upsert_registros(body: HabitoRegistroBatch):
+    items = [r.model_dump() for r in body.registros]
+    return habitos_registros_batch_upsert(items)

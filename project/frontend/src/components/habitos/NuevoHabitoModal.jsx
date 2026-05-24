@@ -1,34 +1,53 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { X } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
-import { HABITO_COLORS, parseDias } from './habitosUtils'
+import { HABITO_COLORS, parseDias, DIAS_SEMANA } from './habitosUtils'
 
-const DIAS_LABELS = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb']
+const DIAS_LABELS = DIAS_SEMANA
 
 export default function NuevoHabitoModal({ habito, onClose }) {
-  const lang        = useStore(s => s.lang)
-  const addHabito   = useStore(s => s.addHabito)
+  const lang         = useStore(s => s.lang)
+  const addHabito    = useStore(s => s.addHabito)
   const updateHabito = useStore(s => s.updateHabito)
+  const habitos      = useStore(s => s.habitos)
 
   const isEdit = !!habito
 
-  const [nombre,   setNombre]   = useState(habito?.nombre || '')
-  const [desc,     setDesc]     = useState(habito?.descripcion || '')
-  const [color,    setColor]    = useState(habito?.color || HABITO_COLORS[0])
-  const [categ,    setCateg]    = useState(habito?.categoria || '')
-  const [freq,     setFreq]     = useState(habito?.frecuencia_tipo || 'diario')
-  const [dias,     setDias]     = useState(parseDias(habito?.dias_semana))
-  const [hora,     setHora]     = useState(habito?.hora || '')
-  const [saving,   setSaving]   = useState(false)
-  const [error,    setError]    = useState('')
+  const [nombre,  setNombre]  = useState(habito?.nombre || '')
+  const [desc,    setDesc]    = useState(habito?.descripcion || '')
+  const [color,   setColor]   = useState(habito?.color || HABITO_COLORS[0])
+  const [categ,   setCateg]   = useState(habito?.categoria || '')
+  const [freq,    setFreq]    = useState(habito?.frecuencia_tipo || 'diario')
+  const [dias,    setDias]    = useState(parseDias(habito?.dias_semana))
+  const [hora,    setHora]    = useState(habito?.hora || '')
+  const [activo,  setActivo]  = useState(habito?.activo !== false)
+  const [saving,  setSaving]  = useState(false)
+  const [error,   setError]   = useState('')
 
-  // Close on Escape
+  // Autocomplete: unique categories from existing habits
+  const categoriaOpts = useMemo(() => {
+    const cats = habitos.map(h => h.categoria).filter(Boolean)
+    return [...new Set(cats)].sort()
+  }, [habitos])
+
+  // Preview string for frecuencia
+  const freqPreview = useMemo(() => {
+    if (freq === 'diario') return hora ? `Todos los días · ${hora}` : 'Todos los días'
+    if (dias.length === 0) return 'Sin días seleccionados'
+    const labels = DIAS_LABELS.filter((_, i) => dias.includes(i))
+    return hora ? `${labels.join(', ')} · ${hora}` : labels.join(', ')
+  }, [freq, dias, hora])
+
+  // Escape closes, Ctrl+Enter saves
   useEffect(() => {
-    const h = (e) => { if (e.key === 'Escape') onClose() }
+    const h = (e) => {
+      if (e.key === 'Escape') onClose()
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') handleSave()
+    }
     document.addEventListener('keydown', h)
     return () => document.removeEventListener('keydown', h)
-  }, [onClose])
+  }, [nombre, desc, color, categ, freq, dias, hora, activo])
 
   function toggleDia(d) {
     setDias(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d])
@@ -46,6 +65,7 @@ export default function NuevoHabitoModal({ habito, onClose }) {
       frecuencia_tipo: freq,
       dias_semana: freq === 'semanal' ? JSON.stringify(dias.sort()) : null,
       hora: hora || null,
+      ...(isEdit ? { activo } : {}),
     }
     if (isEdit) {
       await updateHabito(habito.id, payload)
@@ -76,6 +96,7 @@ export default function NuevoHabitoModal({ habito, onClose }) {
 
         {/* Form */}
         <div className="overflow-y-auto p-5 flex flex-col gap-4">
+
           {/* Nombre */}
           <div>
             <label className="label mb-1.5 block">{t(lang, 'habitosNombre')}</label>
@@ -87,7 +108,7 @@ export default function NuevoHabitoModal({ habito, onClose }) {
               className="w-full text-[13px] px-3 py-2.5 rounded-xl border outline-none bg-transparent"
               style={{ borderColor: error && !nombre ? 'var(--danger)' : 'var(--border)', color: 'var(--text)' }}
               onFocus={e => e.currentTarget.style.borderColor = 'var(--accent)'}
-              onBlur={e => e.currentTarget.style.borderColor = 'var(--border)'}
+              onBlur={e => e.currentTarget.style.borderColor = error && !nombre ? 'var(--danger)' : 'var(--border)'}
               autoFocus
             />
           </div>
@@ -99,7 +120,7 @@ export default function NuevoHabitoModal({ habito, onClose }) {
               type="text"
               value={desc}
               onChange={e => setDesc(e.target.value)}
-              placeholder="Ej: 10 min con los ojos cerrados, enfocado en la respiración"
+              placeholder="Ej: 10 min con los ojos cerrados"
               className="w-full text-[13px] px-3 py-2.5 rounded-xl border outline-none bg-transparent"
               style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
               onFocus={e => e.currentTarget.style.borderColor = 'var(--accent)'}
@@ -127,19 +148,23 @@ export default function NuevoHabitoModal({ habito, onClose }) {
             </div>
           </div>
 
-          {/* Categoría */}
+          {/* Categoría con autocomplete */}
           <div>
             <label className="label mb-1.5 block">{t(lang, 'habitosCategoria')}</label>
             <input
               type="text"
+              list="habito-cats"
               value={categ}
               onChange={e => setCateg(e.target.value)}
-              placeholder="Ej: Salud, Aprendizaje, Bienestar..."
+              placeholder="Ej: Salud, Aprendizaje..."
               className="w-full text-[13px] px-3 py-2.5 rounded-xl border outline-none bg-transparent"
               style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
               onFocus={e => e.currentTarget.style.borderColor = 'var(--accent)'}
               onBlur={e => e.currentTarget.style.borderColor = 'var(--border)'}
             />
+            <datalist id="habito-cats">
+              {categoriaOpts.map(c => <option key={c} value={c} />)}
+            </datalist>
           </div>
 
           {/* Frecuencia */}
@@ -183,6 +208,11 @@ export default function NuevoHabitoModal({ habito, onClose }) {
                 ))}
               </div>
             )}
+
+            {/* Preview frecuencia en vivo */}
+            <div className="mt-2 text-[11px] mono px-1" style={{ color: 'var(--accent)' }}>
+              Toca: {freqPreview}
+            </div>
           </div>
 
           {/* Hora */}
@@ -198,6 +228,35 @@ export default function NuevoHabitoModal({ habito, onClose }) {
               onBlur={e => e.currentTarget.style.borderColor = 'var(--border)'}
             />
           </div>
+
+          {/* Toggle Activo — solo en modo edición */}
+          {isEdit && (
+            <div className="flex items-center justify-between py-2 px-3 rounded-xl border" style={{ borderColor: 'var(--border)' }}>
+              <div>
+                <div className="text-[13px] font-medium" style={{ color: 'var(--text)' }}>Hábito activo</div>
+                <div className="text-[11px]" style={{ color: 'var(--subtext)' }}>
+                  {activo ? 'Aparece en la grilla y en Agenda' : 'Archivado — historial preservado'}
+                </div>
+              </div>
+              <button
+                onClick={() => setActivo(v => !v)}
+                className="relative w-10 h-5.5 rounded-full transition-colors duration-200 shrink-0"
+                style={{
+                  width: 40, height: 22,
+                  background: activo ? 'var(--accent)' : 'var(--border)',
+                }}
+              >
+                <span
+                  className="absolute top-[3px] rounded-full bg-white transition-transform duration-200"
+                  style={{
+                    width: 16, height: 16,
+                    left: 3,
+                    transform: activo ? 'translateX(18px)' : 'translateX(0)',
+                  }}
+                />
+              </button>
+            </div>
+          )}
 
           {error && (
             <p className="text-[12px]" style={{ color: 'var(--danger)' }}>{error}</p>

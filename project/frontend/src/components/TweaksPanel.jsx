@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useStore } from '../store/useStore'
 import { THEMES, TONES, FONT_PAIRS } from '../utils/themes'
+
+const AGENDA_SHORTCUTS = {
+  hoy:      [['Click celda', 'Nuevo evento'], ['Drag bloque', 'Mover en grilla'], ['Ctrl+Enter', 'Guardar modal']],
+  mes:      [['← →', 'Navegar mes'], ['Click día', 'Nuevo evento'], ['Ctrl+Enter', 'Guardar modal']],
+  tareas:   [['Click lista', 'Seleccionar'], ['Click check', 'Completar tarea'], ['Ctrl+Enter', 'Guardar modal']],
+  revision: [['← →', 'Cambiar semana'], ['PDF', 'Imprimir revisión']],
+}
 
 const PAD = 8
 
@@ -16,12 +24,17 @@ const kbdStyle = {
 
 export default function TweaksPanel() {
   const [open, setOpen] = useState(false)
-  const theme       = useStore(s => s.theme)
-  const tone        = useStore(s => s.tone)
-  const fontPair    = useStore(s => s.fontPair)
-  const setTheme    = useStore(s => s.setTheme)
-  const setTone     = useStore(s => s.setTone)
-  const setFontPair = useStore(s => s.setFontPair)
+  const theme          = useStore(s => s.theme)
+  const tone           = useStore(s => s.tone)
+  const fontPair       = useStore(s => s.fontPair)
+  const setTheme       = useStore(s => s.setTheme)
+  const setTone        = useStore(s => s.setTone)
+  const setFontPair    = useStore(s => s.setFontPair)
+  const agendaActiveTab = useStore(s => s.agendaActiveTab)
+
+  const { pathname } = useLocation()
+  const isAgenda = pathname.startsWith('/agenda')
+  const agendaShortcuts = isAgenda ? (AGENDA_SHORTCUTS[agendaActiveTab] || []) : []
 
   const isDark = THEMES[theme]?.dark !== false
 
@@ -305,6 +318,24 @@ export default function TweaksPanel() {
             })}
           </div>
         </div>
+
+        {/* Contextual Agenda shortcuts */}
+        {agendaShortcuts.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{
+              fontSize: 10, fontWeight: 600, letterSpacing: '.06em',
+              textTransform: 'uppercase', color: 'var(--subtext)',
+            }}>
+              Atajos · {agendaActiveTab}
+            </div>
+            {agendaShortcuts.map(([key, desc]) => (
+              <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11 }}>
+                <kbd style={kbdStyle}>{key}</kbd>
+                <span style={{ color: 'var(--text-2)' }}>{desc}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Shortcut hint */}
         <div style={{

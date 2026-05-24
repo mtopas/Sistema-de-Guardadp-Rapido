@@ -7,7 +7,12 @@ export default function Toast() {
 
   const isError = toast.type === 'error'
   return (
-    <div className="fixed bottom-24 md:bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in pointer-events-none">
+    <div
+      className="fixed bottom-24 md:bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in pointer-events-none"
+      role={isError ? 'alert' : 'status'}
+      aria-live={isError ? 'assertive' : 'polite'}
+      aria-atomic="true"
+    >
       <div className={`flex items-center gap-2 px-4 py-3 rounded-xl shadow-2xl text-sm font-medium whitespace-nowrap ${
         isError
           ? 'bg-red-950/95 text-red-100 border border-red-800'

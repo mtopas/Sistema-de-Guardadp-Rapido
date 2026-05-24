@@ -39,11 +39,13 @@ app/main.py → app/db/crud.py → SQLite
 |------|----------|
 | Pantalla | `frontend/src/screens/AgendaScreen.jsx` |
 | Tabs | `components/agenda/HoyTab.jsx`, `MesTab.jsx`, `TareasTab.jsx`, `RevisionTab.jsx` |
-| UI compartida | `AgendaTabs.jsx`, `MiniCalendar.jsx`, `AgendaModalShell.jsx` |
+| UI compartida | `AgendaTabs.jsx`, `MiniCalendar.jsx`, `AgendaModalShell.jsx`, `AgendaContextMenu.jsx`, `AgendaPanel.jsx` |
 | Modales | `EventoModal.jsx`, `TareaModal.jsx`, `HorarioFacultadModal.jsx` |
-| Estado | `store/useStore.js` (slice `agenda*`) |
+| Hooks reutilizables | `useAgendaDay.js`, `useAgendaKeyboard.js` |
+| Grilla horaria | `HourGrid.jsx` (parametrizable: hours, hourHeight, nowMinutes, blocks, events) |
+| Estado | `store/useStore.js` (slice `agenda*` + `agendaActiveTab`) |
 | API | `app/main.py` (`/agenda/*`) |
-| SQL | `app/db/crud.py` (`agenda_*`) |
+| SQL | `app/db/crud.py` (`agenda_*`, `_expand_recurring`) |
 | Schema + seed | `app/db/database.py` (`_seed_agenda`) |
 | i18n | `utils/i18n.js` (claves `agenda*`) |
 | Carga inicial | `App.jsx` — 5 `fetchAgenda*` al montar |
@@ -94,7 +96,7 @@ agenda_horario_facultad (id, dia_semana, hora_inicio, hora_fin, materia, descrip
 | `hora_bloque` | Time blocking HOY: tarea en grilla; si pasa sin completar → se limpia al montar `HoyTab` |
 | `hora_opcional` | Metadata en listas / chips |
 | `duracion_estimada` | Altura del bloque en grilla (default 30 min) |
-| `se_repite` / `regla_repeticion` | Toggle guardado; **sin motor de recurrencia** — no genera ocurrencias |
+| `se_repite` / `regla_repeticion` | JSON `{frecuencia, dias, hasta}`; **motor backend** `_expand_recurring()` en `crud.py` expande ocurrencias al servir eventos |
 | `activo` (calendario) | Mes filtra eventos de calendarios inactivos |
 
 ### API REST
@@ -111,7 +113,10 @@ agenda_horario_facultad (id, dia_semana, hora_inicio, hora_fin, materia, descrip
 | POST | `/agenda/tareas` | Acepta `hora_bloque` en create |
 | PATCH/DELETE | `/agenda/tareas/{id}` | PATCH actualiza `actualizado_en` |
 | GET/POST/PATCH/DELETE | `/agenda/horario-facultad` | `dia_semana`: Lun=0 … Dom=6 |
+| GET | `/agenda/buscar?q=` | Full-text en título/descripción de eventos y tareas; retorna `{eventos, tareas}` (20 c/u) |
 | GET | `/agenda/revision?desde=&hasta=` | JSON con completadas, incompletas, vencidas, por_calendario |
+| GET | `/agenda/export.ics?desde=&hasta=` | iCalendar RFC-compliant; `DTSTART`, `DTEND`, `SUMMARY`, `DESCRIPTION`, `UID` |
+| GET | `/agenda/notificaciones/pending?ventana_min=` | Eventos que empiezan dentro de `ventana_min` (default 15); usado por TopBar polling |
 
 Formato fechas eventos: ISO local `YYYY-MM-DDTHH:MM:00` (string en SQLite).
 
@@ -123,24 +128,31 @@ Formato fechas eventos: ISO local `YYYY-MM-DDTHH:MM:00` (string en SQLite).
 
 **Navegación de día:** `viewDate` state (← / →); botón "Hoy" aparece cuando `viewISO !== todayISO`. Todos los filtros derivan de `viewISO`.
 
+**Refetch automático:** `useRef(lastFetchedMonth)` — refetch `GET /agenda/eventos?desde=&hasta=` cuando `viewISO.slice(0,7)` cambia (navegación fuera del rango cargado).
+
 **Panel izquierdo (260px)**
 - Tareas **pendientes** con `fecha_opcional` ≤ hoy+15 días (o sin fecha). Filtrado con `useMemo`.
+- **Semáforo de vencimiento:** `fecha_opcional < hoy` → rojo `#ef4444`, `= hoy` → ámbar `#d97706`, `> hoy` → subtext.
 - Checkbox → `updateAgendaTarea({ completada })`.
+- **Quick-add inline:** input "Nueva tarea..." → `addAgendaTarea` con `fecha_opcional = viewISO`; Enter guarda, Escape cancela.
 - ⊕ Agendar → mini `input[type=time]` → `hora_bloque` + `fecha_opcional = viewISO`.
 - Sección **"Hábitos de hoy"** (sin `hora`): checkbox → `upsertHabitoRegistro` (toggle 0 / 1.0).
 
 **Panel central**
 - Franja **chips all-day** encima de la grilla para eventos `todo_el_dia` del día.
 - Grilla **6:00–23:00**, `HOUR_HEIGHT = 56px` (constante en `agendaUtils.js`).
-- Click en franja horaria vacía → `EventoModal` prellenado con fecha y hora del slot.
+- **Layout de columnas para eventos solapados:** `layoutTimedEvents()` — algoritmo greedy que asigna `_col` y `_totalCols`; posición CSS usa `calc(col% + 56px fijo)` para respetar el label de hora.
+- **QuickEventPopover:** click en slot vacío → mini-formulario inline (título + hora prellenada) posicionado en `top = (h-6) * HOUR_HEIGHT`; Escape cierra; "Más detalles" abre `EventoModal` completo.
+- Click en bloque de evento/tarea → selecciona ítem en panel derecho; abre drawer en `< xl`.
 - Capas: facultad (fondo opacado, `pointer-events: none`) → eventos → bloques de tareas → hábitos con hora.
 - Línea "ahora" (`.now-dot` pulso animado) actualiza cada 60 s; solo visible cuando `isToday`.
 - Bloques de tareas: animación `.block-new` (scaleY) al aparecer.
 - Bloques de hábitos con hora son clickeables → completa vía `upsertHabitoRegistro`.
 - Scroll automático a la hora actual al montar (cuando `isToday`).
 
-**Panel derecho (xl)**
-- Cards de eventos y tareas bloqueadas del día (solo lectura).
+**Panel derecho (xl) / Drawer (`< xl`)**
+- Muestra detalle del ítem seleccionado (evento o tarea) con botón "Editar" que abre `EventoModal`/`TareaModal`.
+- En pantallas `< xl`: overlay drawer desde la derecha (300px) con backdrop oscuro al click fuera.
 
 **Lógica time blocking**
 ```javascript
@@ -151,11 +163,15 @@ Formato fechas eventos: ISO local `YYYY-MM-DDTHH:MM:00` (string en SQLite).
 
 ### 4.2 Mes (`MesTab.jsx`)
 
+**Refetch automático:** `useRef(lastFetchedMonth)` — refetch al cambiar `year/month` fuera del rango cargado.
+
 **Izquierda:** `MiniCalendar` + lista calendarios (toggle `activo` al click).
 **Centro:** vista Mes (6×7) o Semana (columnas 7–22h). Click en día → `EventoModal` con `defaultFecha`. Click en chip → `selected` en panel derecho.
-**Derecha (xl):** detalle evento/tarea o próximos 5 eventos.
+**Derecha (xl):** detalle evento/tarea (lectura + botón **Editar** que abre `EventoModal`/`TareaModal`) o próximos 5 eventos.
 
-Facultad y hábitos **no** aparecen en el mes.
+**Vista Semana (mejoras mayo 2026):**
+- Franja all-day entre cabecera de días y grilla horaria: chips sólidos (eventos `todo_el_dia`) + chips punteados (tareas con `fecha_opcional` = ese día, hasta 2 visibles + "+N").
+- Capa **facultad** (`agendaHorarioFacultad`) visible en cada columna de día (`dia_semana` 0=Lun…6=Dom) con color verde opacado `#059669 15%`.
 
 ### 4.3 Tareas (`TareasTab.jsx`)
 
@@ -184,8 +200,8 @@ Facultad y hábitos **no** aparecen en el mes.
 
 | Modal | Abre desde | Notas |
 |-------|------------|-------|
-| `EventoModal` | TopBar CTA, clic en día Mes, mini-cal, click slot HOY | Usa `AgendaModalShell`. Acepta `defaultHora`. `showToast` al guardar. |
-| `TareaModal` | HOY +, Tareas | Usa `AgendaModalShell`. `showToast` al guardar. |
+| `EventoModal` | TopBar CTA, clic en día Mes, mini-cal, click slot HOY, panel derecho | Usa `AgendaModalShell`. Acepta `defaultHora`. `showToast` i18n al guardar. **Confirmación doble** antes de eliminar (primer click = confirmar; segundo = DELETE). **UI de recurrencia:** toggle `seRepite` → selector frecuencia (Diario/Semanal/Mensual) + días de semana (solo Semanal) + fecha límite; serializa a `regla_repeticion` JSON. |
+| `TareaModal` | HOY +, Tareas, panel derecho | Usa `AgendaModalShell`. `showToast` i18n al guardar. **Confirmación doble** antes de eliminar. |
 | `HorarioFacultadModal` | Botón "Facultad" | Lista + form inline; CRUD recurrente por día de semana. `Escape` cierra, backdrop blur. |
 
 ---
@@ -196,7 +212,9 @@ Facultad y hábitos **no** aparecen en el mes.
 |--------|--------|
 | **Hábitos** | HOY muestra hábitos programados hoy; completar desde grilla o panel izq (toggle 0/1.0) |
 | **Bóveda** | Sin enlace directo |
-| **Finanzas** | Sin enlace |
+| **Finanzas** | Soft-link por keywords (`FIN_KEYWORDS` regex): `HoyTab` muestra 💰 en tareas con palabras financieras (pagar, cuota, factura…) → click navega a `/finanzas`; `FinanzasLeftPanel` muestra hasta 6 tareas pendientes con keyword financiero y enlace "Ver todas →" en `/agenda?tab=tareas` |
+| **TopBar búsqueda** | En `/agenda`: debounce 300ms → `GET /agenda/buscar?q=` → dropdown con eventos (📅) y tareas (☑) |
+| **CaptureModal** | Tab "Agenda" habilitado: toggle Evento/Tarea, título, fecha, hora; tareas asocian lista |
 | **TopBar campana** | Badge visual; sin handler (decorativo) |
 | **TweaksPanel Ctrl+M** | Global: temas/tonos/fuentes; igual en todos los módulos |
 
@@ -214,7 +232,7 @@ mybot/
 ```
 
 `API_BASE` desde `API_BASE_URL` en `.env`; en Docker = `http://backend:8000`.
-Al arrancar: healthcheck `GET /habitos` con backoff exponencial (1→2→4→8 s, 4 intentos); si el backend no responde el bot arranca igualmente. Carga `chat_id.json`, registra job `check_in_noche` a las 21:00.
+Al arrancar: healthcheck `GET /habitos` con backoff exponencial (1→2→4→8 s, 4 intentos); si el backend no responde el bot arranca igualmente. Carga `chat_id.json`. Lee `checkin_config.json` (crea si no existe, default 21:00) y registra job `check_in_noche` a la hora configurada.
 
 ### Comandos implementados
 
@@ -237,6 +255,7 @@ Al arrancar: healthcheck `GET /habitos` con backoff exponencial (1→2→4→8 s
 | `/ayer <nombre> [total\|parcial]` | Marca hábito de ayer | `PUT /habitos/{id}/registro` |
 | `/racha` | Rachas de todos los hábitos activos ordenadas de mayor a menor | `GET /habitos`, `GET /habitos/registros` |
 | `/nota <nombre> <texto>` | Agrega nota al registro de hoy; crea registro 1.0 si no existe | `PUT /habitos/{id}/registro` |
+| `/checkin [HH:MM]` | Sin args: muestra hora actual. Con args: reprograma el check-in nocturno (guarda en `checkin_config.json`, reagenda `job_queue` sin reiniciar) | — |
 | Texto libre | Captura a Bóveda | `GET /categorias`, `POST /hojas` |
 | `t: <texto>` | Quick-capture tarea (sin flujo multi-turno) | `GET /agenda/listas`, `POST /agenda/tareas` |
 | `e: <texto>` | Quick-capture evento (primera lista/calendario) | `GET /agenda/calendarios`, `POST /agenda/eventos` |
@@ -246,7 +265,7 @@ Al arrancar: healthcheck `GET /habitos` con backoff exponencial (1→2→4→8 s
 
 - **Tareas:** `[✓ Título]` → `PATCH /agenda/tareas/{id}` `completada=true`; el mensaje `/hoy` se refresca.
 - **Hábitos completados:** `[↩ Nombre]` → `DELETE /habitos/registros/{id}` (deshacer).
-- **Hábitos pendientes:** `[✓ Nombre]` (1.0) y `[½ Nombre]` (0.5) → `PUT /habitos/{id}/registro`; íconos actualizan en el mismo mensaje (✅/⚡/⬜). Muestra 📝 si tiene nota.
+- **Hábitos pendientes:** `[✓ Nombre]` (1.0) y `[½ Nombre]` (0.5) → `PUT /habitos/{id}/registro`; íconos actualizan en el mismo mensaje (✅/⚡/⬜). Muestra 📝 si tiene nota. Tras marcar, el bot pregunta "¿Querés agregar una nota?" → respuesta de texto libre la guarda en el registro; responder "no"/"skip" omite.
 - **Calendarios:** al crear evento con >1 calendario, botones inline uno por calendario → `POST /agenda/eventos` en el seleccionado.
 
 `callback_data` usa prefijos cortos (límite 64 bytes de Telegram):
@@ -288,7 +307,7 @@ Al arrancar: healthcheck `GET /habitos` con backoff exponencial (1→2→4→8 s
 ### Chat_id y check-in nocturno
 
 - El `chat_id` se guarda automáticamente en `chat_id.json` al primer mensaje del usuario y se carga al arrancar.
-- `job_queue.run_daily(check_in_noche, time=21:00)` — si hay hábitos pendientes del día, envía un mensaje proactivo con botones ✓/½.
+- `job_queue.run_daily(check_in_noche, time=<configurado>)` — si hay hábitos pendientes del día, envía un mensaje proactivo con botones ✓/½. La hora se persiste en `checkin_config.json` y se puede cambiar con `/checkin HH:MM` en caliente sin reiniciar el bot.
 
 ### Estado conversacional
 
@@ -296,6 +315,7 @@ Al arrancar: healthcheck `GET /habitos` con backoff exponencial (1→2→4→8 s
 |------|--------|
 | `agenda_choose_lista` | `/tarea` con >1 lista: espera número |
 | `agenda_choose_calendario` | (vía inline keyboard, no texto) |
+| `STEP_HABITO_NOTA` | Tras marcar hábito ✓/½: espera texto de nota o "no"/"skip" para omitir |
 
 `/cancel` limpia `user_data` en cualquier momento desde cualquier flujo (Bóveda o Agenda).
 
@@ -307,12 +327,16 @@ Al arrancar: healthcheck `GET /habitos` con backoff exponencial (1→2→4→8 s
 
 ## 7. Bugs conocidos
 
-Sin bugs P0 conocidos a mayo 2026.
+### Bugs P0 conocidos
+
+Sin bugs P0 abiertos.
 
 ### Bugs resueltos (mayo 2026)
 
 | Bug | Fix |
 |-----|-----|
+| Eventos solapados en grilla HOY | `layoutTimedEvents()` — greedy column assignment con `_col`/`_totalCols`; CSS `calc()` mixto % + px |
+| `fetchAgendaEventos` sin refetch al navegar | `useRef(lastFetchedMonth)` en `HoyTab` y `MesTab`; refetch al cambiar mes |
 | `style2={{...}}` en `MesTab.jsx` | Fusionado en `style={{ height, borderColor }}` |
 | `toISOString().slice(0,10)` TZ | `toLocalISODate()` en `agendaUtils.js`; importado en `HoyTab` y `MesTab` |
 | Now-line stale tras medianoche | `useEffect` crea `new Date()` fresco en cada tick |
@@ -339,20 +363,27 @@ project/
 │   ├── store/useStore.js    # Slice agenda*
 │   ├── screens/AgendaScreen.jsx  # Tab en URL (?tab=)
 │   └── components/agenda/
-│       ├── agendaUtils.js        # toLocalISODate, HOURS, HOUR_HEIGHT, timeToMinutes, minutesToTop
+│       ├── agendaUtils.js        # toLocalISODate, HOURS, HOUR_HEIGHT, timeToMinutes, minutesToTop, layoutTimedEvents
 │       ├── AgendaModalShell.jsx  # Shell reutilizable: Escape, Ctrl+Enter, backdrop blur
 │       ├── AgendaTabs.jsx
+│       ├── AgendaPanel.jsx       # Panel derecho reutilizable (detalle evento/tarea)
+│       ├── AgendaContextMenu.jsx # Menú contextual (integrado en chips Mes: Editar/Duplicar/Eliminar)
+│       ├── HourGrid.jsx          # Grilla horaria parametrizable (hours, hourHeight, nowMinutes, blocks, events)
 │       ├── MiniCalendar.jsx
-│       ├── HoyTab.jsx            # Grilla 6–23h + navegación día + integración hábitos
+│       ├── HoyTab.jsx            # Grilla 6–23h + navegación día + integración hábitos + 💰 FIN_KEYWORDS
 │       ├── MesTab.jsx
 │       ├── TareasTab.jsx
 │       ├── RevisionTab.jsx       # Sparkline + export MD + bloques en % tiempo
-│       ├── EventoModal.jsx       # Usa AgendaModalShell
+│       ├── EventoModal.jsx       # Usa AgendaModalShell; recurrencia UI
 │       ├── TareaModal.jsx        # Usa AgendaModalShell
-│       └── HorarioFacultadModal.jsx
+│       ├── HorarioFacultadModal.jsx
+│       ├── useAgendaDay.js       # Hook: lógica de navegación de día (viewDate, viewISO, isToday)
+│       └── useAgendaKeyboard.js  # Hook: atajos de teclado globales en AgendaScreen
 └── mybot/
-    ├── bot.py               # Entry point + Bóveda + backoff healthcheck
-    └── agenda_handlers.py   # Agenda + Hábitos; /pendientes acepta [lista]
+    ├── bot.py               # Entry point + Bóveda + backoff healthcheck + /checkin handler
+    ├── agenda_handlers.py   # Agenda + Hábitos; nota conversacional; /checkin configurable
+    ├── chat_id.json         # Auto-generado al primer mensaje
+    └── checkin_config.json  # Hora del check-in nocturno; default {"hour":21,"minute":0}
 ```
 
 ---

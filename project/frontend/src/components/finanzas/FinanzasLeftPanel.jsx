@@ -1,8 +1,11 @@
 import { useState, useMemo } from 'react'
-import { ArrowDown, ArrowUp, Settings, ChevronDown, ChevronUp } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { ArrowDown, ArrowUp, Settings, ChevronDown, ChevronUp, CalendarClock } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
 import { FINANZAS, fmtARS, fmtUSD, isTransferencia } from '../../data/finanzas'
+
+const FIN_KEYWORDS = /pagar|cuota|vencimiento|cobro|débito|debito|transferir|tarjeta|impuesto|factura|alquiler|servicio|préstamo|prestamo/i
 
 const GROUP_LABEL = { wallets: 'wallets', banks: 'banks', cash: 'cash' }
 
@@ -32,12 +35,14 @@ function AccountRow({ a }) {
 }
 
 export default function FinanzasLeftPanel() {
+  const navigate         = useNavigate()
   const lang             = useStore(s => s.lang)
   const finCuentas       = useStore(s => s.finCuentas)
   const finMovimientos   = useStore(s => s.finMovimientos)
   const finConfig        = useStore(s => s.finConfig)
   const updateFinConfig  = useStore(s => s.updateFinConfig)
   const updateFinCuenta  = useStore(s => s.updateFinCuenta)
+  const agendaTareas     = useStore(s => s.agendaTareas)
 
   const [configOpen, setConfigOpen] = useState(false)
   const [dolarInput, setDolarInput] = useState('')
@@ -87,6 +92,11 @@ export default function FinanzasLeftPanel() {
 
   const dolarRate = finConfig?.dolar_oficial ?? FINANZAS.blueRate
 
+  const tareasFinancieras = useMemo(() =>
+    agendaTareas.filter(t => !t.completada && FIN_KEYWORDS.test(t.titulo)).slice(0, 6),
+    [agendaTareas]
+  )
+
   const handleDolarUpdate = () => {
     const val = parseFloat(dolarInput)
     if (!isNaN(val) && val > 0) {
@@ -114,7 +124,7 @@ export default function FinanzasLeftPanel() {
         <div className="text-[11.5px] mt-1.5 flex items-center gap-2 flex-wrap" style={{ color: 'var(--subtext)' }}>
           <span className="mono tnum">≈ {fmtUSD(saldoUSD)}</span>
           <span className="opacity-50">·</span>
-          <span>blue {dolarRate} ARS/USD</span>
+          <span>{t(lang, 'finBlue')} {dolarRate} ARS/USD</span>
         </div>
 
         <div className="grid grid-cols-2 gap-2 mt-4">
@@ -190,6 +200,46 @@ export default function FinanzasLeftPanel() {
           )
         })}
 
+        {/* Agenda cross-module: pending financial tasks */}
+        {tareasFinancieras.length > 0 && (
+          <>
+            <hr className="divider" />
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-2 px-1">
+                <div className="label flex items-center gap-1.5">
+                  <CalendarClock size={11} />
+                  Agenda pendiente
+                </div>
+                <button
+                  onClick={() => navigate('/agenda?tab=tareas')}
+                  className="text-[10.5px] transition-colors"
+                  style={{ color: 'var(--accent)' }}
+                >
+                  Ver todas →
+                </button>
+              </div>
+              {tareasFinancieras.map(tarea => (
+                <div
+                  key={tarea.id}
+                  className="flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-colors"
+                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                  onClick={() => navigate('/agenda?tab=tareas')}
+                  title="Ir a Agenda"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: tarea.lista_color || 'var(--accent)' }} />
+                  <span className="text-[12px] flex-1 truncate" style={{ color: 'var(--text)' }}>{tarea.titulo}</span>
+                  {tarea.fecha_opcional && (
+                    <span className="mono text-[10px] shrink-0" style={{ color: 'var(--subtext)' }}>
+                      {new Date(tarea.fecha_opcional + 'T12:00:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
         {/* Config toggle */}
         <hr className="divider" />
         <button
@@ -239,7 +289,7 @@ export default function FinanzasLeftPanel() {
 
             {/* Account balances */}
             <div>
-              <div className="label mb-2">Saldos por cuenta</div>
+              <div className="label mb-2">{t(lang, 'finSaldosCuenta')}</div>
               <div className="flex flex-col gap-2">
                 {cuentas.flatMap(g => g.items ?? []).map(cuenta => {
                   const edit = saldoEdits[cuenta.id] ?? {}
@@ -285,7 +335,7 @@ export default function FinanzasLeftPanel() {
                           {cuenta.name}
                         </span>
                         <span className="text-[10px] mono tnum" style={{ color: 'var(--subtext)' }}>
-                          actual: {fmtARS(cuenta.ars ?? 0)}
+                          {t(lang, 'finActual')}: {fmtARS(cuenta.ars ?? 0)}
                         </span>
                       </div>
                       <div className="flex gap-1.5">

@@ -7,3 +7,8 @@ class CategoriaCreate(BaseModel):
     nombre: str
     padre_id: Optional[int] = None
     icono: Optional[str] = None
+
+class CategoriaPatch(BaseModel):
+    nombre:   Optional[str] = None
+    padre_id: Optional[int] = None
+    icono:    Optional[str] = None

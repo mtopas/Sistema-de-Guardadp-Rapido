@@ -199,26 +199,42 @@ Seed por defecto: 3 hábitos de ejemplo (Meditar, Correr, Leer).
 
 ### Bóveda — hecho
 
-- Grafo conectado a API, barra superior estilo ClaudeDesign, modal captura (Ctrl+Enter), 6 temas + tonos + pares de fuentes, Tweaks Ctrl+M.
-- Módulos Hábitos en UI de captura **deshabilitados**.
+- Grafo conectado a API, barra superior ClaudeDesign, modal captura (`Ctrl+Enter`), 6 temas + tonos + pares de fuentes, Tweaks `Ctrl+M`.
+- **NetworkGraph:** click en hoja → abre RightPanel; tooltip hover (título + tipo + categoría); `cursor:pointer` hojas / `cursor:grab` fondo; aviso "+N" cuando hay >14 hojas por rama; ARIA completo. `parseGraph.js` + `DetailPanel.jsx` eliminados.
+- **LeftPanel:** estado expansión en `localStorage`; expandir/colapsar todo; highlight búsqueda; botón "+ Hoja" inline por categoría (`openCaptureWith`); formulario inline "Nueva subcategoría".
+- **RightPanel:** título editable al click; breadcrumb → select categoría; indicador "⚠ Sin guardar" si falla la red; TipTap Extension `Link` + `Placeholder`.
+- **CaptureModal:** pre-selecciona última categoría usada (`localStorage`) y `captureDefaultCategoriaId` del store; `role="dialog"` + `aria-modal` + focus trap. Tab Hábitos habilitado con formulario compacto.
+- **Store Bóveda:** `crearHoja` con update optimista (temp id + rollback); `updateHoja(id, patch)` genérico; `openCaptureWith(categoriaId)`.
+- **Backend:** `HojaPatch` ampliado (contenido, categoria_id, tipo); `GET /hojas?q=&tipo=&categoria_id=`; `GET /hojas/recientes?limit=`; `PATCH /categorias/{id}`; `DELETE /categorias/{id}` con 409 si tiene hojas; índices SQLite en `hojas`; DELETE archivo al borrar foto.
+- Link preview server-side, tags + cross-links en grafo.
+- **Bot Bóveda completo:** inline keyboards, subcategorías, `/rapido`, `/ultimas`, `/buscar`, forward, ubicación, foto con caption, caché 60s, healthcheck `/categorias`. Prefijos Agenda: `t:`/`e:`.
 
 ### Finanzas — hecho
 
-- **Dashboard:** donuts, tarjetas movimientos, modal "ver todos" (sort 3-clicks + filtro categoría), cuotas, notas, panel derecho KPIs/cuotas/categorías.
-- **Datos:** histórico completo, edición inline blur, delete sin confirmación, columnas reordenadas, fecha `DD-MM-AAAA`, PATCH backend.
+- **Dashboard:** donuts con tooltip hover monto/% por segmento e highlight interactivo; tarjetas movimientos; modal "ver todos" (sort 3-clicks + filtro categoría + **export CSV**); cuotas; notas; panel derecho.
+- **Datos:** histórico completo, edición inline blur con **debounce 300ms**, delete, orden por fecha. `scope="col"` en headers de tabla.
 - **Anual:** agregados por año, gráfico barras nominal/real, tabla meses, inflación mensual editable, panel derecho.
-- **FIRE:** tabla mensual con proyección (aporte compuesto, interés, saldo), overrides de ahorrado, panel config (% aumento mensual, rentabilidad).
-- **Ahorro:** totales ARS/USD, "líquido sin invertir", barra por tipo, secciones colapsables por instrumento, CRUD instrumentos, objetivos en panel derecho con modal, P&L básico.
-- Scrollbars Finanzas tematizados (`.panel-scroll` en `index.css`).
+- **FIRE:** tabla mensual con proyección, overrides ahorrado, panel config.
+- **Ahorro:** totales ARS/USD, "líquido sin invertir", barra por tipo, instrumentos colapsables, CRUD, objetivos, P&L. Tokens CSS `var(--warning)`/`var(--success)` (antes hex hardcoded).
+- **`MovementModal`:** `Ctrl+Enter` guarda; validación "Ahorro sin objetivo" con warning inline; chips de plantillas rápidas; autocompletar última cuenta/categoría desde `localStorage`.
+- **`FinanzasMobileDrawer`:** botón "Ver resumen" en `< md` abre `FinanzasLeftPanel` como drawer deslizante.
+- **Code-split:** `AnualTab`, `FireTab`, `AhorroTab`, `DatosTab` con `React.lazy` + `Suspense`. Prefetch `finMovimientosAll` al montar.
+- **`MovimientosTableModal`:** botón export CSV con los movimientos actualmente filtrados.
+- **Store:** `finActiveTab` + `setFinActiveTab`; `normalizeMovimiento()` centralizado.
+- **`utils/months.js`** centralizado; `DashboardTabs` y otros ya lo usan.
+- **`prefers-reduced-motion`** para `.anim-card-in`.
+- **Toast:** `role="status"/"alert"` + `aria-live` para screen readers.
+- **i18n:** `finSaldosCuenta`, `finBlue`, `finActual` en `i18n.js`; `FinanzasLeftPanel` sin strings hardcodeados.
+- **Backend:** índices SQL `(fecha)`, `(categoria_id)`, `(tipo, fecha)` en `fin_movimientos`; `dolar_oficial_updated_at` auto-stamped en PUT; `mes_cierre` en config; `GET /fin/movimientos/resumen?mes=`.
+- Scrollbars Finanzas tematizados (`.panel-scroll`).
 
-### Finanzas — parcial / deuda conocida
+### Finanzas — deuda conocida
 
-- **MovementModal:** no valida "categoría Ahorro sin objetivo" con error al guardar.
-- **Emergencia:** API `/fin/emergencia` y categoría `Emergencia` siguen en código; spec = migrar a objetivo `Fondo de Emergencia`.
-- **Ahorro vs movimientos:** dos fuentes (ledger instrumentos vs suma categoría Ahorro); "líquido sin invertir" reconcilia parcialmente.
-- **FIRE:** tabla superior de hitos por edad — spec pide recalcular desde último saldo real.
+- **Emergencia:** `GET /fin/emergencia` sigue en código — pendiente migrar a objetivo `Fondo de Emergencia`.
+- **FIRE:** hitos por edad sin recalcular desde saldo real.
 - **Instrumentos:** ventas parciales, splits, dividendos — spec futuro.
-- **Config bancos** en panel izquierdo: incompleto respecto al prompt.
+- **Dual schema movimientos:** `normalizeMovimiento()` existe pero no se aplica en todos los consumidores todavía.
+- **TopBar búsqueda:** input existe pero no filtra nada.
 
 ### Agenda — hecho
 
@@ -236,22 +252,71 @@ Seed por defecto: 3 hábitos de ejemplo (Meditar, Correr, Leer).
 - **BD:** `agenda_eventos.calendario_id` tiene `ON DELETE CASCADE` (migración automática en `_apply_migrations`); `PRAGMA foreign_keys = ON` activado en `get_connection()`. Migraciones: `creado_en`/`actualizado_en` en `agenda_tareas` y `agenda_eventos`; índice `idx_eventos_inicio`. `actualizado_en` se actualiza en cada PATCH.
 - **API:** `GET /agenda/eventos` tiene defaults de rango automáticos (mes actual ±2 meses) cuando no se pasan params. `POST /agenda/tareas` acepta `hora_bloque`.
 
+### Agenda — hecho (mayo 2026 — segunda ronda)
+
+- **Layout columnas eventos solapados:** `layoutTimedEvents()` greedy en `HoyTab`; `_col`/`_totalCols`; CSS `calc(col% + 56px)`.
+- **Refetch en navegación:** `useRef(lastFetchedMonth)` en `HoyTab` y `MesTab`; refetch al salir del rango cargado.
+- **Panel derecho HOY editable:** click en bloque → selecciona ítem; botón Editar abre modal; drawer en `< xl`.
+- **Semáforo vencimiento tareas:** rojo (vencida), ámbar (hoy), normal (futura) en panel izq HOY.
+- **Quick-add inline:** input "Nueva tarea..." en panel izq HOY; `QuickEventPopover` al click en slot vacío.
+- **Panel derecho Mes editable:** botón Edit2 abre `EventoModal`/`TareaModal` con ítem seleccionado.
+- **Confirmación doble eliminar:** `confirmDelete` state en `EventoModal` y `TareaModal`; primer click = confirmar, segundo = DELETE.
+- **Vista Semana completa:** franja all-day con chips tareas + eventos todo-el-día; capa facultad en cada columna.
+- **Recurrencia UI:** toggle `seRepite` → selector Diario/Semanal/Mensual + días + fecha hasta; serializa a `regla_repeticion` JSON.
+- **Validación Pydantic Agenda:** HH:MM para campos hora; `model_validator` fecha_fin > fecha_inicio; `dia_semana` 0–6.
+- **`GET /agenda/buscar?q=`:** full-text LIKE en título/descripción eventos y tareas; `{eventos, tareas}` (20 c/u).
+- **TopBar búsqueda agenda:** debounce 300ms → dropdown resultados en `/agenda`; placeholder diferenciado.
+- **CaptureModal tab Agenda:** habilitado; toggle Evento/Tarea, título, fecha, hora, lista.
+- **ARIA AgendaTabs:** `role="tablist"`, `aria-controls`, `id` en tabs.
+- **i18n Agenda completo:** 35+ claves nuevas; eliminados hardcoded strings en `TareasTab`, `EventoModal`, `TareaModal`, `RevisionTab`, `MesTab`.
+
+### Agenda — hecho (tercera ronda — mayo 2026)
+
+- **useShallow** en `MesTab` + `RevisionTab`: un solo selector agrupado evita re-renders por cambios de otros módulos.
+- **AgendaContextMenu:** portal con posición x/y, cierre Escape/click-fuera, ítems danger; integrado en chips de `MesTab`.
+- **Crossfade Mes:** `key={year-month}` en grid + animación `sgr-fade-in 180ms`; CSS `sgr-highlight-pulse` para ítems encontrados por búsqueda.
+- **i18n MesTab:** `WEEKDAYS` → `t(lang, 'agendaDiasLargos').split(',')`.
+- **Highlight TopBar→Mes:** resultados de búsqueda navegan a `?tab=mes&highlight=ID&highlightDate=YYYY-MM-DD`; `MesTab` salta al mes y aplica clase `sgr-highlight`.
+- **TareasTab Inbox:** lista virtual `__inbox__` (tareas sin fecha); siempre visible en panel izq con badge count; botón "Nueva tarea" deshabilitado en Inbox.
+- **Toggle descompletar tarea HOY:** `handleBlockToggle` maneja `completada → false`; anima fade + strike-through 200ms antes de confirmar.
+- **AgendaModalShell:** focus trap Tab/Shift-Tab + ARIA (`role="dialog"`, `aria-modal`, `aria-labelledby`, `aria-label` en close); grilla HOY tiene `role="grid"` / `role="row"` / `role="gridcell"`.
+- **TweaksPanel atajos contextuales:** `agendaActiveTab` en store; sección dinámica en Ctrl+M muestra atajos del tab activo.
+- **RevisionTab mejorado:** hábitos incluidos en % tiempo planificado; barra `role="progressbar"` + `aria-valuenow/min/max`; comparación N vs N-1 (delta badge); export PDF via `window.print()`; card "Finanzas · semana" con ingresos/gastos/neto.
+- **Motor recurrencia backend:** `_expand_recurring()` en `crud.py`; soporta `diario`, `semanal`, `mensual`; respeta `hasta`; se invoca en `agenda_obtener_eventos`.
+- **`GET /agenda/export.ics`:** iCalendar RFC-compliant con `DTSTART`, `DTEND`, `SUMMARY`, `DESCRIPTION`, `UID`.
+- **`GET /agenda/notificaciones/pending`:** eventos próximos en ventana configurable (default 15 min); TopBar polling 60s + `Notification API` del browser.
+- **Cross-módulo Bóveda↔Agenda:** widget "Próximos eventos" en `RightPanel` con hasta 4 eventos de hoy; navega a `/agenda?tab=hoy`.
+- **Cross-módulo Finanzas↔Agenda:** `FinanzasLeftPanel` muestra tareas pendientes con keywords financieros (pagar, cuota, vencimiento…) con link a `/agenda?tab=tareas`; `HoyTab` muestra 💰 en tareas financieras con link a `/finanzas`.
+- **Deuda técnica:** `HourGrid.jsx` (grilla horaria reutilizable), `useAgendaDay.js` (hook datos de día), `useAgendaKeyboard.js` (ArrowLeft/Right + T/N), `AgendaPanel.jsx` (aside reutilizable).
+- **Bot — nota conversacional:** tras marcar ✓/½, el bot pregunta "¿Querés agregar una nota?" y gestiona la respuesta vía `STEP_HABITO_NOTA`.
+- **Bot — `/checkin [HH:MM]`:** ver o cambiar la hora del check-in nocturno; persiste en `checkin_config.json`; reprograma el job sin reiniciar el bot.
+
+### Agenda — deuda conocida
+
+- **Semana en SemanTab propio:** actualmente la vista Semana está embebida en `MesTab`; no hay tab separada.
+- **Notificaciones completas:** `agenda_recordatorios` tabla + worker scheduler en backend pendientes.
+- **Menú contextual completo:** sólo en chips Mes; falta en slots vacíos HOY, bloques grilla, listas, calendarios.
+
 ### Hábitos — hecho
 
-- **HOY (default):** grilla mensual con scroll único y columnas sticky; click → `CompletarModal` (Total verde / Parcial amarillo) + nota corta; días futuros grises; días sin programar con guión.
-- **Progreso:** resumen semanal/mensual/vs anterior; mensaje de momentum; heatmap 3 meses; sparkline 6 meses; tabla stats por hábito (racha/pct/tendencia).
-- **Historial:** calendario mensual coloreado por % del día; notas en hover; filtro por hábito; selector de período.
-- **Panel izquierdo:** lista de hábitos con estado del día, streak ≥3 con 🔥, barra de progreso.
-- **Panel derecho (xl):** descripción, racha actual/máxima, % mes, registros recientes, editar/eliminar.
-- **NuevoHabitoModal:** nombre, descripción, color picker, categoría libre, frecuencia diario/días específicos, hora opcional.
+- **HOY:** grilla mensual sticky; anillo SVG de progreso en número del día actual; ARIA `role="grid"` completo; navegación por teclado (flechas + 1/2/Enter/Escape); leyenda; tooltip fecha+nota; scroll automático a hoy; animación `habito-cell-pulse`.
+- **Progreso:** resumen semanal/mensual; afirmaciones de identidad con stats reales; heatmap 3 meses (click → navega a HOY del mes); sparkline 6 meses; tabla stats; filtro por categoría; cards "Más consistente" / "Más fallas".
+- **Historial:** selector período Mes/Trimestre/Año (multi-grilla); marca ⚡ racha rota por hábito; click en día → `DetalleDiaModal`; tooltip notas seleccionable.
+- **Panel izquierdo:** quick-check inline; toggle "Solo pendientes hoy"; empty state con CTA.
+- **Panel derecho:** sparkline 30 días; racha máxima con `calcMaxStreak`; modal confirmación eliminar + toast; drawer `HabitosDrawer` en `< xl`.
+- **NuevoHabitoModal:** `Ctrl+Enter`; preview frecuencia en vivo; toggle Activo (soft-archive); autocomplete categoría.
+- **TopBar campana (en `/habitos`):** dropdown pendientes del día; badge count real; usa `GET /habitos/pendientes-hoy`.
+- **CaptureModal tab Hábitos:** habilitado con formulario compacto (nombre + color + frecuencia).
+- **Code-split:** `ProgresoTab` + `HistorialTab` con `React.lazy`; `HabitosScreen` usa `useShallow`.
 - **Integración Agenda HOY:** sección "Hábitos de hoy" en panel izq (sin hora, checkbox inline); bloques en grilla horaria (con hora).
-- **BD + API:** `habitos` + `habitos_registros`, upsert por fecha. API bajo `/habitos/*`.
+- **BD + API:** `habitos` + `habitos_registros`, upsert por fecha. Columnas `archivado_en`, `notificar`, `minutos_antes` en `habitos`. `valor` validado ∈ {0.5, 1.0}. Endpoints: `GET /habitos/pendientes-hoy`, `GET /habitos/{id}/stats`, `POST /habitos/registros/batch`. API bajo `/habitos/*`.
+- **Rendimiento:** `fetchHabitosRegistros` acotado a últimos 120 días; `useMemo(buildRegistrosMap)` en todos los tabs.
 - **Accent Arcoíris** `/habitos` = verde `#059669`.
-- Store: slice completo (`habitos`, `habitosRegistros`, acciones CRUD + `upsertHabitoRegistro`) con fallback offline.
+- Store: slice completo con fallback offline en todas las acciones.
 
 ### Bot Telegram — hecho
 
-- **Bóveda:** texto libre y fotos → categoría → `POST /hojas`. Prefijos rápidos: `t:` crea tarea, `e:` crea evento.
+- **Bóveda:** texto libre → detección automática `tipo=link` si hay URL; inline keyboards de categorías (📂 raíz → hijos en dos pasos); modo rápido `/rapido on|off` (guarda en última categoría sin menú, persiste en `rapido.json`); `/ultimas` (últimas 5 hojas con botón 🗑 eliminar); `/buscar <palabra>` (usa `GET /hojas?q=`); fotos con caption como título directo; forwards → extrae texto/URL; ubicaciones → captura lat/lon; caché categorías 60s; healthcheck `/categorias` al arrancar. Prefijos rápidos: `t:` crea tarea, `e:` crea evento.
 - **Agenda:** `/hoy` (eventos + tareas + hábitos integrados), `/dia <fecha>`, `/planificar` (organización del día: ocupado + slots libres + asignación con inline keyboards), `/asignar`, `/tarea` (con parsing de fecha), `/evento` (duración configurable + selección de calendario inline), `/pendientes [lista]` (con lista; acepta filtro por nombre de lista), `/semana`, `/bloquear <N> <HH:MM>`, `/revision`.
 - **Hábitos:** `/habitos` (Total/Parcial/Deshacer inline), `/hecho <nombre>` (fuzzy match), `/ayer`, `/racha`, `/nota`. Cache 60 s.
 - **Finanzas:** `/mov` (flujo guiado con inline keyboards: tipo → monto → desc → cuenta → categoría → confirmación con preview), `/saldo` (cuentas + equivalente USD), `/mes [YYYY-MM]` (ingresos/gastos/tasa ahorro), `/ahorro` (total mes + objetivos), `/ultimo` (últimos 5 con botón eliminar), `/dolar [valor]` (ver/actualizar tipo de cambio), `/objetivo [nombre]` (progreso con barra). Captura rápida `$: gasto 4500 Super Coto uala` con fuzzy match de cuenta. Seguridad: `BOT_ALLOWED_CHAT_IDS` en `.env`.
@@ -263,7 +328,7 @@ Seed por defecto: 3 hábitos de ejemplo (Meditar, Correr, Leer).
 
 El detalle completo de pendientes por módulo está en los archivos de roadmap:
 
-- **Bóveda:** `Boveda-Roadmap.md` — bot, grafo interactivo, menú contextual, backend, notificaciones.
+- **Bóveda:** `Boveda-Roadmap.md` — grafo (zoom/pan), menú contextual, notificaciones. Bot Bóveda: completo (ver `Boveda.md §6`).
 - **Finanzas:** `Finanzas-Roadmap.md` — bot, frontend, backend, notificaciones.
 - **Agenda:** `Agenda-Roadmap.md` — bot (menor), frontend, backend, notificaciones.
 - **Hábitos:** `Habitos-Roadmap.md` — bugs P0, frontend, backend, notificaciones.
@@ -353,8 +418,9 @@ project/
 ## API resumen
 
 **Bóveda:**
-- `GET/POST /categorias`, `DELETE /categorias/{id}`
-- `GET/POST /hojas`, `GET/PATCH/DELETE /hojas/{id}`
+- `GET/POST /categorias`, `PATCH/DELETE /categorias/{id}` (`?forzar=true` si tiene hojas)
+- `GET/POST /hojas`, `GET /hojas?q=&tipo=&categoria_id=`, `GET /hojas/recientes?limit=`
+- `GET/PATCH/DELETE /hojas/{id}`
 - `POST /upload`, `GET /preview?url=`
 
 **Finanzas** (`/fin/*`): cuentas, categorías, movimientos, config, notas, instrumentos, objetivos, fire-filas, inflación, emergencia (legacy).

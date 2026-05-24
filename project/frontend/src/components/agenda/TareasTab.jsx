@@ -1,5 +1,7 @@
 import { useState } from 'react'
-import { Plus, Trash2, CheckCircle2, Circle, ChevronDown, ChevronRight, Edit2, X } from 'lucide-react'
+import { Plus, Trash2, CheckCircle2, Circle, Edit2, X, Inbox } from 'lucide-react'
+
+const INBOX_ID = '__inbox__'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
 import MiniCalendar from './MiniCalendar'
@@ -112,7 +114,7 @@ export default function TareasTab() {
   const today = new Date()
   const [year, setYear]       = useState(today.getFullYear())
   const [month, setMonth]     = useState(today.getMonth())
-  const [selectedListaId, setSelectedListaId] = useState(agendaListas[0]?.id ?? null)
+  const [selectedListaId, setSelectedListaId] = useState(INBOX_ID)
   const [filtro, setFiltro]   = useState('pendientes') // 'pendientes' | 'completadas' | 'todas'
   const [newListaNombre, setNewListaNombre] = useState('')
   const [addingLista, setAddingLista]       = useState(false)
@@ -128,7 +130,7 @@ export default function TareasTab() {
   }
 
   const tareasLista = agendaTareas
-    .filter(t => t.lista_id === selectedListaId)
+    .filter(t => selectedListaId === INBOX_ID ? !t.fecha_opcional : t.lista_id === selectedListaId)
     .filter(t => {
       if (filtro === 'pendientes') return !t.completada
       if (filtro === 'completadas') return t.completada
@@ -143,15 +145,18 @@ export default function TareasTab() {
     setAddingLista(false)
   }
 
-  // Mini calendar event dots
+  // Mini calendar event dots (inbox has no dates to show)
   const miniEventDays = {}
-  agendaTareas.filter(t => t.lista_id === selectedListaId && t.fecha_opcional).forEach(t => {
-    const [y, m, d] = t.fecha_opcional.split('-').map(Number)
-    if (y === year && m - 1 === month) {
-      if (!miniEventDays[d]) miniEventDays[d] = []
-      miniEventDays[d].push(t.lista_color)
-    }
-  })
+  if (selectedListaId !== INBOX_ID) {
+    agendaTareas.filter(t => t.lista_id === selectedListaId && t.fecha_opcional).forEach(t => {
+      const [y, m, d] = t.fecha_opcional.split('-').map(Number)
+      if (y === year && m - 1 === month) {
+        if (!miniEventDays[d]) miniEventDays[d] = []
+        miniEventDays[d].push(t.lista_color)
+      }
+    })
+  }
+  const inboxCount = agendaTareas.filter(t => !t.fecha_opcional && !t.completada).length
 
   return (
     <div className="flex flex-1 min-h-0 overflow-hidden">
@@ -208,6 +213,21 @@ export default function TareasTab() {
         )}
 
         <div className="flex flex-col gap-0.5">
+          {/* Inbox virtual entry */}
+          <div
+            className={`flex items-center gap-2.5 px-2 py-1.5 rounded-lg cursor-pointer ${selectedListaId === INBOX_ID ? 'bg-[var(--surface)]' : 'hover:bg-[var(--surface)]'}`}
+            onClick={() => setSelectedListaId(INBOX_ID)}
+          >
+            <Inbox size={13} style={{ color: 'var(--subtext)', flexShrink: 0 }} />
+            <span className="flex-1 text-[12.5px]" style={{ color: selectedListaId === INBOX_ID ? 'var(--text)' : 'var(--text-2)' }}>
+              {t(lang, 'agendaInbox')}
+            </span>
+            {inboxCount > 0 && (
+              <span className="mono text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: 'var(--surface)', color: 'var(--subtext)' }}>
+                {inboxCount}
+              </span>
+            )}
+          </div>
           {agendaListas.map(lista => (
             <ListaItem
               key={lista.id}
@@ -215,7 +235,7 @@ export default function TareasTab() {
               isSelected={lista.id === selectedListaId}
               onClick={() => setSelectedListaId(lista.id)}
               onDelete={id => {
-                if (selectedListaId === id) setSelectedListaId(agendaListas.find(l => l.id !== id)?.id ?? null)
+                if (selectedListaId === id) setSelectedListaId(INBOX_ID)
                 deleteAgendaLista(id)
               }}
               onRename={(id, nombre) => updateAgendaLista(id, { nombre })}
@@ -229,7 +249,12 @@ export default function TareasTab() {
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b shrink-0" style={{ borderColor: 'var(--border)' }}>
           <div className="flex items-center gap-3">
-            {agendaListas.find(l => l.id === selectedListaId) && (
+            {selectedListaId === INBOX_ID ? (
+              <>
+                <Inbox size={15} style={{ color: 'var(--subtext)' }} />
+                <h2 className="text-[16px] font-semibold serif italic">{t(lang, 'agendaInbox')}</h2>
+              </>
+            ) : agendaListas.find(l => l.id === selectedListaId) && (
               <>
                 <span className="w-3 h-3 rounded-full" style={{ background: agendaListas.find(l => l.id === selectedListaId)?.color }} />
                 <h2 className="text-[16px] font-semibold serif italic">
@@ -258,7 +283,7 @@ export default function TareasTab() {
             <button
               className="btn flex items-center gap-1.5 text-[12.5px]"
               onClick={() => setNewTareaOpen(true)}
-              disabled={!selectedListaId}
+              disabled={!selectedListaId || selectedListaId === INBOX_ID}
             >
               <Plus size={13} /> {t(lang, 'agendaTareaNueva')}
             </button>
@@ -269,11 +294,11 @@ export default function TareasTab() {
         <div className="flex-1 overflow-y-auto panel-scroll px-4 py-3">
           {!selectedListaId ? (
             <div className="text-[13px] italic text-center mt-12" style={{ color: 'var(--subtext)' }}>
-              Seleccioná una lista
+              {t(lang, 'agendaSeleccionaLista')}
             </div>
           ) : tareasLista.length === 0 ? (
             <div className="text-[13px] italic text-center mt-12" style={{ color: 'var(--subtext)' }}>
-              {filtro === 'pendientes' ? 'Sin tareas pendientes' : 'Sin tareas en este filtro'}
+              {filtro === 'pendientes' ? t(lang, 'agendaSinTareasPendientes') : t(lang, 'agendaSinTareasFiltro')}
             </div>
           ) : (
             <div className="flex flex-col gap-0.5">
@@ -296,7 +321,7 @@ export default function TareasTab() {
         {editTarea ? (
           <div>
             <div className="flex items-center justify-between mb-4">
-              <div className="label">Detalle</div>
+              <div className="label">{t(lang, 'agendaDetalle')}</div>
               <button className="icon-btn" style={{ width: 22, height: 22 }} onClick={() => setEditTarea(null)}>
                 <X size={12} />
               </button>
@@ -339,12 +364,12 @@ export default function TareasTab() {
               onMouseLeave={e => e.currentTarget.style.color = 'var(--subtext)'}
               onClick={() => { deleteAgendaTarea(editTarea.id); setEditTarea(null) }}
             >
-              <Trash2 size={12} /> Eliminar tarea
+              <Trash2 size={12} /> {t(lang, 'agendaEliminarTarea')}
             </button>
           </div>
         ) : (
           <div className="text-[12px] italic mt-8 text-center" style={{ color: 'var(--subtext)' }}>
-            Hacé clic en una tarea para ver el detalle
+            {t(lang, 'agendaClickTarea')}
           </div>
         )}
       </aside>

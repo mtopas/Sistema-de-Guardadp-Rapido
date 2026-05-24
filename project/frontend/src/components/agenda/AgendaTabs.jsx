@@ -12,7 +12,7 @@ export default function AgendaTabs({ active, onChange }) {
   const lang = useStore(s => s.lang)
 
   return (
-    <div className="flex items-center gap-1 p-1 rounded-xl border shrink-0" style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}>
+    <div role="tablist" aria-label="Agenda" className="flex items-center gap-1 p-1 rounded-xl border shrink-0" style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}>
       {TABS.map(tab => {
         const isActive = tab.id === active
         return (
@@ -20,6 +20,8 @@ export default function AgendaTabs({ active, onChange }) {
             key={tab.id}
             role="tab"
             aria-selected={isActive}
+            aria-controls={`agenda-tab-${tab.id}`}
+            id={`agenda-tabBtn-${tab.id}`}
             onClick={() => onChange(tab.id)}
             className="px-3.5 py-1.5 rounded-lg text-[12.5px] font-medium transition-all duration-150"
             style={{

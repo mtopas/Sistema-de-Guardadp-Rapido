@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { X, ArrowDown, ArrowUp, Calendar as CalIcon } from 'lucide-react'
+import { X, ArrowDown, ArrowUp, Calendar as CalIcon, Zap } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
 import { FINANZAS, fmtARS } from '../../data/finanzas'
@@ -9,8 +9,19 @@ const CURRENCIES = [
   { id: 'USD', label: 'USD', symbol: 'US$' },
 ]
 
-// Default icon per type — keeps the movement card row visually consistent.
 const DEFAULT_ICON = { income: '💰', expense: '💸' }
+
+// Quick-fill templates: { label, tipo, categoria, descripcion, icono? }
+const PLANTILLAS = [
+  { label: 'Alquiler',      tipo: 'expense', categoria: 'Vivienda',       descripcion: 'Alquiler' },
+  { label: 'SUBE',          tipo: 'expense', categoria: 'Transporte',     descripcion: 'SUBE' },
+  { label: 'Spotify',       tipo: 'expense', categoria: 'Entretenimiento',descripcion: 'Spotify' },
+  { label: 'Supermercado',  tipo: 'expense', categoria: 'Supermercado',   descripcion: 'Supermercado' },
+  { label: 'Sueldo',        tipo: 'income',  categoria: 'Sueldo',         descripcion: 'Sueldo' },
+]
+
+const LS_LAST_CAT    = 'sgr-fin-last-cat'
+const LS_LAST_CUENTA = 'sgr-fin-last-cuenta'
 
 function nowLocalIso() {
   const d = new Date()
@@ -32,6 +43,7 @@ export default function MovementModal() {
   const lang          = useStore(s => s.lang)
   const finCuentas    = useStore(s => s.finCuentas)
   const finCategorias = useStore(s => s.finCategorias)
+  const finObjetivos  = useStore(s => s.finObjetivos)
 
   const cuentas = useMemo(() => {
     if (!finCuentas || finCuentas.length === 0) return FINANZAS.cuentas.flatMap(g => g.items)
@@ -49,8 +61,8 @@ export default function MovementModal() {
   const [moneda,      setMoneda]      = useState('ARS')
   const [fecha,       setFecha]       = useState(nowLocalIso())
   const [descripcion, setDescripcion] = useState('')
-  const [cuentaId,    setCuentaId]    = useState(cuentas[0]?.id ?? null)
-  const [categoria,   setCategoria]   = useState(categorias[0]?.name ?? '')
+  const [cuentaId,    setCuentaId]    = useState(null)
+  const [categoria,   setCategoria]   = useState('')
   const [cuotas,      setCuotas]      = useState('')
   const [nota,        setNota]        = useState('')
   const [audit,       setAudit]       = useState(false)
@@ -58,7 +70,7 @@ export default function MovementModal() {
 
   const montoRef = useRef(null)
 
-  // Reset whenever (re)opened.
+  // Reset + load localStorage defaults when opened
   useEffect(() => {
     if (!open) return
     setTipo('expense')
@@ -66,21 +78,30 @@ export default function MovementModal() {
     setMoneda('ARS')
     setFecha(nowLocalIso())
     setDescripcion('')
-    setCuentaId(cuentas[0]?.id ?? null)
-    setCategoria(categorias[0]?.name ?? '')
+    const lastCuenta = localStorage.getItem(LS_LAST_CUENTA)
+    const lastCat    = localStorage.getItem(LS_LAST_CAT)
+    const defaultCuenta = lastCuenta
+      ? cuentas.find(c => String(c.id) === lastCuenta)?.id ?? cuentas[0]?.id ?? null
+      : cuentas[0]?.id ?? null
+    const defaultCat = lastCat ?? categorias[0]?.name ?? ''
+    setCuentaId(defaultCuenta)
+    setCategoria(defaultCat)
     setCuotas('')
     setNota('')
     setAudit(false)
     setTimeout(() => montoRef.current?.focus(), 30)
   }, [open])
 
-  // Esc to close
+  // Ctrl+Enter saves; Escape closes
   useEffect(() => {
     if (!open) return
-    const h = e => { if (e.key === 'Escape') close() }
+    const h = e => {
+      if (e.key === 'Escape') { close(); return }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); handleSubmit() }
+    }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
-  }, [open, close])
+  }, [open, tipo, monto, moneda, fecha, descripcion, cuentaId, categoria, cuotas, nota, audit, saving])
 
   if (!open) return null
 
@@ -91,37 +112,46 @@ export default function MovementModal() {
   const cuotasNum  = parseInt(cuotas, 10) || 0
   const valid      = montoNum > 0 && descripcion.trim().length > 0 && cuentaSel
 
+  // Warning: Ahorro category without matching objetivo
+  const isAhorro = categoria.toLowerCase() === 'ahorro'
+  const objetivosNames = (finObjetivos || []).map(o => o.nombre?.toLowerCase())
+  const ahorroSinObjetivo = isAhorro && tipo === 'expense'
+    && descripcion.trim().length > 0
+    && !objetivosNames.includes(descripcion.trim().toLowerCase())
+
+  // Apply a quick-fill template
+  const applyPlantilla = (p) => {
+    setTipo(p.tipo)
+    setDescripcion(p.descripcion)
+    const cat = categorias.find(c => c.name?.toLowerCase() === p.categoria.toLowerCase())
+    if (cat) setCategoria(cat.name)
+    setTimeout(() => montoRef.current?.focus(), 30)
+  }
+
   const handleSubmit = async (e) => {
     e?.preventDefault()
     if (!valid || saving) return
     setSaving(true)
 
+    // Persist last used for next open
+    if (cuentaSel) localStorage.setItem(LS_LAST_CUENTA, String(cuentaSel.id))
+    if (categoria)  localStorage.setItem(LS_LAST_CAT, categoria)
+
     const signed = isIncome ? montoNum : -montoNum
     const payload = {
-      // API shape
-      tipo:             tipo,
-      monto:            signed,
-      moneda:           moneda,
-      fecha:            fecha,
-      descripcion:      descripcion.trim(),
-      icono:            DEFAULT_ICON[tipo],
-      cuenta_nombre:    cuentaSel.name,
-      cuenta_id:        cuentaSel.id,
+      tipo, monto: signed, moneda, fecha,
+      descripcion: descripcion.trim(),
+      icono: DEFAULT_ICON[tipo],
+      cuenta_nombre: cuentaSel.name, cuenta_id: cuentaSel.id,
       categoria_nombre: categoria,
-      cuotas:           cuotasNum > 1 ? cuotasNum : null,
-      nota:             nota.trim() || null,
-      audit:            audit || undefined,
-      // Legacy shape (used by mock fallback)
-      type:     tipo,
-      amount:   signed,
-      currency: moneda,
-      datetime: fecha,
-      date:     formatShortDate(fecha),
-      desc:     descripcion.trim(),
-      icon:     DEFAULT_ICON[tipo],
-      method:   cuentaSel.name,
-      cuentaId: cuentaSel.id,
-      cat:      categoria,
+      cuotas: cuotasNum > 1 ? cuotasNum : null,
+      nota: nota.trim() || null,
+      audit: audit || undefined,
+      // Legacy mock shape
+      type: tipo, amount: signed, currency: moneda, datetime: fecha,
+      date: formatShortDate(fecha), desc: descripcion.trim(),
+      icon: DEFAULT_ICON[tipo], method: cuentaSel.name,
+      cuentaId: cuentaSel.id, cat: categoria,
     }
 
     try {
@@ -169,6 +199,27 @@ export default function MovementModal() {
         </div>
 
         <div className="p-5 space-y-4">
+          {/* Plantillas rápidas */}
+          <div className="flex gap-1.5 flex-wrap">
+            {PLANTILLAS.map(p => (
+              <button
+                key={p.label}
+                type="button"
+                onClick={() => applyPlantilla(p)}
+                className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium transition-all border"
+                style={{
+                  borderColor: 'var(--border)',
+                  background: 'var(--surface)',
+                  color: 'var(--subtext)',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--text)' }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--subtext)' }}
+              >
+                <Zap size={10} /> {p.label}
+              </button>
+            ))}
+          </div>
+
           {/* Tipo (toggle) */}
           <div className="grid grid-cols-2 gap-2 p-1 rounded-xl border" style={{ borderColor: 'var(--border)', background: 'var(--bg)' }}>
             {[
@@ -268,7 +319,6 @@ export default function MovementModal() {
                 style={{ borderColor: 'var(--border)', background: 'var(--bg)', color: 'var(--text)' }}
               />
             </div>
-
             <div>
               <label className="label block mb-1.5">{t(lang, 'account')}</label>
               <select
@@ -299,7 +349,6 @@ export default function MovementModal() {
                 ))}
               </select>
             </div>
-
             <div>
               <label className="label block mb-1.5">{t(lang, 'installments')}</label>
               <input
@@ -313,6 +362,25 @@ export default function MovementModal() {
               />
             </div>
           </div>
+
+          {/* Warning: Ahorro sin objetivo */}
+          {ahorroSinObjetivo && (
+            <div
+              className="flex items-start gap-2 px-3 py-2.5 rounded-xl text-[12px]"
+              style={{
+                background: 'color-mix(in oklch, var(--warning) 12%, transparent)',
+                border: '1px solid color-mix(in oklch, var(--warning) 30%, transparent)',
+                color: 'var(--warning)',
+              }}
+              role="alert"
+            >
+              <span style={{ fontSize: 14, lineHeight: 1.3 }}>⚠</span>
+              <span>
+                La descripción <strong>"{descripcion.trim()}"</strong> no coincide con ningún objetivo de ahorro.
+                El monto sumará al total bruto pero no se asignará a un objetivo.
+              </span>
+            </div>
+          )}
 
           {/* Nota */}
           <div>
@@ -356,6 +424,9 @@ export default function MovementModal() {
                 {cuotasNum > 1 && <span> · {cuotasNum} cuotas</span>}
               </>
             )}
+            {!montoNum && (
+              <span className="opacity-50">Ctrl+Enter para guardar</span>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -372,7 +443,7 @@ export default function MovementModal() {
                 boxShadow: `0 6px 18px -8px ${accentVar}`,
               }}
             >
-              {saving ? (t(lang, 'saving')) : (t(lang, 'save'))}
+              {saving ? t(lang, 'saving') : t(lang, 'save')}
             </button>
           </div>
         </div>

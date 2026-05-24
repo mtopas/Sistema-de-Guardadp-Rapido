@@ -14,8 +14,9 @@ import HorarioFacultadModal from '../components/agenda/HorarioFacultadModal'
 const VALID_TABS = ['hoy', 'mes', 'tareas', 'revision']
 
 export default function AgendaScreen() {
-  const agendaEventoOpen  = useStore(s => s.agendaEventoOpen)
-  const closeAgendaEvento = useStore(s => s.closeAgendaEvento)
+  const agendaEventoOpen    = useStore(s => s.agendaEventoOpen)
+  const closeAgendaEvento   = useStore(s => s.closeAgendaEvento)
+  const setAgendaActiveTab  = useStore(s => s.setAgendaActiveTab)
 
   const location  = useLocation()
   const navigate  = useNavigate()
@@ -28,6 +29,7 @@ export default function AgendaScreen() {
 
   const handleTabChange = (newTab) => {
     setTab(newTab)
+    setAgendaActiveTab(newTab)
     const sp = new URLSearchParams(location.search)
     sp.set('tab', newTab)
     navigate(`/agenda?${sp.toString()}`, { replace: true })

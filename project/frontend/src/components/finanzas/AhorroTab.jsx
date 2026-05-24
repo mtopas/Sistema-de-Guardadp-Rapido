@@ -162,7 +162,7 @@ function AccionesRows({ items, lang }) {
   return items.map(inst => {
     const valor  = (inst.cantidad ?? 0) * (inst.precio_actual ?? 0)
     const pl     = pnl(inst)
-    const plColor = pl == null ? 'var(--text)' : pl.diff >= 0 ? '#22c55e' : '#ef4444'
+    const plColor = pl == null ? 'var(--text)' : pl.diff >= 0 ? 'var(--success)' : '#ef4444'
     return (
       <tr key={inst.id} style={{ borderBottom: '1px solid var(--border)' }}>
         <td style={{ ...TD, fontWeight: 700 }}>{inst.ticker ?? '—'}</td>
@@ -207,7 +207,7 @@ function PlazoFijoRows({ items }) {
         <td style={{ ...TD, textAlign: 'right' }}>{inst.tna != null ? `${inst.tna}%` : '—'}</td>
         <td style={TD}>{fmtFecha(inst.fecha_inicio)}</td>
         <td style={TD}>{fmtFecha(inst.fecha_vencimiento)}</td>
-        <td style={{ ...TD, textAlign: 'right', color: '#22c55e' }}>{fmtARS(intereses)}</td>
+        <td style={{ ...TD, textAlign: 'right', color: 'var(--success)' }}>{fmtARS(intereses)}</td>
         <td style={{ ...TD, textAlign: 'right', fontWeight: 600 }}>{fmtARS(total)}</td>
         <DeleteCell id={inst.id} />
       </tr>
@@ -304,7 +304,7 @@ function DistribBar({ items, dolar }) {
   }, [items, dolar])
 
   const COLORS = {
-    acciones: 'var(--accent)', fci: '#22c55e', plazo_fijo: '#f59e0b',
+    acciones: 'var(--accent)', fci: 'var(--success)', plazo_fijo: 'var(--warning)',
     ons: '#8b5cf6', crypto: '#ec4899', otros: 'var(--subtext)',
   }
 
@@ -505,7 +505,7 @@ export default function AhorroTab() {
                 <div className="text-[10px] uppercase tracking-wide mono mb-0.5" style={{ color: 'var(--subtext)' }}>
                   {t(lang, 'ahorroLiquido')}
                 </div>
-                <div className="serif italic text-[18px] font-semibold tnum" style={{ color: '#f59e0b' }}>
+                <div className="serif italic text-[18px] font-semibold tnum" style={{ color: 'var(--warning)' }}>
                   {fmtARS(liquidoSinInvertir)}
                 </div>
               </div>

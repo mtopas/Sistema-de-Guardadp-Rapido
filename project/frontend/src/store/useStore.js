@@ -38,8 +38,10 @@ export const useStore = create((set, get) => ({
 
   // --- Capture modal (floating, replaces /capture screen) ---
   captureOpen: false,
-  openCapture:  () => set({ captureOpen: true }),
-  closeCapture: () => set({ captureOpen: false }),
+  captureDefaultCategoriaId: null,
+  openCapture:     () => set({ captureOpen: true, captureDefaultCategoriaId: null }),
+  openCaptureWith: (categoriaId) => set({ captureOpen: true, captureDefaultCategoriaId: categoriaId }),
+  closeCapture:    () => set({ captureOpen: false, captureDefaultCategoriaId: null }),
 
   // --- Finanzas: movement modal + persistent state ---
   movementOpen:  false,
@@ -58,6 +60,8 @@ export const useStore = create((set, get) => ({
 
   // Finanzas state
   selectedMes:        currentMes(),
+  finActiveTab:       'dashboard',
+  setFinActiveTab:    (tab) => set({ finActiveTab: tab }),
   finMovimientos:     FINANZAS.movimientos.slice(),
   finMovimientosAll:  FINANZAS.movimientos.slice(),
   finCuentas:         FINANZAS.cuentas,
@@ -65,6 +69,21 @@ export const useStore = create((set, get) => ({
   finConfig:          { dolar_oficial: 1245, fire_meta_usd: 500000 },
   finNotas:           [],
   finEmergenciaSaldo: 0,
+
+  /** Normalize a movimiento to consistent shape regardless of mock vs API schema. */
+  normalizeMovimiento: (m) => ({
+    id:               m.id,
+    tipo:             m.type   ?? m.tipo   ?? 'expense',
+    monto:            m.amount ?? m.monto  ?? 0,
+    fecha:            m.date   ?? m.fecha  ?? '',
+    descripcion:      m.desc   ?? m.descripcion ?? '',
+    categoria_nombre: m.cat    ?? m.categoria_nombre ?? '',
+    cuenta_nombre:    m.method ?? m.cuenta_nombre ?? '',
+    moneda:           m.moneda ?? m.currency ?? 'ARS',
+    cuotas:           m.cuotas ?? null,
+    nota:             m.nota   ?? null,
+    icono:            m.icon   ?? m.icono  ?? '',
+  }),
 
   fetchFinMovimientos: async (mes) => {
     try {
@@ -454,6 +473,8 @@ export const useStore = create((set, get) => ({
   agendaListas:          [],
   agendaTareas:          [],
   agendaHorarioFacultad: [],
+  agendaActiveTab:       'hoy',
+  setAgendaActiveTab:    (tab) => set({ agendaActiveTab: tab }),
 
   fetchAgendaCalendarios: async () => {
     try {
@@ -854,47 +875,110 @@ export const useStore = create((set, get) => ({
   },
 
   crearHoja: async (payload) => {
-    const res = await fetch(`${API_URL}/hojas`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
-    if (!res.ok) throw new Error((await res.json()).detail)
-    await get().fetchHojas()
-    if (DEBUG) console.log('crearHoja:', payload.tipo)
+    // Optimistic: add a temporary entry immediately so the graph/list updates
+    const tempId = `tmp_${Date.now()}`
+    const optimistic = {
+      id: tempId,
+      contenido: payload.contenido ?? '',
+      tipo: payload.tipo ?? 'texto',
+      categoria_id: payload.categoria_id,
+      categoria_nombre: payload.categoria_nombre ?? '',
+      fecha: new Date().toISOString(),
+      apuntes: null, icono: null, fecha_actualizado: new Date().toISOString(),
+    }
+    set(state => ({ hojas: [optimistic, ...state.hojas] }))
+    try {
+      const res = await fetch(`${API_URL}/hojas`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) throw new Error((await res.json()).detail)
+      await get().fetchHojas()  // replace temp with real data
+      if (DEBUG) console.log('crearHoja:', payload.tipo)
+    } catch (e) {
+      // Rollback optimistic entry
+      set(state => ({ hojas: state.hojas.filter(h => h.id !== tempId) }))
+      throw e
+    }
   },
 
   eliminarHoja: async (id) => {
-    await fetch(`${API_URL}/hojas/${id}`, { method: 'DELETE' })
+    // Optimistic remove
     set(state => ({ hojas: state.hojas.filter(h => h.id !== id) }))
+    try {
+      await fetch(`${API_URL}/hojas/${id}`, { method: 'DELETE' })
+    } catch {
+      // Restore on failure — refetch to get correct state
+      get().fetchHojas()
+    }
     if (DEBUG) console.log('eliminarHoja:', id)
   },
 
-  updateIcono: async (id, icono) => {
-    const res = await fetch(`${API_URL}/hojas/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ icono }),
-    })
-    if (!res.ok) throw new Error('Error al guardar icono')
-    const { fecha_actualizado } = await res.json().catch(() => ({}))
+  /** Generic PATCH for a hoja — updates contenido, categoria_id, tipo, apuntes, icono */
+  updateHoja: async (id, patch) => {
     set(state => ({
-      hojas: state.hojas.map(h => h.id === id ? { ...h, icono, fecha_actualizado: fecha_actualizado ?? h.fecha_actualizado } : h),
+      hojas: state.hojas.map(h => h.id === id ? { ...h, ...patch } : h),
     }))
+    try {
+      const res = await fetch(`${API_URL}/hojas/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      })
+      if (!res.ok) throw new Error('Error al actualizar hoja')
+      const { fecha_actualizado } = await res.json().catch(() => ({}))
+      if (fecha_actualizado) {
+        set(state => ({
+          hojas: state.hojas.map(h => h.id === id ? { ...h, fecha_actualizado } : h),
+        }))
+      }
+    } catch {
+      // On failure refetch to restore true state
+      get().fetchHojas()
+    }
+    if (DEBUG) console.log('updateHoja:', id, patch)
+  },
+
+  updateIcono: async (id, icono) => {
+    set(state => ({
+      hojas: state.hojas.map(h => h.id === id ? { ...h, icono } : h),
+    }))
+    try {
+      const res = await fetch(`${API_URL}/hojas/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ icono }),
+      })
+      if (!res.ok) throw new Error('Error al guardar icono')
+      const { fecha_actualizado } = await res.json().catch(() => ({}))
+      if (fecha_actualizado) {
+        set(state => ({
+          hojas: state.hojas.map(h => h.id === id ? { ...h, fecha_actualizado } : h),
+        }))
+      }
+    } catch { /* noop — optimistic already applied */ }
     if (DEBUG) console.log('updateIcono:', id, icono)
   },
 
   updateApuntes: async (id, apuntes) => {
-    const res = await fetch(`${API_URL}/hojas/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ apuntes }),
-    })
-    if (!res.ok) throw new Error('Error al guardar apuntes')
-    const { fecha_actualizado } = await res.json().catch(() => ({}))
     set(state => ({
-      hojas: state.hojas.map(h => h.id === id ? { ...h, apuntes, fecha_actualizado: fecha_actualizado ?? h.fecha_actualizado } : h),
+      hojas: state.hojas.map(h => h.id === id ? { ...h, apuntes } : h),
     }))
+    try {
+      const res = await fetch(`${API_URL}/hojas/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apuntes }),
+      })
+      if (!res.ok) throw new Error('Error al guardar apuntes')
+      const { fecha_actualizado } = await res.json().catch(() => ({}))
+      if (fecha_actualizado) {
+        set(state => ({
+          hojas: state.hojas.map(h => h.id === id ? { ...h, apuntes, fecha_actualizado } : h),
+        }))
+      }
+    } catch { /* noop — autosave will retry */ }
     if (DEBUG) console.log('updateApuntes:', id)
   },
 }))

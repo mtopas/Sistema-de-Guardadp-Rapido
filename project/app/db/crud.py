@@ -1,4 +1,5 @@
-from datetime import datetime
+from datetime import datetime, date, timedelta
+import calendar as _calendar
 import json
 import sqlite3
 from typing import Optional
@@ -203,16 +204,119 @@ def actualizar_link_preview(hoja_id: int, preview: Optional[dict]):
         print(f"actualizar_link_preview: id={hoja_id}")
 
 
-def eliminar_hoja(hoja_id: int) -> bool:
+def eliminar_hoja(hoja_id: int) -> Optional[str]:
+    """Delete hoja; returns its `contenido` (needed to clean up uploaded files), or None if not found."""
     conn = get_connection()
     cursor = conn.cursor()
+    cursor.execute("SELECT contenido FROM hojas WHERE id = ?", (hoja_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        return None
+    contenido = row[0]
     cursor.execute("DELETE FROM hojas WHERE id = ?", (hoja_id,))
-    deleted = cursor.rowcount > 0
     conn.commit()
     conn.close()
     if DEBUG:
-        print(f"eliminar_hoja: id={hoja_id} deleted={deleted}")
-    return deleted
+        print(f"eliminar_hoja: id={hoja_id}")
+    return contenido
+
+
+_HOJA_SELECT = """
+    SELECT h.id, h.contenido, h.fecha, h.categoria_id, c.nombre,
+           h.tipo, h.apuntes, h.lugar, h.latitud, h.longitud, h.fecha_recordatorio,
+           h.icono, h.fecha_actualizado, h.link_preview
+    FROM hojas h
+    JOIN categorias c ON c.id = h.categoria_id
+"""
+
+_UPDATABLE_HOJA = frozenset({"contenido", "categoria_id", "tipo", "apuntes", "icono",
+                              "lugar", "fecha_recordatorio"})
+
+
+def actualizar_hoja(hoja_id: int, campos: dict) -> Optional[dict]:
+    """Generic PATCH for a hoja; always stamps fecha_actualizado."""
+    safe = {k: v for k, v in campos.items() if k in _UPDATABLE_HOJA}
+    if not safe:
+        return obtener_hoja_por_id(hoja_id)
+    conn = get_connection()
+    cursor = conn.cursor()
+    ahora = datetime.now().isoformat()
+    safe["fecha_actualizado"] = ahora
+    sets = ", ".join(f"{k} = ?" for k in safe)
+    vals = list(safe.values()) + [hoja_id]
+    cursor.execute(f"UPDATE hojas SET {sets} WHERE id = ?", vals)
+    conn.commit()
+    cursor.execute(_HOJA_SELECT + " WHERE h.id = ?", (hoja_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return _hoja_dict(row) if row else None
+
+
+def buscar_hojas(q: Optional[str] = None, tipo: Optional[str] = None,
+                 categoria_id: Optional[int] = None) -> list:
+    conn = get_connection()
+    cursor = conn.cursor()
+    where = []
+    params = []
+    if q:
+        where.append("(h.contenido LIKE ? OR h.apuntes LIKE ?)")
+        params += [f"%{q}%", f"%{q}%"]
+    if tipo:
+        where.append("h.tipo = ?")
+        params.append(tipo)
+    if categoria_id:
+        where.append("h.categoria_id = ?")
+        params.append(categoria_id)
+    sql = _HOJA_SELECT
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY h.fecha DESC"
+    cursor.execute(sql, params)
+    rows = cursor.fetchall()
+    conn.close()
+    return [_hoja_dict(r) for r in rows]
+
+
+def obtener_hojas_recientes(limit: int = 20) -> list:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(_HOJA_SELECT + " ORDER BY h.fecha_actualizado DESC LIMIT ?", (limit,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [_hoja_dict(r) for r in rows]
+
+
+def categoria_tiene_hojas(categoria_id: int) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT 1 FROM hojas WHERE categoria_id = ? LIMIT 1", (categoria_id,))
+    has = cursor.fetchone() is not None
+    conn.close()
+    return has
+
+
+def actualizar_categoria(categoria_id: int, campos: dict) -> Optional[dict]:
+    safe = {k: v for k, v in campos.items() if k in {"nombre", "padre_id", "icono"}}
+    if not safe:
+        return None
+    conn = get_connection()
+    cursor = conn.cursor()
+    sets = ", ".join(f"{k} = ?" for k in safe)
+    vals = list(safe.values()) + [categoria_id]
+    try:
+        cursor.execute(f"UPDATE categorias SET {sets} WHERE id = ?", vals)
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        conn.close()
+        return None
+    cursor.execute("SELECT id, nombre, padre_id, icono FROM categorias WHERE id = ?", (categoria_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {"id": row[0], "nombre": row[1], "padre_id": row[2], "icono": row[3]}
 
 
 # ---------------------------------------------------------------------------
@@ -900,12 +1004,76 @@ def _evento_dict(r) -> dict:
     }
 
 
+def _expand_recurring(evento: dict, desde: str, hasta: str) -> list:
+    """Expands a recurring event into individual occurrences within [desde, hasta]."""
+    try:
+        regla = evento.get("regla_repeticion")
+        if isinstance(regla, str):
+            regla = json.loads(regla)
+        if not regla:
+            return [evento]
+    except Exception:
+        return [evento]
+
+    frecuencia = regla.get("frecuencia", "semanal")
+    dias       = regla.get("dias") or []          # [0=Mon..6=Sun] for weekly
+    hasta_rule = regla.get("hasta")
+
+    base_str  = evento["fecha_inicio"][:10]
+    time_part = evento["fecha_inicio"][10:]       # e.g. "T08:00:00" or ""
+    duration  = None
+    if evento.get("fecha_fin"):
+        try:
+            duration = datetime.fromisoformat(evento["fecha_fin"]) - datetime.fromisoformat(evento["fecha_inicio"])
+        except Exception:
+            pass
+
+    range_start = max(date.fromisoformat(desde[:10]), date.fromisoformat(base_str))
+    range_end   = date.fromisoformat(hasta[:10])
+    if hasta_rule:
+        try:
+            range_end = min(range_end, date.fromisoformat(hasta_rule))
+        except Exception:
+            pass
+
+    occurrences = []
+    cur = date.fromisoformat(base_str)
+
+    while cur <= range_end:
+        scheduled = False
+        if frecuencia == "diario":
+            scheduled = True
+        elif frecuencia == "semanal":
+            scheduled = (not dias) or (cur.weekday() in dias)
+        elif frecuencia == "mensual":
+            scheduled = cur.day == date.fromisoformat(base_str).day
+
+        if scheduled and cur >= range_start:
+            occ = dict(evento)
+            occ["fecha_inicio"] = cur.isoformat() + time_part
+            if duration is not None:
+                occ["fecha_fin"] = (datetime.fromisoformat(occ["fecha_inicio"]) + duration).isoformat()
+            occurrences.append(occ)
+
+        if frecuencia == "mensual":
+            m, y = cur.month + 1, cur.year
+            if m > 12:
+                m, y = 1, y + 1
+            day = min(cur.day, _calendar.monthrange(y, m)[1])
+            cur = date(y, m, day)
+        else:
+            cur += timedelta(days=1)
+
+    return occurrences
+
+
 def agenda_obtener_eventos(
     fecha_desde: Optional[str] = None,
     fecha_hasta: Optional[str] = None,
 ) -> list:
     conn = get_connection()
     cursor = conn.cursor()
+    # Fetch all recurring events regardless of start date so expansion can cover the range
     query = """
         SELECT e.id, e.titulo, e.descripcion, e.fecha_inicio, e.fecha_fin,
                e.todo_el_dia, e.se_repite, e.regla_repeticion, e.calendario_id,
@@ -913,18 +1081,26 @@ def agenda_obtener_eventos(
         FROM agenda_eventos e
         LEFT JOIN agenda_calendarios c ON c.id = e.calendario_id
     """
-    params = []
+    params: list = []
     if fecha_desde and fecha_hasta:
-        query += " WHERE e.fecha_inicio >= ? AND e.fecha_inicio <= ?"
+        query += " WHERE (e.fecha_inicio >= ? AND e.fecha_inicio <= ?) OR e.se_repite = 1"
         params = [fecha_desde, fecha_hasta]
     elif fecha_desde:
-        query += " WHERE e.fecha_inicio >= ?"
+        query += " WHERE e.fecha_inicio >= ? OR e.se_repite = 1"
         params = [fecha_desde]
     query += " ORDER BY e.fecha_inicio"
     cursor.execute(query, params)
     rows = cursor.fetchall()
     conn.close()
-    return [_evento_dict(r) for r in rows]
+
+    results = []
+    for r in rows:
+        ev = _evento_dict(r)
+        if ev["se_repite"] and fecha_desde and fecha_hasta:
+            results.extend(_expand_recurring(ev, fecha_desde, fecha_hasta))
+        else:
+            results.append(ev)
+    return results
 
 
 def agenda_crear_evento(
@@ -1336,9 +1512,51 @@ def agenda_resumen_semana(desde: str, hasta: str) -> dict:
     }
 
 
+def agenda_buscar(q: str) -> dict:
+    """Full-text search over event titles/descriptions and task titles/descriptions."""
+    like = f"%{q.strip()}%"
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """SELECT e.id, e.titulo, e.descripcion, e.fecha_inicio, e.fecha_fin,
+                  e.todo_el_dia, e.se_repite, e.regla_repeticion, e.calendario_id,
+                  COALESCE(c.color, '#2563eb'), COALESCE(c.nombre, '')
+           FROM agenda_eventos e
+           LEFT JOIN agenda_calendarios c ON c.id = e.calendario_id
+           WHERE e.titulo LIKE ? OR e.descripcion LIKE ?
+           ORDER BY e.fecha_inicio DESC
+           LIMIT 20""",
+        (like, like),
+    )
+    eventos = [_evento_dict(r) for r in cursor.fetchall()]
+
+    cursor.execute(
+        """SELECT t.id, t.titulo, t.descripcion, t.fecha_opcional, t.hora_opcional,
+                  t.hora_bloque, t.duracion_estimada, t.completada, t.lista_id,
+                  COALESCE(l.color, '#7c3aed'), COALESCE(l.nombre, '')
+           FROM agenda_tareas t
+           LEFT JOIN agenda_listas l ON l.id = t.lista_id
+           WHERE t.titulo LIKE ? OR t.descripcion LIKE ?
+           ORDER BY t.fecha_opcional DESC NULLS LAST
+           LIMIT 20""",
+        (like, like),
+    )
+    tareas = [_tarea_dict(r) for r in cursor.fetchall()]
+
+    conn.close()
+    return {"eventos": eventos, "tareas": tareas}
+
+
 # ---------------------------------------------------------------------------
 # Hábitos
 # ---------------------------------------------------------------------------
+
+_HABITO_SELECT = """SELECT id, nombre, descripcion, color, categoria, frecuencia_tipo,
+                          dias_semana, hora, activo, creado_en, archivado_en,
+                          notificar, minutos_antes
+                   FROM habitos"""
+
 
 def _habito_dict(r) -> dict:
     return {
@@ -1352,17 +1570,16 @@ def _habito_dict(r) -> dict:
         "hora":            r[7],
         "activo":          bool(r[8]),
         "creado_en":       r[9],
+        "archivado_en":    r[10] if len(r) > 10 else None,
+        "notificar":       bool(r[11]) if len(r) > 11 else False,
+        "minutos_antes":   r[12] if len(r) > 12 else 0,
     }
 
 
 def habitos_obtener() -> list:
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute(
-        """SELECT id, nombre, descripcion, color, categoria, frecuencia_tipo,
-                  dias_semana, hora, activo, creado_en
-           FROM habitos ORDER BY id"""
-    )
+    cursor.execute(_HABITO_SELECT + " ORDER BY id")
     rows = cursor.fetchall()
     conn.close()
     return [_habito_dict(r) for r in rows]
@@ -1388,10 +1605,7 @@ def habitos_crear(
     )
     hid = cursor.lastrowid
     conn.commit()
-    cursor.execute(
-        "SELECT id, nombre, descripcion, color, categoria, frecuencia_tipo, dias_semana, hora, activo, creado_en FROM habitos WHERE id = ?",
-        (hid,),
-    )
+    cursor.execute(_HABITO_SELECT + " WHERE id = ?", (hid,))
     row = cursor.fetchone()
     conn.close()
     if DEBUG:
@@ -1399,26 +1613,63 @@ def habitos_crear(
     return _habito_dict(row)
 
 
-_HABITO_UPDATABLE = frozenset({"nombre", "descripcion", "color", "categoria", "frecuencia_tipo", "dias_semana", "hora", "activo"})
+_HABITO_UPDATABLE = frozenset({"nombre", "descripcion", "color", "categoria", "frecuencia_tipo", "dias_semana", "hora", "activo", "archivado_en", "notificar", "minutos_antes"})
 
 
 def habitos_actualizar(habito_id: int, campos: dict) -> Optional[dict]:
     safe = {k: v for k, v in campos.items() if k in _HABITO_UPDATABLE}
     if not safe:
         return None
+    # Auto-set archivado_en when deactivating
+    if safe.get("activo") == 0 and "archivado_en" not in safe:
+        safe["archivado_en"] = datetime.now().isoformat()
+    elif safe.get("activo") == 1 and "archivado_en" not in safe:
+        safe["archivado_en"] = None
     conn = get_connection()
     cursor = conn.cursor()
     sets = ", ".join(f"{k} = ?" for k in safe)
     vals = list(safe.values()) + [habito_id]
     cursor.execute(f"UPDATE habitos SET {sets} WHERE id = ?", vals)
     conn.commit()
-    cursor.execute(
-        "SELECT id, nombre, descripcion, color, categoria, frecuencia_tipo, dias_semana, hora, activo, creado_en FROM habitos WHERE id = ?",
-        (habito_id,),
-    )
+    cursor.execute(_HABITO_SELECT + " WHERE id = ?", (habito_id,))
     row = cursor.fetchone()
     conn.close()
     return _habito_dict(row) if row else None
+
+
+def habitos_pendientes_hoy(fecha_hoy: str) -> list:
+    """Return active habits scheduled for today, each with today's registro if it exists."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(_HABITO_SELECT + " WHERE activo = 1 ORDER BY id")
+    hab_rows = cursor.fetchall()
+    cursor.execute(
+        "SELECT id, habito_id, fecha, valor, nota, creado_en FROM habitos_registros WHERE fecha = ?",
+        (fecha_hoy,),
+    )
+    reg_rows = {r[1]: _registro_dict(r) for r in cursor.fetchall()}
+    conn.close()
+    result = []
+    import json as _json
+    for r in hab_rows:
+        h = _habito_dict(r)
+        freq = h["frecuencia_tipo"]
+        if freq == "diario":
+            scheduled = True
+        else:
+            try:
+                dias = _json.loads(h["dias_semana"] or "[]")
+            except Exception:
+                dias = []
+            from datetime import date as _date
+            dow = _date.fromisoformat(fecha_hoy).weekday()
+            # weekday(): Mon=0..Sun=6 → convert to JS convention Sun=0..Sat=6
+            dow_js = (dow + 1) % 7
+            scheduled = dow_js in dias
+        if scheduled:
+            h["registro_hoy"] = reg_rows.get(h["id"])
+            result.append(h)
+    return result
 
 
 def habitos_eliminar(habito_id: int) -> bool:
@@ -1480,6 +1731,8 @@ def habitos_registros_upsert(
     valor: float,
     nota: Optional[str] = None,
 ) -> dict:
+    if valor not in (0.5, 1.0):
+        raise ValueError(f"valor debe ser 0.5 o 1.0, recibido: {valor}")
     conn = get_connection()
     cursor = conn.cursor()
     creado_en = datetime.now().isoformat()
@@ -1510,3 +1763,144 @@ def habitos_registros_eliminar(registro_id: int) -> bool:
     conn.commit()
     conn.close()
     return deleted
+
+
+def habitos_stats(habito_id: int) -> Optional[dict]:
+    """Return pre-computed stats for a single habit (reduces client-side calculation)."""
+    from datetime import date as _date
+    import json as _json
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(_HABITO_SELECT + " WHERE id = ?", (habito_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        return None
+    h = _habito_dict(row)
+
+    today = _date.today()
+    # All registros for this habit
+    cursor.execute(
+        "SELECT fecha, valor FROM habitos_registros WHERE habito_id = ? ORDER BY fecha",
+        (habito_id,),
+    )
+    reg_rows = cursor.fetchall()
+    conn.close()
+
+    reg_map = {r[0]: r[1] for r in reg_rows}
+
+    def is_scheduled(fecha_str: str) -> bool:
+        d = _date.fromisoformat(fecha_str)
+        if h["frecuencia_tipo"] == "diario":
+            return True
+        try:
+            dias = _json.loads(h["dias_semana"] or "[]")
+        except Exception:
+            return False
+        dow_js = (d.weekday() + 1) % 7
+        return dow_js in dias
+
+    start_str = h["creado_en"][:10] if h["creado_en"] else "2000-01-01"
+    today_str  = today.isoformat()
+
+    # Current streak (backwards from today)
+    streak_cur = 0
+    d = today
+    for _ in range(400):
+        ds = d.isoformat()
+        if ds < start_str:
+            break
+        if is_scheduled(ds):
+            v = reg_map.get(ds, 0)
+            if v and v > 0:
+                streak_cur += 1
+            elif d <= today:
+                break
+        from datetime import timedelta
+        d = d - timedelta(days=1)
+
+    # Max streak (forward pass)
+    streak_max = 0
+    cur = 0
+    from datetime import date as _d2, timedelta as _td
+    d = _d2.fromisoformat(start_str)
+    while d <= today:
+        ds = d.isoformat()
+        if is_scheduled(ds):
+            v = reg_map.get(ds, 0)
+            if v and v > 0:
+                cur += 1
+                streak_max = max(streak_max, cur)
+            else:
+                cur = 0
+        d += _td(days=1)
+
+    # % this month
+    y, m = today.year, today.month
+    import calendar as _cal
+    days_in_month = _cal.monthrange(y, m)[1]
+    sched_m = done_m = 0
+    for day in range(1, min(days_in_month, today.day) + 1):
+        ds = f"{y:04d}-{m:02d}-{day:02d}"
+        if is_scheduled(ds):
+            sched_m += 1
+            v = reg_map.get(ds, 0)
+            if v:
+                done_m += v
+    pct_mes = round((done_m / sched_m) * 100) if sched_m else 0
+
+    # % previous month
+    if m == 1:
+        pm, py = 12, y - 1
+    else:
+        pm, py = m - 1, y
+    days_prev = _cal.monthrange(py, pm)[1]
+    sched_p = done_p = 0
+    for day in range(1, days_prev + 1):
+        ds = f"{py:04d}-{pm:02d}-{day:02d}"
+        if is_scheduled(ds):
+            sched_p += 1
+            v = reg_map.get(ds, 0)
+            if v:
+                done_p += v
+    pct_mes_anterior = round((done_p / sched_p) * 100) if sched_p else 0
+
+    return {
+        "habito_id":        habito_id,
+        "racha_actual":     streak_cur,
+        "racha_max":        streak_max,
+        "pct_mes":          pct_mes,
+        "pct_mes_anterior": pct_mes_anterior,
+    }
+
+
+def habitos_registros_batch_upsert(items: list) -> list:
+    """Upsert multiple registros at once. Each item: {habito_id, fecha, valor, nota?}."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    creado_en = datetime.now().isoformat()
+    results = []
+    for item in items:
+        v = item.get("valor")
+        if v not in (0.5, 1.0):
+            continue  # skip invalid; caller should validate
+        habito_id = item["habito_id"]
+        fecha     = item["fecha"]
+        nota      = item.get("nota")
+        cursor.execute(
+            """INSERT INTO habitos_registros (habito_id, fecha, valor, nota, creado_en)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(habito_id, fecha) DO UPDATE SET valor = excluded.valor, nota = excluded.nota""",
+            (habito_id, fecha, v, nota, creado_en),
+        )
+        cursor.execute(
+            "SELECT id, habito_id, fecha, valor, nota, creado_en FROM habitos_registros WHERE habito_id=? AND fecha=?",
+            (habito_id, fecha),
+        )
+        row = cursor.fetchone()
+        if row:
+            results.append(_registro_dict(row))
+    conn.commit()
+    conn.close()
+    return results

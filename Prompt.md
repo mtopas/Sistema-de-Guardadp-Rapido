@@ -402,9 +402,9 @@ Quiero que me ayudes y me des ideas con esto.
 > ¿Cada tipo de instrumento (Acciones, Plazos Fijos, FCI, etc.) tiene su propia sección expandible/colapsable? ¿O todos se muestran en una lista corrida? ¿Los tipos sin posiciones se ocultan o se muestran vacíos con un botón "+"?
 Cada tipo de instrumento tiene su propia sección expandible/colapsable.
 
-**7. Precio promedio ponderado (PPP) en acciones/CEDEARs**
+**7. Precio promedio ponderado (PPC) en acciones/CEDEARs**
 
-> Al cargar varias compras del mismo ticker, ¿el precio promedio se calcula como promedio ponderado por cantidad (PPP)? ¿Las ventas parciales reducen la posición usando FIFO, LIFO o precio promedio?
+> Al cargar varias compras del mismo ticker, ¿el precio promedio se calcula como promedio ponderado por cantidad (PPC)? ¿Las ventas parciales reducen la posición usando FIFO, LIFO o precio promedio?
 Lo dejo a tu criterio.
 
 **8. Valor actual de mercado: ¿dónde y cómo se actualiza?**

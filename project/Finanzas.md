@@ -254,9 +254,22 @@ Parsing: `{tipo?} {monto} {descripción…} {cuenta_hint?}` — el último token
 
 ## 7. Estado implementado (mayo 2026)
 
-- Dashboard completo: donuts, tarjetas, modal ver todos (sort + filtro), cuotas, notas, panel der.
-- Datos: histórico, edición inline on blur, delete sin confirmación, orden por fecha.
+- Dashboard completo: donuts (con tooltip hover monto/% y highlight interactivo), tarjetas movimientos, modal ver todos (sort 3-clicks + filtro categoría + **export CSV**), cuotas, notas, panel der.
+- Datos: histórico, edición inline on blur con **debounce 300ms**, delete sin confirmación, orden por fecha. `scope="col"` en headers.
 - Anual, FIRE, Ahorro con paneles y CRUD instrumentos/objetivos.
+- **`MovementModal`:** `Ctrl+Enter` guarda; validación visual "Ahorro sin objetivo"; chips de plantillas rápidas (Alquiler, SUBE, Spotify, etc.); autocompletar última cuenta/categoría desde `localStorage`.
+- **Code-split:** `AnualTab`, `FireTab`, `AhorroTab`, `DatosTab` con `React.lazy` + `Suspense`.
+- **`finActiveTab`** en store Zustand; `normalizeMovimiento()` centralizado.
+- **`fetchFinMovimientosAll`** prefetcheado al entrar en `/finanzas` (no espera a que el usuario cambie de tab).
+- **`utils/months.js`** centralizado; `DashboardTabs` ya lo usa.
+- **`FinanzasMobileDrawer`:** botón "Ver resumen y cuentas" en `< md` abre panel izquierdo como drawer.
+- **`prefers-reduced-motion`** para `.anim-card-in`.
+- **Hex hardcoded** `#f59e0b`/`#22c55e` en `AhorroTab` → `var(--warning)`/`var(--success)`.
+- **4 componentes huérfanos eliminados:** `IncomeExpenseCard`, `SubscriptionsCard`, `KPIsCard`, `FireProjectionCard`.
+- **Rama `Placeholder`** eliminada de `FinanzasScreen`.
+- **i18n:** `finSaldosCuenta`, `finBlue`, `finActual` agregados a `i18n.js`; `FinanzasLeftPanel` usa claves en lugar de strings hardcodeados.
+- **Toast:** `role="status"/"alert"` + `aria-live` para anunciar cambios a lectores de pantalla.
+- **Backend:** índices SQL `(fecha)`, `(categoria_id)`, `(tipo, fecha)` en `fin_movimientos`; `dolar_oficial_updated_at` en `fin_config` (auto-stamped en PUT); `mes_cierre` en config; endpoint `GET /fin/movimientos/resumen?mes=`.
 - Scrollbars tematizados (`.panel-scroll` + accent Finanzas).
 - Patrón offline: update optimista + try/catch en store.
 
@@ -264,15 +277,12 @@ Parsing: `{tipo?} {monto} {descripción…} {cuenta_hint?}` — el último token
 
 | Ítem | Detalle |
 |------|---------|
-| Validación Ahorro/objetivo | Sin error en UI al guardar sin objetivo asignado |
-| Emergencia → objetivo | Migración pendiente |
-| Config bancos en panel izq. | Incompleto vs prompt |
+| Emergencia → objetivo | Migración pendiente (`GET /fin/emergencia` sigue en código) |
 | FIRE hitos por edad | Recálculo desde saldo real pendiente |
 | Instrumentos avanzados | Ventas parciales, splits, dividendos |
-| MovementModal | Sin `Ctrl+Enter`; sin plantillas recurrentes |
-| TopBar búsqueda | `searchQuery` en FinanzasScreen no filtra nada |
-| Campana notificaciones | Badge fijo, sin lógica |
-| 4 componentes huérfanos | Ver §5 |
+| Dual schema movimientos | `type/amount/cat` vs `tipo/monto/categoria_nombre` — `normalizeMovimiento()` existe pero no se usa aún en todos los consumidores |
+| TopBar búsqueda | `searchQuery` en `FinanzasScreen` existe pero no filtra nada todavía |
+| Campana notificaciones | Badge visual, sin handler (requiere `fin_alertas`) |
 
 ---
 

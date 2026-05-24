@@ -39,7 +39,7 @@ mybot/bot.py ── requests ──► /categorias, /hojas, /upload
 
 - **Un solo store:** `frontend/src/store/useStore.js`.
 - **Sin capa de servicios:** rutas en `app/main.py`, SQL en `app/db/crud.py`.
-- **Offline:** Bóveda **no** tiene update optimista en `crearHoja`/`fetchHojas`; si falla la API, el modal muestra error y no persiste localmente (a diferencia de Finanzas/Agenda/Hábitos).
+- **Offline:** `crearHoja` tiene update optimista (temp id + rollback en catch); `fetchHojas`/`fetchCategorias` sin mock fallback — si falla la API, log en consola.
 
 ### Rutas frontend
 
@@ -75,8 +75,8 @@ Seed: categoría **General** si la tabla está vacía.
 | `categoria_id` | INTEGER FK | Obligatorio |
 | `tipo` | TEXT | `texto` \| `link` \| `foto` |
 | `apuntes` | TEXT | HTML (TipTap) |
-| `lugar` | TEXT | En schema; poco usado en UI |
-| `latitud`, `longitud` | REAL | En schema; poco usado en UI |
+| `lugar` | TEXT | Bot Telegram (ubicación); sin vista mapa en UI |
+| `latitud`, `longitud` | REAL | Bot Telegram (ubicación); sin vista mapa en UI |
 | `fecha_recordatorio` | TEXT | Persistido en BD; **UI deshabilitada** |
 | `icono` | TEXT | Override visual (`leafIcons.js`) |
 | `fecha_actualizado` | TEXT | Se actualiza al PATCH apuntes/icono |
@@ -97,17 +97,18 @@ Prefijos sin namespace (`/categorias`, `/hojas`).
 |--------|------|-----|
 | GET | `/categorias` | Lista árbol plano `{ id, nombre, padre_id, icono }` |
 | POST | `/categorias` | `{ nombre, padre_id?, icono? }` |
-| DELETE | `/categorias/{id}` | Borra categoría (sin validar hojas huérfanas) |
+| PATCH | `/categorias/{id}` | Renombrar, cambiar `padre_id` o `icono` |
+| DELETE | `/categorias/{id}` | Borra categoría; 409 si tiene hojas (`?forzar=true`) |
 | GET | `/hojas` | Todas con `categoria_nombre` |
+| GET | `/hojas?q=&tipo=&categoria_id=` | Búsqueda/filtro server-side (contenido + apuntes) |
+| GET | `/hojas/recientes?limit=` | Últimas hojas por fecha (default 20, max 100) |
 | GET | `/hojas/{id}` | Una hoja |
 | POST | `/hojas` | Crear; si `tipo=link`, fetch OG preview en servidor |
-| PATCH | `/hojas/{id}` | Solo `{ apuntes }` o `{ icono }` (`HojaPatch`) |
-| DELETE | `/hojas/{id}` | Eliminar |
+| PATCH | `/hojas/{id}` | `HojaPatch`: `apuntes`, `icono`, `contenido`, `categoria_id`, `tipo` |
+| DELETE | `/hojas/{id}` | Eliminar (+ borra archivo en `/uploads/` si era foto) |
 | POST | `/hojas/{id}/preview` | Refrescar link preview |
 | POST | `/upload` | Multipart → `{ url: "/uploads/..." }` |
 | GET | `/preview?url=` | Preview sin guardar hoja |
-
-`HojaPatch` **solo** acepta `apuntes` e `icono` — no se puede cambiar categoría/contenido/tipo vía API hoy.
 
 ---
 
@@ -131,9 +132,9 @@ Prefijos sin namespace (`/categorias`, `/hojas`).
 - Grafo **estático SVG** (no D3 force): hub central "SGR", ramas = categorías raíz, leaves = hojas (máx. **14 por rama**).
 - Formas: círculo = texto, cuadrado rotado = link, rect redondeado = foto.
 - **Cross-links** punteados entre hojas que comparten `#tag`.
+- Click en hoja → abre `RightPanel` vía `onOpenHoja`; tooltip hover (título + tipo + categoría).
 - Controles zoom: **decorativos**, sin lógica real.
-- **Sin clicks en nodos** — no abre `RightPanel`.
-- `utils/parseGraph.js` existe pero **no se usa** (vestigio D3).
+- Aviso "+N" cuando hay más de 14 hojas por rama; ARIA en legend y SVG.
 
 ### `RightPanel.jsx`
 
@@ -175,37 +176,80 @@ Prefijos sin namespace (`/categorias`, `/hojas`).
 
 ---
 
-## 6. Bot de Telegram
+## 6. Bot de Telegram (`mybot/bot.py`)
 
-### Flujo actual
+Cliente de captura Bóveda completo. Persistencia local: `rapido.json` (modo rápido + última categoría), `chat_id.json` (check-in nocturno).
 
-1. **Texto libre** → draft → menú numérico de categorías (+ "Crear categoría").
-2. **Foto** → sube a `/upload` → pide título → menú de categorías → guarda `tipo=foto`.
-3. **Links:** no hay detección automática de URL desde el bot; todo texto va como `tipo=texto`.
-4. **Prefijos rápidos:** `t:` crea tarea en Agenda, `e:` crea evento en Agenda.
+### Flujo de captura
 
-### Limitaciones actuales
+1. **Texto libre** → regex `https?://\S+` → `tipo=link` o `texto` → inline keyboard de categorías → `POST /hojas`.
+2. **Foto** → `POST /upload` → caption como título directo (sin paso extra); sin caption pide título → keyboard → `tipo=foto`.
+3. **Forward** → extrae texto/caption del reenviado → mismo flujo que texto.
+4. **Ubicación** → `lugar` + `latitud`/`longitud` en `POST /hojas` → keyboard → guarda.
+5. **Modo rápido** (`/rapido on`) → salta menú; guarda en última categoría usada (persiste en `rapido.json`).
+6. **Prefijos rápidos** (Agenda, no Bóveda): `t:` tarea, `e:` evento.
+
+### Features implementadas
+
+| Feature | Cómo funciona |
+|---------|---------------|
+| **URL → `tipo=link`** | Regex `https?://\S+` al recibir texto — sin fricción |
+| **Inline keyboards** | Reemplazan el menú numérico. Callbacks `bov_root:`, `bov_cat:`, `bov_back`, `bov_new_cat` |
+| **Subcategorías en dos pasos** | Click en `📂 Categoría` → segundo teclado con hijos + botón ⬅ Volver |
+| **Modo rápido `/rapido`** | `on` = guarda directo en última cat usada (sin menú). Persiste en `rapido.json` |
+| **`/ultimas`** | Últimas 5 hojas con botones 🗑 para eliminar. Usa `GET /hojas/recientes` |
+| **`/buscar <texto>`** | Busca en contenido + apuntes. Usa `GET /hojas?q=`. Devuelve hasta 10 |
+| **Caché categorías 60s** | `bot_data["cat_cache"]` con TTL. Se invalida al crear categoría nueva |
+| **Healthcheck `/categorias`** | Al arrancar verifica `/habitos` y `/categorias`; avisa si falla |
+| **Forward → texto** | Extrae texto/caption del mensaje reenviado y lo captura a Bóveda |
+| **Ubicación** | Captura `lat`/`lon` + `lugar` en `POST /hojas` |
+| **Foto con caption** | Si la foto viene con caption, lo usa como título directo (sin paso extra) |
+
+### Comandos Bóveda
+
+| Comando | Acción |
+|---------|--------|
+| `/ultimas` | Últimas 5 hojas con botón 🗑 por hoja (`bov_del:{id}`) |
+| `/buscar <palabra>` | `GET /hojas?q=` — hasta 10 resultados |
+| `/rapido [on\|off]` | Sin args: estado + última categoría. Con args: activa/desactiva |
+| `/cancel` | Cancela flujo pendiente (categoría nueva, título foto, etc.) |
+
+### Callbacks inline
+
+| Callback | Acción |
+|----------|--------|
+| `bov_root:{id}` | Entra a subcategorías de la raíz |
+| `bov_cat:{id}` | Selecciona categoría hoja → guarda draft |
+| `bov_back` | Vuelve al nivel raíz del teclado |
+| `bov_new_cat` | Pide nombre de categoría (respeta `cat_parent_id` actual) |
+| `bov_del:{id}` | Elimina hoja (`DELETE /hojas/{id}`) |
+
+### Limitaciones conocidas
 
 | Tema | Estado |
 |------|--------|
-| Links como `tipo=link` | No; bot no llama `detectType` |
-| Subcategorías | No (lista plana) |
-| Editar / borrar hojas | No |
-| Recordatorios | No |
-| `/cancel` | Implementado en `cmd_cancel` de `bot.py` |
+| Editar hojas | No (solo eliminar desde `/ultimas`) |
+| Recordatorios | No (requiere pipeline de notificaciones) |
 | Auth / multi-usuario | Token del bot = un usuario implícito |
 
 ---
 
 ## 7. Estado implementado (mayo 2026)
 
-- Grafo radial conectado a BD, árbol izquierdo, panel derecho con TipTap.
+- Grafo radial conectado a BD; árbol izquierdo; panel derecho con TipTap.
 - Barra superior ClaudeDesign, modal captura, autodetect tipo, `Ctrl+Enter` guardar.
 - 6 temas + tonos + 6 pares tipográficos; Tweaks `Ctrl+M`.
 - Tags en UI y cross-links en grafo.
 - Link preview server-side al crear link.
-- Bot: texto + foto + crear categoría + elegir por número + `/cancel` + prefijos rápidos `t:`/`e:`.
+- Bot Bóveda completo: inline keyboards, subcategorías, `/rapido`, `/ultimas`, `/buscar`, forward, ubicación, foto con caption, caché 60s, healthcheck `/categorias`.
 - Campos BD para recordatorio y geo (parcialmente preparados).
+- **NetworkGraph mejorado:** click en hoja → abre en RightPanel; tooltip hover (título + tipo + categoría); `cursor:pointer` en hojas, `cursor:grab` en fondo; aviso "+N" cuando hay más de 14 hojas por rama; `aria-label` en legend y botones zoom; `role="img"` + `aria-label` en SVG. `parseGraph.js` y `DetailPanel.jsx` (huérfanos) eliminados.
+- **LeftPanel mejorado:** estado de expansión en `localStorage` (`sgr-boveda-tree-open`); botón "expandir/colapsar todo" (con `ChevronsUpDown`); highlight del texto de búsqueda coincidente; botón "+ Hoja" inline en cada categoría (abre `CaptureModal` con cat preseleccionada vía `openCaptureWith`); formulario inline de "Nueva subcategoría" con `Enter`/`Escape`.
+- **RightPanel mejorado:** título `contenido` editable al click (PATCH `updateHoja`); breadcrumb clickeable → select de `categoria_id` inline; indicador "⚠ Sin guardar" si el autosave falla la red; TipTap Extension `Link` (URLs clicables, autolink, linkOnPaste); TipTap `Placeholder` ("Apuntes, #tags, ideas…").
+- **CaptureModal mejorado:** pre-selecciona última categoría usada (`localStorage`); respeta `captureDefaultCategoriaId` del store (preset desde LeftPanel); `role="dialog"` + `aria-modal` + `aria-label`; focus trap Tab/Shift+Tab dentro del modal.
+- **Store Bóveda:** `crearHoja` con update optimista local (temp id + rollback en catch); `updateHoja(id, patch)` genérico para contenido/categoria_id/tipo; `openCaptureWith(categoriaId)`; `captureDefaultCategoriaId` en store.
+- **Backend:** `HojaPatch` ampliado (contenido, categoria_id, tipo); `GET /hojas?q=&tipo=&categoria_id=` búsqueda server-side; `GET /hojas/recientes?limit=`; `PATCH /categorias/{id}` (renombrar, padre_id, icono); `DELETE /categorias/{id}` con 409 si tiene hojas (`?forzar=true` para forzar); índices SQLite `(categoria_id)`, `(fecha DESC)`, `(tipo)`; DELETE archivo al borrar hoja foto; `actualizar_hoja()` genérica en `crud.py`.
+- **CSS:** placeholder TipTap y links en `index.css`.
 
 ---
 
@@ -215,9 +259,12 @@ Prefijos sin namespace (`/categorias`, `/hojas`).
 project/
 ├── app/main.py              # Rutas /categorias, /hojas, /upload, /preview
 ├── app/models/hoja.py       # HojaCreate, HojaPatch
-├── app/db/crud.py           # crear_hoja, obtener_hojas, …
+├── app/db/crud.py           # crear_hoja, obtener_hojas, buscar_hojas, …
 ├── app/db/database.py       # Schema + migraciones categorias/hojas
-├── mybot/bot.py             # Captura Telegram → API
+├── mybot/
+│   ├── bot.py               # Handlers Bóveda + dispatcher callbacks
+│   ├── rapido.json          # Modo rápido (generado en runtime)
+│   └── chat_id.json         # chat_id persistido (generado en runtime)
 ├── uploads/                 # Imágenes subidas
 └── frontend/src/
     ├── screens/BrowseScreen.jsx, DetailScreen.jsx, CaptureScreen.jsx
@@ -226,7 +273,7 @@ project/
     │   ├── CaptureModal.jsx, CategoryPicker.jsx, TopBar.jsx
     │   ├── TweaksPanel.jsx, LinkPreview.jsx, ScrollArea.jsx, FAB.jsx
     ├── store/useStore.js
-    └── utils/detectType.js, tags.js, parseGraph.js (no usado), leafIcons.js
+    └── utils/detectType.js, tags.js, leafIcons.js
 ```
 
 ---

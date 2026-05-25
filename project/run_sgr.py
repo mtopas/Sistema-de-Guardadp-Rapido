@@ -8,7 +8,19 @@ from __future__ import annotations
 import os
 import sys
 import threading
+import time
 import webbrowser
+
+
+def _ensure_stdio() -> None:
+    """console=False (PyInstaller) deja stdout/stderr en None; uvicorn usa .isatty()."""
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    sink = open(os.devnull, "w", encoding="utf-8", errors="replace")
+    if sys.stdout is None:
+        sys.stdout = sink
+    if sys.stderr is None:
+        sys.stderr = sink
 
 
 def _ensure_import_path() -> None:
@@ -119,6 +131,7 @@ def _run_window(host: str, port: int, url: str) -> None:
 
 def main() -> None:
     _ensure_import_path()
+    _ensure_stdio()
 
     host = os.getenv("SGR_HOST", "127.0.0.1")
     port = int(os.getenv("SGR_PORT", "8000"))

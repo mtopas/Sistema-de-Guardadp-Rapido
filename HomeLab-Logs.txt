@@ -137,7 +137,7 @@ scp -r ./project mtopas@192.168.137.10:~/
 
 | Acción | Comando |
 | :--- | :--- |
-| **Actualizar y reiniciar** | `sudo docker compose up -d --build` |
+| **Actualizar y reiniciar** | `sudo docker-compose up -d --build` |
 | **Ver procesos vivos** | `sudo docker compose ps` |
 | **Ver logs en tiempo real** | `sudo docker compose logs -f [nombre_servicio]` |
 | **Apagar todo** | `sudo docker compose down` |

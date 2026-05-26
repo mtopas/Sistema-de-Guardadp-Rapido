@@ -2,13 +2,17 @@
 
 Ejecutá **todo** esto en cada cambio (backend o frontend), desde la carpeta **`project`** del repositorio:
 
-```powershell
+```bash
 python -m pip install -r requirements.txt -r requirements-build.txt
 cd frontend
 npm ci
 npm run build
 cd ..
 python -m PyInstaller -y sgr.spec
+```
+
+```bash
+python -m pip install -r requirements.txt -r requirements-build.txt; cd frontend; npm ci; npm run build; cd ..; python -m PyInstaller -y sgr.spec
 ```
 
 El resultado queda en **`dist\SGR\`**. Para distribuir copiá **toda esa carpeta**, no solo `SGR.exe`.

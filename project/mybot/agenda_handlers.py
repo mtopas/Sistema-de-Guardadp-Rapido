@@ -68,13 +68,16 @@ HELP_TEXT = """\
 🌱 *Hábitos*
 /habitos — hábitos de hoy con botones Total / Parcial
 /hecho <nombre> — marca un hábito como total hoy (match por nombre)
-/ayer <nombre> — marca un hábito de ayer como total
-/racha — muestra rachas de todos los hábitos activos
+/ayer <nombre> [total|parcial] — marca un hábito de ayer
+/racha — rachas de todos los hábitos activos
 /nota <nombre> <texto> — agrega nota al registro de hoy
 
 📦 *Bóveda*
-Enviá cualquier texto o foto y te pide la categoría.
+Enviá cualquier texto, foto o ubicación y te pide la categoría.
 Prefijos rápidos: `t: comprar leche` (tarea) · `e: dentista 10:30` (evento)
+/ultimas — últimas hojas guardadas (con botón para eliminar)
+/buscar <texto> — buscar en la Bóveda
+/rapido on|off — modo rápido (guarda en última categoría sin pedir)
 
 ℹ️ *General*
 /help — esta ayuda

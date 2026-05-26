@@ -254,14 +254,7 @@ async def _save_draft(ud: dict, bot_data: dict, cat: dict, message) -> bool:
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _register_chat_id(context.bot_data, update.effective_chat.id)
-    text = (
-        ah.HELP_TEXT +
-        "\n\n*Bóveda*\n"
-        "`/ultimas` — últimas hojas guardadas\n"
-        "`/buscar <texto>` — buscar en la Bóveda\n"
-        "`/rapido on|off` — modo rápido (guarda en última categoría sin pedir)\n"
-    )
-    await update.message.reply_text(text, parse_mode="Markdown")
+    await update.message.reply_text(ah.HELP_TEXT, parse_mode="Markdown")
 
 
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):

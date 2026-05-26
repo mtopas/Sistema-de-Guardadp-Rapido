@@ -6,6 +6,8 @@ import requests
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
+from defaults import DEFAULT_API_BASE
+
 # ──────────────────────────────────────────────────────────────
 # Seguridad — BOT_ALLOWED_CHAT_IDS
 # ──────────────────────────────────────────────────────────────
@@ -441,7 +443,7 @@ async def cmd_mov(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _is_allowed(update.effective_chat.id):
         return
-    api = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    api = context.bot_data.get("api_base", DEFAULT_API_BASE)
     try:
         cuentas = _get_cuentas(api)
         config  = _get_config(api)
@@ -454,7 +456,7 @@ async def cmd_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_mes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _is_allowed(update.effective_chat.id):
         return
-    api = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    api = context.bot_data.get("api_base", DEFAULT_API_BASE)
     mes = (context.args[0] if context.args else _mes_actual()).strip()
     if not re.match(r"^\d{4}-\d{2}$", mes):
         await update.message.reply_text("Formato: /mes [YYYY-MM]\nEjemplo: /mes 2026-04")
@@ -470,7 +472,7 @@ async def cmd_mes(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_ahorro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _is_allowed(update.effective_chat.id):
         return
-    api = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    api = context.bot_data.get("api_base", DEFAULT_API_BASE)
     mes = _mes_actual()
     try:
         movs      = _get_movimientos(api, mes)
@@ -484,7 +486,7 @@ async def cmd_ahorro(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_ultimo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _is_allowed(update.effective_chat.id):
         return
-    api = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    api = context.bot_data.get("api_base", DEFAULT_API_BASE)
     try:
         movs = _get_movimientos(api)
     except Exception as e:
@@ -497,7 +499,7 @@ async def cmd_ultimo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_dolar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _is_allowed(update.effective_chat.id):
         return
-    api  = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    api  = context.bot_data.get("api_base", DEFAULT_API_BASE)
     args = context.args or []
 
     if not args:
@@ -533,7 +535,7 @@ async def cmd_dolar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_objetivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _is_allowed(update.effective_chat.id):
         return
-    api    = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    api    = context.bot_data.get("api_base", DEFAULT_API_BASE)
     nombre = " ".join(context.args).strip() if context.args else ""
 
     try:
@@ -589,7 +591,7 @@ async def handle_fin_quick_capture(update: Update, context: ContextTypes.DEFAULT
     if not raw:
         return False
 
-    api    = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    api    = context.bot_data.get("api_base", DEFAULT_API_BASE)
     parsed = _parse_natural(raw)
 
     if not parsed:
@@ -682,7 +684,7 @@ async def handle_finanzas_step(update: Update, context: ContextTypes.DEFAULT_TYP
         desc = "" if texto.strip() in ("-", "skip", "–") else texto.strip()
         ud["fin_draft"]["descripcion"] = desc
 
-        api = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+        api = context.bot_data.get("api_base", DEFAULT_API_BASE)
         try:
             cuentas = _get_cuentas(api)
         except Exception as e:
@@ -736,7 +738,7 @@ async def handle_finanzas_callback(update: Update, context: ContextTypes.DEFAULT
         return False
 
     query = update.callback_query
-    api   = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    api   = context.bot_data.get("api_base", DEFAULT_API_BASE)
     ud    = context.user_data
 
     # ── Tipo seleccionado ────────────────────────────────────

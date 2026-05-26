@@ -178,6 +178,8 @@ Prefijos sin namespace (`/categorias`, `/hojas`).
 
 ## 6. Bot de Telegram (`mybot/bot.py`)
 
+**API local:** `http://127.0.0.1:8765` (`API_BASE_URL` en `.env` si necesitás otro host/puerto).
+
 Cliente de captura Bóveda completo. Persistencia local: `rapido.json` (modo rápido + última categoría), `chat_id.json` (check-in nocturno).
 
 ### Flujo de captura

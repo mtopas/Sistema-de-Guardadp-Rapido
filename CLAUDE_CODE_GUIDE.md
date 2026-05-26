@@ -78,8 +78,8 @@ The `CLAUDE.md` file in your repo root is **always loaded into context**. Use it
 Keep it under ~300 lines. Claude reads it every session — stale or bloated CLAUDE.md degrades quality.
 
 **This project's CLAUDE.md already covers:**
-- FastAPI backend (`uvicorn app.main:app --reload`)
-- React/Vite frontend (`npm run dev` on `:5173`)
+- FastAPI backend (`uvicorn app.main:app --reload --port 8765`)
+- React/Vite frontend (`npm run dev` on `:5173` → API `:8765`)
 - Telegram bot
 - Domain model (Categorias / Hojas)
 - Zustand store architecture

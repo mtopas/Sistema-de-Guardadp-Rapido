@@ -10,27 +10,37 @@ Guía para agentes en este repositorio. **Arquitectura detallada y estado implem
 ```bash
 cd project
 .\venv\Scripts\activate          # Windows
-uvicorn app.main:app --reload    # :8000
+uvicorn app.main:app --reload --port 8765    # API SGR (default :8765, no :8000)
 ```
 
 ### Frontend (React/Vite)
 ```bash
 cd project/frontend
 npm install
-npm run dev      # :5173 — API_URL en src/config.js (default http://127.0.0.1:8000)
+npm run dev      # :5173 — API_URL en src/config.js (default http://127.0.0.1:8765)
 npm run build    # → frontend/dist
 ```
 
 ### Telegram Bot (única pieza "online")
 ```bash
 cd project
-python mybot/bot.py   # TELEGRAM_BOT_TOKEN en .env
+python mybot/bot.py   # TELEGRAM_BOT_TOKEN en .env — API en :8765 (API_BASE_URL)
 ```
+
+### Puertos (local)
+
+| Qué | Puerto / URL |
+|-----|----------------|
+| API SGR | **8765** — `uvicorn … --port 8765`, `.exe`, `app/config.py` |
+| Vite (dev) | **5173** — llama a `http://127.0.0.1:8765` (`frontend/src/config.js`) |
+| Override | `SGR_PORT`, `API_BASE_URL` en `.env` — ver `project/.env.example` |
+
+No usar `:8000` por defecto (conflicto frecuente con otros proyectos en la misma máquina).
 
 SQLite y migraciones: `init_db()` al arrancar el backend (`app/db/database.py`).
 
 ### Ejecutable Windows
-Ver **`project/BUILD.md`** — PyInstaller desde `project/` → `dist/SGR/`; datos en `project/database/` (fuera de `dist/`).
+Ver **`project/BUILD.md`** — PyInstaller desde `project/` → `dist/SGR/`; abre **`http://127.0.0.1:8765/`**; datos en `project/database/` (fuera de `dist/`). El bot **no** va en el `.exe` (proceso aparte, misma API `:8765`).
 
 ---
 

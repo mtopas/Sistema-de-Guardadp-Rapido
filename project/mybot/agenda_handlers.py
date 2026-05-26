@@ -7,6 +7,8 @@ import requests
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
+from defaults import DEFAULT_API_BASE
+
 # ──────────────────────────────────────────────────────────────
 # Pasos conversacionales
 # ──────────────────────────────────────────────────────────────
@@ -784,7 +786,7 @@ def _build_planificar(eventos_hoy: list, tareas_hoy: list, tareas_sin_bloque: li
 # ──────────────────────────────────────────────────────────────
 
 async def cmd_hoy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    api = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    api = context.bot_data.get("api_base", DEFAULT_API_BASE)
     try:
         hoy = _today_iso()
         tareas   = _get_tareas_pendientes(api)
@@ -803,7 +805,7 @@ async def cmd_hoy(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_dia(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    api = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    api = context.bot_data.get("api_base", DEFAULT_API_BASE)
     raw = " ".join(context.args).strip() if context.args else ""
     fecha = _parse_fecha_simple(raw)
 
@@ -819,7 +821,7 @@ async def cmd_dia(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_tarea(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    api = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    api = context.bot_data.get("api_base", DEFAULT_API_BASE)
     raw = " ".join(context.args).strip() if context.args else ""
 
     if not raw:
@@ -871,7 +873,7 @@ async def cmd_tarea(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    api = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    api = context.bot_data.get("api_base", DEFAULT_API_BASE)
     raw = " ".join(context.args).strip() if context.args else ""
 
     if not raw:
@@ -937,7 +939,7 @@ async def cmd_evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_semana(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    api = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    api = context.bot_data.get("api_base", DEFAULT_API_BASE)
     try:
         hoy  = _today_iso()
         hasta = (date.today() + timedelta(days=6)).isoformat()
@@ -950,7 +952,7 @@ async def cmd_semana(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_pendientes(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    api = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    api = context.bot_data.get("api_base", DEFAULT_API_BASE)
     lista_filter = ' '.join(context.args).lower().strip() if context.args else None
     try:
         tareas = _get_tareas_pendientes(api)
@@ -984,7 +986,7 @@ async def cmd_pendientes(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_habitos(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    api = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    api = context.bot_data.get("api_base", DEFAULT_API_BASE)
     try:
         habitos   = _get_habitos_cached(context.bot_data, api)
         registros = _get_registros_hoy(api, _today_iso())
@@ -996,7 +998,7 @@ async def cmd_habitos(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_racha(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    api = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    api = context.bot_data.get("api_base", DEFAULT_API_BASE)
     try:
         habitos   = _get_habitos_cached(context.bot_data, api)
         desde90   = (date.today() - timedelta(days=90)).isoformat()
@@ -1008,7 +1010,7 @@ async def cmd_racha(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_hecho(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    api = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    api = context.bot_data.get("api_base", DEFAULT_API_BASE)
     nombre = " ".join(context.args).strip() if context.args else ""
 
     if not nombre:
@@ -1034,7 +1036,7 @@ async def cmd_hecho(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_ayer(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    api = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    api = context.bot_data.get("api_base", DEFAULT_API_BASE)
     args = context.args or []
     ayer = (date.today() - timedelta(days=1)).isoformat()
 
@@ -1077,7 +1079,7 @@ async def cmd_ayer(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_nota(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    api = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    api = context.bot_data.get("api_base", DEFAULT_API_BASE)
     args = context.args or []
 
     if len(args) < 2:
@@ -1128,7 +1130,7 @@ async def cmd_nota(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_bloquear(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    api = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    api = context.bot_data.get("api_base", DEFAULT_API_BASE)
     args = context.args or []
 
     if len(args) < 2:
@@ -1169,7 +1171,7 @@ async def cmd_bloquear(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_planificar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    api = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    api = context.bot_data.get("api_base", DEFAULT_API_BASE)
     try:
         hoy      = _today_iso()
         tareas   = _get_tareas_pendientes(api)
@@ -1194,7 +1196,7 @@ async def cmd_asignar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     /asignar 2 10:30  →  asigna por número del último /hoy
     /asignar comprar 10:30  →  fuzzy match entre pendientes
     """
-    api  = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    api  = context.bot_data.get("api_base", DEFAULT_API_BASE)
     args = context.args or []
 
     if len(args) < 2:
@@ -1257,7 +1259,7 @@ async def cmd_asignar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_revision(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    api = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    api = context.bot_data.get("api_base", DEFAULT_API_BASE)
     hoy   = date.today()
     lunes = hoy - timedelta(days=hoy.weekday() + 7)  # lunes de la semana pasada
     dom   = lunes + timedelta(days=6)
@@ -1284,7 +1286,7 @@ async def handle_agenda_step(update: Update, context: ContextTypes.DEFAULT_TYPE,
     step = ud.get("step")
 
     if step == STEP_AGENDA_CHOOSE_LISTA:
-        api    = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+        api    = context.bot_data.get("api_base", DEFAULT_API_BASE)
         listas = ud.get("agenda_listas_cache", [])
 
         if not texto.isdigit():
@@ -1325,7 +1327,7 @@ async def handle_agenda_step(update: Update, context: ContextTypes.DEFAULT_TYPE,
         return True
 
     if step == STEP_HABITO_NOTA:
-        api      = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+        api      = context.bot_data.get("api_base", DEFAULT_API_BASE)
         hab_id   = ud.get("habito_nota_id")
         fecha    = ud.get("habito_nota_fecha", _today_iso())
         nombre   = ud.get("habito_nota_nombre", "hábito")
@@ -1350,7 +1352,7 @@ async def handle_agenda_step(update: Update, context: ContextTypes.DEFAULT_TYPE,
         return True
 
     if step == STEP_PLANIFICAR_NUEVA_TAREA:
-        api   = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+        api   = context.bot_data.get("api_base", DEFAULT_API_BASE)
         hora  = ud.get("planificar_slot_hora", "")
         titulo = texto.strip()
         if not titulo:
@@ -1407,7 +1409,7 @@ async def handle_quick_capture(update: Update, context: ContextTypes.DEFAULT_TYP
     Detecta prefijos t: / tarea: → crea tarea, e: / evento: → crea evento.
     Devuelve True si fue manejado.
     """
-    api = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    api = context.bot_data.get("api_base", DEFAULT_API_BASE)
 
     lower = texto.lower()
     if lower.startswith("t:") or lower.startswith("tarea:"):
@@ -1520,7 +1522,7 @@ async def check_in_noche(context: ContextTypes.DEFAULT_TYPE):
     chat_id = context.bot_data.get("chat_id")
     if not chat_id:
         return
-    api = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    api = context.bot_data.get("api_base", DEFAULT_API_BASE)
     try:
         habitos   = _get_habitos_cached(context.bot_data, api)
         hoy       = _today_iso()
@@ -1558,7 +1560,7 @@ async def check_in_noche(context: ContextTypes.DEFAULT_TYPE):
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    api  = context.bot_data.get("api_base", "http://127.0.0.1:8000")
+    api  = context.bot_data.get("api_base", DEFAULT_API_BASE)
     data = query.data or ""
 
     # ── Completar tarea ──────────────────────────────────────

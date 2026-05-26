@@ -27,17 +27,28 @@ Aplicación local full-stack (español) para capturar conocimiento (**Bóveda**)
 ```powershell
 # Backend (desde project/)
 .\venv\Scripts\activate
-uvicorn app.main:app --reload    # :8000
+uvicorn app.main:app --reload --port 8765
 
 # Frontend
 cd frontend
 npm install
-npm run dev                      # :5173  →  API_URL en src/config.js
+npm run dev                      # :5173  →  API en :8765 (src/config.js)
 ```
 
-Bot opcional: `python mybot/bot.py` + `TELEGRAM_BOT_TOKEN` en `.env`. Build producción: `npm run build` → `frontend/dist/` (el backend puede servir estáticos).
+Bot opcional: `python mybot/bot.py` + `TELEGRAM_BOT_TOKEN` en `.env` (misma API en `:8765`). Build producción: `npm run build` → `frontend/dist/` (el backend puede servir estáticos).
 
-**Ejecutable Windows (.exe):** ver [`BUILD.md`](BUILD.md) — PyInstaller → `dist/SGR/`; mismos datos que en dev en `project/database/` y `project/uploads/`.
+**Ejecutable Windows (.exe):** ver [`BUILD.md`](BUILD.md) — PyInstaller → `dist/SGR/`; abre **`http://127.0.0.1:8765/`**; mismos datos que en dev en `project/database/` y `project/uploads/`.
+
+### Puertos y URLs (local)
+
+| Servicio | URL / puerto | Notas |
+|----------|----------------|--------|
+| API SGR (uvicorn, `.exe`) | `http://127.0.0.1:8765` | Default en `app/config.py` (`SGR_PORT=8765`). Evita `:8000` (p. ej. SimLab, uvicorn genérico). |
+| UI dev (Vite) | `http://127.0.0.1:5173` | `API_URL` → `:8765` salvo `VITE_API_URL` en `.env` |
+| UI prod / `.exe` | mismo origen que la API | `API_URL` vacío en build; todo en `:8765` |
+| Bot Telegram | `API_BASE_URL` en `.env` | Default `http://127.0.0.1:8765` vía `app/config.py` |
+
+Override: `SGR_PORT`, `SGR_HOST`, `API_BASE_URL` o `DB_PATH` — ver [`BUILD.md`](BUILD.md). Ejemplo: copiá `.env.example` → `.env`.
 
 ---
 
@@ -430,7 +441,7 @@ project/
 
 **Hábitos** (`/habitos/*`): hábitos CRUD, registros GET/PUT/DELETE.
 
-CORS dev: `http://localhost:5173`.
+CORS dev: `http://localhost:5173` y `http://127.0.0.1:5173` (API en `:8765`).
 
 ---
 

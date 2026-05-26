@@ -223,7 +223,7 @@ Archivo: `components/agenda/HoyTab.jsx`.
 - Integración Agenda HOY (lista + grilla horaria).
 - Accent verde Arcoíris; i18n keys en `i18n.js`.
 - Seeds de ejemplo en BD.
-- **Bot:** `/habitos` (Total/Parcial/Deshacer inline), `/hecho` (fuzzy match), `/ayer`, `/racha`, `/nota`. Cache 60s. Check-in nocturno vía `job_queue`. Port Python de `calcStreak`/`isScheduled` en `agenda_handlers.py`.
+- **Bot:** `/habitos` (Total/Parcial/Deshacer inline), `/hecho` (fuzzy match), `/ayer`, `/racha`, `/nota`. API en `:8765` por defecto (`API_BASE_URL`). Cache 60s. Check-in nocturno vía `job_queue`. Port Python de `calcStreak`/`isScheduled` en `agenda_handlers.py`.
 - **Bot — nota conversacional post-marcado (mayo 2026):** tras presionar ✓ o ½ en un hábito, el bot pregunta automáticamente "¿Querés agregar una nota?" (paso `STEP_HABITO_NOTA` en `user_data`). Respuesta de texto → guarda nota; "no" / "skip" → omite. No requiere `/nota` separado.
 - **Bot — `/checkin [HH:MM]` (mayo 2026):** ver o cambiar la hora del check-in nocturno desde el chat sin tocar código. La hora se persiste en `checkin_config.json` y el job se reprograma en caliente con `job.schedule_removal()` + `run_daily()`.
 - **`calcMaxStreak`** en `habitosUtils.js`: racha máxima histórica que respeta días programados (itera sólo días `isScheduled`). Reemplaza algoritmo calendar-day anterior en `HabitosRightPanel` y `ProgresoTab`.

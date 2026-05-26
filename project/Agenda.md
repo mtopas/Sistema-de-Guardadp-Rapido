@@ -231,7 +231,7 @@ mybot/
 └── chat_id.json        ← chat_id persistido entre reinicios (auto-generado)
 ```
 
-`API_BASE` desde `API_BASE_URL` en `.env`; en Docker = `http://backend:8000`.
+`API_BASE` desde `API_BASE_URL` en `.env` (local por defecto `http://127.0.0.1:8765`, ver `app/config.py`). En Docker Compose el servicio interno suele exponerse como `http://backend:8000` — configurar `API_BASE_URL` según el entorno.
 Al arrancar: healthcheck `GET /habitos` con backoff exponencial (1→2→4→8 s, 4 intentos); si el backend no responde el bot arranca igualmente. Carga `chat_id.json`. Lee `checkin_config.json` (crea si no existe, default 21:00) y registra job `check_in_noche` a la hora configurada.
 
 ### Comandos implementados

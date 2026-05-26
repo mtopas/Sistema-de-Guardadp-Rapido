@@ -185,6 +185,8 @@ Concepto **"líquido sin invertir"** en `AhorroTab` reconcilia parcialmente ambo
 
 ## 6. Bot de Telegram — Finanzas
 
+**API local:** `http://127.0.0.1:8765` (mismo default que `app/config.py` / `mybot/defaults.py`). Override con `API_BASE_URL` en `.env`.
+
 ### Arquitectura
 
 ```

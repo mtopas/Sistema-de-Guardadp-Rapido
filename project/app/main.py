@@ -1367,7 +1367,7 @@ def batch_upsert_registros(body: HabitoRegistroBatch):
     return habitos_registros_batch_upsert(items)
 
 
-# --- SPA (UI empaquetada / producción en :8000) ---
+# --- SPA (UI empaquetada / producción; puerto por defecto :8765 vía SGR_PORT) ---
 
 _SPA_API_PREFIXES = (
     "categorias",

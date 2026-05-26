@@ -8,7 +8,10 @@ DB_PATH = os.getenv("DB_PATH") or resolve_db_path()
 _DEBUG_DEFAULT = "0" if is_frozen() else "1"
 DEBUG = os.getenv("SGR_DEBUG", _DEBUG_DEFAULT).lower() in ("1", "true", "yes")
 
-API_BASE_URL = "http://127.0.0.1:8000"
+# Puerto distinto de 8000 (p. ej. SimLab/uvicorn por defecto) — override: SGR_PORT / API_BASE_URL
+SGR_HOST = os.getenv("SGR_HOST", "127.0.0.1")
+SGR_PORT = int(os.getenv("SGR_PORT", "8765"))
+API_BASE_URL = os.getenv("API_BASE_URL", f"http://{SGR_HOST}:{SGR_PORT}")
 MAX_IMAGE_SIZE_MB = 5
 
 import builtins as _builtins

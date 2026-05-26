@@ -21,10 +21,11 @@ from telegram.ext import (
 
 import agenda_handlers as ah
 import finanzas_handlers as fh
+from defaults import DEFAULT_API_BASE
 
 
 TOKEN    = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-API_BASE = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
+API_BASE = DEFAULT_API_BASE
 
 # Archivo local para persistir el chat_id entre reinicios
 _CHAT_ID_FILE  = Path(__file__).parent / "chat_id.json"

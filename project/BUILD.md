@@ -34,16 +34,19 @@ Override manual: variable `SGR_DATA_DIR` apuntando a cualquier carpeta.
 ## Uso del ejecutable
 
 - Doble clic en `dist\SGR\SGR.exe`.
-- Aparece una **ventana pequeña** (sin consola negra) y se abre el navegador en `http://127.0.0.1:8000/`.
-- **Cerrar la pestaña del navegador no detiene SGR** — el servidor sigue en `:8000` hasta que usás **Salir** o la **X** de la ventana de control.
+- Aparece una **ventana pequeña** (sin consola negra) y se abre el navegador en **`http://127.0.0.1:8765/`** (puerto por defecto de SGR; SimLab y otros suelen usar `:8000`).
+- **Cerrar la pestaña del navegador no detiene SGR** — el servidor sigue en `:8765` hasta que usás **Salir** o la **X** de la ventana de control.
 - Para depurar con consola visible: `set SGR_CONSOLE=1` y ejecutá `SGR.exe` (o corré `python run_sgr.py` desde `project/`).
+
+Tras cambios en `run_sgr.py` o el puerto, volvé a correr PyInstaller (`python -m PyInstaller -y sgr.spec`).
 
 ## Variables opcionales
 
 | Variable | Efecto |
 |----------|--------|
-| `SGR_PORT` | Puerto (default `8000`) |
+| `SGR_PORT` | Puerto (default `8765`) |
 | `SGR_HOST` | Host (default `127.0.0.1`) |
+| `API_BASE_URL` | URL completa de la API (bot; default `http://127.0.0.1:8765`) |
 | `SGR_NO_BROWSER=1` | No abrar el navegador al iniciar |
 | `SGR_CONSOLE=1` | Mostrar consola (modo depuración; solo en el `.exe`) |
 | `SGR_DATA_DIR` | Carpeta raíz de datos (contiene `database/` y `uploads/`) |
@@ -54,7 +57,7 @@ Override manual: variable `SGR_DATA_DIR` apuntando a cualquier carpeta.
 
 | | Desarrollo | Ejecutable (desde repo) |
 |--|------------|-------------------------|
-| API + UI | Backend `:8000` + Vite `:5173` | Todo en `:8000` |
+| API + UI | Backend `:8765` + Vite `:5173` | Todo en `:8765` |
 | SQLite | `project/database/app.db` | `project/database/app.db` |
 | Uploads | `project/uploads/` | `project/uploads/` |
 

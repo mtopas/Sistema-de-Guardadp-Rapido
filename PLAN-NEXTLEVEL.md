@@ -92,7 +92,7 @@ Buen prompt:
 - [ ] `Dockerfile` para el frontend (multi-stage: build Vite → nginx sirviendo `dist/`)
 - [ ] `Dockerfile` para el bot de Telegram (Python)
 - [ ] `docker-compose.yml` con servicios:
-  - `backend` — FastAPI en puerto 8000
+  - `backend` — FastAPI (en Docker suele mapearse a `:8000` interno; en dev local SGR usa **`:8765`** para no chocar con otros proyectos)
   - `frontend` — nginx en puerto 80
   - `bot` — Python Telegram bot
   - `ollama` — LLM local (perfil opcional: `--profile ai`)

@@ -53,7 +53,7 @@ Convertir SGR en un proyecto que demuestre capacidades en AI/ML/LLM, DevOps y pr
 
 ---
 
-### Fase 0.5 — Auditoría Frontend
+### Fase 1 — Auditoría Frontend
 
 > Antes de modificar el backend o dockerizar: entender el estado real del frontend y documentar qué hay que mejorar. El feedback puede cambiar qué y cómo se toca el back.
 
@@ -84,7 +84,7 @@ Buen prompt:
 
 ---
 
-### Fase 1 — Docker y distribución
+### Fase 2 — Docker y distribución
 
 > Objetivo: `git clone` → `cp .env.example .env` → editar token → `docker-compose up -d` → sistema funcionando.
 
@@ -103,7 +103,46 @@ Buen prompt:
 
 ---
 
-### Fase 2 — Router LLM en el bot de Telegram
+### Fase 3 — Notificaciones
+
+> Objetivo: sistema unificado de alertas cross-módulo entregado por dos canales — campana web en TopBar y mensajes Telegram.
+
+Depende de Fase 2 (Docker) porque el scheduler necesita correr como proceso persistente. La campana web y la entrega Telegram usan el bot e infraestructura ya existente; no requieren el router LLM de Fase 4.
+
+**Tabla unificada (base de todo):**
+
+```sql
+notificaciones_pendientes (
+  id, modulo TEXT, ref_id, tipo TEXT,
+  fire_at DATETIME, canal TEXT,  -- 'telegram' | 'web'
+  enviado BOOLEAN, payload_json
+)
+```
+
+Cubre todos los tipos: recordatorios de hojas (Bóveda), alertas financieras (Finanzas), eventos/tareas/revisión (Agenda), hábito con hora + racha en riesgo (Hábitos).
+
+#### Pieza 1 — Scheduler backend
+
+- [ ] Tabla `notificaciones_pendientes` + índice en `fire_at`
+- [ ] `POST /notificaciones/evaluar` — regenera alertas de Finanzas, inserta recordatorios de hábitos/agenda
+- [ ] Worker scheduler como servicio Docker o `lifespan` FastAPI con `asyncio.sleep(60)`
+
+#### Pieza 2 — Entrega por Telegram
+
+- [ ] Job en el bot que cada 1 min consulta `GET /notificaciones/pendientes?canal=telegram` y envía
+- [ ] Inline keyboards: ✅ Hecho · 🕐 Posponer · 📖 Abrir en web
+
+#### Pieza 3 — UI campana web
+
+- [ ] `GET /notificaciones/pendientes?canal=web` — agrega campana unificada en TopBar
+- [ ] Store: `notificaciones[]`, `fetchNotificaciones()`, `marcarLeida(id)`
+- [ ] Settings `/settings`: toggles por canal (web / Telegram) y anticipación global
+
+**Por qué acá:** con Docker corriendo el scheduler tiene su proceso persistente, el bot ya existe (Pieza 2 no necesita el router LLM), y la campana web es trabajo de frontend puro. Tiene todo lo que necesita sin esperar el stack de IA.
+
+---
+
+### Fase 4 — Router LLM en el bot de Telegram
 
 > Objetivo: captura en lenguaje natural sin prefijos. Un mensaje, el modelo entiende la intención y enruta al módulo correcto.
 
@@ -125,7 +164,7 @@ Buen prompt:
 
 ---
 
-### Fase 3 — RAG sobre Bóveda
+### Fase 5 — RAG sobre Bóveda
 
 > Objetivo: convertir el knowledge vault en un sistema de Q&A semántico sobre tu propio conocimiento.
 
@@ -147,7 +186,7 @@ Pregunta del usuario → embedding → k-NN search → contexto → LLM → resp
 
 ---
 
-### Fase 4 — Resumen semanal generado por LLM
+### Fase 6 — Resumen semanal generado por LLM
 
 > Objetivo: síntesis cross-módulo que cierra el loop entre Bóveda, Finanzas, Agenda y Hábitos.
 
@@ -171,7 +210,7 @@ Pregunta del usuario → embedding → k-NN search → contexto → LLM → resp
 
 ---
 
-### Fase 5 — Extensión Chrome: Side Panel
+### Fase 7 — Extensión Chrome: Side Panel
 
 > Objetivo: tener SGR visible como panel lateral mientras navegás cualquier sitio externo, sin perder el contexto de la nota que estabas mirando.
 
@@ -209,48 +248,7 @@ Cuando el usuario hace clic en un link externo desde una hoja de SGR, el panel s
 - [ ] El panel escucha `chrome.storage.onChanged` y hace scroll/focus a la hoja activa
 - [ ] Requiere que la extensión y SGR compartan el mismo `extension ID` o mensaje vía `postMessage`
 
-**Dependencia:** Fase 1 (Docker) — el backend tiene que arrancar siempre en el mismo puerto para que el iframe apunte a algo. Sin Docker, si el usuario no levantó el backend manualmente, el panel muestra nada.
-
----
-
-## Notificaciones — en qué fase implementar
-
-Los 4 módulos tienen ideas de notificaciones en sus roadmaps. El sistema requiere tres piezas independientes con dependencias distintas:
-
-### Pieza 1 — Scheduler backend → **Fase 1 (Docker)**
-
-El scheduler (worker que cada 1 min lee registros `fire_at <= now` y dispara) necesita correr como proceso persistente. Docker es el lugar natural: se agrega como servicio `scheduler` en `docker-compose.yml` o como `lifespan` de FastAPI. Sin Docker, gestionar un proceso background en Windows es frágil.
-
-Conviene usar **una tabla unificada** en lugar de tablas por módulo:
-
-```sql
-notificaciones_pendientes (
-  id, modulo TEXT, ref_id, tipo TEXT,
-  fire_at DATETIME, canal TEXT,  -- 'telegram' | 'web'
-  enviado BOOLEAN, payload_json
-)
-```
-
-Esto cubre los tipos de todos los módulos: recordatorios de hojas (Bóveda), alertas financieras (Finanzas), eventos/tareas/revisión (Agenda), hábito con hora + racha en riesgo (Hábitos).
-
-- [ ] Tabla `notificaciones_pendientes` + índice en `fire_at`
-- [ ] `POST /notificaciones/evaluar` — regenera alertas de Finanzas, inserta recordatorios de hábitos/agenda
-- [ ] Worker scheduler (servicio Docker o `lifespan` FastAPI con `asyncio.sleep(60)`)
-
-### Pieza 2 — Entrega por Telegram → **Fase 2 (Router LLM bot)**
-
-Ya que Fase 2 toca `bot.py` para agregar el router de intención, es el momento natural para agregar la entrega de notificaciones vía Telegram. El scheduler llama al bot o el bot tiene un job que consume `notificaciones_pendientes`. El comando `/alertas` de Finanzas entra acá.
-
-- [ ] Job en bot que cada 1 min consulta `GET /notificaciones/pendientes?canal=telegram` y envía
-- [ ] Inline keyboards: ✅ Hecho · 🕐 Posponer · 📖 Abrir en web
-
-### Pieza 3 — UI campana web → **Fase 0.5 o después de Fase 1**
-
-La campana en TopBar para Agenda ya existe (polling cada 60s + Notification API). Extenderla a los otros módulos es trabajo de frontend puro, sin dependencia de Docker ni LLM. Se puede hacer antes de Fase 1 si la auditoría de Fase 0.5 lo prioriza, o como parte del trabajo de Fase 1.
-
-- [ ] `GET /notificaciones/pendientes?canal=web` — agrega campana unificada en TopBar
-- [ ] Store: `notificaciones[]`, `fetchNotificaciones()`, `marcarLeida(id)`
-- [ ] Settings `/settings`: toggles por canal (web / Telegram) y anticipación global
+**Dependencia:** Fase 2 (Docker) — el backend tiene que arrancar siempre en el mismo puerto para que el iframe apunte a algo. Sin Docker, si el usuario no levantó el backend manualmente, el panel muestra nada.
 
 ---
 

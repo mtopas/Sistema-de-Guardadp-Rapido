@@ -6,3 +6,11 @@ __pycache__/
 node_modules/
 project/dist/
 project/build/
+
+# Datos y secretos — nunca commitear
+project/.env
+project/database/app.db
+project/uploads/
+project/mybot/rapido.json
+project/mybot/chat_id.json
+project/mybot/checkin_config.json

@@ -213,6 +213,47 @@ Cuando el usuario hace clic en un link externo desde una hoja de SGR, el panel s
 
 ---
 
+## Notificaciones — en qué fase implementar
+
+Los 4 módulos tienen ideas de notificaciones en sus roadmaps. El sistema requiere tres piezas independientes con dependencias distintas:
+
+### Pieza 1 — Scheduler backend → **Fase 1 (Docker)**
+
+El scheduler (worker que cada 1 min lee registros `fire_at <= now` y dispara) necesita correr como proceso persistente. Docker es el lugar natural: se agrega como servicio `scheduler` en `docker-compose.yml` o como `lifespan` de FastAPI. Sin Docker, gestionar un proceso background en Windows es frágil.
+
+Conviene usar **una tabla unificada** en lugar de tablas por módulo:
+
+```sql
+notificaciones_pendientes (
+  id, modulo TEXT, ref_id, tipo TEXT,
+  fire_at DATETIME, canal TEXT,  -- 'telegram' | 'web'
+  enviado BOOLEAN, payload_json
+)
+```
+
+Esto cubre los tipos de todos los módulos: recordatorios de hojas (Bóveda), alertas financieras (Finanzas), eventos/tareas/revisión (Agenda), hábito con hora + racha en riesgo (Hábitos).
+
+- [ ] Tabla `notificaciones_pendientes` + índice en `fire_at`
+- [ ] `POST /notificaciones/evaluar` — regenera alertas de Finanzas, inserta recordatorios de hábitos/agenda
+- [ ] Worker scheduler (servicio Docker o `lifespan` FastAPI con `asyncio.sleep(60)`)
+
+### Pieza 2 — Entrega por Telegram → **Fase 2 (Router LLM bot)**
+
+Ya que Fase 2 toca `bot.py` para agregar el router de intención, es el momento natural para agregar la entrega de notificaciones vía Telegram. El scheduler llama al bot o el bot tiene un job que consume `notificaciones_pendientes`. El comando `/alertas` de Finanzas entra acá.
+
+- [ ] Job en bot que cada 1 min consulta `GET /notificaciones/pendientes?canal=telegram` y envía
+- [ ] Inline keyboards: ✅ Hecho · 🕐 Posponer · 📖 Abrir en web
+
+### Pieza 3 — UI campana web → **Fase 0.5 o después de Fase 1**
+
+La campana en TopBar para Agenda ya existe (polling cada 60s + Notification API). Extenderla a los otros módulos es trabajo de frontend puro, sin dependencia de Docker ni LLM. Se puede hacer antes de Fase 1 si la auditoría de Fase 0.5 lo prioriza, o como parte del trabajo de Fase 1.
+
+- [ ] `GET /notificaciones/pendientes?canal=web` — agrega campana unificada en TopBar
+- [ ] Store: `notificaciones[]`, `fetchNotificaciones()`, `marcarLeida(id)`
+- [ ] Settings `/settings`: toggles por canal (web / Telegram) y anticipación global
+
+---
+
 ## Lo que no se implementa (y por qué)
 
 | Idea | Motivo |

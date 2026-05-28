@@ -646,7 +646,10 @@ async def _handle_boveda_callback(update: Update, context: ContextTypes.DEFAULT_
             ud.clear()
             return True
 
-        await query.edit_message_text(f"Guardando en [{cat['nombre']}]…")
+        try:
+            await query.edit_message_text(f"Guardando en [{cat['nombre']}]…")
+        except Exception:
+            pass
         ok = await _save_draft(ud, context.bot_data, cat, query.message)
         ud.clear()
         return True

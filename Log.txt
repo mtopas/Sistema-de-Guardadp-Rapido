@@ -1,0 +1,54 @@
+mtopas@homelab:~/project$ sudo docker-compose logs -f bot
+bot-1  | /app/mybot/bot.py:826: PTBUserWarning: No `JobQueue` set up. To use `JobQueue`, you must install PTB via `pip install "python-telegram-bot[job-queue]"`.
+bot-1  |   if app.job_queue:
+bot-1  | No error handlers are registered, logging exception.
+bot-1  | Traceback (most recent call last):
+bot-1  |   File "/usr/local/lib/python3.11/site-packages/telegram/ext/_application.py", line 1315, in process_update
+bot-1  |     await coroutine
+bot-1  |   File "/usr/local/lib/python3.11/site-packages/telegram/ext/_handlers/basehandler.py", line 159, in handle_update
+bot-1  |     return await self.callback(update, context)
+bot-1  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+bot-1  |   File "/app/mybot/bot.py", line 747, in _dispatch_callback
+bot-1  |     if await _handle_boveda_callback(update, context, data):
+bot-1  |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+bot-1  |   File "/app/mybot/bot.py", line 649, in _handle_boveda_callback
+bot-1  |     await query.edit_message_text(f"Guardando en [{cat['nombre']}]…")
+bot-1  |   File "/usr/local/lib/python3.11/site-packages/telegram/_callbackquery.py", line 269, in edit_message_text
+bot-1  |     return await self._get_message().edit_text(
+bot-1  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+bot-1  |   File "/usr/local/lib/python3.11/site-packages/telegram/_message.py", line 4243, in edit_text
+bot-1  |     return await self.get_bot().edit_message_text(
+bot-1  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+bot-1  |   File "/usr/local/lib/python3.11/site-packages/telegram/ext/_extbot.py", line 1733, in edit_message_text
+bot-1  |     return await super().edit_message_text(
+bot-1  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+bot-1  |   File "/usr/local/lib/python3.11/site-packages/telegram/_bot.py", line 4548, in edit_message_text
+bot-1  |     return await self._send_message(
+bot-1  |            ^^^^^^^^^^^^^^^^^^^^^^^^^
+bot-1  |   File "/usr/local/lib/python3.11/site-packages/telegram/ext/_extbot.py", line 630, in _send_message
+bot-1  |     result = await super()._send_message(
+bot-1  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+bot-1  |   File "/usr/local/lib/python3.11/site-packages/telegram/_bot.py", line 820, in _send_message
+bot-1  |     result = await self._post(
+bot-1  |              ^^^^^^^^^^^^^^^^^
+bot-1  |   File "/usr/local/lib/python3.11/site-packages/telegram/_bot.py", line 704, in _post
+bot-1  |     return await self._do_post(
+bot-1  |            ^^^^^^^^^^^^^^^^^^^^
+bot-1  |   File "/usr/local/lib/python3.11/site-packages/telegram/ext/_extbot.py", line 370, in _do_post
+bot-1  |     return await super()._do_post(
+bot-1  |            ^^^^^^^^^^^^^^^^^^^^^^^
+bot-1  |   File "/usr/local/lib/python3.11/site-packages/telegram/_bot.py", line 733, in _do_post
+bot-1  |     result = await request.post(
+bot-1  |              ^^^^^^^^^^^^^^^^^^^
+bot-1  |   File "/usr/local/lib/python3.11/site-packages/telegram/request/_baserequest.py", line 198, in post
+bot-1  |     result = await self._request_wrapper(
+bot-1  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+bot-1  |   File "/usr/local/lib/python3.11/site-packages/telegram/request/_baserequest.py", line 375, in _request_wrapper
+bot-1  |     raise exception
+bot-1  | telegram.error.BadRequest: Message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message
+
+
+
+
+scp "D:\Sistema-de-Guardadp-Rapido\project\mybot\bot.py" mtopas@192.168.137.10:~/project/mybot/bot.py
+D:\Sistema-de-Guardadp-Rapido\project

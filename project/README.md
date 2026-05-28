@@ -363,7 +363,7 @@ El detalle completo de pendientes por módulo está en los archivos de roadmap:
 ## Convenciones para agentes
 
 1. **Leer primero** `../Prompt.md` para la tab o feature pedida; este README para arquitectura y estado.
-2. **Documentación por módulo** (qué está hecho, cómo funciona): `Boveda.md`, `Finanzas.md`, `Agenda.md`, `Habitos.md`.
+2. **Documentación por módulo** (qué está hecho, cómo funciona): `Boveda.md`, `Finanzas.md`, `Agenda.md`, `Habitos.md`, `Bot.md`.
 3. **Roadmap / pendientes** (qué falta, bugs, ideas): `Boveda-Roadmap.md`, `Finanzas-Roadmap.md`, `Agenda-Roadmap.md`, `Habitos-Roadmap.md`.
 4. **No re-explorar** rutas ya listadas abajo si el cambio es acotado.
 3. **Offline:** toda acción del store debe funcionar si `fetch` falla (update optimista local + try/catch).
@@ -435,6 +435,7 @@ project/
 ├── Agenda-Roadmap.md        # Pendientes Agenda
 ├── Habitos.md               # Documentación técnica del módulo Hábitos
 ├── Habitos-Roadmap.md       # Pendientes Hábitos
+├── Bot.md                   # Documentación técnica del bot Telegram + integración Ollama/LLM
 ├── database/app.db          # excluido de git (.gitignore)
 ├── uploads/                 # excluido de git (.gitignore)
 ├── .env                     # excluido de git — copiar de .env.example

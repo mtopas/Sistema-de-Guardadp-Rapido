@@ -66,6 +66,7 @@ export default function DashboardTabs({ active, onChange, hideSelector = false, 
         <div className="flex items-center gap-2">
           {!yearOnly && (
             <select
+              aria-label={lang === 'en' ? 'Month' : 'Mes'}
               value={month}
               onChange={handleMonth}
               className="px-2.5 py-1.5 rounded-xl border outline-none transition-colors"
@@ -81,6 +82,7 @@ export default function DashboardTabs({ active, onChange, hideSelector = false, 
             </select>
           )}
           <select
+            aria-label={lang === 'en' ? 'Year' : 'Año'}
             value={year}
             onChange={handleYear}
             className="px-2.5 py-1.5 rounded-xl border outline-none transition-colors"

@@ -76,7 +76,7 @@ ssh mtopas@192.168.137.10
 scp -r ./project mtopas@192.168.137.10:~/
 ```
 
-*(Antes del netplan estático la IP era `192.168.0.10` vía bridge; durante ICS transitorio: `192.168.137.93`.)*
+*(IP actual y definitiva: `192.168.137.10`. La `192.168.0.10` era la del bridge — ya no existe. La `192.168.137.93` fue transitoria durante el recovery ICS.)*
 
 ### Verificaciones útiles (en el gabinete)
 

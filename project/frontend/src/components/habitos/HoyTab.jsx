@@ -209,10 +209,11 @@ export default function HoyTab({ selectedId, setSelectedId, onEdit, initialDate 
               Creá tu primer hábito con el botón + del panel izquierdo
             </div>
           ) : (
-            <div className="overflow-x-auto" ref={scrollRef}>
-              <div style={{ minWidth: gridMinWidth }}>
+            <div className="overflow-x-auto" ref={scrollRef} tabIndex={0}>
+              <div style={{ minWidth: gridMinWidth }} role="grid" aria-label="Completaciones por hábito y día">
 
                 {/* Header row */}
+                <div role="rowgroup">
                 <div role="row" className="flex border-b" style={{ borderColor: 'var(--border)' }}>
                   <div
                     role="columnheader"
@@ -278,9 +279,10 @@ export default function HoyTab({ selectedId, setSelectedId, onEdit, initialDate 
                     Mes
                   </div>
                 </div>
+                </div>{/* /rowgroup header */}
 
                 {/* Habit rows */}
-                <div role="grid" aria-label="Completaciones por hábito y día">
+                <div role="rowgroup">
                   {activos.map((h, hi) => {
                     const isSelected = h.id === selectedId
                     const pct        = calcMonthPct(h, registrosMap, year, month)

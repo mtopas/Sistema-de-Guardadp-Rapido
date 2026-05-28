@@ -40,7 +40,7 @@ function buildWeekDays(year, month, weekOffset) {
 }
 
 export default function MesTab() {
-  const { lang, agendaEventos, agendaTareas, agendaCalendarios, agendaHorarioFacultad, updateAgendaCalendario, fetchAgendaEventos, deleteAgendaEvento, deleteAgendaTarea, addAgendaEvento } = useStore(
+  const { lang, agendaEventos, agendaTareas, agendaCalendarios, agendaHorarioFacultad, updateAgendaCalendario, fetchAgendaEventos, deleteAgendaEvento, deleteAgendaTarea, addAgendaEvento, setAgendaMesPosition } = useStore(
     useShallow(s => ({
       lang:                  s.lang,
       agendaEventos:         s.agendaEventos,
@@ -52,6 +52,7 @@ export default function MesTab() {
       deleteAgendaEvento:    s.deleteAgendaEvento,
       deleteAgendaTarea:     s.deleteAgendaTarea,
       addAgendaEvento:       s.addAgendaEvento,
+      setAgendaMesPosition:  s.setAgendaMesPosition,
     }))
   )
 
@@ -65,11 +66,11 @@ export default function MesTab() {
   // Jump to the highlighted item's month on mount / when highlight changes
   const [year, setYear]       = useState(() => {
     if (highlightDate?.length >= 7) return parseInt(highlightDate.slice(0, 4))
-    return today.getFullYear()
+    return useStore.getState().agendaMesYear ?? today.getFullYear()
   })
   const [month, setMonth]     = useState(() => {
     if (highlightDate?.length >= 7) return parseInt(highlightDate.slice(5, 7)) - 1
-    return today.getMonth()
+    return useStore.getState().agendaMesMonth ?? today.getMonth()
   })
   const [vista, setVista]     = useState(() => localStorage.getItem('sgr-agenda-vista') || 'mes')
   const [weekOff, setWeekOff] = useState(0)
@@ -121,11 +122,12 @@ export default function MesTab() {
     let y = year
     if (m > 11) { m = 0; y++ }
     if (m < 0)  { m = 11; y-- }
-    setMonth(m); setYear(y)
+    setMonth(m); setYear(y); setAgendaMesPosition(y, m)
   }
 
   const goToday = () => {
-    setYear(today.getFullYear()); setMonth(today.getMonth()); setWeekOff(0)
+    const y = today.getFullYear(); const m = today.getMonth()
+    setYear(y); setMonth(m); setWeekOff(0); setAgendaMesPosition(y, m)
   }
 
   const monthName = new Date(year, month, 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })

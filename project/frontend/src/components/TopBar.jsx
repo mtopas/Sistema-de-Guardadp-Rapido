@@ -207,7 +207,6 @@ export default function TopBar({ searchQuery = '', onSearchChange }) {
         type="button"
         onClick={cycleNext}
         onContextMenu={cyclePrev}
-        aria-label={`Ir a ${t(lang, prevMod.titleKey)}`}
         title={`← ${t(lang, prevMod.titleKey)}  /  ${t(lang, nextMod.titleKey)} →`}
         className="flex items-center rounded-md select-none transition-transform duration-150 hover:scale-[1.03] active:scale-95 focus:outline-none cursor-pointer"
       >

@@ -31,11 +31,12 @@ export default function CategoryPicker({ value, onChange }) {
     setCreating(true)
     try {
       const cat = await crearCategoria(query.trim())
-      onChange(cat.id)
-      setQuery('')
-      setOpen(false)
-    } catch (_) {}
-    finally { setCreating(false) }
+      if (cat) {
+        onChange(cat.id)
+        setQuery('')
+        setOpen(false)
+      }
+    } finally { setCreating(false) }
   }
 
   return (

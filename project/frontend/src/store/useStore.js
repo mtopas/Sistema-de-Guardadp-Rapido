@@ -96,21 +96,6 @@ export const useStore = create((set, get) => ({
   finNotas:           [],
   finEmergenciaSaldo: 0,
 
-  /** Normalize a movimiento to consistent shape regardless of mock vs API schema. */
-  normalizeMovimiento: (m) => ({
-    id:               m.id,
-    tipo:             m.type   ?? m.tipo   ?? 'expense',
-    monto:            m.amount ?? m.monto  ?? 0,
-    fecha:            m.date   ?? m.fecha  ?? '',
-    descripcion:      m.desc   ?? m.descripcion ?? '',
-    categoria_nombre: m.cat    ?? m.categoria_nombre ?? '',
-    cuenta_nombre:    m.method ?? m.cuenta_nombre ?? '',
-    moneda:           m.moneda ?? m.currency ?? 'ARS',
-    cuotas:           m.cuotas ?? null,
-    nota:             m.nota   ?? null,
-    icono:            m.icon   ?? m.icono  ?? '',
-  }),
-
   fetchFinMovimientos: async (mes) => {
     try {
       const m = mes || currentMes()
@@ -402,7 +387,7 @@ export const useStore = create((set, get) => ({
       const data = await res.json()
       set({ finInstrumentos: data })
     } catch {
-      set({ finInstrumentos: [] })
+      if (DEBUG) console.log('fetchFinInstrumentos: API error, keeping current state')
     }
   },
 
@@ -571,13 +556,21 @@ export const useStore = create((set, get) => ({
   agendaHorarioFacultad: [],
   agendaActiveTab:       'hoy',
   setAgendaActiveTab:    (tab) => set({ agendaActiveTab: tab }),
+  // Navigation state — persisted in store so tabs can unmount/remount without losing position
+  agendaHoyViewISO:      null,
+  agendaMesYear:         null,
+  agendaMesMonth:        null,
+  setAgendaHoyViewISO:   (iso) => set({ agendaHoyViewISO: iso }),
+  setAgendaMesPosition:  (year, month) => set({ agendaMesYear: year, agendaMesMonth: month }),
 
   fetchAgendaCalendarios: async () => {
     try {
       const res = await fetch(`${API_URL}/agenda/calendarios`)
       if (!res.ok) throw new Error('not ok')
       set({ agendaCalendarios: await res.json() })
-    } catch { set({ agendaCalendarios: [] }) }
+    } catch {
+      if (DEBUG) console.log('fetchAgendaCalendarios: API error, keeping current state')
+    }
   },
 
   addAgendaCalendario: async (payload) => {
@@ -789,7 +782,9 @@ export const useStore = create((set, get) => ({
       const res = await fetch(`${API_URL}/habitos`)
       if (!res.ok) throw new Error('not ok')
       set({ habitos: await res.json() })
-    } catch { set({ habitos: [] }) }
+    } catch {
+      if (DEBUG) console.log('fetchHabitos: API error, keeping current state')
+    }
   },
 
   fetchHabitosRegistros: async (fechaDesde, fechaHasta) => {
@@ -881,15 +876,6 @@ export const useStore = create((set, get) => ({
     try { await fetch(`${API_URL}/habitos/registros/${registroId}`, { method: 'DELETE' }) } catch { /* noop */ }
   },
 
-  // Legacy alias — kept for backward compat
-  movimientos: [],
-  addMovimiento: (mov) => {
-    const id = `m_${Date.now()}`
-    const full = { id, ...mov }
-    set(state => ({ movimientos: [full, ...state.movimientos] }))
-    if (DEBUG) console.log('addMovimiento (legacy):', full)
-  },
-
   // --- User name ---
   setUserName: (name) => {
     localStorage.setItem('sgr-username', name)
@@ -960,9 +946,12 @@ export const useStore = create((set, get) => ({
   },
 
   // --- Toast ---
+  _toastTimer: null,
   showToast: (message, type = 'success') => {
-    set({ toast: { message, type } })
-    setTimeout(() => set({ toast: null }), 2500)
+    const s = get()
+    if (s._toastTimer) clearTimeout(s._toastTimer)
+    const id = setTimeout(() => set({ toast: null, _toastTimer: null }), 2500)
+    set({ toast: { message, type }, _toastTimer: id })
   },
 
   // --- Categorias ---
@@ -978,16 +967,26 @@ export const useStore = create((set, get) => ({
   },
 
   crearCategoria: async (nombre, padre_id = null) => {
-    const res = await fetch(`${API_URL}/categorias`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nombre, padre_id }),
-    })
-    if (!res.ok) throw new Error((await res.json()).detail)
-    const data = await res.json()
-    await get().fetchCategorias()
-    if (DEBUG) console.log('crearCategoria:', data)
-    return data
+    try {
+      const res = await fetch(`${API_URL}/categorias`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nombre, padre_id }),
+      })
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => ({}))).detail || 'Error al crear categoría'
+        get().showToast(detail, 'error')
+        return null
+      }
+      const data = await res.json()
+      await get().fetchCategorias()
+      if (DEBUG) console.log('crearCategoria:', data)
+      return data
+    } catch (e) {
+      if (DEBUG) console.error('crearCategoria:', e)
+      get().showToast('Error al crear categoría', 'error')
+      return null
+    }
   },
 
   // --- Hojas ---

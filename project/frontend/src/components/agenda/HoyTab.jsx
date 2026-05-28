@@ -62,7 +62,12 @@ export default function HoyTab() {
   const deleteHabitoRegistro  = useStore(s => s.deleteHabitoRegistro)
   const showToast             = useStore(s => s.showToast)
 
-  const [viewDate, setViewDate]               = useState(new Date())
+  const setAgendaHoyViewISO = useStore(s => s.setAgendaHoyViewISO)
+
+  const [viewDate, setViewDate] = useState(() => {
+    const iso = useStore.getState().agendaHoyViewISO
+    return iso ? new Date(iso + 'T12:00:00') : new Date()
+  })
   const [schedulingId, setSchedulingId]       = useState(null)
   const [horaInput, setHoraInput]             = useState('')
   const [newTareaOpen, setNewTareaOpen]       = useState(false)
@@ -83,6 +88,11 @@ export default function HoyTab() {
   const todayISO    = toLocalISODate(todayActual)
   const isToday     = viewISO === todayISO
   const todayDow    = (viewDate.getDay() + 6) % 7
+
+  // Persist viewed date in store so the tab can remount without losing position
+  useEffect(() => {
+    setAgendaHoyViewISO(toLocalISODate(viewDate))
+  }, [viewDate])
 
   // Task 2: refetch when navigating outside the initially-loaded month range
   useEffect(() => {
@@ -552,8 +562,8 @@ export default function HoyTab() {
           <div
             className="relative"
             style={{ height: HOURS.length * HOUR_HEIGHT }}
-            role="grid"
             aria-label={t(lang, 'agendaTuDia')}
+            role="region"
           >
             {/* Hour lines + click targets */}
             {HOURS.map(h => (
@@ -561,7 +571,6 @@ export default function HoyTab() {
                 key={h}
                 className="absolute left-0 right-0 flex items-start gap-3"
                 style={{ top: (h - 6) * HOUR_HEIGHT, height: HOUR_HEIGHT }}
-                role="row"
               >
                 <span
                   className="mono text-[10.5px] w-10 shrink-0 text-right pt-0.5"
@@ -571,11 +580,13 @@ export default function HoyTab() {
                   {String(h).padStart(2, '0')}:00
                 </span>
                 <div
-                  role="gridcell"
-                  aria-label={`${String(h).padStart(2, '0')}:00`}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Nuevo evento a las ${String(h).padStart(2, '0')}:00`}
                   className="flex-1 border-t cursor-pointer hover:bg-[var(--surface)] rounded-sm transition-colors"
                   style={{ borderColor: 'var(--border)', marginTop: 8, height: HOUR_HEIGHT - 8 }}
                   onClick={() => setQuickEvento({ hora: `${String(h).padStart(2, '0')}:00`, titulo: '', top: (h - 6) * HOUR_HEIGHT })}
+                  onKeyDown={e => e.key === 'Enter' && setQuickEvento({ hora: `${String(h).padStart(2, '0')}:00`, titulo: '', top: (h - 6) * HOUR_HEIGHT })}
                 />
               </div>
             ))}
@@ -626,7 +637,7 @@ export default function HoyTab() {
                   }}
                   onClick={() => handleSelectItem('evento', evento)}
                   role="button"
-                  aria-label={evento.titulo}
+                  aria-label={`${evento.fecha_inicio.slice(11, 16)} ${evento.titulo}`}
                 >
                   <div className="mono text-[9.5px] opacity-80" style={{ color: evento.calendario_color }}>
                     {evento.fecha_inicio.slice(11, 16)}
@@ -668,6 +679,7 @@ export default function HoyTab() {
                   <button
                     onClick={e => { e.stopPropagation(); handleBlockToggle(tarea) }}
                     style={{ color: tarea.lista_color, flexShrink: 0 }}
+                    role="checkbox"
                     aria-label={tarea.completada ? 'Descompletar' : 'Completar'}
                     aria-checked={tarea.completada}
                   >

@@ -75,31 +75,37 @@ export default function HabitosScreen() {
 
         <div className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
           {tab === 'hoy' && (
-            <HoyTab
-              selectedId={selectedId}
-              setSelectedId={setSelectedId}
-              onEdit={handleEdit}
-              initialDate={hoyInitialDate}
-            />
+            <div id="habitos-tabpanel-hoy" role="tabpanel" className="contents">
+              <HoyTab
+                selectedId={selectedId}
+                setSelectedId={setSelectedId}
+                onEdit={handleEdit}
+                initialDate={hoyInitialDate}
+              />
+            </div>
           )}
           {tab === 'progreso' && (
-            <Suspense fallback={<TabFallback />}>
-              <ProgresoTab
-                selectedId={selectedId}
-                setSelectedId={setSelectedId}
-                onEdit={handleEdit}
-                onHeatmapClick={handleHeatmapClick}
-              />
-            </Suspense>
+            <div id="habitos-tabpanel-progreso" role="tabpanel" className="contents">
+              <Suspense fallback={<TabFallback />}>
+                <ProgresoTab
+                  selectedId={selectedId}
+                  setSelectedId={setSelectedId}
+                  onEdit={handleEdit}
+                  onHeatmapClick={handleHeatmapClick}
+                />
+              </Suspense>
+            </div>
           )}
           {tab === 'historial' && (
-            <Suspense fallback={<TabFallback />}>
-              <HistorialTab
-                selectedId={selectedId}
-                setSelectedId={setSelectedId}
-                onEdit={handleEdit}
-              />
-            </Suspense>
+            <div id="habitos-tabpanel-historial" role="tabpanel" className="contents">
+              <Suspense fallback={<TabFallback />}>
+                <HistorialTab
+                  selectedId={selectedId}
+                  setSelectedId={setSelectedId}
+                  onEdit={handleEdit}
+                />
+              </Suspense>
+            </div>
           )}
         </div>
       </div>

@@ -334,6 +334,7 @@ export default function RightPanel({ openHojaId, onClose }) {
           )}
           <button onClick={() => setExpanded(e => !e)}
             className="p-1 rounded-lg transition-colors"
+            aria-label={expanded ? 'Contraer panel' : 'Expandir panel'}
             style={{ color: 'var(--subtext)' }}
             onMouseEnter={e => e.currentTarget.style.color = 'var(--text)'}
             onMouseLeave={e => e.currentTarget.style.color = 'var(--subtext)'}
@@ -343,6 +344,7 @@ export default function RightPanel({ openHojaId, onClose }) {
           {view !== 'latest' && (
             <button onClick={handleClose}
               className="p-1 rounded-lg transition-colors"
+              aria-label="Cerrar panel"
               style={{ color: 'var(--subtext)' }}
               onMouseEnter={e => e.currentTarget.style.color = 'var(--text)'}
               onMouseLeave={e => e.currentTarget.style.color = 'var(--subtext)'}

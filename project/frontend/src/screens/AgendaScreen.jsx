@@ -63,10 +63,10 @@ export default function AgendaScreen() {
       </div>
 
       <div className="flex flex-1 min-h-0 overflow-hidden">
-        <div className={tab === 'hoy'      ? 'contents' : 'hidden'}><HoyTab /></div>
-        <div className={tab === 'mes'      ? 'contents' : 'hidden'}><MesTab /></div>
-        <div className={tab === 'tareas'   ? 'contents' : 'hidden'}><TareasTab /></div>
-        <div className={tab === 'revision' ? 'contents' : 'hidden'}><RevisionTab /></div>
+        {tab === 'hoy'      && <div id="agenda-tab-hoy"      className="contents"><HoyTab /></div>}
+        {tab === 'mes'      && <div id="agenda-tab-mes"      className="contents"><MesTab /></div>}
+        {tab === 'tareas'   && <div id="agenda-tab-tareas"   className="contents"><TareasTab /></div>}
+        {tab === 'revision' && <div id="agenda-tab-revision" className="contents"><RevisionTab /></div>}
       </div>
 
       {agendaEventoOpen && <EventoModal onClose={closeAgendaEvento} />}

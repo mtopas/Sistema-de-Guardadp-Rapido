@@ -19,13 +19,17 @@ from telegram.ext import (
     filters,
 )
 
+import logging
+
 import agenda_handlers as ah
 import finanzas_handlers as fh
-from defaults import DEFAULT_API_BASE
+import intent_router as ir
+
+logger = logging.getLogger(__name__)
 
 
 TOKEN    = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-API_BASE = DEFAULT_API_BASE
+API_BASE = os.environ.get("API_BASE_URL", "http://127.0.0.1:8765")
 
 # Archivo local para persistir el chat_id entre reinicios
 _CHAT_ID_FILE  = Path(__file__).parent / "chat_id.json"
@@ -401,6 +405,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if await fh.handle_fin_quick_capture(update, context, texto):
             return
 
+        # ── LLM routing (texto libre sin prefijos) ─────────────
+        rr = ir.route(texto)
+        if rr.action in ("direct", "confirm"):
+            summary = ir.format_summary(rr)
+            kb = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Confirmar", callback_data="llm_ok"),
+                InlineKeyboardButton("✏️ Corregir",  callback_data="llm_edit"),
+                InlineKeyboardButton("❌ Cancelar",  callback_data="llm_cancel"),
+            ]])
+            ud["llm_pending"] = ir.result_to_dict(rr)
+            await msg.reply_text(summary, reply_markup=kb, parse_mode="Markdown")
+            return
+        elif rr.action == "question":
+            await msg.reply_text(
+                "🔍 Modo consulta próximamente.\n"
+                "Por ahora usá los comandos: /saldo, /mes, /habitos, /hoy…"
+            )
+            return
+        # "fallback": continúa al flujo Bóveda normal
+
     # ── Crear categoría nueva ─────────────────────────────────
     if step == STEP_NEW_CATEGORY_NAME:
         if not texto:
@@ -661,13 +685,65 @@ async def _handle_boveda_callback(update: Update, context: ContextTypes.DEFAULT_
 
 
 # ──────────────────────────────────────────────────────────────
-# Dispatcher de callbacks (Bóveda → Finanzas → Agenda)
+# Callbacks LLM (llm_ok / llm_edit / llm_cancel)
+# ──────────────────────────────────────────────────────────────
+
+async def _handle_llm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str) -> bool:
+    """Maneja confirmaciones del router LLM. Devuelve True si fue manejado."""
+    if not data.startswith("llm_"):
+        return False
+
+    query = update.callback_query
+    await query.answer()
+    ud      = context.user_data
+    pending = ud.get("llm_pending")
+
+    if data == "llm_cancel":
+        ud.pop("llm_pending", None)
+        await query.edit_message_text("❌ Cancelado.")
+        return True
+
+    if data == "llm_ok":
+        if not pending:
+            await query.edit_message_text("No hay nada pendiente.")
+            return True
+        rr = ir.dict_to_result(pending)
+        ud.pop("llm_pending", None)
+        await query.edit_message_text("⏳ Guardando…")
+        ok, msg_text = ir.execute(rr)
+        await query.edit_message_text(msg_text)
+        logger.info("[llm_ok] módulo=%s ok=%s", rr.modulo, ok)
+        return True
+
+    if data == "llm_edit":
+        if not pending:
+            await query.edit_message_text("No hay nada pendiente.")
+            return True
+        rr = ir.dict_to_result(pending)
+        ud.pop("llm_pending", None)
+        cmd_hint = {
+            "finanzas": "/mov",
+            "agenda":   "/tarea o /evento",
+            "habitos":  "/habitos",
+        }.get(rr.modulo, "el comando correspondiente")
+        await query.edit_message_text(
+            f"✏️ Usá {cmd_hint} para ingresar los datos manualmente."
+        )
+        return True
+
+    return False
+
+
+# ──────────────────────────────────────────────────────────────
+# Dispatcher de callbacks (LLM → Bóveda → Finanzas → Agenda)
 # ──────────────────────────────────────────────────────────────
 
 async def _dispatch_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data  = query.data or ""
 
+    if await _handle_llm_callback(update, context, data):
+        return
     if await _handle_boveda_callback(update, context, data):
         return
     if await fh.handle_finanzas_callback(update, context, data):

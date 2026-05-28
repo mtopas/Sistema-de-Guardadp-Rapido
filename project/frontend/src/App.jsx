@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { useStore } from './store/useStore'
 import Layout from './components/Layout'
@@ -6,13 +6,15 @@ import Toast from './components/Toast'
 import TweaksPanel from './components/TweaksPanel'
 import CaptureModal from './components/CaptureModal'
 import MovementModal from './components/finanzas/MovementModal'
-import BrowseScreen   from './screens/BrowseScreen'
 import CaptureScreen  from './screens/CaptureScreen'
-import DetailScreen   from './screens/DetailScreen'
 import SettingsScreen from './screens/SettingsScreen'
 import FinanzasScreen from './screens/FinanzasScreen'
 import AgendaScreen   from './screens/AgendaScreen'
 import HabitosScreen  from './screens/HabitosScreen'
+
+// Lazy-load screens with heavy deps (D3, TipTap) to keep the initial bundle lean
+const BrowseScreen = lazy(() => import('./screens/BrowseScreen'))
+const DetailScreen = lazy(() => import('./screens/DetailScreen'))
 
 export default function App() {
   const fetchCategorias           = useStore(s => s.fetchCategorias)
@@ -59,15 +61,17 @@ export default function App() {
       }}
     >
       <Layout>
-        <Routes>
-          <Route path="/"          element={<BrowseScreen />}  />
-          <Route path="/capture"   element={<CaptureScreen />} />
-          <Route path="/hoja/:id"  element={<DetailScreen />}  />
-          <Route path="/finanzas"  element={<FinanzasScreen />} />
-          <Route path="/agenda"    element={<AgendaScreen />}   />
-          <Route path="/habitos"   element={<HabitosScreen />}  />
-          <Route path="/settings"  element={<SettingsScreen />} />
-        </Routes>
+        <Suspense fallback={<div />}>
+          <Routes>
+            <Route path="/"          element={<BrowseScreen />}  />
+            <Route path="/capture"   element={<CaptureScreen />} />
+            <Route path="/hoja/:id"  element={<DetailScreen />}  />
+            <Route path="/finanzas"  element={<FinanzasScreen />} />
+            <Route path="/agenda"    element={<AgendaScreen />}   />
+            <Route path="/habitos"   element={<HabitosScreen />}  />
+            <Route path="/settings"  element={<SettingsScreen />} />
+          </Routes>
+        </Suspense>
       </Layout>
       <Toast />
       <TweaksPanel />

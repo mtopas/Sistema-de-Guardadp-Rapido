@@ -41,19 +41,9 @@ Convertir SGR en un proyecto que demuestre capacidades en AI/ML/LLM, DevOps y pr
 
 ## Fases de implementación
 
-### Fase 0 — Licencia y limpieza previa a publicación
-
-> Antes de hacer público cualquier repositorio.
-
-- [ ] Crear `LICENSE` (MIT + Commons Clause)
-- [ ] Revisar `.gitignore`: confirmar que `.env`, `app.db`, `uploads/`, `rapido.json`, `chat_id.json`, `checkin_config.json` no se commiteen
-- [ ] Crear `.env.example` con todas las variables necesarias y comentadas
-
-**Por qué primero:** protección legal y seguridad antes de exponer el repo.
-
 ---
 
-### Fase 1 — Auditoría Frontend
+### Fase 1 — Auditoría Frontend - ✅✅✅ IMPLEMENTADA Y CORREGIDA
 
 > Antes de modificar el backend o dockerizar: entender el estado real del frontend y documentar qué hay que mejorar. El feedback puede cambiar qué y cómo se toca el back.
 
@@ -262,4 +252,10 @@ Cuando el usuario hace clic en un link externo desde una hoja de SGR, el panel s
 
 ---
 
-*Actualizar este archivo al completar cada ítem. El orden de fases es una dependencia técnica, no solo preferencia.*
+### Fase Z — Licencia y limpieza previa a publicación
+
+> Antes de hacer público cualquier repositorio.
+
+- [ ] Crear `LICENSE` (MIT + Commons Clause)
+- [ ] Revisar `.gitignore`: confirmar que `.env`, `app.db`, `uploads/`, `rapido.json`, `chat_id.json`, `checkin_config.json` no se commiteen
+- [ ] Crear `.env.example` con todas las variables necesarias y comentadas$s$

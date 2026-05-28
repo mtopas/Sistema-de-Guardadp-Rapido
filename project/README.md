@@ -4,6 +4,8 @@
 
 Aplicación local full-stack (español) para capturar conocimiento (**Bóveda**), llevar finanzas personales (**Finanzas**), gestionar tiempo y tareas (**Agenda**) y construir hábitos (**Hábitos**). SQLite + API propia; UI React. Casi todo corre **offline** en la máquina del usuario. Lo único pensado como online es el **bot de Telegram** (`mybot/`), que llama al mismo REST.
 
+**Licencia:** MIT + Commons Clause — uso personal y modificación libres; uso comercial requiere permiso. Ver `../LICENSE`.
+
 **Spec de producto y decisiones nuevas:** `../Prompt.md`. **Comandos de arranque:** `../CLAUDE.md`.
 
 ---
@@ -48,7 +50,7 @@ Bot opcional: `python mybot/bot.py` + `TELEGRAM_BOT_TOKEN` en `.env` (misma API 
 | UI prod / `.exe` | mismo origen que la API | `API_URL` vacío en build; todo en `:8765` |
 | Bot Telegram | `API_BASE_URL` en `.env` | Default `http://127.0.0.1:8765` vía `app/config.py` |
 
-Override: `SGR_PORT`, `SGR_HOST`, `API_BASE_URL` o `DB_PATH` — ver [`BUILD.md`](BUILD.md). Ejemplo: copiá `.env.example` → `.env`.
+Override: `SGR_PORT`, `SGR_HOST`, `API_BASE_URL`, `DB_PATH`, `SGR_DEBUG` — ver [`BUILD.md`](BUILD.md). Ejemplo: copiá `.env.example` → `.env`.
 
 ---
 
@@ -336,6 +338,16 @@ Sin seed — arranca vacío.
 - **General:** `/help`, `/cancel`, parsers de fecha/hora/duración, port Python de `calcStreak`/`isScheduled`.
 - Código: `mybot/bot.py` + `mybot/agenda_handlers.py` + `mybot/finanzas_handlers.py`.
 
+### Bot Telegram — LLM (Ollama) — hecho (mayo 2026)
+
+- **`llm_client.py`:** cliente HTTP a Ollama (`classify`, `chat`, `embed`, `is_available`). Timeout configurable; todas las funciones fallan silenciosamente si Ollama no está disponible.
+- **`intent_router.py`:** clasifica el mensaje del usuario en 8 módulos (`finanzas`, `agenda`, `habitos`, `boveda`, `consulta_*`, `desconocido`). Devuelve `RouteResult` con action (`direct`/`confirm`/`question`/`fallback`) + datos extraídos + confianza. Caché de healthcheck 30s. Fallback transparente al sistema de prefijos si Ollama no responde.
+- **Integración en `bot.py`:** texto libre sin prefijo → LLM router antes del flujo Bóveda; acción directa/confirm muestra resumen + teclado (✅ Confirmar / ✏️ Corregir / ❌ Cancelar); `llm_ok` llama a `ir.execute()`; `question` muestra placeholder (Capa 3 pendiente).
+- **`execute()`:** guarda en SGR vía API — finanzas usa `cuenta_nombre`/`categoria_nombre` directo; agenda crea tarea (`fecha_opcional`/`hora_opcional`) o evento (`fecha_inicio` datetime); hábitos hace fuzzy match por nombre y llama a `PUT /habitos/{id}/registro`.
+- **Variables de entorno:** `OLLAMA_BASE_URL`, `OLLAMA_MODEL_CLASSIFY`, `OLLAMA_MODEL_CHAT`, `OLLAMA_MODEL_EMBED`, `OLLAMA_TIMEOUT`, `LLM_CONFIDENCE_THRESHOLD`.
+- **Pendiente (Capa 3):** `assistant.py` para modo consulta (`action="question"`) — respuestas conversacionales sobre datos de Finanzas, Hábitos y Agenda.
+- **Pendiente (Capa 4):** `embeddings.py` + ChromaDB para RAG sobre Bóveda.
+
 ### No implementado
 
 El detalle completo de pendientes por módulo está en los archivos de roadmap:
@@ -413,6 +425,8 @@ project/
 ├── mybot/bot.py                  # Entry point + handlers Bóveda + dispatcher callbacks
 ├── mybot/agenda_handlers.py      # Handlers Agenda + Hábitos (commands + callbacks)
 ├── mybot/finanzas_handlers.py    # Handlers Finanzas (commands + callbacks + captura $:)
+├── mybot/llm_client.py           # Cliente HTTP Ollama: classify(), chat(), embed(), is_available()
+├── mybot/intent_router.py        # Router LLM: route(), execute(), format_summary() — Capa 2 Ollama
 ├── Boveda.md                # Documentación técnica del módulo Bóveda
 ├── Boveda-Roadmap.md        # Pendientes Bóveda
 ├── Finanzas.md              # Documentación técnica del módulo Finanzas
@@ -421,8 +435,10 @@ project/
 ├── Agenda-Roadmap.md        # Pendientes Agenda
 ├── Habitos.md               # Documentación técnica del módulo Hábitos
 ├── Habitos-Roadmap.md       # Pendientes Hábitos
-├── database/app.db
-└── uploads/
+├── database/app.db          # excluido de git (.gitignore)
+├── uploads/                 # excluido de git (.gitignore)
+├── .env                     # excluido de git — copiar de .env.example
+└── .env.example             # plantilla con todas las variables documentadas
 ```
 
 ---
@@ -451,7 +467,10 @@ CORS dev: `http://localhost:5173` y `http://127.0.0.1:5173` (API en `:8765`).
 |----------|-----------------|
 | Monolito en `main.py` + `crud.py` | Velocidad de iteración; poco acoplamiento formal |
 | Zustand único | Estado compartido entre módulos; riesgo de archivo grande |
-| Mock fallback en catch | UX offline-first para todos los módulos |
+| Catch sin reset en fetches | Los catches de `fetchAgendaCalendarios`, `fetchHabitos`, `fetchFinInstrumentos` solo loguean — no borran estado existente (offline-first) |
+| `normalizeMovimiento` en `data/finanzas.js` | Es helper sin estado; vivía en el store pero pertenece a las utilidades de Finanzas |
+| `BrowseScreen`/`DetailScreen` lazy | D3 y TipTap solo cargan cuando se navega a `/` o `/hoja/:id` |
+| AgendaScreen renderizado condicional | Igual que Finanzas/Hábitos; `agendaHoyViewISO`, `agendaMesYear/Month` en store para preservar posición al remontar |
 | `finMovimientos` vs `finMovimientosAll` | Mes actual vs histórico (Datos, Ahorro, Anual, FIRE) |
 | Instrumentos en tabla polimórfica | Un CRUD; campos opcionales por `tipo` |
 | Objetivos por nombre = descripción movimiento | Sin tabla puente movimiento↔objetivo |

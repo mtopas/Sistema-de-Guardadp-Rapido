@@ -6,7 +6,7 @@ import requests
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from defaults import DEFAULT_API_BASE
+DEFAULT_API_BASE = os.environ.get("API_BASE_URL", "http://127.0.0.1:8765")
 
 # ──────────────────────────────────────────────────────────────
 # Seguridad — BOT_ALLOWED_CHAT_IDS

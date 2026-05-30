@@ -16,8 +16,8 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator, model_validator
 
-from app.config import DEBUG
-from app.paths import dist_directory, uploads_directory
+from app.config import DEBUG, DB_PATH
+from app.paths import data_root, dist_directory, uploads_directory
 from app.db.crud import (
     actualizar_apuntes,
     actualizar_icono,
@@ -277,6 +277,31 @@ def read_root():
     if index.exists():
         return FileResponse(str(index))
     return {"message": "Run 'npm run build' inside frontend/ to serve the UI here."}
+
+
+@app.get("/meta")
+def api_meta():
+    """Diagnóstico: qué SQLite usa esta instancia de la API (bot vs UI deben coincidir)."""
+    from app.db.database import get_connection
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    def _count(table: str) -> int:
+        cur.execute(f"SELECT COUNT(*) FROM {table}")
+        return int(cur.fetchone()[0])
+
+    counts = {
+        "hojas": _count("hojas"),
+        "fin_movimientos": _count("fin_movimientos"),
+        "fin_notas": _count("fin_notas"),
+    }
+    conn.close()
+    return {
+        "db_path": DB_PATH,
+        "data_root": str(data_root()),
+        "counts": counts,
+    }
 
 
 # --- Categorias ---
@@ -1375,6 +1400,7 @@ _SPA_API_PREFIXES = (
     "fin/",
     "agenda/",
     "habitos/",
+    "meta",
     "preview",
     "upload",
     "assets/",

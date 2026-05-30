@@ -26,12 +26,11 @@ from datetime import date, datetime
 import requests
 
 import llm_client
+from api_config import API_BASE
 
 logger = logging.getLogger(__name__)
 
 # ── Config ─────────────────────────────────────────────────────────────────────
-
-API_BASE          = os.environ.get("API_BASE_URL", "http://127.0.0.1:8765")
 CONFIDENCE_HIGH   = float(os.environ.get("LLM_CONFIDENCE_THRESHOLD", "0.75"))
 CONFIDENCE_MEDIUM = 0.5
 _HEALTH_TTL       = 30  # segundos entre healthchecks

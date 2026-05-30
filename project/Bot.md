@@ -213,8 +213,8 @@ class RouteResult:
 ```
 Ubuntu Server 22.04 — 192.168.137.10
 └── Docker Compose
-    ├── backend  (FastAPI :8765)
-    └── bot      (python-telegram-bot)
+    ├── backend  (FastAPI :8765)  → SQLite en ./database/app.db (volume)
+    └── bot      (python-telegram-bot)  → API_BASE_URL=http://backend:8765
 
 Windows PC (host)
 └── Ollama :11434  (OLLAMA_HOST=0.0.0.0)
@@ -224,12 +224,29 @@ Windows PC (host)
 
 Red: ICS (Internet Connection Sharing) — `Ethernet 2` en Windows, IP fija `192.168.137.1`. Perfil de red: **Private** (requerido para que el firewall permita inbound desde el homelab).
 
+### Bot y app muestran datos distintos
+
+El bot **no abre SQLite**; llama a `API_BASE_URL`. Si abrís SGR en Windows (`project/database/app.db`) pero el bot en Docker usa el backend del homelab (`~/project/database/app.db`), verás notas/movimientos diferentes.
+
+Al arrancar, el bot imprime la ruta de DB que devuelve `GET /meta` del backend al que está conectado.
+
+**Opciones (elegí una):**
+
+| Objetivo | Qué hacer |
+|----------|-----------|
+| Todo en el homelab | UI en `http://192.168.137.10:8765`; `docker compose up -d`; una sola carpeta `database/` en el gabinete |
+| Todo en Windows | `python mybot/bot.py` en la PC con `API_BASE_URL=http://127.0.0.1:8765` (no uses backend Docker) |
+| App en Windows, bot en Docker | En `.env` del homelab: `API_BASE_URL=http://192.168.137.1:8765` y en Windows `SGR_HOST=0.0.0.0` |
+| Copiar datos al homelab | `scp database/app.db mtopas@192.168.137.10:~/project/database/` y reiniciar backend |
+
+Verificar desde la PC: `curl http://127.0.0.1:8765/meta` vs `curl http://192.168.137.10:8765/meta` — deben mostrar el mismo `db_path` y `counts` que esperás.
+
 Rebuild y deploy:
 ```bash
 # En el homelab
 cd ~/project
-sudo docker-compose up -d --build bot
-sudo docker-compose logs -f bot
+sudo docker compose up -d --build
+sudo docker compose logs -f bot
 ```
 
 ---

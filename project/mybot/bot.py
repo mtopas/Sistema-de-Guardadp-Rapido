@@ -1,6 +1,3 @@
-from dotenv import load_dotenv
-load_dotenv()
-
 import json
 import os
 import re
@@ -21,6 +18,8 @@ from telegram.ext import (
 
 import logging
 
+from api_config import API_BASE
+
 import agenda_handlers as ah
 import finanzas_handlers as fh
 import intent_router as ir
@@ -28,8 +27,7 @@ import intent_router as ir
 logger = logging.getLogger(__name__)
 
 
-TOKEN    = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-API_BASE = os.environ.get("API_BASE_URL", "http://127.0.0.1:8765")
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 
 # Archivo local para persistir el chat_id entre reinicios
 _CHAT_ID_FILE  = Path(__file__).parent / "chat_id.json"
@@ -97,6 +95,29 @@ def _update_rapido_last_cat(cat_id: int, cat_nombre: str):
 # Healthcheck
 # ──────────────────────────────────────────────────────────────
 
+def _log_api_meta():
+    try:
+        r = requests.get(f"{API_BASE}/meta", timeout=10)
+        r.raise_for_status()
+        meta = r.json()
+        counts = meta.get("counts") or {}
+        print(f"[bot] API: {API_BASE}")
+        print(f"[bot] Base de datos del backend: {meta.get('db_path')}")
+        print(
+            "[bot] Registros en esa DB — hojas: {hojas}, movimientos: {mov}, notas fin: {notas}".format(
+                hojas=counts.get("hojas", "?"),
+                mov=counts.get("fin_movimientos", "?"),
+                notas=counts.get("fin_notas", "?"),
+            )
+        )
+        print(
+            "[bot] Si no coinciden con la app en Windows, el bot apunta a OTRA API/DB "
+            "(p. ej. backend Docker en el homelab vs uvicorn/.exe local)."
+        )
+    except Exception as e:
+        print(f"[bot] No se pudo leer /meta ({e}). ¿Backend actualizado?")
+
+
 def _healthcheck():
     delays = [1, 2, 4, 8]
     api_ok = False
@@ -115,6 +136,9 @@ def _healthcheck():
                 _time.sleep(delay)
             else:
                 print(f"[bot] ADVERTENCIA: API no responde tras {attempt} intentos ({e}).")
+
+    if api_ok:
+        _log_api_meta()
 
     # Also verify /categorias specifically (Bóveda dependency)
     if api_ok:

@@ -1,0 +1,37 @@
+# SGR en homelab — misma DB para backend, bot y (opcional) UI en :8765
+#
+# Modo A (todo en el gabinete): dejá API_BASE_URL=http://backend:8765 y montá ./database
+# Modo B (app en Windows, solo bot acá): en .env del homelab:
+#   API_BASE_URL=http://192.168.137.1:8765
+#   y en Windows: SGR_HOST=0.0.0.0 + uvicorn/.exe escuchando en :8765
+# Modo C (una sola DB): copiá app.db de Windows al homelab antes de up:
+#   scp database/app.db mtopas@192.168.137.10:~/project/database/
+
+services:
+  backend:
+    build: .
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8765
+    ports:
+      - "8765:8765"
+    env_file:
+      - .env
+    environment:
+      SGR_DATA_DIR: /app
+      SGR_HOST: 0.0.0.0
+      SGR_PORT: "8765"
+    volumes:
+      - ./database:/app/database
+      - ./uploads:/app/uploads
+    restart: unless-stopped
+
+  bot:
+    build: .
+    command: python mybot/bot.py
+    env_file:
+      - .env
+    environment:
+      # Dentro de la red Docker el backend se llama por nombre de servicio
+      API_BASE_URL: http://backend:8765
+    depends_on:
+      - backend
+    restart: unless-stopped

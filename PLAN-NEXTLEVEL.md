@@ -132,7 +132,7 @@ Cubre todos los tipos: recordatorios de hojas (Bóveda), alertas financieras (Fi
 
 ---
 
-### Fase 4 — Router LLM en el bot de Telegram
+### Fase 4 — Router LLM en el bot de Telegram — ✅ IMPLEMENTADA
 
 > Objetivo: captura en lenguaje natural sin prefijos. Un mensaje, el modelo entiende la intención y enruta al módulo correcto.
 
@@ -144,35 +144,37 @@ Cubre todos los tipos: recordatorios de hojas (Bóveda), alertas financieras (Fi
 "el libro Atomic Habits habla de identidad" → hoja en Bóveda
 ```
 
-- [ ] Configurar Ollama como cliente HTTP desde el bot (`API_BASE_URL` en `.env`)
-- [ ] Prompt de clasificación de intención: devuelve `{ modulo, datos_extraidos, confianza }`
-- [ ] Router en `bot.py`: confianza alta → acción directa; confianza baja → confirmar con el usuario
-- [ ] Fallback: si Ollama falla o tarda → comportamiento actual con prefijos (`$:`, `t:`, `e:`)
-- [ ] Pruebas con 20+ frases reales de uso diario
+- [x] Configurar Ollama como cliente HTTP desde el bot → `mybot/llm_client.py`
+- [x] Prompt de clasificación de intención → `mybot/intent_router.py` (8 módulos, JSON, confianza)
+- [x] Router en `bot.py`: direct/confirm → teclado ✅/✏️/❌; question → `assistant.answer_question()`
+- [x] Fallback transparente si Ollama no responde → sigue con prefijos y flujo Bóveda
+- [x] Modo consulta (`action="question"`) → `assistant.py` con síntesis LLM para Finanzas/Hábitos/Agenda
+- [ ] Calibración formal con 20+ frases (sin suite automatizada; pendiente testing manual)
 
-**Por qué acá:** usa Ollama que ya está en docker-compose. Demuestra integración LLM real con una app existente — no un chatbot demo, sino algo que *hace cosas*. Y se usa todos los días, así que el feedback es inmediato.
+**Archivos:** `mybot/llm_client.py`, `mybot/intent_router.py`, `mybot/assistant.py`, `mybot/bot.py`
 
 ---
 
-### Fase 5 — RAG sobre Bóveda
+### Fase 5 — RAG sobre Bóveda — ✅ IMPLEMENTADA (core)
 
 > Objetivo: convertir el knowledge vault en un sistema de Q&A semántico sobre tu propio conocimiento.
 
 **Flujo:**
 ```
-Nueva hoja guardada → embedding → ChromaDB
-Pregunta del usuario → embedding → k-NN search → contexto → LLM → respuesta citando hojas
+Nueva hoja guardada → embedding (nomic-embed-text) → ChromaDB (database/chroma/)
+Pregunta del usuario → embedding → k-NN search → top-5 hojas → LLM síntesis → respuesta
 ```
 
-- [ ] ChromaDB como servicio en `docker-compose.yml`
-- [ ] Modelo de embeddings: `nomic-embed-text` vía Ollama
-- [ ] Worker que indexa hojas al crear/editar (`POST /hojas` y `PATCH /hojas/{id}` disparan embedding)
-- [ ] `GET /hojas/buscar-semantico?q=` en `main.py` + función en `crud.py`
-- [ ] `POST /hojas/pregunta` — recibe query, recupera contexto RAG, llama a LLM, devuelve respuesta
-- [ ] UI: toggle "búsqueda semántica" en `LeftPanel` y `TopBar` de Bóveda
-- [ ] Comando `/pregunta <texto>` en el bot: responde citando hojas relevantes
+- [ ] ChromaDB como servicio en `docker-compose.yml` (hoy: librería embebida en el proceso backend)
+- [x] Modelo de embeddings: `nomic-embed-text` vía Ollama → `app/semantic.py`
+- [x] Hooks en POST/PATCH/DELETE `/hojas` con `BackgroundTasks` (no bloquea CRUD) + backfill al arrancar
+- [x] `GET /hojas/buscar-semantico?q=&top_k=` en `main.py`; `POST /hojas/reindexar`
+- [x] Síntesis LLM: `assistant._gather_boveda()` → top-5 hits → `_synthesize()` → respuesta en lenguaje natural
+- [ ] UI: toggle "búsqueda semántica" en `LeftPanel` (pendiente frontend)
+- [x] Comando `/pregunta <texto>` en el bot → cita título + categoría de hojas relevantes
+- [x] `consulta_boveda` en modo conversacional (texto libre en el bot sin prefijo)
 
-**Por qué es el "wow factor":** resuelve un problema real (buscar entre cientos de hojas), demuestra comprensión de embeddings + retrieval + generación, y es el caso de uso más natural para un personal knowledge vault.
+**Archivos:** `app/semantic.py`, `mybot/embeddings.py`, `mybot/assistant.py` (`_gather_boveda`)
 
 ---
 
@@ -252,10 +254,8 @@ Cuando el usuario hace clic en un link externo desde una hoja de SGR, el panel s
 
 ---
 
-### Fase Z — Licencia y limpieza previa a publicación
+### Fase Z — Licencia y limpieza previa a publicación — ✅ HECHA
 
-> Antes de hacer público cualquier repositorio.
-
-- [ ] Crear `LICENSE` (MIT + Commons Clause)
-- [ ] Revisar `.gitignore`: confirmar que `.env`, `app.db`, `uploads/`, `rapido.json`, `chat_id.json`, `checkin_config.json` no se commiteen
-- [ ] Crear `.env.example` con todas las variables necesarias y comentadas$s$
+- [x] `LICENSE` creado (MIT + Commons Clause) — commit "Fase 0"
+- [x] `.gitignore` revisado: `.env`, `app.db`, `uploads/`, `rapido.json`, `chat_id.json`, `checkin_config.json`, `database/chroma/`
+- [x] `.env.example` con todas las variables documentadas (incluye Ollama)

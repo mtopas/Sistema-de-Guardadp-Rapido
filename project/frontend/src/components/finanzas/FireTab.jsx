@@ -1,7 +1,8 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
-import { fmtARS, fmtUSD } from '../../data/finanzas'
+import { fmtARS, fmtUSD, contribucionFire, mesMovimiento } from '../../data/finanzas'
+import { mergeFireCfg } from './fireConfigUtils'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -15,13 +16,6 @@ function mesLabel(m) {
   const [y, mo] = m.split('-').map(Number)
   const names = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
   return `${names[mo - 1]} ${y}`
-}
-
-function mesOf(mov) {
-  const v = mov.date ?? mov.fecha ?? ''
-  const d = new Date(v)
-  if (isNaN(d.getTime())) return ''
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
 function edadEn(fechaNac, mes) {
@@ -128,7 +122,7 @@ function usdFontSize(n) {
   return 12
 }
 
-function ProyeccionRow({ lang, saldoHoy, aporteHoy, aumentoMensual, rentabilidadMensual, dolar, fechaNac }) {
+function ProyeccionRow({ lang, saldoHoy, saldoRealCuentas, aporteHoy, aumentoMensual, rentabilidadMensual, dolar, fechaNac }) {
   const AGES = [25, 30, 35, 40, 45, 50]
 
   const proyecciones = useMemo(() => {
@@ -172,7 +166,11 @@ function ProyeccionRow({ lang, saldoHoy, aporteHoy, aumentoMensual, rentabilidad
     <div className="panel-strong p-5 mb-4">
       <div className="label mb-1">{t(lang, 'fireProyeccion')}</div>
       <div className="text-[10px] mono mb-3" style={{ color: 'var(--subtext)' }}>
-        Proyectado desde el saldo real de hoy · regla del 4% SWR
+        Proyectado desde el plan al mes actual ({fmtARSShort(saldoHoy)} ARS)
+        {saldoRealCuentas > 0 && Math.abs(saldoRealCuentas - saldoHoy) > 1000 && (
+          <> · cuentas: {fmtARSShort(saldoRealCuentas)}</>
+        )}
+        {' '}· regla del 4% SWR
       </div>
 
       <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${proyecciones.length}, 1fr)` }}>
@@ -215,16 +213,19 @@ function ProyeccionRow({ lang, saldoHoy, aporteHoy, aumentoMensual, rentabilidad
 export default function FireTab() {
   const lang           = useStore(s => s.lang)
   const finConfig      = useStore(s => s.finConfig)
+  const finFirePreview = useStore(s => s.finFirePreview)
   const finFireFilas   = useStore(s => s.finFireFilas)
   const fetchFireFilas = useStore(s => s.fetchFinFireFilas)
   const finMovAll      = useStore(s => s.finMovimientosAll)
   const fetchAll       = useStore(s => s.fetchFinMovimientosAll)
-  const finObjetivos   = useStore(s => s.finObjetivos)
-  const fetchObj       = useStore(s => s.fetchFinObjetivos)
+  const finCuentas     = useStore(s => s.finCuentas)
 
-  useEffect(() => { fetchFireFilas(); fetchAll(); fetchObj() }, [])
+  useEffect(() => { fetchFireFilas(); fetchAll() }, [])
 
-  const cfg = finConfig ?? {}
+  const cfg = useMemo(
+    () => mergeFireCfg(finConfig, finFirePreview),
+    [finConfig, finFirePreview],
+  )
   const aumentoMensual      = (cfg.fire_aumento_aporte    ?? 1.20)  / 100
   const rentabilidadAnual   = (cfg.fire_rentabilidad_anual ?? 6.00)
   const rentabilidadMensual = rentabilidadAnual / 100 / 12
@@ -234,6 +235,16 @@ export default function FireTab() {
   const dolar               = cfg.dolar_mep ?? cfg.dolar_oficial ?? cfg.dolar_default ?? 1245
   const fireMetaEdad        = cfg.fire_meta_edad ? Number(cfg.fire_meta_edad) : null
 
+  // Saldo real total desde fin_cuentas (ARS + USD × dolar)
+  const saldoRealCuentas = useMemo(() => {
+    const cuentas = Array.isArray(finCuentas)
+      ? (finCuentas[0]?.items ? finCuentas.flatMap(g => g.items) : finCuentas)
+      : []
+    const totalARS = cuentas.reduce((s, c) => s + (c.ars ?? 0), 0)
+    const totalUSD = cuentas.reduce((s, c) => s + (c.usd ?? 0), 0)
+    return totalARS + totalUSD * dolar
+  }, [finCuentas, dolar])
+
   const currentMes = useMemo(() => {
     const d = new Date()
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
@@ -241,21 +252,16 @@ export default function FireTab() {
 
   const inicioMes = cfg.fire_inicio_mes || currentMes
 
-  // Compute ahorrado FIRE per month from movimientos (residual after objetivos)
-  const objetivoNombres = useMemo(() => new Set(finObjetivos.map(o => o.nombre)), [finObjetivos])
-
   const ahorroPorMes = useMemo(() => {
     const map = {}
     finMovAll.forEach(m => {
-      const cat  = m.cat ?? m.categoria_nombre ?? ''
-      const desc = m.desc ?? m.descripcion ?? ''
-      if (cat !== 'Ahorro' || objetivoNombres.has(desc)) return
-      const mes   = mesOf(m)
-      const monto = Math.abs(m.amount ?? m.monto ?? 0)
-      map[mes] = (map[mes] ?? 0) + ((m.type ?? m.tipo) === 'expense' ? monto : -monto)
+      const mes = mesMovimiento(m)
+      if (!mes) return
+      const delta = contribucionFire(m)
+      if (delta) map[mes] = (map[mes] ?? 0) + delta
     })
     return map
-  }, [finMovAll, objetivoNombres])
+  }, [finMovAll])
 
   // Generate all rows — always up to fire_meta_edad (default 50) + 1 mes
   const endMes = useMemo(() => {
@@ -274,8 +280,7 @@ export default function FireTab() {
 
   const rows = useMemo(() => {
     const result = []
-    let prevAporte     = aporteInicial
-    let prevFalta      = 0
+    let prevAportePlan = aporteInicial
     let prevSaldoFinal = saldoInicial
     let mes = inicioMes
 
@@ -284,19 +289,25 @@ export default function FireTab() {
       const isCurrent = mes === currentMes
       const isFuture  = mes > currentMes
 
+      // Solo aumento % mensual; la falta no se suma al aporte del mes siguiente (evita “duplicar”)
       const aporte = result.length === 0
         ? aporteInicial
-        : prevAporte * (1 + aumentoMensual) + prevFalta
+        : prevAportePlan * (1 + aumentoMensual)
 
       const inicial = result.length === 0 ? saldoInicial : prevSaldoFinal
 
+      const computed = !isFuture ? (ahorroPorMes[mes] ?? 0) : null
+      const override = finFireFilas[mes]
       let ahorrado
-      if (finFireFilas[mes] !== undefined) {
-        ahorrado = finFireFilas[mes]
-      } else if (!isFuture) {
-        ahorrado = ahorroPorMes[mes] ?? 0
+      if (isFuture) {
+        ahorrado = null
+      } else if (computed > 0) {
+        // Movimientos reales ganan sobre override 0 (p. ej. seed en fin_fire_filas)
+        ahorrado = computed
+      } else if (override !== undefined) {
+        ahorrado = override
       } else {
-        ahorrado = null // projected
+        ahorrado = 0
       }
 
       const efectivo   = isFuture ? aporte : (ahorrado ?? aporte)
@@ -310,8 +321,7 @@ export default function FireTab() {
         aporte, inicial, interes, saldoFinal, ahorrado, falta,
       })
 
-      prevAporte     = aporte
-      prevFalta      = falta ?? 0
+      prevAportePlan = aporte
       prevSaldoFinal = saldoFinal
       mes = nextMes(mes)
     }
@@ -341,6 +351,7 @@ export default function FireTab() {
       <ProyeccionRow
         lang={lang}
         saldoHoy={saldoHoy}
+        saldoRealCuentas={saldoRealCuentas}
         aporteHoy={aporteHoy}
         aumentoMensual={aumentoMensual}
         rentabilidadMensual={rentabilidadMensual}
@@ -349,18 +360,29 @@ export default function FireTab() {
       />
 
       <div className="panel-strong overflow-hidden">
-        <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'calc(100vh - 340px)' }}>
+        <div className="flex items-center justify-between px-4 py-2 border-b" style={{ borderColor: 'var(--border)' }}>
+          <span className="label">{t(lang, 'fire') || 'Plan FIRE'}</span>
+          <button
+            type="button"
+            onClick={() => currentRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium border transition-colors"
+            style={{ borderColor: 'var(--accent)', color: 'var(--accent)', background: 'color-mix(in oklch, var(--accent) 8%, transparent)' }}
+          >
+            ● Hoy — {mesLabel(currentMes)}
+          </button>
+        </div>
+        <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'calc(100vh - 380px)' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 780, fontFamily: 'var(--font-mono)', fontSize: 12 }}>
             <thead>
               <tr>
-                {fechaNac && <th style={TH_LEFT}>{t(lang,'colEdad')}</th>}
-                <th style={TH_LEFT}>{t(lang,'colMes')}</th>
-                <th style={TH_BASE}>{t(lang,'colAporte')}</th>
-                <th style={TH_BASE}>{t(lang,'colInicial')}</th>
-                <th style={TH_BASE}>{t(lang,'colInteres')}</th>
-                <th style={TH_BASE}>{t(lang,'colSaldoFinal')}</th>
-                <th style={TH_BASE}>{t(lang,'colAhorrado')}</th>
-                <th style={TH_BASE}>{t(lang,'colFalta')}</th>
+                {fechaNac && <th scope="col" style={TH_LEFT}>{t(lang,'colEdad')}</th>}
+                <th scope="col" style={TH_LEFT}>{t(lang,'colMes')}</th>
+                <th scope="col" style={TH_BASE}>{t(lang,'colAporte')}</th>
+                <th scope="col" style={TH_BASE}>{t(lang,'colInicial')}</th>
+                <th scope="col" style={TH_BASE}>{t(lang,'colInteres')}</th>
+                <th scope="col" style={TH_BASE}>{t(lang,'colSaldoFinal')}</th>
+                <th scope="col" style={TH_BASE}>{t(lang,'colAhorrado')}</th>
+                <th scope="col" style={TH_BASE}>{t(lang,'colFalta')}</th>
               </tr>
             </thead>
             <tbody>

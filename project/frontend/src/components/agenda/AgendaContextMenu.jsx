@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 
 export default function AgendaContextMenu({ x, y, items, onClose }) {
   const ref = useRef(null)
@@ -18,7 +19,7 @@ export default function AgendaContextMenu({ x, y, items, onClose }) {
     }
   }, [onClose])
 
-  return (
+  return createPortal(
     <div
       ref={ref}
       role="menu"
@@ -27,7 +28,7 @@ export default function AgendaContextMenu({ x, y, items, onClose }) {
         position: 'fixed',
         left: clampedX,
         top: clampedY,
-        zIndex: 9999,
+        zIndex: 10001,
         minWidth: 160,
         background: 'var(--panel-bg)',
         border: '1px solid var(--border)',
@@ -68,6 +69,7 @@ export default function AgendaContextMenu({ x, y, items, onClose }) {
           </button>
         )
       })}
-    </div>
+    </div>,
+    document.body,
   )
 }

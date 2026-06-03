@@ -38,17 +38,40 @@ def _hoja_dict(f):
 
 # --- Categorias ---
 
+def _categoria_row_dict(row) -> dict:
+    return {"id": row[0], "nombre": row[1], "padre_id": row[2], "icono": row[3], "color": row[4]}
+
+
+def _categoria_descendant_ids(cursor, categoria_id: int) -> list:
+    ids = []
+    stack = [categoria_id]
+    while stack:
+        pid = stack.pop()
+        cursor.execute("SELECT id FROM categorias WHERE padre_id = ?", (pid,))
+        for (cid,) in cursor.fetchall():
+            ids.append(cid)
+            stack.append(cid)
+    return ids
+
+
 def crear_categoria(
     nombre: str,
     padre_id: Optional[int] = None,
     icono: Optional[str] = None,
+    color: Optional[str] = None,
 ) -> Optional[int]:
     conn = get_connection()
     cursor = conn.cursor()
+    inherited_color = color
+    if inherited_color is None and padre_id is not None:
+        cursor.execute("SELECT color FROM categorias WHERE id = ?", (padre_id,))
+        parent_row = cursor.fetchone()
+        if parent_row and parent_row[0]:
+            inherited_color = parent_row[0]
     try:
         cursor.execute(
-            "INSERT INTO categorias (nombre, padre_id, icono) VALUES (?, ?, ?)",
-            (nombre.strip(), padre_id, icono),
+            "INSERT INTO categorias (nombre, padre_id, icono, color) VALUES (?, ?, ?, ?)",
+            (nombre.strip(), padre_id, icono, inherited_color),
         )
         cid = cursor.lastrowid
         conn.commit()
@@ -65,10 +88,10 @@ def crear_categoria(
 def obtener_categorias():
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, nombre, padre_id, icono FROM categorias ORDER BY id ASC")
+    cursor.execute("SELECT id, nombre, padre_id, icono, color FROM categorias ORDER BY id ASC")
     filas = cursor.fetchall()
     conn.close()
-    return [{"id": f[0], "nombre": f[1], "padre_id": f[2], "icono": f[3]} for f in filas]
+    return [_categoria_row_dict(f) for f in filas]
 
 
 def categoria_existe(categoria_id: int) -> bool:
@@ -297,26 +320,38 @@ def categoria_tiene_hojas(categoria_id: int) -> bool:
 
 
 def actualizar_categoria(categoria_id: int, campos: dict) -> Optional[dict]:
-    safe = {k: v for k, v in campos.items() if k in {"nombre", "padre_id", "icono"}}
+    safe = {k: v for k, v in campos.items() if k in {"nombre", "padre_id", "icono", "color"}}
     if not safe:
         return None
     conn = get_connection()
     cursor = conn.cursor()
-    sets = ", ".join(f"{k} = ?" for k in safe)
-    vals = list(safe.values()) + [categoria_id]
     try:
-        cursor.execute(f"UPDATE categorias SET {sets} WHERE id = ?", vals)
+        color_val = safe.pop("color", None)
+        if color_val is not None and str(color_val).strip():
+            color_val = str(color_val).strip()
+            ids = [categoria_id] + _categoria_descendant_ids(cursor, categoria_id)
+            for cid in ids:
+                cursor.execute("UPDATE categorias SET color = ? WHERE id = ?", (color_val, cid))
+            if DEBUG:
+                print(f"actualizar_categoria: color={color_val} en ids={ids}")
+        if safe:
+            sets = ", ".join(f"{k} = ?" for k in safe)
+            vals = list(safe.values()) + [categoria_id]
+            cursor.execute(f"UPDATE categorias SET {sets} WHERE id = ?", vals)
         conn.commit()
     except sqlite3.IntegrityError:
         conn.rollback()
         conn.close()
         return None
-    cursor.execute("SELECT id, nombre, padre_id, icono FROM categorias WHERE id = ?", (categoria_id,))
+    cursor.execute(
+        "SELECT id, nombre, padre_id, icono, color FROM categorias WHERE id = ?",
+        (categoria_id,),
+    )
     row = cursor.fetchone()
     conn.close()
     if not row:
         return None
-    return {"id": row[0], "nombre": row[1], "padre_id": row[2], "icono": row[3]}
+    return _categoria_row_dict(row)
 
 
 # ---------------------------------------------------------------------------
@@ -337,15 +372,59 @@ def fin_obtener_cuentas():
     ]
 
 
+def fin_obtener_o_crear_categoria_ajuste(cursor) -> int:
+    cursor.execute("SELECT id FROM fin_categorias WHERE nombre = 'Ajuste' LIMIT 1")
+    row = cursor.fetchone()
+    if row:
+        return row[0]
+    cursor.execute(
+        "INSERT INTO fin_categorias (nombre, color, tipo) VALUES ('Ajuste', NULL, 'both')"
+    )
+    return cursor.lastrowid
+
+
+def fin_crear_saldos_iniciales(
+    cursor,
+    cuenta_id: int,
+    saldo_ars: float = 0,
+    saldo_usd: float = 0,
+) -> None:
+    """Registra saldo inicial como movimientos (ingreso / categoría Ajuste), no como piso manual."""
+    from datetime import date
+
+    cat_id = fin_obtener_o_crear_categoria_ajuste(cursor)
+    fecha = date.today().isoformat()
+    if saldo_ars and float(saldo_ars) > 0:
+        monto = float(saldo_ars)
+        cursor.execute(
+            """INSERT INTO fin_movimientos
+               (fecha, monto, tipo, descripcion, icono, cuenta_id, cuotas, categoria_id, moneda, nota, audit)
+               VALUES (?, ?, 'income', 'Saldo inicial', NULL, ?, NULL, ?, 'ARS', NULL, 0)""",
+            (fecha, monto, cuenta_id, cat_id),
+        )
+        _fin_ajustar_saldo_cuenta(cursor, cuenta_id, monto, 0.0)
+    if saldo_usd and float(saldo_usd) > 0:
+        monto = float(saldo_usd)
+        cursor.execute(
+            """INSERT INTO fin_movimientos
+               (fecha, monto, tipo, descripcion, icono, cuenta_id, cuotas, categoria_id, moneda, nota, audit)
+               VALUES (?, ?, 'income', 'Saldo inicial (USD)', NULL, ?, NULL, ?, 'USD', NULL, 0)""",
+            (fecha, monto, cuenta_id, cat_id),
+        )
+        _fin_ajustar_saldo_cuenta(cursor, cuenta_id, 0.0, monto)
+
+
 def fin_crear_cuenta(nombre: str, tipo: str = "wallet", color: Optional[str] = None,
                      initials: Optional[str] = None, saldo_ars: float = 0, saldo_usd: float = 0) -> int:
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO fin_cuentas (nombre, tipo, color, initials, saldo_ars, saldo_usd) VALUES (?, ?, ?, ?, ?, ?)",
-        (nombre.strip(), tipo, color, initials, saldo_ars, saldo_usd),
+        "INSERT INTO fin_cuentas (nombre, tipo, color, initials, saldo_ars, saldo_usd) VALUES (?, ?, ?, ?, 0, 0)",
+        (nombre.strip(), tipo, color, initials),
     )
     cid = cursor.lastrowid
+    if float(saldo_ars or 0) > 0 or float(saldo_usd or 0) > 0:
+        fin_crear_saldos_iniciales(cursor, cid, saldo_ars, saldo_usd)
     conn.commit()
     conn.close()
     if DEBUG:
@@ -385,24 +464,20 @@ def fin_editar_cuenta(cuenta_id: int, nombre: str, tipo: str, color: Optional[st
 
 
 def fin_actualizar_cuenta_saldo(cuenta_id: int, saldo_ars: float, saldo_usd: float) -> Optional[dict]:
+    """Obsoleto: los saldos se derivan de movimientos. Usar fin_recalcular_saldos_cuentas."""
+    _ = cuenta_id, saldo_ars, saldo_usd
+    fin_recalcular_saldos_cuentas()
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "UPDATE fin_cuentas SET saldo_ars = ?, saldo_usd = ? WHERE id = ?",
-        (saldo_ars, saldo_usd, cuenta_id),
+        "SELECT id, nombre, tipo, color, initials, saldo_ars, saldo_usd FROM fin_cuentas WHERE id = ?",
+        (cuenta_id,),
     )
-    updated = cursor.rowcount > 0
-    conn.commit()
-    if updated:
-        cursor.execute(
-            "SELECT id, nombre, tipo, color, initials, saldo_ars, saldo_usd FROM fin_cuentas WHERE id = ?",
-            (cuenta_id,),
-        )
-        r = cursor.fetchone()
-        conn.close()
-        return {"id": r[0], "name": r[1], "tipo": r[2], "color": r[3], "initials": r[4], "ars": r[5], "usd": r[6]}
+    r = cursor.fetchone()
     conn.close()
-    return None
+    if not r:
+        return None
+    return {"id": r[0], "name": r[1], "tipo": r[2], "color": r[3], "initials": r[4], "ars": r[5], "usd": r[6]}
 
 
 def fin_buscar_cuenta_por_nombre(nombre: str) -> Optional[int]:
@@ -418,13 +493,28 @@ def fin_buscar_cuenta_por_nombre(nombre: str) -> Optional[int]:
 # Finanzas — Categorias
 # ---------------------------------------------------------------------------
 
-def fin_obtener_categorias():
+def _fin_cat_dict(r) -> dict:
+    return {
+        "id": r[0],
+        "name": r[1],
+        "color": r[2],
+        "tipo": r[3],
+        "oculta": bool(r[4]) if len(r) > 4 else False,
+        "objetivo_id": r[5] if len(r) > 5 else None,
+    }
+
+
+def fin_obtener_categorias(include_ocultas: bool = False):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, nombre, color, tipo FROM fin_categorias ORDER BY tipo, id")
+    sql = "SELECT id, nombre, color, tipo, oculta, objetivo_id FROM fin_categorias"
+    if not include_ocultas:
+        sql += " WHERE oculta = 0"
+    sql += " ORDER BY tipo, id"
+    cursor.execute(sql)
     rows = cursor.fetchall()
     conn.close()
-    return [{"id": r[0], "name": r[1], "color": r[2], "tipo": r[3]} for r in rows]
+    return [_fin_cat_dict(r) for r in rows]
 
 
 def fin_crear_categoria(nombre: str, color: Optional[str] = None, tipo: str = "expense") -> Optional[int]:
@@ -446,14 +536,91 @@ def fin_crear_categoria(nombre: str, color: Optional[str] = None, tipo: str = "e
         return None
 
 
+FIN_CATEGORIAS_SISTEMA = frozenset({"Transferencia", "Ajuste", "FIRE"})
+FIN_CATEGORIAS_RESERVADAS = FIN_CATEGORIAS_SISTEMA
+OBJETIVO_EMERGENCIA_NOMBRE = "Fondo de emergencia"
+
+
+def _fin_vincular_categoria_objetivo(cursor, objetivo_id: int, nombre: str) -> int:
+    nombre = nombre.strip()
+    cursor.execute("SELECT id FROM fin_categorias WHERE objetivo_id = ?", (objetivo_id,))
+    row = cursor.fetchone()
+    if row:
+        cursor.execute(
+            "UPDATE fin_categorias SET nombre = ?, oculta = 0, tipo = 'both' WHERE id = ?",
+            (nombre, row[0]),
+        )
+        return row[0]
+    cursor.execute("SELECT id FROM fin_categorias WHERE nombre = ?", (nombre,))
+    by_name = cursor.fetchone()
+    if by_name:
+        cursor.execute(
+            "UPDATE fin_categorias SET objetivo_id = ?, oculta = 0, tipo = 'both' WHERE id = ?",
+            (objetivo_id, by_name[0]),
+        )
+        return by_name[0]
+    cursor.execute(
+        """INSERT INTO fin_categorias (nombre, color, tipo, oculta, objetivo_id)
+           VALUES (?, NULL, 'both', 0, ?)""",
+        (nombre, objetivo_id),
+    )
+    return cursor.lastrowid
+
+
+def fin_categoria_es_protegida(cat_id: int) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT nombre, objetivo_id FROM fin_categorias WHERE id = ?",
+        (cat_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return True
+    if row[1] is not None:
+        return True
+    return row[0] in FIN_CATEGORIAS_SISTEMA
+
+
+def fin_contar_movimientos_categoria(cat_id: int) -> int:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM fin_movimientos WHERE categoria_id = ?", (cat_id,))
+    n = cursor.fetchone()[0]
+    conn.close()
+    return int(n or 0)
+
+
 def fin_eliminar_categoria(cat_id: int) -> bool:
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM fin_categorias WHERE id = ?", (cat_id,))
-    deleted = cursor.rowcount > 0
-    conn.commit()
-    conn.close()
-    return deleted
+    cursor.execute("SELECT nombre FROM fin_categorias WHERE id = ?", (cat_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        return False
+    cursor.execute("SELECT objetivo_id FROM fin_categorias WHERE id = ?", (cat_id,))
+    obj_row = cursor.fetchone()
+    if obj_row and obj_row[0] is not None:
+        conn.close()
+        return False
+    if row[0] in FIN_CATEGORIAS_SISTEMA:
+        conn.close()
+        return False
+    if fin_contar_movimientos_categoria(cat_id) > 0:
+        conn.close()
+        return False
+    try:
+        cursor.execute("DELETE FROM fin_categorias WHERE id = ?", (cat_id,))
+        deleted = cursor.rowcount > 0
+        conn.commit()
+        conn.close()
+        return deleted
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        conn.close()
+        return False
 
 
 def fin_buscar_categoria_por_nombre(nombre: str) -> Optional[int]:
@@ -486,6 +653,56 @@ def _mov_dict(r) -> dict:
         "nota":             r[12],
         "audit":            bool(r[13]),
     }
+
+
+def _fin_delta_saldo(
+    monto: float,
+    moneda: Optional[str],
+    tipo: str = "expense",
+    categoria_nombre: Optional[str] = None,
+) -> tuple:
+    """(delta_ars, delta_usd) a sumar en fin_cuentas. Ingresos +, gastos −.
+
+    La categoría Transferencia no cambia este signo: hay que mover saldo entre cuentas
+    (gasto en origen, ingreso en destino). Los KPIs de ingreso/gasto excluyen Transferencia en la UI.
+    """
+    _ = categoria_nombre  # reservado; no altera delta por cuenta
+    amt = abs(float(monto))
+    signed = amt if (tipo or "expense").lower() == "income" else -amt
+    if (moneda or "ARS").upper() == "USD":
+        return (0.0, signed)
+    return (signed, 0.0)
+
+
+def _fin_ajustar_saldo_cuenta(cursor, cuenta_id: Optional[int], delta_ars: float, delta_usd: float) -> None:
+    if not cuenta_id:
+        return
+    cursor.execute(
+        "UPDATE fin_cuentas SET saldo_ars = COALESCE(saldo_ars, 0) + ?, saldo_usd = COALESCE(saldo_usd, 0) + ? WHERE id = ?",
+        (delta_ars, delta_usd, cuenta_id),
+    )
+
+
+def fin_recalcular_saldos_cuentas(cursor=None) -> None:
+    """Recalcula saldos desde cero según todos los movimientos (migración / reparación)."""
+    own_conn = cursor is None
+    conn = get_connection() if own_conn else cursor.connection
+    cur = conn.cursor() if own_conn else cursor
+    cur.execute("UPDATE fin_cuentas SET saldo_ars = 0, saldo_usd = 0")
+    cur.execute(
+        """SELECT m.cuenta_id, m.monto, m.moneda, m.tipo, cat.nombre
+           FROM fin_movimientos m
+           LEFT JOIN fin_categorias cat ON cat.id = m.categoria_id
+           WHERE m.cuenta_id IS NOT NULL"""
+    )
+    for cuenta_id, monto, moneda, tipo, cat_nombre in cur.fetchall():
+        d_ars, d_usd = _fin_delta_saldo(monto, moneda, tipo, cat_nombre)
+        _fin_ajustar_saldo_cuenta(cur, cuenta_id, d_ars, d_usd)
+    if own_conn:
+        conn.commit()
+        conn.close()
+    if DEBUG:
+        print("fin_recalcular_saldos_cuentas: done")
 
 
 def fin_obtener_movimientos(mes: Optional[str] = None):
@@ -531,6 +748,13 @@ def fin_crear_movimiento(
         (fecha, monto, tipo, descripcion, icono, cuenta_id, cuotas, categoria_id, moneda, nota, int(audit)),
     )
     mid = cursor.lastrowid
+    cat_nombre = None
+    if categoria_id:
+        cursor.execute("SELECT nombre FROM fin_categorias WHERE id = ?", (categoria_id,))
+        row_cat = cursor.fetchone()
+        cat_nombre = row_cat[0] if row_cat else None
+    d_ars, d_usd = _fin_delta_saldo(monto, moneda, tipo, cat_nombre)
+    _fin_ajustar_saldo_cuenta(cursor, cuenta_id, d_ars, d_usd)
     conn.commit()
     cursor.execute(
         """SELECT m.id, m.fecha, m.monto, m.tipo, m.descripcion, m.icono,
@@ -552,6 +776,17 @@ def fin_crear_movimiento(
 def fin_eliminar_movimiento(mov_id: int) -> bool:
     conn = get_connection()
     cursor = conn.cursor()
+    cursor.execute(
+        """SELECT m.cuenta_id, m.monto, m.moneda, m.tipo, cat.nombre
+           FROM fin_movimientos m
+           LEFT JOIN fin_categorias cat ON cat.id = m.categoria_id
+           WHERE m.id = ?""",
+        (mov_id,),
+    )
+    old = cursor.fetchone()
+    if old:
+        d_ars, d_usd = _fin_delta_saldo(old[1], old[2], old[3], old[4])
+        _fin_ajustar_saldo_cuenta(cursor, old[0], -d_ars, -d_usd)
     cursor.execute("DELETE FROM fin_movimientos WHERE id = ?", (mov_id,))
     deleted = cursor.rowcount > 0
     conn.commit()
@@ -626,14 +861,27 @@ def fin_obtener_emergencia_saldo() -> float:
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT COALESCE(SUM(CASE WHEN m.tipo = 'income' THEN m.monto ELSE -ABS(m.monto) END), 0)
+        SELECT COALESCE(SUM(
+            CASE WHEN m.tipo = 'income' THEN m.monto ELSE -ABS(m.monto) END
+        ), 0)
         FROM fin_movimientos m
         JOIN fin_categorias c ON c.id = m.categoria_id
-        WHERE LOWER(c.nombre) = 'emergencia'
-    """)
+        JOIN fin_objetivos o ON o.id = c.objetivo_id
+        WHERE o.nombre = ?
+    """, (OBJETIVO_EMERGENCIA_NOMBRE,))
     saldo = cursor.fetchone()[0]
+    if saldo == 0:
+        cursor.execute("""
+            SELECT COALESCE(SUM(
+                CASE WHEN m.tipo = 'income' THEN m.monto ELSE -ABS(m.monto) END
+            ), 0)
+            FROM fin_movimientos m
+            JOIN fin_categorias c ON c.id = m.categoria_id
+            WHERE LOWER(c.nombre) = LOWER(?)
+        """, (OBJETIVO_EMERGENCIA_NOMBRE,))
+        saldo = cursor.fetchone()[0]
     conn.close()
-    return float(saldo)
+    return float(saldo or 0)
 
 
 def fin_eliminar_nota(nota_id: int) -> bool:
@@ -662,9 +910,25 @@ def fin_actualizar_movimiento(mov_id: int, campos: dict) -> Optional[dict]:
         return None
     conn = get_connection()
     cursor = conn.cursor()
+    _mov_saldo_sql = """
+        SELECT m.cuenta_id, m.monto, m.moneda, m.tipo, cat.nombre
+        FROM fin_movimientos m
+        LEFT JOIN fin_categorias cat ON cat.id = m.categoria_id
+        WHERE m.id = ?
+    """
+    cursor.execute(_mov_saldo_sql, (mov_id,))
+    old = cursor.fetchone()
+    if old:
+        d_ars, d_usd = _fin_delta_saldo(old[1], old[2], old[3], old[4])
+        _fin_ajustar_saldo_cuenta(cursor, old[0], -d_ars, -d_usd)
     sets = ", ".join(f"{k} = ?" for k in safe)
     vals = list(safe.values()) + [mov_id]
     cursor.execute(f"UPDATE fin_movimientos SET {sets} WHERE id = ?", vals)
+    cursor.execute(_mov_saldo_sql, (mov_id,))
+    new = cursor.fetchone()
+    if new:
+        d_ars, d_usd = _fin_delta_saldo(new[1], new[2], new[3], new[4])
+        _fin_ajustar_saldo_cuenta(cursor, new[0], d_ars, d_usd)
     conn.commit()
     cursor.execute(
         """SELECT m.id, m.fecha, m.monto, m.tipo, m.descripcion, m.icono,
@@ -843,6 +1107,7 @@ def fin_crear_objetivo(
             (nombre.strip(), meta, moneda, fecha_limite, cuota_mensual, fecha_creacion),
         )
         oid = cursor.lastrowid
+        _fin_vincular_categoria_objetivo(cursor, oid, nombre.strip())
         conn.commit()
         cursor.execute(
             "SELECT id, nombre, meta, moneda, fecha_limite, cuota_mensual, fecha_creacion FROM fin_objetivos WHERE id = ?",
@@ -858,7 +1123,7 @@ def fin_crear_objetivo(
         return None
 
 
-_OBJ_UPDATABLE = frozenset({"nombre", "meta", "moneda", "fecha_limite", "cuota_mensual"})
+_OBJ_UPDATABLE = frozenset({"meta", "moneda", "fecha_limite", "cuota_mensual"})
 
 
 def fin_actualizar_objetivo(obj_id: int, campos: dict) -> Optional[dict]:
@@ -883,6 +1148,18 @@ def fin_actualizar_objetivo(obj_id: int, campos: dict) -> Optional[dict]:
 def fin_eliminar_objetivo(obj_id: int) -> bool:
     conn = get_connection()
     cursor = conn.cursor()
+    cursor.execute("SELECT nombre FROM fin_objetivos WHERE id = ?", (obj_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        return False
+    if row[0] == OBJETIVO_EMERGENCIA_NOMBRE:
+        conn.close()
+        return False
+    cursor.execute(
+        "UPDATE fin_categorias SET oculta = 1 WHERE objetivo_id = ?",
+        (obj_id,),
+    )
     cursor.execute("DELETE FROM fin_objetivos WHERE id = ?", (obj_id,))
     deleted = cursor.rowcount > 0
     conn.commit()
@@ -917,6 +1194,234 @@ def fin_upsert_fire_fila(mes: str, ahorrado_override: Optional[float]):
     conn.close()
     if DEBUG:
         print(f"fin_upsert_fire_fila: mes={mes} override={ahorrado_override}")
+
+
+# ---------------------------------------------------------------------------
+# Finanzas — Categorías (actualizar)
+# ---------------------------------------------------------------------------
+
+_CAT_FIN_UPDATABLE = frozenset({"nombre", "color", "tipo"})
+
+
+def fin_actualizar_categoria(cat_id: int, campos: dict) -> Optional[dict]:
+    safe = {k: v for k, v in campos.items() if k in _CAT_FIN_UPDATABLE}
+    if not safe:
+        return None
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT nombre, objetivo_id FROM fin_categorias WHERE id = ?",
+        (cat_id,),
+    )
+    existing = cursor.fetchone()
+    if not existing:
+        conn.close()
+        return None
+    if existing[1] is not None or existing[0] in FIN_CATEGORIAS_SISTEMA:
+        safe.pop("nombre", None)
+    if not safe:
+        conn.close()
+        return None
+    sets = ", ".join(f"{k} = ?" for k in safe)
+    vals = list(safe.values()) + [cat_id]
+    try:
+        cursor.execute(f"UPDATE fin_categorias SET {sets} WHERE id = ?", vals)
+        conn.commit()
+        cursor.execute(
+            "SELECT id, nombre, color, tipo, oculta, objetivo_id FROM fin_categorias WHERE id = ?",
+            (cat_id,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if row is None:
+            return None
+        return _fin_cat_dict(row)
+    except sqlite3.IntegrityError:
+        conn.close()
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Finanzas — Movimientos duplicados
+# ---------------------------------------------------------------------------
+
+def fin_obtener_movimientos_duplicados(ventana_horas: int = 24) -> list:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """SELECT m.id, m.fecha, m.monto, m.tipo, m.descripcion, m.icono,
+                  m.cuenta_id, c.nombre, m.cuotas, m.categoria_id, cat.nombre,
+                  m.moneda, m.nota, m.audit
+           FROM fin_movimientos m
+           LEFT JOIN fin_cuentas c ON c.id = m.cuenta_id
+           LEFT JOIN fin_categorias cat ON cat.id = m.categoria_id
+           ORDER BY m.fecha DESC, m.monto, m.tipo"""
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    duplicates = []
+    seen = []
+    for r in rows:
+        mov = _mov_dict(r)
+        d_fecha = datetime.fromisoformat(mov["fecha"]) if mov["fecha"] else None
+        for s in seen:
+            if (
+                s["tipo"] == mov["tipo"]
+                and abs(s["monto"] - mov["monto"]) < 0.01
+                and s["categoria_id"] == mov["categoria_id"]
+                and d_fecha is not None
+            ):
+                s_fecha = datetime.fromisoformat(s["fecha"]) if s["fecha"] else None
+                if s_fecha and abs((d_fecha - s_fecha).total_seconds()) <= ventana_horas * 3600:
+                    duplicates.append(mov)
+                    break
+        seen.append(mov)
+    return duplicates
+
+
+# ---------------------------------------------------------------------------
+# Finanzas — Export / Import CSV
+# ---------------------------------------------------------------------------
+
+def fin_export_csv_data() -> list:
+    return fin_obtener_movimientos()
+
+
+def fin_import_movimientos(filas: list) -> list:
+    """Importa lista de dicts con campos de movimiento. Devuelve los creados."""
+    created = []
+    for f in filas:
+        tipo   = f.get("tipo") or f.get("type", "expense")
+        monto  = float(f.get("monto") or f.get("amount") or 0)
+        fecha  = f.get("fecha") or f.get("date", "")
+        desc   = f.get("descripcion") or f.get("desc", "")
+        cat    = f.get("categoria_nombre") or f.get("cat", "")
+        cta    = f.get("cuenta_nombre") or f.get("method", "")
+        moneda = f.get("moneda", "ARS")
+        nota   = f.get("nota", "")
+        cuotas = f.get("cuotas")
+        if not fecha or monto == 0 or tipo not in ("income", "expense"):
+            continue
+        cuenta_id = fin_buscar_cuenta_por_nombre(cta) if cta else None
+        categoria_id = fin_buscar_categoria_por_nombre(cat) if cat else None
+        if cat and categoria_id is None:
+            tipo_cat = "income" if tipo == "income" else "expense"
+            categoria_id = fin_crear_categoria(cat, tipo=tipo_cat)
+        mov = fin_crear_movimiento(
+            fecha=fecha[:10],
+            monto=monto,
+            tipo=tipo,
+            descripcion=desc,
+            cuenta_id=cuenta_id,
+            cuotas=int(cuotas) if cuotas else None,
+            categoria_id=categoria_id,
+            moneda=moneda,
+            nota=nota or None,
+        )
+        created.append(mov)
+    return created
+
+
+# ---------------------------------------------------------------------------
+# Finanzas — Bulk update / delete movimientos
+# ---------------------------------------------------------------------------
+
+def fin_bulk_update_movimientos(updates: list) -> list:
+    """updates: [{id, ...campos}]. Devuelve lista de movimientos actualizados."""
+    result = []
+    for u in updates:
+        mov_id = u.get("id")
+        if not mov_id:
+            continue
+        campos = {k: v for k, v in u.items() if k != "id"}
+        updated = fin_actualizar_movimiento(int(mov_id), campos)
+        if updated:
+            result.append(updated)
+    return result
+
+
+def fin_bulk_delete_movimientos(ids: list) -> int:
+    """Elimina lista de movimientos. Devuelve cantidad eliminada."""
+    count = 0
+    for mov_id in ids:
+        if fin_eliminar_movimiento(int(mov_id)):
+            count += 1
+    return count
+
+
+# ---------------------------------------------------------------------------
+# Finanzas — Ledger transacciones por instrumento
+# ---------------------------------------------------------------------------
+
+def _trans_dict(r) -> dict:
+    return {
+        "id":             r[0],
+        "instrumento_id": r[1],
+        "tipo":           r[2],
+        "fecha":          r[3],
+        "cantidad":       r[4],
+        "precio":         r[5],
+        "monto_total":    r[6],
+        "nota":           r[7],
+        "creado_en":      r[8],
+    }
+
+
+def fin_obtener_transacciones_instrumento(instrumento_id: int) -> list:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """SELECT id, instrumento_id, tipo, fecha, cantidad, precio, monto_total, nota, creado_en
+           FROM fin_transacciones_instrumento
+           WHERE instrumento_id = ?
+           ORDER BY fecha DESC""",
+        (instrumento_id,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [_trans_dict(r) for r in rows]
+
+
+def fin_crear_transaccion_instrumento(
+    instrumento_id: int,
+    tipo: str,
+    fecha: str,
+    cantidad: float,
+    precio: float,
+    nota: Optional[str] = None,
+) -> dict:
+    monto_total = round(cantidad * precio, 6)
+    creado_en   = datetime.now().isoformat()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """INSERT INTO fin_transacciones_instrumento
+           (instrumento_id, tipo, fecha, cantidad, precio, monto_total, nota, creado_en)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (instrumento_id, tipo, fecha, cantidad, precio, monto_total, nota, creado_en),
+    )
+    tid = cursor.lastrowid
+    conn.commit()
+    cursor.execute(
+        """SELECT id, instrumento_id, tipo, fecha, cantidad, precio, monto_total, nota, creado_en
+           FROM fin_transacciones_instrumento WHERE id = ?""",
+        (tid,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if DEBUG:
+        print(f"fin_crear_transaccion_instrumento: id={tid} inst={instrumento_id} tipo={tipo}")
+    return _trans_dict(row)
+
+
+def fin_eliminar_transaccion_instrumento(trans_id: int) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM fin_transacciones_instrumento WHERE id = ?", (trans_id,))
+    deleted = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted
 
 
 # ---------------------------------------------------------------------------

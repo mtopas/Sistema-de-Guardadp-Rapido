@@ -10,6 +10,14 @@ const AGENDA_SHORTCUTS = {
   revision: [['← →', 'Cambiar semana'], ['PDF', 'Imprimir revisión']],
 }
 
+const FINANZAS_SHORTCUTS = {
+  global:    [['N', 'Nuevo movimiento'], ['1–5', 'Cambiar tab'], ['← →', 'Mes anterior/siguiente'], ['/', 'Buscar']],
+  dashboard: [['Vi', 'Ver todos ingresos'], ['Ve', 'Ver todos gastos'], ['C', 'Focus notas']],
+  datos:     [['Ctrl+S', 'Guardar edición'], ['Supr', 'Eliminar fila seleccionada']],
+  ahorro:    [['I', 'Nuevo instrumento']],
+  fire:      [['E', 'Modo edición']],
+}
+
 const PAD = 8
 
 const kbdStyle = {
@@ -33,9 +41,15 @@ export default function TweaksPanel() {
   const currentSection  = useStore(s => s.currentSection)
   const agendaActiveTab = useStore(s => s.agendaActiveTab)
 
+  const finActiveTab = useStore(s => s.finActiveTab)
+
   const { pathname } = useLocation()
-  const isAgenda = pathname.startsWith('/agenda')
-  const agendaShortcuts = isAgenda ? (AGENDA_SHORTCUTS[agendaActiveTab] || []) : []
+  const isAgenda    = pathname.startsWith('/agenda')
+  const isFinanzas  = pathname.startsWith('/finanzas')
+  const agendaShortcuts   = isAgenda   ? (AGENDA_SHORTCUTS[agendaActiveTab] || []) : []
+  const finanzasShortcuts = isFinanzas
+    ? [...(FINANZAS_SHORTCUTS.global || []), ...(FINANZAS_SHORTCUTS[finActiveTab] || [])]
+    : []
 
   const isDark = THEMES[theme]?.dark !== false
 
@@ -337,6 +351,24 @@ export default function TweaksPanel() {
               <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11 }}>
                 <kbd style={kbdStyle}>{key}</kbd>
                 <span style={{ color: 'var(--text-2)' }}>{desc}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Contextual Finanzas shortcuts */}
+        {finanzasShortcuts.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{
+              fontSize: 10, fontWeight: 600, letterSpacing: '.06em',
+              textTransform: 'uppercase', color: 'var(--subtext)',
+            }}>
+              Atajos · {finActiveTab || 'finanzas'}
+            </div>
+            {finanzasShortcuts.map(([key, desc]) => (
+              <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11 }}>
+                <kbd style={kbdStyle}>{key}</kbd>
+                <span style={{ color: 'var(--subtext)', textAlign: 'right', maxWidth: 140 }}>{desc}</span>
               </div>
             ))}
           </div>

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { API_URL, DEBUG } from '../config'
+import { categoriaDescendantIds } from '../utils/categoriaColors'
 import { applyTheme, DEFAULT_THEME, DEFAULT_TONE, DEFAULT_FONT_PAIR, FONT_PAIRS, THEMES, TONES, ARCOIRIS_ACCENTS, pathToSection } from '../utils/themes'
 
 function currentMes() {
@@ -7,6 +8,16 @@ function currentMes() {
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')
   return `${y}-${m}`
+}
+
+/** Evita re-render si el poll trae los mismos datos (parpadeo en Datos). */
+function finPayloadEqual(a, b) {
+  if (a === b) return true
+  try {
+    return JSON.stringify(a) === JSON.stringify(b)
+  } catch {
+    return false
+  }
 }
 
 // Per-section themes — each module has its own independent theme + tone.
@@ -93,8 +104,24 @@ export const useStore = create((set, get) => ({
   finCuentas:         [],
   finCategorias:      [],
   finConfig:          {},
+  /** Vista previa del form FIRE (panel derecho) antes/después de guardar */
+  finFirePreview:     null,
+  setFinFirePreview:  (preview) => set({ finFirePreview: preview }),
+  clearFinFirePreview: () => set({ finFirePreview: null }),
   finNotas:           [],
   finEmergenciaSaldo: 0,
+  /** Pausa sync (poll) mientras se edita en Datos / modal movimiento */
+  finSyncPaused:      false,
+  setFinSyncPaused:     (paused) => {
+    const prev = get().finSyncPaused
+    set({ finSyncPaused: paused })
+    if (prev && !paused) {
+      const m = get().selectedMes
+      get().fetchFinMovimientos(m)
+      get().fetchFinMovimientosAll()
+      get().fetchFinCuentas()
+    }
+  },
 
   fetchFinMovimientos: async (mes) => {
     try {
@@ -102,6 +129,7 @@ export const useStore = create((set, get) => ({
       const res = await fetch(`${API_URL}/fin/movimientos?mes=${m}`)
       if (!res.ok) throw new Error('not ok')
       const data = await res.json()
+      if (finPayloadEqual(get().finMovimientos, data)) return
       set({ finMovimientos: data })
       if (DEBUG) console.log('fetchFinMovimientos:', data.length)
     } catch {
@@ -130,6 +158,7 @@ export const useStore = create((set, get) => ({
       const res = await fetch(`${API_URL}/fin/movimientos`)
       if (!res.ok) throw new Error('not ok')
       const data = await res.json()
+      if (finPayloadEqual(get().finMovimientosAll, data)) return
       set({ finMovimientosAll: data })
       if (DEBUG) console.log('fetchFinMovimientosAll:', data.length)
     } catch {
@@ -151,6 +180,10 @@ export const useStore = create((set, get) => ({
         finMovimientosAll: [data, ...state.finMovimientosAll],
       }))
       if (DEBUG) console.log('addFinMovimiento (API):', data)
+      get().fetchFinMovimientosAll()
+      get().fetchFinMovimientos(get().selectedMes)
+      get().fetchFinCuentas()
+      get().fetchFinCategorias()
     } catch {
       const id = `m_${Date.now()}`
       const full = { id, ...payload }
@@ -170,6 +203,7 @@ export const useStore = create((set, get) => ({
       finMovimientos:    state.finMovimientos.filter(m => m.id !== id),
       finMovimientosAll: state.finMovimientosAll.filter(m => m.id !== id),
     }))
+    get().fetchFinCuentas()
     if (DEBUG) console.log('deleteFinMovimiento:', id)
   },
 
@@ -185,43 +219,40 @@ export const useStore = create((set, get) => ({
         body: JSON.stringify(patch),
       })
     } catch { /* offline ok */ }
+    get().fetchFinCuentas()
     if (DEBUG) console.log('updateFinMovimiento:', id, patch)
   },
 
-  updateFinCuenta: async (id, saldo_ars, saldo_usd) => {
+  recalcularFinSaldos: async () => {
     try {
-      const res = await fetch(`${API_URL}/fin/cuentas/${id}/saldo`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ saldo_ars, saldo_usd }),
-      })
+      const res = await fetch(`${API_URL}/fin/recalcular-saldos`, { method: 'POST' })
       if (!res.ok) throw new Error('not ok')
-      const updated = await res.json()
-      set(state => ({
-        finCuentas: state.finCuentas.map(c => (c.id === id ? { ...c, ...updated } : c)),
-      }))
-    } catch {
-      set(state => ({
-        finCuentas: state.finCuentas.map(c =>
-          c.id === id ? { ...c, ars: saldo_ars, usd: saldo_usd } : c
-        ),
-      }))
+      const data = await res.json()
+      set({ finCuentas: data })
+      if (DEBUG) console.log('recalcularFinSaldos:', data.length, 'cuentas')
+      return true
+    } catch (e) {
+      if (DEBUG) console.error('recalcularFinSaldos:', e)
+      return false
     }
-    if (DEBUG) console.log('updateFinCuenta:', id, saldo_ars, saldo_usd)
   },
 
-  createFinCuenta: async (nombre, tipo, color, initials) => {
-    const optimistic = { id: Date.now(), name: nombre, tipo, color, initials, ars: 0, usd: 0 }
+  createFinCuenta: async (nombre, tipo, color, initials, saldo_ars = 0, saldo_usd = 0) => {
+    const optimistic = { id: Date.now(), name: nombre, tipo, color, initials, ars: saldo_ars, usd: saldo_usd }
     set(state => ({ finCuentas: [...state.finCuentas, optimistic] }))
     try {
       const res = await fetch(`${API_URL}/fin/cuentas`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nombre, tipo, color, initials, saldo_ars: 0, saldo_usd: 0 }),
+        body: JSON.stringify({ nombre, tipo, color, initials, saldo_ars, saldo_usd }),
       })
       if (!res.ok) throw new Error('not ok')
       const created = await res.json()
       set(state => ({ finCuentas: state.finCuentas.map(c => c.id === optimistic.id ? created : c) }))
+      if (saldo_ars > 0 || saldo_usd > 0) {
+        await get().fetchFinMovimientos(get().selectedMes)
+        await get().fetchFinMovimientosAll()
+      }
     } catch {
       // keep optimistic
     }
@@ -262,6 +293,7 @@ export const useStore = create((set, get) => ({
       const res = await fetch(`${API_URL}/fin/cuentas`)
       if (!res.ok) throw new Error('not ok')
       const data = await res.json()
+      if (finPayloadEqual(get().finCuentas, data)) return
       set({ finCuentas: data })
       if (DEBUG) console.log('fetchFinCuentas:', data)
     } catch {
@@ -276,8 +308,80 @@ export const useStore = create((set, get) => ({
       const data = await res.json()
       set({ finCategorias: data })
       if (DEBUG) console.log('fetchFinCategorias:', data)
+      return data
     } catch {
       if (DEBUG) console.log('fetchFinCategorias: API error, keeping current state')
+      return null
+    }
+  },
+
+  createFinCategoria: async (nombre, tipo = 'expense', color = null) => {
+    try {
+      const res = await fetch(`${API_URL}/fin/categorias`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nombre: nombre.trim(), tipo, color }),
+      })
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => ({}))).detail || 'Error al crear categoría'
+        get().showToast(typeof detail === 'string' ? detail : 'Error al crear categoría', 'error')
+        return null
+      }
+      const created = await res.json()
+      await get().fetchFinCategorias()
+      get().showToast('Categoría creada', 'success')
+      if (DEBUG) console.log('createFinCategoria:', created)
+      return created
+    } catch (e) {
+      if (DEBUG) console.error('createFinCategoria:', e)
+      get().showToast('Error al crear categoría', 'error')
+      return null
+    }
+  },
+
+  updateFinCategoria: async (id, { nombre, tipo, color }) => {
+    try {
+      const body = {}
+      if (nombre !== undefined) body.nombre = nombre
+      if (tipo !== undefined) body.tipo = tipo
+      if (color !== undefined) body.color = color
+      const res = await fetch(`${API_URL}/fin/categorias/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => ({}))).detail || 'Error al actualizar'
+        get().showToast(typeof detail === 'string' ? detail : 'Error al actualizar categoría', 'error')
+        return false
+      }
+      await get().fetchFinCategorias()
+      get().showToast('Categoría actualizada', 'success')
+      if (DEBUG) console.log('updateFinCategoria:', id, body)
+      return true
+    } catch (e) {
+      if (DEBUG) console.error('updateFinCategoria:', e)
+      get().showToast('Error al actualizar categoría', 'error')
+      return false
+    }
+  },
+
+  deleteFinCategoria: async (id) => {
+    try {
+      const res = await fetch(`${API_URL}/fin/categorias/${id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => ({}))).detail || 'No se pudo eliminar'
+        get().showToast(typeof detail === 'string' ? detail : 'Error al eliminar categoría', 'error')
+        return false
+      }
+      await get().fetchFinCategorias()
+      get().showToast('Categoría eliminada', 'success')
+      if (DEBUG) console.log('deleteFinCategoria:', id)
+      return true
+    } catch (e) {
+      if (DEBUG) console.error('deleteFinCategoria:', e)
+      get().showToast('Error al eliminar categoría', 'error')
+      return false
     }
   },
 
@@ -318,9 +422,9 @@ export const useStore = create((set, get) => ({
       })
       if (!res.ok) throw new Error('not ok')
       const data = await res.json()
-      set({ finConfig: data })
+      set({ finConfig: data, finFirePreview: null })
     } catch {
-      set(state => ({ finConfig: { ...state.finConfig, ...updates } }))
+      set(state => ({ finConfig: { ...state.finConfig, ...updates }, finFirePreview: null }))
     }
     if (DEBUG) console.log('saveFinConfigBulk:', Object.keys(updates))
   },
@@ -455,6 +559,7 @@ export const useStore = create((set, get) => ({
       if (!res.ok) throw new Error('not ok')
       const data = await res.json()
       set(state => ({ finObjetivos: [...state.finObjetivos, data] }))
+      await get().fetchFinCategorias()
       return data
     } catch {
       const mock = { id: `o_${Date.now()}`, fecha_creacion: new Date().toISOString(), ...payload }
@@ -480,6 +585,7 @@ export const useStore = create((set, get) => ({
     set(state => ({ finObjetivos: state.finObjetivos.filter(o => o.id !== id) }))
     try {
       await fetch(`${API_URL}/fin/objetivos/${id}`, { method: 'DELETE' })
+      await get().fetchFinCategorias()
     } catch { /* noop */ }
   },
 
@@ -989,6 +1095,52 @@ export const useStore = create((set, get) => ({
     }
   },
 
+  actualizarCategoria: async (id, { nombre, icono, color }) => {
+    try {
+      const body = {}
+      if (nombre !== undefined) body.nombre = nombre
+      if (icono !== undefined) body.icono = icono
+      if (color !== undefined) body.color = color
+      const res = await fetch(`${API_URL}/categorias/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => ({}))).detail || 'Error al actualizar categoría'
+        get().showToast(detail, 'error')
+        return false
+      }
+      const updated = await res.json()
+      const desc = color !== undefined ? categoriaDescendantIds(get().categorias, id) : []
+      set({
+        categorias: get().categorias.map(c => {
+          if (c.id === id) {
+            return {
+              ...c,
+              ...updated,
+              ...(nombre !== undefined ? { nombre } : {}),
+              ...(icono !== undefined ? { icono } : {}),
+              ...(color !== undefined ? { color } : {}),
+            }
+          }
+          if (color !== undefined && desc.includes(c.id)) {
+            return { ...c, color }
+          }
+          return c
+        }),
+      })
+      await get().fetchCategorias()
+      get().showToast('Categoría actualizada', 'success')
+      if (DEBUG) console.log('actualizarCategoria:', id, body, updated)
+      return true
+    } catch (e) {
+      if (DEBUG) console.error('actualizarCategoria:', e)
+      get().showToast('Error al actualizar categoría', 'error')
+      return false
+    }
+  },
+
   // --- Hojas ---
   fetchHojas: async () => {
     try {
@@ -1044,8 +1196,13 @@ export const useStore = create((set, get) => ({
 
   /** Generic PATCH for a hoja — updates contenido, categoria_id, tipo, apuntes, icono */
   updateHoja: async (id, patch) => {
+    const extra = {}
+    if (patch.categoria_id != null) {
+      const cat = get().categorias.find(c => c.id === patch.categoria_id)
+      if (cat) extra.categoria_nombre = cat.nombre
+    }
     set(state => ({
-      hojas: state.hojas.map(h => h.id === id ? { ...h, ...patch } : h),
+      hojas: state.hojas.map(h => h.id === id ? { ...h, ...patch, ...extra } : h),
     }))
     try {
       const res = await fetch(`${API_URL}/hojas/${id}`, {
@@ -1060,9 +1217,9 @@ export const useStore = create((set, get) => ({
           hojas: state.hojas.map(h => h.id === id ? { ...h, fecha_actualizado } : h),
         }))
       }
-    } catch {
-      // On failure refetch to restore true state
+    } catch (e) {
       get().fetchHojas()
+      throw e
     }
     if (DEBUG) console.log('updateHoja:', id, patch)
   },

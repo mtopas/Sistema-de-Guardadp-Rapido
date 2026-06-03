@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useStore } from '../../store/useStore'
-import { fmtARS, isTransferencia } from '../../data/finanzas'
+import { fmtARS, isTransferencia, movimientoAnio } from '../../data/finanzas'
+import { buildFinCategoriaColorByName, getFinCategoriaColor } from '../../data/finCategoriaColors'
 import CardHeader from './CardHeader'
 
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
@@ -28,10 +29,10 @@ export function buildMonthly(movimientos, year) {
   movimientos.forEach(m => {
     if (isTransferencia(m)) return
     const tipo  = m.type  ?? m.tipo
-    const fecha = m.date  ?? m.fecha ?? ''
-    if (!fecha.startsWith(year)) return
+    if (movimientoAnio(m) !== String(year)) return
     if (tipo !== 'income' && tipo !== 'expense') return
-    const idx   = parseInt(fecha.slice(5, 7)) - 1
+    const raw   = m.date ?? m.fecha ?? ''
+    const idx   = parseInt(String(raw).slice(5, 7), 10) - 1
     if (idx < 0 || idx > 11) return
     const monto = Math.abs(m.amount ?? m.monto ?? 0)
     if (tipo === 'income') months[idx].ingresos += monto
@@ -344,23 +345,32 @@ function MonthTable({ monthlyData, inflMap, lang }) {
 
 // ── Category breakdown ────────────────────────────────────────────────────────
 
-function CategoryTable({ movimientos, year, lang }) {
+function CategoryTable({ movimientos, year, lang, finCategorias }) {
+  const colorByName = useMemo(
+    () => buildFinCategoriaColorByName(finCategorias),
+    [finCategorias],
+  )
+
   const cats = useMemo(() => {
     const map = {}
     movimientos.forEach(m => {
       if (isTransferencia(m)) return
       if ((m.type ?? m.tipo) !== 'expense') return
-      const fecha = m.date ?? m.fecha ?? ''
-      if (!fecha.startsWith(year)) return
+      if (movimientoAnio(m) !== String(year)) return
       const cat   = m.cat ?? m.categoria_nombre ?? (lang === 'en' ? 'Other' : 'Otro')
       const monto = Math.abs(m.amount ?? m.monto ?? 0)
       map[cat] = (map[cat] ?? 0) + monto
     })
     const total = Object.values(map).reduce((a, b) => a + b, 0)
     return Object.entries(map)
-      .map(([nombre, monto]) => ({ nombre, monto, pct: total > 0 ? (monto / total) * 100 : 0 }))
+      .map(([nombre, monto], i) => ({
+        nombre,
+        monto,
+        pct: total > 0 ? (monto / total) * 100 : 0,
+        color: getFinCategoriaColor(colorByName, nombre, i),
+      }))
       .sort((a, b) => b.monto - a.monto)
-  }, [movimientos, year, lang])
+  }, [movimientos, year, lang, colorByName])
 
   if (cats.length === 0) return null
 
@@ -374,7 +384,8 @@ function CategoryTable({ movimientos, year, lang }) {
       <div className="flex flex-col gap-2 mt-3">
         {cats.map(c => (
           <div key={c.nombre} className="flex items-center gap-3">
-            <div className="w-24 shrink-0 text-[11.5px] truncate" style={{ color: 'var(--text)' }}>
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: c.color }} aria-hidden />
+            <div className="w-22 shrink-0 text-[11.5px] truncate" style={{ color: 'var(--text)' }}>
               {c.nombre}
             </div>
             <div className="flex-1 h-4 rounded-full overflow-hidden" style={{ background: 'var(--surface)' }}>
@@ -382,7 +393,7 @@ function CategoryTable({ movimientos, year, lang }) {
                 className="h-full rounded-full transition-all duration-500"
                 style={{
                   width: `${(c.monto / maxMonto) * 100}%`,
-                  background: 'linear-gradient(90deg, var(--expense), color-mix(in oklch, var(--expense) 45%, transparent))',
+                  background: `linear-gradient(90deg, ${c.color}, color-mix(in oklch, ${c.color} 40%, transparent))`,
                 }}
               />
             </div>
@@ -399,12 +410,48 @@ function CategoryTable({ movimientos, year, lang }) {
   )
 }
 
+// ── Aviso cuando hay movimientos pero no suman (p. ej. solo Transferencia) ───
+
+function AnualDataHint({ movimientos, year, hasChartData, lang }) {
+  const enAnio = useMemo(
+    () => movimientos.filter(m => movimientoAnio(m) === String(year)),
+    [movimientos, year],
+  )
+  const xferCount = enAnio.filter(isTransferencia).length
+  if (hasChartData || enAnio.length === 0) return null
+
+  const soloTransferencias = xferCount === enAnio.length
+  const msg = soloTransferencias
+    ? (lang === 'en'
+        ? `All ${xferCount} movement(s) in ${year} use category Transferencia — they are excluded from income/expense totals. Change the category in the Datos tab (e.g. Salary, Groceries).`
+        : `Los ${xferCount} movimiento(s) de ${year} están en categoría Transferencia y no entran en ingresos/gastos. Cambiá la categoría en la pestaña Datos (ej. Sueldo, Supermercado).`)
+    : (lang === 'en'
+        ? `${enAnio.length} movement(s) in ${year} do not contribute to the chart (${xferCount} transfer(s)). Check categories in Datos.`
+        : `${enAnio.length} movimiento(s) en ${year} no aparecen en el gráfico (${xferCount} transferencia(s)). Revisá categorías en Datos.`)
+
+  return (
+    <div
+      className="flex items-start gap-2.5 px-4 py-3 rounded-xl text-[12.5px] leading-snug"
+      style={{
+        background: 'color-mix(in oklch, var(--warning) 12%, transparent)',
+        border: '1px solid color-mix(in oklch, var(--warning) 28%, transparent)',
+        color: 'var(--text)',
+      }}
+      role="status"
+    >
+      <span style={{ fontSize: 16, lineHeight: 1.2 }} aria-hidden>⚠</span>
+      <span>{msg}</span>
+    </div>
+  )
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function AnualTab() {
   const lang             = useStore(s => s.lang)
   const selectedMes      = useStore(s => s.selectedMes)
   const finMovimientosAll = useStore(s => s.finMovimientosAll)
+  const finCategorias     = useStore(s => s.finCategorias)
   const finInflacion     = useStore(s => s.finInflacion)
   const fetchAll         = useStore(s => s.fetchFinMovimientosAll)
   const fetchInflacion   = useStore(s => s.fetchFinInflacion)
@@ -435,9 +482,17 @@ export default function AnualTab() {
   }, [monthlyData, finInflacion, year])
 
   const hasInflacion = Object.keys(finInflacion).some(k => k.startsWith(year))
+  const hasChartData = monthlyData.some(m => m.hasData)
 
   return (
     <div className="flex flex-col gap-4">
+      <AnualDataHint
+        movimientos={finMovimientosAll}
+        year={year}
+        hasChartData={hasChartData}
+        lang={lang}
+      />
+
       {/* Summary row */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <StatCard
@@ -510,7 +565,7 @@ export default function AnualTab() {
       <MonthTable monthlyData={monthlyData} inflMap={finInflacion} lang={lang} />
 
       {/* Category breakdown */}
-      <CategoryTable movimientos={finMovimientosAll} year={year} lang={lang} />
+      <CategoryTable movimientos={finMovimientosAll} year={year} lang={lang} finCategorias={finCategorias} />
     </div>
   )
 }

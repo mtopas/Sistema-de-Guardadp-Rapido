@@ -24,7 +24,8 @@ def init_db():
             id       INTEGER PRIMARY KEY AUTOINCREMENT,
             nombre   TEXT NOT NULL UNIQUE,
             padre_id INTEGER REFERENCES categorias(id),
-            icono    TEXT
+            icono    TEXT,
+            color    TEXT
         )
     """)
 
@@ -64,10 +65,12 @@ def init_db():
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS fin_categorias (
-            id     INTEGER PRIMARY KEY AUTOINCREMENT,
-            nombre TEXT NOT NULL UNIQUE,
-            color  TEXT,
-            tipo   TEXT NOT NULL DEFAULT 'expense'
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre      TEXT NOT NULL UNIQUE,
+            color       TEXT,
+            tipo        TEXT NOT NULL DEFAULT 'expense',
+            oculta      INTEGER NOT NULL DEFAULT 0,
+            objetivo_id INTEGER REFERENCES fin_objetivos(id)
         )
     """)
 
@@ -146,6 +149,20 @@ def init_db():
         CREATE TABLE IF NOT EXISTS fin_inflacion (
             mes       TEXT PRIMARY KEY,
             inflacion REAL NOT NULL
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fin_transacciones_instrumento (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            instrumento_id INTEGER NOT NULL REFERENCES fin_instrumentos(id) ON DELETE CASCADE,
+            tipo           TEXT NOT NULL,
+            fecha          TEXT NOT NULL,
+            cantidad       REAL NOT NULL,
+            precio         REAL NOT NULL,
+            monto_total    REAL NOT NULL,
+            nota           TEXT,
+            creado_en      TEXT NOT NULL
         )
     """)
 
@@ -239,6 +256,9 @@ def init_db():
     _seed_habitos(cursor)
     _apply_migrations(cursor)
     _ensure_fin_data(cursor)
+    _migrate_fin_saldos_desde_movimientos(cursor)
+    _migrate_fin_saldos_signo_v2(cursor)
+    _migrate_fin_saldos_transfer_v3(cursor)
     conn.commit()
     conn.close()
 
@@ -246,13 +266,64 @@ def init_db():
         print("init_db: database ready")
 
 
+def _migrate_fin_saldos_desde_movimientos(cursor):
+    """Una vez: alinear saldo_ars/usd con la suma de movimientos existentes."""
+    cursor.execute(
+        "SELECT valor FROM fin_config WHERE clave = 'saldos_desde_movimientos_v1'"
+    )
+    if cursor.fetchone():
+        return
+    from app.db.crud import fin_recalcular_saldos_cuentas
+
+    fin_recalcular_saldos_cuentas(cursor)
+    cursor.execute(
+        "INSERT OR REPLACE INTO fin_config (clave, valor) VALUES ('saldos_desde_movimientos_v1', '1')"
+    )
+    if DEBUG:
+        print("migration: fin_cuentas saldos recalculados desde movimientos")
+
+
+def _migrate_fin_saldos_signo_v2(cursor):
+    """Recalcula saldos: ingresos suman, gastos restan (fix signo)."""
+    cursor.execute(
+        "SELECT valor FROM fin_config WHERE clave = 'saldos_signo_income_expense_v2'"
+    )
+    if cursor.fetchone():
+        return
+    from app.db.crud import fin_recalcular_saldos_cuentas
+
+    fin_recalcular_saldos_cuentas(cursor)
+    cursor.execute(
+        "INSERT OR REPLACE INTO fin_config (clave, valor) VALUES ('saldos_signo_income_expense_v2', '1')"
+    )
+    if DEBUG:
+        print("migration: fin_cuentas saldos recalculados (ingreso +, gasto −)")
+
+
+def _migrate_fin_saldos_transfer_v3(cursor):
+    """Transferencias vuelven a mover saldo por cuenta (gasto − / ingreso +)."""
+    cursor.execute(
+        "SELECT valor FROM fin_config WHERE clave = 'saldos_transfer_cuentas_v3'"
+    )
+    if cursor.fetchone():
+        return
+    from app.db.crud import fin_recalcular_saldos_cuentas
+
+    fin_recalcular_saldos_cuentas(cursor)
+    cursor.execute(
+        "INSERT OR REPLACE INTO fin_config (clave, valor) VALUES ('saldos_transfer_cuentas_v3', '1')"
+    )
+    if DEBUG:
+        print("migration: saldos por cuenta incluyen transferencias")
+
+
 def _ensure_fin_data(cursor):
     """Idempotent: insert essential rows that must always exist."""
     cursor.execute(
-        "INSERT OR IGNORE INTO fin_categorias (nombre, color, tipo) VALUES ('Emergencia', NULL, 'both')"
+        "INSERT OR IGNORE INTO fin_categorias (nombre, color, tipo) VALUES ('Ajuste', NULL, 'both')"
     )
     cursor.execute(
-        "INSERT OR IGNORE INTO fin_categorias (nombre, color, tipo) VALUES ('Ahorro', NULL, 'both')"
+        "INSERT OR IGNORE INTO fin_categorias (nombre, color, tipo) VALUES ('FIRE', NULL, 'both')"
     )
     cursor.execute(
         "INSERT OR IGNORE INTO fin_config (clave, valor) VALUES ('fondo_emergencia_meta', '0')"
@@ -286,6 +357,100 @@ def _seed_finanzas(cursor):
     pass
 
 
+def _migrate_fin_categorias_objetivos(cursor):
+    """oculta + objetivo_id; categoría FIRE; objetivo Fondo de emergencia; sync categorías de objetivos."""
+    from datetime import datetime as _dt
+
+    fin_cols = _get_columns(cursor, "fin_categorias")
+    if "oculta" not in fin_cols:
+        cursor.execute("ALTER TABLE fin_categorias ADD COLUMN oculta INTEGER NOT NULL DEFAULT 0")
+        if DEBUG:
+            print("migration: fin_categorias.oculta added")
+    if "objetivo_id" not in fin_cols:
+        cursor.execute(
+            "ALTER TABLE fin_categorias ADD COLUMN objetivo_id INTEGER REFERENCES fin_objetivos(id)"
+        )
+        if DEBUG:
+            print("migration: fin_categorias.objetivo_id added")
+
+    cursor.execute(
+        "INSERT OR IGNORE INTO fin_categorias (nombre, color, tipo, oculta) VALUES ('FIRE', NULL, 'both', 0)"
+    )
+    cursor.execute(
+        "UPDATE fin_categorias SET oculta = 1 WHERE LOWER(nombre) = 'emergencia' AND objetivo_id IS NULL"
+    )
+
+    emergencia_nombre = "Fondo de emergencia"
+    cursor.execute("SELECT id FROM fin_objetivos WHERE nombre = ? LIMIT 1", (emergencia_nombre,))
+    row = cursor.fetchone()
+    if not row:
+        meta = 0.0
+        cursor.execute("SELECT valor FROM fin_config WHERE clave = 'fondo_emergencia_meta'")
+        cfg = cursor.fetchone()
+        if cfg and cfg[0]:
+            try:
+                meta = float(cfg[0])
+            except ValueError:
+                meta = 0.0
+        cursor.execute(
+            """INSERT INTO fin_objetivos (nombre, meta, moneda, fecha_limite, cuota_mensual, fecha_creacion)
+               VALUES (?, ?, 'ARS', NULL, NULL, ?)""",
+            (emergencia_nombre, meta, _dt.now().isoformat()),
+        )
+        oid = cursor.lastrowid
+    else:
+        oid = row[0]
+
+    cursor.execute("SELECT id FROM fin_categorias WHERE objetivo_id = ?", (oid,))
+    cat_row = cursor.fetchone()
+    if cat_row:
+        cursor.execute(
+            "UPDATE fin_categorias SET nombre = ?, oculta = 0, tipo = 'both' WHERE id = ?",
+            (emergencia_nombre, cat_row[0]),
+        )
+    else:
+        cursor.execute("SELECT id FROM fin_categorias WHERE nombre = ?", (emergencia_nombre,))
+        existing = cursor.fetchone()
+        if existing:
+            cursor.execute(
+                "UPDATE fin_categorias SET objetivo_id = ?, oculta = 0, tipo = 'both' WHERE id = ?",
+                (oid, existing[0]),
+            )
+        else:
+            cursor.execute(
+                """INSERT INTO fin_categorias (nombre, color, tipo, oculta, objetivo_id)
+                   VALUES (?, NULL, 'both', 0, ?)""",
+                (emergencia_nombre, oid),
+            )
+
+    cursor.execute("SELECT id, nombre FROM fin_objetivos")
+    for oid, nombre in cursor.fetchall():
+        cursor.execute("SELECT id FROM fin_categorias WHERE objetivo_id = ?", (oid,))
+        linked = cursor.fetchone()
+        if linked:
+            cursor.execute(
+                "UPDATE fin_categorias SET nombre = ?, oculta = 0, tipo = 'both' WHERE id = ?",
+                (nombre, linked[0]),
+            )
+            continue
+        cursor.execute("SELECT id FROM fin_categorias WHERE nombre = ?", (nombre,))
+        by_name = cursor.fetchone()
+        if by_name:
+            cursor.execute(
+                "UPDATE fin_categorias SET objetivo_id = ?, oculta = 0, tipo = 'both' WHERE id = ?",
+                (oid, by_name[0]),
+            )
+        else:
+            cursor.execute(
+                """INSERT INTO fin_categorias (nombre, color, tipo, oculta, objetivo_id)
+                   VALUES (?, NULL, 'both', 0, ?)""",
+                (nombre, oid),
+            )
+
+    if DEBUG:
+        print("migration: fin_categorias objetivos/FIRE sync done")
+
+
 def _apply_migrations(cursor):
     # --- categorias ---
     cat_cols = _get_columns(cursor, "categorias")
@@ -299,6 +464,11 @@ def _apply_migrations(cursor):
         cursor.execute("ALTER TABLE categorias ADD COLUMN icono TEXT")
         if DEBUG:
             print("migration: categorias.icono added")
+
+    if "color" not in cat_cols:
+        cursor.execute("ALTER TABLE categorias ADD COLUMN color TEXT")
+        if DEBUG:
+            print("migration: categorias.color added")
 
     # --- hojas ---
     hoja_cols = _get_columns(cursor, "hojas")
@@ -452,3 +622,5 @@ def _apply_migrations(cursor):
         cursor.execute("ALTER TABLE habitos ADD COLUMN minutos_antes INTEGER NOT NULL DEFAULT 0")
         if DEBUG:
             print("migration: habitos.minutos_antes added")
+
+    _migrate_fin_categorias_objetivos(cursor)

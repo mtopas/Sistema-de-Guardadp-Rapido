@@ -1,9 +1,10 @@
-"""
+'''
 seed_demo.py — Rellena la base de datos con datos de demo realistas.
 Corre desde project/: python seed_demo.py
 
 ADVERTENCIA: borra todos los datos existentes antes de insertar.
-"""
+
+ADVERTENCIA: ESTÁ DESACTUALIZADO
 
 import sqlite3
 import random
@@ -611,3 +612,5 @@ if __name__ == "__main__":
     conn.commit()
     conn.close()
     print("=== Listo. Reiniciá el backend para que sirva los datos frescos. ===")
+
+'''

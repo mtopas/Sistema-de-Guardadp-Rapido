@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { Plus, Trash2, X, Check } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
-import { fmtARS, fmtUSD } from '../../data/finanzas'
+import { fmtARS, fmtUSD, contribucionFire, acumuladoPorCategoriaNombre, mesMovimiento } from '../../data/finanzas'
 
 function ProgressBar({ pct, color }) {
   return (
@@ -192,13 +192,11 @@ export default function AhorroRightPanel() {
     const aporteInicial = cfg.fire_aporte_inicial ?? 0
     const inicioMes     = cfg.fire_inicio_mes ?? currentMes
 
-    // Walk months from start to current to compute aporte
+    // Aporte plan del mes actual: solo compuesto desde inicio (sin arrastrar faltas)
     let aporte = aporteInicial
-    let falta  = 0
     let mes    = inicioMes
     while (mes < currentMes) {
-      aporte = aporte * (1 + aumento) + falta
-      falta  = 0
+      aporte = aporte * (1 + aumento)
       mes    = nextMes(mes)
     }
     return aporte
@@ -210,40 +208,20 @@ export default function AhorroRightPanel() {
     return `${y}-${String(mo + 1).padStart(2, '0')}`
   }
 
-  // Ahorrado este mes (categoría Ahorro, residual sin objetivos)
-  const objetivoNombres = useMemo(() => new Set(finObjetivos.map(o => o.nombre)), [finObjetivos])
-
   const ahorradoFireMes = useMemo(() => {
-    if (finFireFilas[currentMes] !== undefined) return finFireFilas[currentMes]
-    return finMovimientosAll
-      .filter(m => {
-        const cat  = m.cat ?? m.categoria_nombre ?? ''
-        const desc = m.desc ?? m.descripcion ?? ''
-        return cat === 'Ahorro' && !objetivoNombres.has(desc) && mesOf(m) === currentMes
-      })
-      .reduce((sum, m) => {
-        const monto = Math.abs(m.amount ?? m.monto ?? 0)
-        return sum + ((m.type ?? m.tipo) === 'expense' ? monto : -monto)
-      }, 0)
-  }, [finMovimientosAll, finFireFilas, currentMes, objetivoNombres])
+    const computed = finMovimientosAll
+      .filter(m => mesMovimiento(m) === currentMes)
+      .reduce((sum, m) => sum + contribucionFire(m), 0)
+    const override = finFireFilas[currentMes]
+    if (computed !== 0) return computed
+    if (override !== undefined) return override
+    return 0
+  }, [finMovimientosAll, finFireFilas, currentMes])
 
-  function mesOf(mov) {
-    const v = mov.date ?? mov.fecha ?? ''
-    const d = new Date(v)
-    if (isNaN(d.getTime())) return ''
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-  }
-
-  // Acumulado por objetivo (matching por descripcion)
   const acumPorObj = useMemo(() => {
     const map = {}
-    finObjetivos.forEach(o => { map[o.nombre] = 0 })
-    finMovimientosAll.forEach(m => {
-      const cat  = m.cat ?? m.categoria_nombre ?? ''
-      const desc = m.desc ?? m.descripcion ?? ''
-      if (cat !== 'Ahorro' || !map.hasOwnProperty(desc)) return
-      const monto = Math.abs(m.amount ?? m.monto ?? 0)
-      map[desc] += (m.type ?? m.tipo) === 'expense' ? monto : -monto
+    finObjetivos.forEach(o => {
+      map[o.nombre] = acumuladoPorCategoriaNombre(finMovimientosAll, o.nombre)
     })
     return map
   }, [finMovimientosAll, finObjetivos])

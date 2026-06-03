@@ -1,8 +1,11 @@
-import { useState, useMemo, useEffect } from 'react'
-import { ChevronDown, ChevronRight, Plus, Trash2, Check, X } from 'lucide-react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
+import { ChevronDown, ChevronRight, Plus, Trash2, Check, X, BookOpen } from 'lucide-react'
+import { API_URL } from '../../config'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
-import { fmtARS, fmtUSD } from '../../data/finanzas'
+import {
+  fmtARS, fmtUSD, acumuladoPorCategoriaNombre, CATEGORIA_FIRE,
+} from '../../data/finanzas'
 
 const TIPOS = [
   { id: 'acciones',   labelKey: 'tipoAcciones' },
@@ -248,7 +251,7 @@ function AccionesHeader({ lang }) {
   return (
     <tr>
       {['colTicker','instrNombre','colCantidad','colPPP','colPrecioActual','colValor','colPnL',''].map(k => (
-        <th key={k} style={TH}>{k ? t(lang, k) : ''}</th>
+        <th key={k} scope="col" style={TH}>{k ? t(lang, k) : ''}</th>
       ))}
     </tr>
   )
@@ -258,7 +261,7 @@ function FCIHeader({ lang }) {
   return (
     <tr>
       {['colSociedad','instrNombre','colCantidad','colPrecioActual','colValor',''].map(k => (
-        <th key={k} style={TH}>{k ? t(lang, k) : ''}</th>
+        <th key={k} scope="col" style={TH}>{k ? t(lang, k) : ''}</th>
       ))}
     </tr>
   )
@@ -268,7 +271,7 @@ function PlazoFijoHeader({ lang }) {
   return (
     <tr>
       {['colEntidad','colCapital','colTNA','colInicio','colVencimiento','colIntereses','colCapitalTotal',''].map(k => (
-        <th key={k} style={TH}>{k ? t(lang, k) : ''}</th>
+        <th key={k} scope="col" style={TH}>{k ? t(lang, k) : ''}</th>
       ))}
     </tr>
   )
@@ -278,7 +281,7 @@ function OtrosHeader({ lang }) {
   return (
     <tr>
       {['instrNombre','colValor',''].map(k => (
-        <th key={k} style={TH}>{k ? t(lang, k) : ''}</th>
+        <th key={k} scope="col" style={TH}>{k ? t(lang, k) : ''}</th>
       ))}
     </tr>
   )
@@ -416,7 +419,209 @@ function TipoSection({ tipo, items, lang, addInstrumento }) {
   )
 }
 
+// ── Ledger de transacciones por instrumento ───────────────────────────────────
+
+function LedgerSection({ instrumentos, lang }) {
+  const [selId, setSelId]         = useState(null)
+  const [trans, setTrans]         = useState([])
+  const [loading, setLoading]     = useState(false)
+  const [showForm, setShowForm]   = useState(false)
+  const [form, setForm]           = useState({ tipo: 'compra', fecha: new Date().toISOString().slice(0,10), cantidad: '', precio: '', nota: '' })
+
+  const flatInst = useMemo(() => instrumentos.flatMap(g => g), [instrumentos])
+
+  const fetchTrans = useCallback(async (id) => {
+    if (!id) return
+    setLoading(true)
+    try {
+      const res = await fetch(`${API_URL}/fin/instrumentos/${id}/transacciones`)
+      if (res.ok) setTrans(await res.json())
+    } catch { /* noop */ }
+    setLoading(false)
+  }, [])
+
+  const handleSelect = (id) => { setSelId(id); fetchTrans(id); setShowForm(false) }
+
+  const handleAdd = async () => {
+    if (!selId || !form.cantidad || !form.precio) return
+    try {
+      const res = await fetch(`${API_URL}/fin/instrumentos/${selId}/transacciones`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tipo: form.tipo, fecha: form.fecha, cantidad: parseFloat(form.cantidad), precio: parseFloat(form.precio), nota: form.nota || null }),
+      })
+      if (res.ok) { await fetchTrans(selId); setShowForm(false) }
+    } catch { /* noop */ }
+  }
+
+  const handleDelete = async (transId) => {
+    try {
+      await fetch(`${API_URL}/fin/transacciones/${transId}`, { method: 'DELETE' })
+      setTrans(t => t.filter(x => x.id !== transId))
+    } catch { /* noop */ }
+  }
+
+  const selInst = flatInst.find(i => i.id === selId)
+
+  const TH2 = { ...TH, fontSize: 10 }
+  const TD2 = { ...TD, fontSize: 11 }
+
+  return (
+    <div className="panel-strong overflow-hidden">
+      <button
+        type="button"
+        className="flex items-center gap-2 w-full px-4 py-3 border-b text-left"
+        style={{ borderColor: 'var(--border)', background: 'var(--surface)', border: 'none' }}
+        onClick={() => setSelId(p => p ? null : flatInst[0]?.id ?? null)}
+      >
+        <BookOpen size={14} style={{ color: 'var(--accent)' }} />
+        <span className="text-[13px] font-semibold" style={{ color: 'var(--text)' }}>Ledger — Transacciones por instrumento</span>
+      </button>
+
+      {selId !== undefined && (
+        <div className="p-4 flex flex-col gap-3">
+          {/* Instrument selector */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {flatInst.map(i => (
+              <button
+                key={i.id}
+                type="button"
+                onClick={() => handleSelect(i.id)}
+                className="px-2.5 py-1 rounded-lg text-[11px] font-medium border transition-all"
+                style={{
+                  borderColor: selId === i.id ? 'var(--accent)' : 'var(--border)',
+                  background: selId === i.id ? 'color-mix(in oklch, var(--accent) 12%, transparent)' : 'transparent',
+                  color: selId === i.id ? 'var(--accent)' : 'var(--subtext)',
+                }}
+              >
+                {i.ticker ?? i.nombre}
+              </button>
+            ))}
+          </div>
+
+          {selInst && (
+            <>
+              <div className="flex items-center justify-between">
+                <span className="text-[12px] font-medium" style={{ color: 'var(--text)' }}>{selInst.nombre}</span>
+                <button
+                  type="button"
+                  onClick={() => setShowForm(v => !v)}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium"
+                  style={{ background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer' }}
+                >
+                  <Plus size={11} /> Nueva
+                </button>
+              </div>
+
+              {showForm && (
+                <div className="flex flex-wrap gap-2 p-3 rounded-xl border" style={{ borderColor: 'var(--accent)', background: 'color-mix(in oklch, var(--accent) 5%, transparent)' }}>
+                  {[
+                    { label: 'Tipo', el: <select value={form.tipo} onChange={e => setForm(f => ({...f, tipo: e.target.value}))} style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '3px 6px', fontSize: 11 }}>
+                      <option value="compra">Compra</option><option value="venta">Venta</option></select> },
+                    { label: 'Fecha', el: <input type="date" value={form.fecha} onChange={e => setForm(f => ({...f, fecha: e.target.value}))} style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '3px 6px', fontSize: 11, outline:'none' }} /> },
+                    { label: 'Cantidad', el: <input type="number" placeholder="0" value={form.cantidad} onChange={e => setForm(f => ({...f, cantidad: e.target.value}))} style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '3px 6px', fontSize: 11, width: 80, outline:'none' }} /> },
+                    { label: 'Precio', el: <input type="number" placeholder="0" value={form.precio} onChange={e => setForm(f => ({...f, precio: e.target.value}))} style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '3px 6px', fontSize: 11, width: 80, outline:'none' }} /> },
+                    { label: 'Nota', el: <input type="text" placeholder="opcional" value={form.nota} onChange={e => setForm(f => ({...f, nota: e.target.value}))} style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '3px 6px', fontSize: 11, width: 120, outline:'none' }} /> },
+                  ].map(({ label, el }) => (
+                    <label key={label} className="flex flex-col gap-0.5">
+                      <span className="text-[9px] uppercase tracking-wider" style={{ color: 'var(--subtext)' }}>{label}</span>
+                      {el}
+                    </label>
+                  ))}
+                  <div className="flex items-end gap-1">
+                    <button type="button" onClick={handleAdd} className="px-2.5 py-1 rounded-lg text-[11px] font-medium" style={{ background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer' }}><Check size={11} /></button>
+                    <button type="button" onClick={() => setShowForm(false)} className="px-2.5 py-1 rounded-lg text-[11px]" style={{ background: 'var(--bg)', color: 'var(--subtext)', border: '1px solid var(--border)', cursor: 'pointer' }}><X size={11} /></button>
+                  </div>
+                </div>
+              )}
+
+              {loading ? (
+                <div className="text-[11px] py-2" style={{ color: 'var(--subtext)' }}>Cargando…</div>
+              ) : trans.length === 0 ? (
+                <div className="text-[11px] py-2" style={{ color: 'var(--subtext)' }}>Sin transacciones registradas.</div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 420, fontFamily: 'var(--font-mono)', fontSize: 11 }}>
+                    <thead>
+                      <tr>
+                        {['Fecha','Tipo','Cantidad','Precio','Total','Nota',''].map(h => (
+                          <th key={h} scope="col" style={TH2}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {trans.map(tx => (
+                        <tr key={tx.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td style={TD2}>{tx.fecha?.slice(0,10)}</td>
+                          <td style={{ ...TD2, color: tx.tipo === 'compra' ? 'var(--income)' : 'var(--expense)', fontWeight: 600 }}>{tx.tipo}</td>
+                          <td style={TD2}>{tx.cantidad}</td>
+                          <td style={TD2}>{fmtARS(tx.precio)}</td>
+                          <td style={{ ...TD2, fontWeight: 600 }}>{fmtARS(tx.monto_total)}</td>
+                          <td style={{ ...TD2, color: 'var(--subtext)' }}>{tx.nota || '—'}</td>
+                          <td style={TD2}>
+                            <button type="button" onClick={() => handleDelete(tx.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--subtext)', lineHeight: 0, padding: 2 }}
+                              onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
+                              onMouseLeave={e => e.currentTarget.style.color = 'var(--subtext)'}
+                            ><Trash2 size={11} /></button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
+
+function RepartoPanel({ lang, segments, liquido }) {
+  const total = segments.reduce((s, x) => s + Math.max(0, x.val), 0)
+  if (!segments.length && liquido === 0) return null
+  const COLORS = ['#d97706', '#059669', '#2563eb', '#7c3aed', '#ec4899', '#64748b']
+  return (
+    <div className="panel-strong p-4">
+      <div className="label mb-2">{lang === 'en' ? 'Allocation' : 'Reparto del ahorro'}</div>
+      {total > 0 && (
+        <div className="flex rounded-full overflow-hidden h-2.5 gap-px mb-3" style={{ background: 'var(--surface)' }}>
+          {segments.filter(s => s.val > 0).map((s, i) => (
+            <div
+              key={s.key}
+              title={`${s.label}: ${fmtARS(s.val)}`}
+              style={{
+                width: `${(s.val / total) * 100}%`,
+                background: COLORS[i % COLORS.length],
+                minWidth: s.val > 0 ? 4 : 0,
+              }}
+            />
+          ))}
+        </div>
+      )}
+      <div className="flex flex-col gap-1.5">
+        {segments.map(s => (
+          <div key={s.key} className="flex justify-between text-[12px]">
+            <span style={{ color: 'var(--subtext)' }}>{s.label}</span>
+            <span className="mono tnum font-medium" style={{ color: 'var(--text)' }}>{fmtARS(s.val)}</span>
+          </div>
+        ))}
+        <div className="flex justify-between text-[12px] pt-1 border-t" style={{ borderColor: 'var(--border)' }}>
+          <span style={{ color: 'var(--subtext)' }}>{lang === 'en' ? 'Uninvested cash' : 'Líquido sin invertir'}</span>
+          <span
+            className="mono tnum font-semibold"
+            style={{ color: liquido >= 0 ? 'var(--warning)' : 'var(--expense)' }}
+          >
+            {fmtARS(liquido)}
+          </span>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export default function AhorroTab() {
   const lang            = useStore(s => s.lang)
@@ -426,8 +631,10 @@ export default function AhorroTab() {
   const finConfig       = useStore(s => s.finConfig)
   const finMovimientosAll = useStore(s => s.finMovimientosAll)
   const fetchAll        = useStore(s => s.fetchFinMovimientosAll)
+  const finObjetivos    = useStore(s => s.finObjetivos)
+  const fetchObj        = useStore(s => s.fetchFinObjetivos)
 
-  useEffect(() => { fetchInst(); fetchAll() }, [])
+  useEffect(() => { fetchInst(); fetchAll(); fetchObj() }, [])
 
   const dolar = finConfig?.dolar_mep ?? finConfig?.dolar_oficial ?? finConfig?.dolar_default ?? 1245
 
@@ -448,15 +655,6 @@ export default function AhorroTab() {
     }
   }, [finInstrumentos, dolar])
 
-  const totalAhorroBruto = useMemo(() => {
-    return finMovimientosAll
-      .filter(m => (m.cat ?? m.categoria_nombre ?? '') === 'Ahorro')
-      .reduce((sum, m) => {
-        const monto = Math.abs(m.amount ?? m.monto ?? 0)
-        return sum + ((m.type ?? m.tipo) === 'expense' ? monto : -monto)
-      }, 0)
-  }, [finMovimientosAll])
-
   const costoTotalInstrumentos = useMemo(() => {
     return finInstrumentos.reduce((sum, i) => {
       if (i.tipo === 'plazo_fijo') return sum + (i.capital_ars ?? 0)
@@ -464,7 +662,27 @@ export default function AhorroTab() {
     }, 0)
   }, [finInstrumentos, dolar])
 
-  const liquidoSinInvertir = totalAhorroBruto - costoTotalInstrumentos
+  const reparto = useMemo(() => {
+    const fire = acumuladoPorCategoriaNombre(finMovimientosAll, CATEGORIA_FIRE)
+    const objetivos = (finObjetivos || []).map(o => ({
+      key: `obj-${o.id}`,
+      label: o.nombre,
+      val: acumuladoPorCategoriaNombre(finMovimientosAll, o.nombre),
+    }))
+    const segments = [
+      { key: 'fire', label: CATEGORIA_FIRE, val: fire },
+      ...objetivos,
+    ]
+    const cajones = fire + objetivos.reduce((s, o) => s + o.val, 0)
+    const liquido = cajones - costoTotalInstrumentos
+    return { segments, liquido, cajones }
+  }, [finMovimientosAll, finObjetivos, costoTotalInstrumentos, lang])
+
+  const legacyAhorroCount = useMemo(() => (
+    finMovimientosAll.filter(m =>
+      (m.cat ?? m.categoria_nombre ?? '').trim().toLowerCase() === 'ahorro'
+    ).length
+  ), [finMovimientosAll])
 
   const byTipo = useMemo(() => {
     const map = {}
@@ -477,6 +695,20 @@ export default function AhorroTab() {
 
   return (
     <div className="flex flex-col gap-4">
+      {legacyAhorroCount > 0 && (
+        <div
+          className="rounded-xl border px-4 py-3 text-[12px]"
+          style={{
+            borderColor: 'color-mix(in oklch, var(--warning) 40%, var(--border))',
+            background: 'color-mix(in oklch, var(--warning) 8%, transparent)',
+            color: 'var(--text)',
+          }}
+        >
+          Hay {legacyAhorroCount} movimiento(s) con categoría <strong>Ahorro</strong> (modelo anterior).
+          Reasignalos a <strong>FIRE</strong> o a la categoría del objetivo correspondiente en Datos.
+        </div>
+      )}
+      <RepartoPanel lang={lang} segments={reparto.segments} liquido={reparto.liquido} />
       {/* Header totals */}
       <div className="panel-strong p-5">
         <div className="label mb-1">{t(lang, 'ahorroTotalPortfolio')}</div>
@@ -498,15 +730,18 @@ export default function AhorroTab() {
               {fmtUSD(totalUSD + totalARS_PF / dolar)}
             </div>
           </div>
-          {liquidoSinInvertir > 0 && (
+          {reparto.liquido !== 0 && (
             <>
               <div className="opacity-30 text-[20px]">·</div>
               <div>
                 <div className="text-[10px] uppercase tracking-wide mono mb-0.5" style={{ color: 'var(--subtext)' }}>
                   {t(lang, 'ahorroLiquido')}
                 </div>
-                <div className="serif italic text-[18px] font-semibold tnum" style={{ color: 'var(--warning)' }}>
-                  {fmtARS(liquidoSinInvertir)}
+                <div
+                  className="serif italic text-[18px] font-semibold tnum"
+                  style={{ color: reparto.liquido >= 0 ? 'var(--warning)' : 'var(--expense)' }}
+                >
+                  {fmtARS(reparto.liquido)}
                 </div>
               </div>
             </>
@@ -525,6 +760,11 @@ export default function AhorroTab() {
           addInstrumento={addInst}
         />
       ))}
+
+      {/* Ledger de transacciones */}
+      {finInstrumentos.length > 0 && (
+        <LedgerSection instrumentos={finInstrumentos} lang={lang} />
+      )}
     </div>
   )
 }

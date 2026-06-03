@@ -6,7 +6,7 @@ Aplicación local full-stack (español) para capturar conocimiento (**Bóveda**)
 
 **Licencia:** MIT + Commons Clause — uso personal y modificación libres; uso comercial requiere permiso. Ver `../LICENSE`.
 
-**Spec de producto y decisiones nuevas:** `../Prompt.md`. **Comandos de arranque:** `../CLAUDE.md`.
+**Guía agentes / comandos:** `../CLAUDE.md`. **Finanzas (técnico + roadmap):** `Finanzas.md`, `Finanzas-Roadmap.md`.
 
 ---
 
@@ -101,19 +101,21 @@ Modal Hábitos en `HabitosScreen`: `NuevoHabitoModal` (CTA TopBar `openHabitoMod
 
 | Tab | Centro | Panel derecho (xl) | Selector mes/año |
 |-----|--------|--------------------|------------------|
-| Dashboard | Donuts, listas movimientos, cuotas, notas | Cuotas + gasto por categoría + metas FIRE/emergencia (legacy) | Sí (`selectedMes`) |
+| Dashboard | Donuts, listas movimientos, cuotas, notas | Cuotas + gasto por categoría + metas (tasa ahorro mes / fondo emergencia) | Sí (`selectedMes`) |
 | Anual | Resumen año, barras, tabla meses, categorías | Highlights, comparación, inflación editable | Solo año |
 | FIRE | Tabla plan mensual editable | % aumento aporte mensual, rentabilidad | Oculto |
-| Ahorro | Totales, barra distribución, acordeón instrumentos | Objetivos + barra meta FIRE del mes | Oculto |
-| Datos | Tabla histórica inline editable | KPIs histórico | Oculto |
+| Ahorro | Reparto (FIRE + objetivos + líquido), portafolio instrumentos, ledger | Objetivos + meta FIRE del mes (cat. `FIRE`) | Oculto |
+| Datos | Tabla histórica inline editable | KPIs histórico + **CRUD categorías** (panel der.) | Oculto |
 
 **Panel izquierdo** (`FinanzasLeftPanel`): saldo cuentas, ingresos/gastos del mes, tasa ahorro, grupos Billeteras/Bancos/En mano, widget cotización dólar (MEP + oficial compra) con botón "↻ Actualizar" que llama a `GET /fin/dolar/cotizacion`.
 
-**Reglas de negocio compartidas** (`data/finanzas.js`):
+**Reglas de negocio compartidas** (`data/finanzas.js`, `data/finCategorias.js`):
 - `isTransferencia(m)` — categoría `transferencia` (case-insensitive) excluida de totales.
+- `contribucionCategoria` / `contribucionFire` / `acumuladoPorCategoriaNombre` — cajones por nombre de categoría.
+- `isFinCategoriaReservada` — sistema (`FIRE`, `Transferencia`, `Ajuste`) + categorías con `objetivo_id`.
 - Helpers `fmtARS` / `fmtUSD`. Sin mock — sin backend la app muestra estado vacío.
 
-**Categoría `Ahorro` (exacta):** gasto suma al ahorro; ingreso resta (retiro a disponible). Objetivos matchean por **descripción = nombre del objetivo**; movimientos sin objetivo → **sin asignar** pero suman al total bruto.
+**Asignación por categoría (2026):** categoría **`FIRE`** alimenta el plan FIRE; cada **objetivo** crea una categoría homónima (`fin_categorias.objetivo_id`). Gasto suma al cajón, ingreso resta (puede quedar negativo). Tab **Ahorro** muestra reparto FIRE + objetivos + líquido sin invertir (cajones − costo instrumentos). Categoría legacy `Ahorro` sigue visible para migración manual. Emergencia → objetivo **Fondo de emergencia** + categoría vinculada; `GET /fin/emergencia` deprecated.
 
 **Dólar:** `fin_config.dolar_mep` (MEP, fuente principal) y `fin_config.dolar_oficial_compra` (oficial compra, referencia). Se obtienen vía `GET /fin/dolar/cotizacion` → `dolarapi.com`; se cachean en `fin_config` para uso offline. FIRE, Ahorro y Anual usan `dolar_mep ?? dolar_oficial` (fallback al valor manual previo). `dolar_actualizado_at` auto-stamped al actualizar.
 
@@ -159,17 +161,18 @@ Tablas creadas en `app/db/database.py`:
 
 | Tabla | Uso |
 |-------|-----|
-| `fin_cuentas` | Billeteras/bancos/efectivo; saldos ARS/USD editables |
-| `fin_categorias` | Gasto/ingreso/both; seed incluye `Ahorro`, `Emergencia` |
+| `fin_cuentas` | Billeteras/bancos/efectivo; saldos ARS/USD **caché** derivados de movimientos (recalcular o ajuste vía categoría Ajuste) |
+| `fin_categorias` | Gasto/ingreso/both; `oculta`, `objetivo_id`; seeds `FIRE`, `Ajuste`, `Transferencia` |
 | `fin_movimientos` | Movimientos del mes e histórico |
 | `fin_config` | Clave-valor (`dolar_oficial`, `fire_*`, `tasa_ahorro_objetivo`, …) |
 | `fin_notas` | Notas del dashboard |
 | `fin_instrumentos` | Posiciones Ahorro (tipo polimórfico: acciones, FCI, plazo fijo, ONs, crypto, otros) |
-| `fin_objetivos` | Metas de ahorro (nombre único, meta, moneda, fecha límite, cuota mensual) |
+| `fin_objetivos` | Metas de ahorro (nombre único, no renombrable); alta/baja sincroniza categoría homónima |
 | `fin_fire_filas` | Override opcional de `ahorrado` por mes (`YYYY-MM`) |
 | `fin_inflacion` | % inflación mensual (tab Anual, ajuste nominal/real) |
+| `fin_transacciones_instrumento` | Ledger de compras/ventas por instrumento (`tipo`, `fecha`, `cantidad`, `precio`, `monto_total`, `nota`); FK → `fin_instrumentos` ON DELETE CASCADE |
 
-API bajo `/fin/*` — cuentas, categorías, movimientos GET con/sin `?mes=`, PATCH movimientos, instrumentos, objetivos, fire-filas, inflación, config, notas, emergencia (legacy).
+API bajo `/fin/*` — cuentas (`POST /fin/recalcular-saldos`), categorías (CRUD; `?include_ocultas=`), movimientos (paginación, bulk, duplicados, CSV), instrumentos + ledger, objetivos (sin PATCH de nombre), fire-filas, inflación, config, notas, `GET /fin/emergencia` (deprecated, saldo vía objetivo Fondo de emergencia).
 
 **Dual schema en movimientos:** el mock y partes del front usan `type`/`amount`/`cat`; la API devuelve `tipo`/`monto`/`categoria_nombre`. Normalizar al leer/escribir.
 
@@ -229,8 +232,8 @@ Sin seed — arranca vacío.
 - **Datos:** histórico completo, edición inline blur con **debounce 300ms**, delete, orden por fecha. `scope="col"` en headers de tabla.
 - **Anual:** agregados por año, gráfico barras nominal/real, tabla meses, inflación mensual editable, panel derecho.
 - **FIRE:** tabla mensual con proyección, overrides ahorrado, panel config.
-- **Ahorro:** totales ARS/USD, "líquido sin invertir", barra por tipo, instrumentos colapsables, CRUD, objetivos, P&L. Tokens CSS `var(--warning)`/`var(--success)` (antes hex hardcoded).
-- **`MovementModal`:** `Ctrl+Enter` guarda; validación "Ahorro sin objetivo" con warning inline; chips de plantillas rápidas; autocompletar última cuenta/categoría desde `localStorage`.
+- **Ahorro:** reparto por categoría (FIRE + objetivos + líquido sin invertir), portafolio ARS/USD, instrumentos colapsables, CRUD, objetivos, P&L, ledger transacciones.
+- **`MovementModal`:** `Ctrl+Enter` guarda; `FinCategoriaPicker` (elegir/crear categoría); chips de plantillas; autocompletar cuenta/categoría desde `localStorage`.
 - **`FinanzasMobileDrawer`:** botón "Ver resumen" en `< md` abre `FinanzasLeftPanel` como drawer deslizante.
 - **Code-split:** `AnualTab`, `FireTab`, `AhorroTab`, `DatosTab` con `React.lazy` + `Suspense`. Prefetch `finMovimientosAll` al montar.
 - **`MovimientosTableModal`:** botón export CSV con los movimientos actualmente filtrados.
@@ -242,13 +245,39 @@ Sin seed — arranca vacío.
 - **Backend:** índices SQL `(fecha)`, `(categoria_id)`, `(tipo, fecha)` en `fin_movimientos`; `dolar_oficial_updated_at` auto-stamped en PUT; `mes_cierre` en config; `GET /fin/movimientos/resumen?mes=`.
 - Scrollbars Finanzas tematizados (`.panel-scroll`).
 
+### Finanzas — hecho (junio 2026)
+
+- **`MovimientosTableModal`:** edición inline por fila (descripción, monto, fecha); eliminar por fila; focus trap + return focus; `scope="col"`.
+- **`CategoryDonutCard`:** click segmento/leyenda → filtra `MovimientosListCard` del mismo tipo; badge "✕" para limpiar; highlight activo.
+- **FireTab:** botón "Hoy" para volver a mes actual; `ProyeccionRow` usa saldo real de `fin_cuentas` en lugar de `fire_saldo_inicial`; `scope="col"`.
+- **AhorroTab:** `LedgerSection` — selector instrumento, tabla compra/venta, formulario alta, eliminar. API: `/fin/instrumentos/{id}/transacciones`, `/fin/transacciones/{id}`.
+- **TopBar búsqueda Finanzas:** debounce 200ms, filtra localmente movimientos + notas + objetivos, dropdown con secciones.
+- **Mobile tabs:** chip bar fija `< md` con las 5 tabs; bottom padding en centro.
+- **Panel derecho bottom sheet:** visible en `lg` (entre `md` y `xl`) como panel flotante esquina inferior.
+- **DatosTab virtualización:** `@tanstack/react-virtual`; solo renderiza filas visibles; tab order fix (`tabIndex={-1}` en selects/botones de filas no en edición).
+- **Ctrl+M atajos Finanzas:** sección dinámica en TweaksPanel; handlers `N`/`1–5`/`←→`/`/` en `FinanzasScreen`.
+- **Focus trap `MovementModal`:** cicla Tab/Shift-Tab; retorna focus al trigger; `role="dialog"`.
+- **Backend — nuevos endpoints:** `PATCH /fin/categorias/{id}`, `GET /fin/movimientos/duplicados`, `GET /fin/export/csv`, `POST /fin/import/csv`, paginación opt-in `?limit=&offset=`, `PATCH/DELETE /fin/movimientos/bulk`, ledger `fin_transacciones_instrumento` + CRUD.
+- **Bot — captura `$:`:** fecha (`ayer`/`anteayer`/`DD/MM`), cuotas (`cuotas:N`).
+- **Bot — resumen semanal:** job lunes 9:00 via `job_queue`.
+- **`GET /fin/emergencia`** marcado `deprecated=True` en FastAPI.
+
+### Finanzas — hecho (junio 2026 — modelo ahorro por categoría)
+
+- **Migración DB:** `fin_categorias.oculta`, `fin_categorias.objetivo_id`; seed **FIRE**; objetivo seed **Fondo de emergencia** + categoría vinculada; categoría **Emergencia** legacy oculta.
+- **Objetivos ↔ categorías:** crear objetivo → categoría homónima (`tipo: both`); eliminar objetivo → categoría `oculta=1`; PATCH objetivo sin cambio de nombre.
+- **FIRE / Ahorro / bot:** ahorrado FIRE solo con cat. `FIRE`; acumulado por objetivo = movimientos con cat. = nombre del objetivo; `/ahorro` y `/objetivo` en Telegram alineados.
+- **AhorroTab:** panel **Reparto** + aviso si quedan movimientos con categoría legacy `Ahorro`.
+- **Datos:** panel derecho gestión categorías (color, tipo; reservadas protegidas); colores en donuts/tablas vía `finCategoriaColors.js`.
+- **Saldos cuentas:** derivados de movimientos; saldo inicial vía movimiento categoría **Ajuste**; `PATCH /fin/cuentas/{id}/saldo` → 410.
+
 ### Finanzas — deuda conocida
 
-- **Emergencia:** `GET /fin/emergencia` sigue en código — pendiente migrar a objetivo `Fondo de Emergencia`.
-- **FIRE:** hitos por edad sin recalcular desde saldo real.
+- **Migración manual:** movimientos con categoría `Ahorro` (modelo viejo) — reasignar a `FIRE` u objetivo en Datos.
+- **Emergencia en dashboard:** sigue usando `GET /fin/emergencia` (internamente suma cat. del objetivo Fondo de emergencia).
 - **Instrumentos:** ventas parciales, splits, dividendos — spec futuro.
-- **Dual schema movimientos:** `normalizeMovimiento()` existe pero no se aplica en todos los consumidores todavía.
-- **TopBar búsqueda:** input existe pero no filtra nada.
+- **Dual schema movimientos:** fallbacks en consumidores; optimistic add offline usa shape legacy.
+- **Atajos teclado avanzados:** Vi/Ve/C (Dashboard), Ctrl+S/Supr (Datos), I/E (Ahorro/FIRE) — pendiente de levantar estado a store.
 
 ### Agenda — hecho
 
@@ -333,7 +362,7 @@ Sin seed — arranca vacío.
 - **Bóveda:** texto libre → detección automática `tipo=link` si hay URL; inline keyboards de categorías (📂 raíz → hijos en dos pasos); modo rápido `/rapido on|off` (guarda en última categoría sin menú, persiste en `rapido.json`); `/ultimas` (últimas 5 hojas con botón 🗑 eliminar); `/buscar <palabra>` (usa `GET /hojas?q=`); fotos con caption como título directo; forwards → extrae texto/URL; ubicaciones → captura lat/lon; caché categorías 60s; healthcheck `/categorias` al arrancar. Prefijos rápidos: `t:` crea tarea, `e:` crea evento.
 - **Agenda:** `/hoy` (eventos + tareas + hábitos integrados), `/dia <fecha>`, `/planificar` (organización del día: ocupado + slots libres + asignación con inline keyboards), `/asignar`, `/tarea` (con parsing de fecha), `/evento` (duración configurable + selección de calendario inline), `/pendientes [lista]` (con lista; acepta filtro por nombre de lista), `/semana`, `/bloquear <N> <HH:MM>`, `/revision`.
 - **Hábitos:** `/habitos` (Total/Parcial/Deshacer inline), `/hecho <nombre>` (fuzzy match), `/ayer`, `/racha`, `/nota`. Cache 60 s.
-- **Finanzas:** `/mov` (flujo guiado con inline keyboards: tipo → monto → desc → cuenta → categoría → confirmación con preview), `/saldo` (cuentas + equivalente USD), `/mes [YYYY-MM]` (ingresos/gastos/tasa ahorro), `/ahorro` (total mes + objetivos), `/ultimo` (últimos 5 con botón eliminar), `/dolar [valor]` (ver/actualizar tipo de cambio), `/objetivo [nombre]` (progreso con barra). Captura rápida `$: gasto 4500 Super Coto uala` con fuzzy match de cuenta. Seguridad: `BOT_ALLOWED_CHAT_IDS` en `.env`.
+- **Finanzas:** `/mov`, `/saldo`, `/mes`, `/ahorro` (FIRE del mes + aporte por objetivo vía categoría homónima), `/ultimo`, `/dolar`, `/objetivo` (progreso por categoría = nombre objetivo). Captura `$:` con fecha/cuotas. Categorías ocultas no aparecen en teclados. Seguridad: `BOT_ALLOWED_CHAT_IDS` en `.env`.
 - **Infraestructura:** healthcheck al arrancar con backoff exponencial (1→2→4→8 s, 4 intentos); `chat_id` persistido en `chat_id.json`, check-in nocturno 21:00 vía `job_queue`. Dispatcher de callbacks: Finanzas tiene prioridad sobre Agenda/Hábitos.
 - **General:** `/help`, `/cancel`, parsers de fecha/hora/duración, port Python de `calcStreak`/`isScheduled`.
 - Código: `mybot/bot.py` + `mybot/agenda_handlers.py` + `mybot/finanzas_handlers.py`.
@@ -342,11 +371,13 @@ Sin seed — arranca vacío.
 
 - **`llm_client.py`:** cliente HTTP a Ollama (`classify`, `chat`, `embed`, `is_available`). Timeout configurable; todas las funciones fallan silenciosamente si Ollama no está disponible.
 - **`intent_router.py`:** clasifica el mensaje del usuario en 8 módulos (`finanzas`, `agenda`, `habitos`, `boveda`, `consulta_*`, `desconocido`). Devuelve `RouteResult` con action (`direct`/`confirm`/`question`/`fallback`) + datos extraídos + confianza. Caché de healthcheck 30s. Fallback transparente al sistema de prefijos si Ollama no responde.
-- **Integración en `bot.py`:** texto libre sin prefijo → LLM router antes del flujo Bóveda; acción directa/confirm muestra resumen + teclado (✅ Confirmar / ✏️ Corregir / ❌ Cancelar); `llm_ok` llama a `ir.execute()`; `question` muestra placeholder (Capa 3 pendiente).
+- **Integración en `bot.py`:** texto libre sin prefijo → LLM router antes del flujo Bóveda; acción directa/confirm muestra resumen + teclado (✅ Confirmar / ✏️ Corregir / ❌ Cancelar); `llm_ok` llama a `ir.execute()`; `question` → `assistant.answer_question()` con "🔍 Consultando…".
 - **`execute()`:** guarda en SGR vía API — finanzas usa `cuenta_nombre`/`categoria_nombre` directo; agenda crea tarea (`fecha_opcional`/`hora_opcional`) o evento (`fecha_inicio` datetime); hábitos hace fuzzy match por nombre y llama a `PUT /habitos/{id}/registro`.
 - **Variables de entorno:** `OLLAMA_BASE_URL`, `OLLAMA_MODEL_CLASSIFY`, `OLLAMA_MODEL_CHAT`, `OLLAMA_MODEL_EMBED`, `OLLAMA_TIMEOUT`, `LLM_CONFIDENCE_THRESHOLD`.
-- **Pendiente (Capa 3):** `assistant.py` para modo consulta (`action="question"`) — respuestas conversacionales sobre datos de Finanzas, Hábitos y Agenda.
-- **Pendiente (Capa 4):** `embeddings.py` + ChromaDB para RAG sobre Bóveda.
+- **`assistant.py`:** modo consulta — `answer_question(pregunta, modulo, api_base)` reúne contexto de la API y llama al LLM con prompt de síntesis (máx 4 oraciones, sin markdown, sin inventar datos). Módulos: `finanzas` (movimientos mes, saldos, objetivos), `habitos` (racha, estado hoy, % últimos 7 días), `agenda` (eventos/tareas hoy y próxima semana), `boveda` (top-5 hits RAG → síntesis). Normaliza `finanzas`/`consulta_finanzas` como el mismo handler.
+- **`app/semantic.py`:** RAG — ChromaDB (`database/chroma/`) + embeddings via Ollama (`nomic-embed-text`). `index_hoja`, `delete_hoja`, `search_hojas`, `backfill_missing`. Hooks en POST/PATCH/DELETE `/hojas` con `BackgroundTasks` (no bloquea CRUD). Backfill al arrancar si Ollama está disponible. `GET /hojas/buscar-semantico?q=`, `POST /hojas/reindexar`. Best-effort: si Ollama no está, el CRUD no se ve afectado.
+- **`mybot/embeddings.py`:** wrapper REST → `GET /hojas/buscar-semantico`. `/pregunta <texto>` en el bot → `_gather_boveda` (top-5 hits) → síntesis LLM citando título + categoría.
+- **Pendiente (Capa 5):** memoria de sesión (contexto conversacional entre preguntas de seguimiento).
 
 ### No implementado
 
@@ -362,7 +393,7 @@ El detalle completo de pendientes por módulo está en los archivos de roadmap:
 
 ## Convenciones para agentes
 
-1. **Leer primero** `../Prompt.md` para la tab o feature pedida; este README para arquitectura y estado.
+1. **Leer primero** `../CLAUDE.md` y este README; para Finanzas también `Finanzas.md` / `Finanzas-Roadmap.md`.
 2. **Documentación por módulo** (qué está hecho, cómo funciona): `Boveda.md`, `Finanzas.md`, `Agenda.md`, `Habitos.md`, `Bot.md`.
 3. **Roadmap / pendientes** (qué falta, bugs, ideas): `Boveda-Roadmap.md`, `Finanzas-Roadmap.md`, `Agenda-Roadmap.md`, `Habitos-Roadmap.md`.
 4. **No re-explorar** rutas ya listadas abajo si el cambio es acotado.
@@ -380,6 +411,7 @@ project/
 ├── app/
 │   ├── main.py              # TODAS las rutas HTTP (Bóveda + Finanzas + Agenda + Hábitos)
 │   ├── config.py            # DEBUG, DB_PATH, límites
+│   ├── semantic.py          # RAG: ChromaDB + embeddings Ollama (index/delete/search hojas)
 │   └── db/
 │       ├── database.py      # init_db, seeds (_seed_finanzas, _seed_agenda, _seed_habitos), migrations
 │       └── crud.py          # SQL Bóveda + Finanzas + Agenda + Hábitos
@@ -427,6 +459,8 @@ project/
 ├── mybot/finanzas_handlers.py    # Handlers Finanzas (commands + callbacks + captura $:)
 ├── mybot/llm_client.py           # Cliente HTTP Ollama: classify(), chat(), embed(), is_available()
 ├── mybot/intent_router.py        # Router LLM: route(), execute(), format_summary() — Capa 2 Ollama
+├── mybot/assistant.py            # Modo consulta: answer_question() — Capas 3 y 4 (Bóveda RAG incluido)
+├── mybot/embeddings.py           # Wrapper REST para /hojas/buscar-semantico (RAG bot-side)
 ├── Boveda.md                # Documentación técnica del módulo Bóveda
 ├── Boveda-Roadmap.md        # Pendientes Bóveda
 ├── Finanzas.md              # Documentación técnica del módulo Finanzas
@@ -449,10 +483,12 @@ project/
 **Bóveda:**
 - `GET/POST /categorias`, `PATCH/DELETE /categorias/{id}` (`?forzar=true` si tiene hojas)
 - `GET/POST /hojas`, `GET /hojas?q=&tipo=&categoria_id=`, `GET /hojas/recientes?limit=`
+- `GET /hojas/buscar-semantico?q=&top_k=` — búsqueda semántica (RAG, requiere Ollama)
+- `POST /hojas/reindexar` — re-indexado completo en background
 - `GET/PATCH/DELETE /hojas/{id}`
 - `POST /upload`, `GET /preview?url=`
 
-**Finanzas** (`/fin/*`): cuentas, categorías, movimientos, config, notas, instrumentos, objetivos, fire-filas, inflación, emergencia (legacy).
+**Finanzas** (`/fin/*`): cuentas, categorías (`oculta`/`objetivo_id`), movimientos, config, notas, instrumentos, objetivos, fire-filas, inflación, emergencia (deprecated).
 
 **Agenda** (`/agenda/*`): calendarios, eventos, listas, tareas, horario-facultad.
 
@@ -474,7 +510,7 @@ CORS dev: `http://localhost:5173` y `http://127.0.0.1:5173` (API en `:8765`).
 | AgendaScreen renderizado condicional | Igual que Finanzas/Hábitos; `agendaHoyViewISO`, `agendaMesYear/Month` en store para preservar posición al remontar |
 | `finMovimientos` vs `finMovimientosAll` | Mes actual vs histórico (Datos, Ahorro, Anual, FIRE) |
 | Instrumentos en tabla polimórfica | Un CRUD; campos opcionales por `tipo` |
-| Objetivos por nombre = descripción movimiento | Sin tabla puente movimiento↔objetivo |
+| Objetivo ↔ categoría homónima (`objetivo_id`) | Asignación solo por categoría del movimiento; sin match por descripción |
 | FIRE: proyección en front + overrides en BD | Cálculo pesado en cliente; persistir solo excepciones |
 | Temas como CSS variables | ClaudeDesign portado sin reescribir componentes |
 | Hábitos: registros por fecha con UNIQUE | Upsert simple con `ON CONFLICT DO UPDATE` |
@@ -491,12 +527,13 @@ MovementModal ──POST──► fin_movimientos ──► finMovimientos / fin
                               ├──► Dashboard (filtro mes)
                               ├──► DatosTab (histórico, PATCH)
                               ├──► AnualTab (agregados año + inflación)
-                              ├──► AhorroTab (total bruto categoría Ahorro)
-                              │         └── vs fin_instrumentos (portfolio)
-                              ├──► AhorroRightPanel (objetivos por descripción)
-                              └──► FireTab (ahorrado residual + overrides)
+                              ├──► AhorroTab (reparto: cat. FIRE + objetivos − costo instrumentos)
+                              │         └── fin_instrumentos (portfolio + ledger)
+                              ├──► AhorroRightPanel (objetivos por cat. homónima; FIRE mes)
+                              └──► FireTab (cat. FIRE + overrides fin_fire_filas)
 
-fin_config.dolar_oficial ──► conversión ARS/USD en Ahorro, Anual, FIRE display
+fin_objetivos ──sync──► fin_categorias (nombre = objetivo; oculta al borrar)
+fin_config.dolar_mep / dolar_oficial ──► ARS/USD en Ahorro, Anual, FIRE
 FinanzasLeftPanel ◄── fin_cuentas, finMovimientos (mes)
 ```
 

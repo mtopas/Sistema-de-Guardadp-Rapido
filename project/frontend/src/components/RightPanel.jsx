@@ -8,11 +8,14 @@ import Link from '@tiptap/extension-link'
 import Placeholder from '@tiptap/extension-placeholder'
 import { useStore } from '../store/useStore'
 import { t } from '../utils/i18n'
-import { BRANCH_COLORS } from '../utils/themes'
+import { buildCategoriaColorMap } from '../utils/categoriaColors'
 import { extractTags } from '../utils/tags'
 import { getLeafIcon, LEAF_ICON_LIST, DEFAULT_LEAF_ICON } from '../utils/leafIcons'
 import ScrollArea from './ScrollArea'
 import LinkPreview from './LinkPreview'
+import AgendaContextMenu from './agenda/AgendaContextMenu'
+import EditHojaModal from './EditHojaModal'
+import { getHojaDisplayTitle } from '../utils/hojaUtils'
 
 function relativeDate(dateStr) {
   if (!dateStr) return ''
@@ -87,14 +90,16 @@ function TypeChip({ tipo, color }) {
 }
 
 // ── Shared note card (latest list) ─────────────────────────────────────────────
-function NoteCard({ hoja, color, onClick }) {
+function NoteCard({ hoja, color, onClick, onContextMenu }) {
   const LeafIcon = getLeafIcon(hoja.icono, hoja.tipo)
   const tags     = extractTags(hoja.contenido, hoja.apuntes)
-  const title    = hoja.contenido.replace(/https?:\/\/\S+/g, '').trim().slice(0, 80) || hoja.contenido.slice(0, 80)
+  const title    = getHojaDisplayTitle(hoja).slice(0, 80)
 
   return (
     <button
+      type="button"
       onClick={onClick}
+      onContextMenu={e => onContextMenu?.(e, hoja)}
       className="w-full text-left rounded-2xl px-4 py-3.5 flex items-center gap-3.5 transition-all duration-150 active:scale-[0.99]"
       style={{ background: 'var(--surface)', boxShadow: '0 0 0 1px var(--border)' }}
       onMouseEnter={e => e.currentTarget.style.boxShadow = `0 0 0 1px ${color}60`}
@@ -136,6 +141,7 @@ export default function RightPanel({ openHojaId, onClose }) {
   const updateApuntes = useStore(s => s.updateApuntes)
   const updateIcono   = useStore(s => s.updateIcono)
   const updateHoja    = useStore(s => s.updateHoja)
+  const eliminarHoja  = useStore(s => s.eliminarHoja)
   const showToast     = useStore(s => s.showToast)
   const lang          = useStore(s => s.lang)
   const agendaEventos = useStore(s => s.agendaEventos)
@@ -150,6 +156,8 @@ export default function RightPanel({ openHojaId, onClose }) {
   const [editContenido,   setEditContenido]  = useState(false)
   const [contenidoDraft,  setContenidoDraft] = useState('')
   const [editCategoria,   setEditCategoria]  = useState(false)
+  const [hojaMenu,        setHojaMenu]       = useState(null)
+  const [editHoja,        setEditHoja]       = useState(null)
   const iconPickerRef = useRef(null)
   const saveTimerRef  = useRef(null)
   const pendingRef    = useRef(null)
@@ -167,13 +175,7 @@ export default function RightPanel({ openHojaId, onClose }) {
     return () => document.removeEventListener('mousedown', handler)
   }, [iconPickerOpen])
 
-  // Color map
-  const rootCats = categorias.filter(c => !c.padre_id)
-  const colorMap = {}
-  rootCats.forEach((c, i) => { colorMap[c.id] = BRANCH_COLORS[i % BRANCH_COLORS.length] })
-  categorias.filter(c => c.padre_id).forEach(c => {
-    colorMap[c.id] = colorMap[c.padre_id] || 'var(--accent)'
-  })
+  const colorMap = useMemo(() => buildCategoriaColorMap(categorias), [categorias])
   const getColor = (catId) => colorMap[catId] || 'var(--accent)'
 
   useEffect(() => {
@@ -197,6 +199,36 @@ export default function RightPanel({ openHojaId, onClose }) {
     ).slice(0, 8),
     [hojas]
   )
+
+  const openHojaContextMenu = useCallback((e, hoja) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setHojaMenu({ x: e.clientX, y: e.clientY, hoja })
+  }, [])
+
+  const buildHojaContextItems = useCallback((hoja) => [
+    { label: 'Editar Hoja', onClick: () => setEditHoja(hoja) },
+    {
+      label: 'Eliminar Hoja',
+      danger: true,
+      onClick: async () => {
+        if (!window.confirm('¿Eliminar esta hoja?')) return
+        await eliminarHoja(hoja.id)
+        if (selHoja?.id === hoja.id) {
+          setSelHoja(null)
+          setView('latest')
+          onClose?.()
+        }
+        showToast('Hoja eliminada', 'success')
+      },
+    },
+  ], [eliminarHoja, selHoja, onClose, showToast])
+
+  const syncSelHojaFromStore = useCallback(() => {
+    if (!editHoja) return
+    const fresh = hojas.find(h => h.id === editHoja.id)
+    if (fresh && selHoja?.id === fresh.id) setSelHoja(fresh)
+  }, [editHoja, hojas, selHoja?.id])
 
   // For foto notes: split the leading <img> from the rest so TipTap doesn't strip it
   const photoImgHtml = useMemo(() => {
@@ -403,7 +435,8 @@ export default function RightPanel({ openHojaId, onClose }) {
             )}
             {latestHojas.map(h => (
               <NoteCard key={h.id} hoja={h} color={getColor(h.categoria_id)}
-                onClick={() => { setSelHoja(h); setView('note') }} />
+                onClick={() => { setSelHoja(h); setView('note') }}
+                onContextMenu={openHojaContextMenu} />
             ))}
           </div>
         )}
@@ -578,6 +611,21 @@ export default function RightPanel({ openHojaId, onClose }) {
           </div>
         )}
       </ScrollArea>
+
+      {hojaMenu && (
+        <AgendaContextMenu
+          x={hojaMenu.x}
+          y={hojaMenu.y}
+          items={buildHojaContextItems(hojaMenu.hoja)}
+          onClose={() => setHojaMenu(null)}
+        />
+      )}
+
+      <EditHojaModal
+        hoja={editHoja}
+        onClose={() => setEditHoja(null)}
+        onSaved={syncSelHojaFromStore}
+      />
     </div>
   )
 }

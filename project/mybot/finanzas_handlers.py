@@ -1,6 +1,6 @@
 import os
 import re
-from datetime import date
+from datetime import date, datetime
 
 import requests
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -68,19 +68,56 @@ def _mes_actual() -> str:
 
 
 # ──────────────────────────────────────────────────────────────
-# Llamadas a la API
+# Llamadas a la API (normaliza name/nombre, ars/saldo_ars, etc.)
 # ──────────────────────────────────────────────────────────────
+
+def _normalize_cuenta(c: dict) -> dict:
+    """API SGR usa name/ars/usd; el bot histórico usaba nombre/saldo_*."""
+    saldo_ars = c.get("saldo_ars")
+    if saldo_ars is None:
+        saldo_ars = c.get("ars", 0)
+    saldo_usd = c.get("saldo_usd")
+    if saldo_usd is None:
+        saldo_usd = c.get("usd", 0)
+    return {
+        "id":     c["id"],
+        "nombre": (c.get("nombre") or c.get("name") or "").strip(),
+        "tipo":   c.get("tipo", "wallet"),
+        "saldo_ars": float(saldo_ars or 0),
+        "saldo_usd": float(saldo_usd or 0),
+    }
+
+
+def _normalize_categoria(c: dict) -> dict:
+    return {
+        "id":     c["id"],
+        "nombre": (c.get("nombre") or c.get("name") or "").strip(),
+        "tipo":   c.get("tipo", "expense"),
+        "color":  c.get("color"),
+        "oculta": bool(c.get("oculta")),
+        "objetivo_id": c.get("objetivo_id"),
+    }
+
 
 def _get_cuentas(api: str) -> list:
     r = requests.get(f"{api}/fin/cuentas", timeout=15)
     r.raise_for_status()
-    return r.json()
+    raw = r.json()
+    if raw and isinstance(raw[0], dict) and raw[0].get("items"):
+        flat = []
+        for g in raw:
+            flat.extend(g.get("items") or [])
+        raw = flat
+    return [_normalize_cuenta(c) for c in raw]
 
 
 def _get_categorias(api: str) -> list:
     r = requests.get(f"{api}/fin/categorias", timeout=15)
     r.raise_for_status()
-    return r.json()
+    return [
+        _normalize_categoria(c) for c in r.json()
+        if not c.get("oculta")
+    ]
 
 
 def _get_movimientos(api: str, mes: str = None) -> list:
@@ -175,15 +212,47 @@ def _kb_cuentas(cuentas: list) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
-def _kb_categorias(categorias: list) -> InlineKeyboardMarkup:
+def _categoria_aplica_tipo(cat: dict, tipo_mov: str) -> bool:
+    if (cat.get("nombre") or "").strip().lower() == "transferencia":
+        return False
+    t = cat.get("tipo", "expense")
+    if t == "both":
+        return True
+    return t == tipo_mov
+
+
+def _filtrar_categorias_por_tipo(categorias: list, tipo_mov: str) -> list:
+    return [c for c in categorias if _categoria_aplica_tipo(c, tipo_mov)]
+
+
+def _post_categoria(api: str, nombre: str, tipo_mov: str) -> dict:
+    """Crea categoría en la API o devuelve la existente si ya hay mismo nombre."""
+    nombre = nombre.strip()
+    tipo_cat = "income" if tipo_mov == "income" else "expense"
+    r = requests.post(
+        f"{api}/fin/categorias",
+        json={"nombre": nombre, "tipo": tipo_cat},
+        timeout=15,
+    )
+    if r.status_code == 400:
+        cats = _get_categorias(api)
+        hit = next((c for c in cats if c["nombre"].lower() == nombre.lower()), None)
+        if hit:
+            return hit
+        r.raise_for_status()
+    r.raise_for_status()
+    return _normalize_categoria(r.json())
+
+
+def _kb_categorias(categorias: list, tipo_mov: str = "expense") -> InlineKeyboardMarkup:
     rows = []
-    visible = categorias[:10]
+    visible = _filtrar_categorias_por_tipo(categorias, tipo_mov)[:10]
     for i in range(0, len(visible), 2):
         fila = [InlineKeyboardButton(visible[i]["nombre"], callback_data=f"fcat:{visible[i]['id']}")]
         if i + 1 < len(visible):
             fila.append(InlineKeyboardButton(visible[i + 1]["nombre"], callback_data=f"fcat:{visible[i + 1]['id']}"))
         rows.append(fila)
-    rows.append([InlineKeyboardButton("✏️ Otra…", callback_data="fcat_text")])
+    rows.append([InlineKeyboardButton("➕ Nueva categoría…", callback_data="fcat_text")])
     rows.append([InlineKeyboardButton("✕ Cancelar", callback_data="fno")])
     return InlineKeyboardMarkup(rows)
 
@@ -214,11 +283,42 @@ def _draft_preview(ud: dict) -> str:
 # Parser de captura natural ($:)
 # ──────────────────────────────────────────────────────────────
 
+def _parse_fecha_natural(token: str) -> str | None:
+    """Convierte tokens de fecha a ISO YYYY-MM-DD. Devuelve None si no reconoce."""
+    from datetime import date, timedelta
+    hoy = date.today()
+    low = token.lower()
+    if low in ("ayer", "yesterday"):
+        return (hoy - timedelta(days=1)).isoformat()
+    if low in ("anteayer", "antayer"):
+        return (hoy - timedelta(days=2)).isoformat()
+    if low == "hoy":
+        return hoy.isoformat()
+    # DD/MM o DD-MM
+    m = re.match(r"^(\d{1,2})[/\-](\d{1,2})$", token)
+    if m:
+        dd, mm = int(m.group(1)), int(m.group(2))
+        try:
+            return date(hoy.year, mm, dd).isoformat()
+        except ValueError:
+            return None
+    # DD/MM/YYYY o DD-MM-YYYY
+    m = re.match(r"^(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})$", token)
+    if m:
+        dd, mm, yyyy = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        try:
+            return date(yyyy, mm, dd).isoformat()
+        except ValueError:
+            return None
+    return None
+
+
 def _parse_natural(texto: str) -> dict | None:
     """
-    '$: gasto 4500 Super Coto uala'  → tipo/monto/descripcion/cuenta_hint
-    '$: ingreso 50000 sueldo galicia' → ídem
-    El último token se trata como cuenta_hint; el resto (tras el monto) es descripción.
+    '$: gasto 4500 Super Coto uala ayer'       → con fecha de ayer
+    '$: gasto 4500 Spotify uala cuotas:3'      → con cuotas
+    '$: ingreso 50000 sueldo galicia 15/06'    → con fecha específica
+    El último token se analiza como fecha, cuenta_hint o ambos.
     """
     text = texto.strip()
 
@@ -230,6 +330,13 @@ def _parse_natural(texto: str) -> dict | None:
     else:
         text = re.sub(r"^(gasto|expense)\s*", "", text, flags=re.IGNORECASE).strip()
 
+    # Extraer cuotas: cuotas:N o c:N (cualquier posición)
+    cuotas = None
+    cuotas_m = re.search(r"\b(?:cuotas?|c):(\d+)\b", text, flags=re.IGNORECASE)
+    if cuotas_m:
+        cuotas = int(cuotas_m.group(1))
+        text = (text[:cuotas_m.start()] + text[cuotas_m.end():]).strip()
+
     m = re.match(r"^(\d+(?:[.,]\d+)?)\s*", text)
     if not m:
         return None
@@ -237,6 +344,16 @@ def _parse_natural(texto: str) -> dict | None:
     text  = text[m.end():].strip()
 
     words = text.split()
+
+    # Detectar fecha en el último token
+    fecha_override = None
+    if words:
+        fecha_candidate = _parse_fecha_natural(words[-1])
+        if fecha_candidate:
+            fecha_override = fecha_candidate
+            words = words[:-1]
+
+    # Detectar cuenta_hint en el nuevo último token
     if len(words) >= 2:
         cuenta_hint = words[-1]
         descripcion = " ".join(words[:-1])
@@ -247,7 +364,12 @@ def _parse_natural(texto: str) -> dict | None:
         cuenta_hint = None
         descripcion = ""
 
-    return {"tipo": tipo, "monto": monto, "descripcion": descripcion, "cuenta_hint": cuenta_hint}
+    result = {"tipo": tipo, "monto": monto, "descripcion": descripcion, "cuenta_hint": cuenta_hint}
+    if cuotas:
+        result["cuotas"] = cuotas
+    if fecha_override:
+        result["fecha"] = fecha_override
+    return result
 
 
 # ──────────────────────────────────────────────────────────────
@@ -317,38 +439,59 @@ def _build_mes(movimientos: list, mes: str) -> str:
     return "\n".join(lines)
 
 
+def _contribucion_categoria(mv: dict, nombre_cat: str) -> float:
+    cat = (mv.get("categoria_nombre") or "").strip().lower()
+    if cat != (nombre_cat or "").strip().lower():
+        return 0.0
+    if mv["tipo"] == "expense":
+        return mv["monto"]
+    return -mv["monto"]
+
+
+def _contribucion_mes(movimientos: list, mes: str, nombre_cat: str) -> float:
+    total = 0.0
+    for m in movimientos:
+        mv = _normalize_mov(m)
+        if not (mv.get("fecha") or "").startswith(mes):
+            continue
+        total += _contribucion_categoria(mv, nombre_cat)
+    return total
+
+
 def _build_ahorro(movimientos: list, objetivos: list, mes: str) -> str:
     mn = int(mes[5:7])
     meses_es = ["enero","febrero","marzo","abril","mayo","junio",
                 "julio","agosto","septiembre","octubre","noviembre","diciembre"]
     mes_label = f"{meses_es[mn - 1]} {mes[:4]}"
 
-    bruto = 0.0
-    for m in movimientos:
-        mv = _normalize_mov(m)
-        if (mv.get("categoria_nombre") or "").strip().lower() == "ahorro":
-            if mv["tipo"] == "expense":
-                bruto += mv["monto"]
-            else:
-                bruto -= mv["monto"]
-
+    fire_mes = _contribucion_mes(movimientos, mes, "FIRE")
     lines = [
         f"💚 *Ahorro — {mes_label}*\n",
-        f"Total ahorrado este mes: *{_fmt_ars(bruto)}*",
+        f"🔥 *FIRE* este mes: *{_fmt_ars(fire_mes)}*",
     ]
 
     if objetivos:
         lines.append("")
-        lines.append("*Objetivos:*")
-        for obj in objetivos[:5]:
+        lines.append("*Objetivos (este mes / meta):*")
+        for obj in objetivos[:8]:
+            nombre = obj["nombre"]
+            mes_obj = _contribucion_mes(movimientos, mes, nombre)
             meta   = float(obj.get("meta") or 0)
             moneda = obj.get("moneda", "ARS")
             cuota  = float(obj.get("cuota_mensual") or 0)
             fmt_m  = _fmt_ars(meta) if moneda == "ARS" else f"USD {meta:,.0f}"
             cuota_str = f" — cuota {_fmt_ars(cuota)}/mes" if cuota else ""
-            lines.append(f"  • *{obj['nombre']}*: meta {fmt_m}{cuota_str}")
+            lines.append(f"  • *{nombre}*: {_fmt_ars(mes_obj)} (meta {fmt_m}){cuota_str}")
     else:
-        lines.append("\n_Sin objetivos registrados. Creá uno desde la app._")
+        lines.append("\n_Sin objetivos — creá uno desde la app._")
+
+    legacy = sum(
+        1 for m in movimientos
+        if (_normalize_mov(m).get("categoria_nombre") or "").strip().lower() == "ahorro"
+        and (_normalize_mov(m).get("fecha") or "").startswith(mes)
+    )
+    if legacy:
+        lines.append(f"\n⚠️ {legacy} mov. con categoría *Ahorro* (vieja). Reasignalos a FIRE u objetivo.")
 
     return "\n".join(lines)
 
@@ -384,15 +527,8 @@ def _build_objetivo(obj: dict, movs_all: list) -> str:
 
     ahorrado = 0.0
     for m in movs_all:
-        mv  = _normalize_mov(m)
-        cat = (mv.get("categoria_nombre") or "").strip()
-        if cat.lower() != "ahorro":
-            continue
-        if mv.get("descripcion", "").strip() == nombre:
-            if mv["tipo"] == "expense":
-                ahorrado += mv["monto"]
-            else:
-                ahorrado -= mv["monto"]
+        mv = _normalize_mov(m)
+        ahorrado += _contribucion_categoria(mv, nombre)
 
     pct      = min(ahorrado / meta * 100, 100) if meta else 0
     faltante = max(0.0, meta - ahorrado)
@@ -614,25 +750,28 @@ async def handle_fin_quick_capture(update: Update, context: ContextTypes.DEFAULT
 
     ud = context.user_data
     ud["fin_draft"] = {
-        "fecha":         _today_iso(),
+        "fecha":         parsed.get("fecha") or _today_iso(),
         "tipo":          parsed["tipo"],
         "monto":         parsed["monto"],
         "descripcion":   parsed["descripcion"],
         "cuenta_id":     cuenta["id"]     if cuenta else None,
         "cuenta_nombre": cuenta["nombre"] if cuenta else None,
+        "cuotas":        parsed.get("cuotas"),
     }
 
     tipo_icon  = _tipo_icon(parsed["tipo"])
     tipo_str   = _tipo_display(parsed["tipo"])
     cuenta_str = f" | {cuenta['nombre']}" if cuenta else " | _cuenta no detectada_"
     desc_str   = parsed["descripcion"] or "—"
+    fecha_str  = ud["fin_draft"]["fecha"]
+    extra_str  = f"\nFecha: {fecha_str}" + (f" | Cuotas: {parsed['cuotas']}" if parsed.get("cuotas") else "")
 
     if cuenta:
         # Cuenta detectada → pedir categoría
         await update.message.reply_text(
             f"{tipo_icon} *{tipo_str} {_fmt_ars(parsed['monto'])}* — {desc_str}{cuenta_str}\n\n¿Qué categoría?",
             parse_mode="Markdown",
-            reply_markup=_kb_categorias(categorias),
+            reply_markup=_kb_categorias(categorias, parsed["tipo"]),
         )
     else:
         # Sin cuenta → pedir cuenta primero
@@ -713,8 +852,16 @@ async def handle_finanzas_step(update: Update, context: ContextTypes.DEFAULT_TYP
             await update.message.reply_text("El nombre de la categoría no puede estar vacío.")
             return True
 
-        ud["fin_draft"]["categoria_nombre"] = cat_nombre
-        ud["fin_draft"]["categoria_id"]     = None
+        api = context.bot_data.get("api_base", DEFAULT_API_BASE)
+        tipo_mov = ud.get("fin_draft", {}).get("tipo", "expense")
+        try:
+            cat = _post_categoria(api, cat_nombre, tipo_mov)
+        except Exception as e:
+            await update.message.reply_text(f"No pude crear la categoría: {e}")
+            return True
+
+        ud["fin_draft"]["categoria_nombre"] = cat["nombre"]
+        ud["fin_draft"]["categoria_id"]     = cat["id"]
         del ud["step"]
 
         await update.message.reply_text(
@@ -763,7 +910,7 @@ async def handle_finanzas_callback(update: Update, context: ContextTypes.DEFAULT
             await query.message.reply_text(f"No pude cargar las cuentas: {e}")
             return True
 
-        cuenta = next((c for c in cuentas if c["id"] == cuenta_id), None)
+        cuenta = next((c for c in cuentas if int(c["id"]) == cuenta_id), None)
         if not cuenta:
             await query.message.reply_text("Cuenta no encontrada.")
             return True
@@ -779,10 +926,11 @@ async def handle_finanzas_callback(update: Update, context: ContextTypes.DEFAULT
             await query.message.reply_text(f"No pude cargar las categorías: {e}")
             return True
 
+        tipo_mov = ud.get("fin_draft", {}).get("tipo", "expense")
         await query.edit_message_text(
             f"Cuenta: *{cuenta['nombre']}* ✓\n\n¿Qué categoría?",
             parse_mode="Markdown",
-            reply_markup=_kb_categorias(categorias),
+            reply_markup=_kb_categorias(categorias, tipo_mov),
         )
         return True
 
@@ -815,7 +963,10 @@ async def handle_finanzas_callback(update: Update, context: ContextTypes.DEFAULT
     # ── "Otra categoría…" → input de texto ──────────────────
     if data == "fcat_text":
         ud["step"] = STEP_FIN_CAT_TEXT
-        await query.edit_message_text("Escribí el nombre de la categoría:")
+        await query.edit_message_text(
+            "Escribí el nombre de la *nueva* categoría (se guarda en Finanzas → Datos):",
+            parse_mode="Markdown",
+        )
         return True
 
     # ── Confirmar movimiento ─────────────────────────────────
@@ -841,6 +992,8 @@ async def handle_finanzas_callback(update: Update, context: ContextTypes.DEFAULT
             "fecha":       fecha,
             "cuenta_id":   cuenta_id,
         }
+        if draft.get("cuotas"):
+            body["cuotas"] = int(draft["cuotas"])
         if categoria_id:
             body["categoria_id"] = categoria_id
         elif cat_nombre:
@@ -888,3 +1041,28 @@ async def handle_finanzas_callback(update: Update, context: ContextTypes.DEFAULT
         return True
 
     return False
+
+
+# ──────────────────────────────────────────────────────────────
+# Resumen semanal de finanzas (job_queue — lunes 9:00)
+# ──────────────────────────────────────────────────────────────
+
+async def resumen_semanal_finanzas(context):
+    """Enviado automáticamente cada lunes a las 9:00. Solo ejecuta si hoy es lunes."""
+    if datetime.today().weekday() != 0:  # 0 = lunes
+        return
+    chat_id = context.bot_data.get("chat_id")
+    if not chat_id:
+        return
+    api = context.bot_data.get("api_base", "http://127.0.0.1:8765")
+    try:
+        mes = date.today().strftime("%Y-%m")
+        movs = _get_movimientos(api, mes)
+        texto = _build_mes(movs, mes)
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"📊 *Resumen semanal de finanzas*\n\n{texto}",
+            parse_mode="Markdown",
+        )
+    except Exception:
+        pass

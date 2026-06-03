@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { X, ArrowDown, ArrowUp, Calendar as CalIcon, Zap } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
-import { fmtARS } from '../../data/finanzas'
+import { fmtARS, isTransferencia, pickDefaultCategoria } from '../../data/finanzas'
+import FinCategoriaPicker from './FinCategoriaPicker'
 
 const CURRENCIES = [
   { id: 'ARS', label: 'ARS', symbol: '$'   },
@@ -41,9 +42,9 @@ export default function MovementModal() {
   const addMov        = useStore(s => s.addFinMovimiento)
   const showT         = useStore(s => s.showToast)
   const lang          = useStore(s => s.lang)
-  const finCuentas    = useStore(s => s.finCuentas)
-  const finCategorias = useStore(s => s.finCategorias)
-  const finObjetivos  = useStore(s => s.finObjetivos)
+  const finCuentas       = useStore(s => s.finCuentas)
+  const finCategorias    = useStore(s => s.finCategorias)
+  const setFinSyncPaused = useStore(s => s.setFinSyncPaused)
 
   const cuentas = useMemo(() => {
     if (!finCuentas || finCuentas.length === 0) return []
@@ -53,7 +54,7 @@ export default function MovementModal() {
 
   const categorias = useMemo(() => {
     if (!finCategorias || finCategorias.length === 0) return []
-    return finCategorias
+    return finCategorias.filter(c => !isTransferencia({ categoria_nombre: c.name }))
   }, [finCategorias])
 
   const [tipo,        setTipo]        = useState('expense')
@@ -68,7 +69,30 @@ export default function MovementModal() {
   const [audit,       setAudit]       = useState(false)
   const [saving,      setSaving]      = useState(false)
 
-  const montoRef = useRef(null)
+  const montoRef    = useRef(null)
+  const containerRef = useRef(null)
+
+  useEffect(() => {
+    setFinSyncPaused(open)
+    return () => setFinSyncPaused(false)
+  }, [open, setFinSyncPaused])
+
+  // Focus trap + return focus on close
+  useEffect(() => {
+    if (!open) return
+    const prev = document.activeElement
+    const FOCUSABLE = 'button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'
+    const handler = (e) => {
+      if (e.key !== 'Tab' || !containerRef.current) return
+      const els = [...containerRef.current.querySelectorAll(FOCUSABLE)]
+      if (!els.length) return
+      const first = els[0], last = els[els.length - 1]
+      if (e.shiftKey) { if (document.activeElement === first) { e.preventDefault(); last.focus() } }
+      else            { if (document.activeElement === last)  { e.preventDefault(); first.focus() } }
+    }
+    window.addEventListener('keydown', handler, true)
+    return () => { window.removeEventListener('keydown', handler, true); prev?.focus() }
+  }, [open])
 
   // Reset + load localStorage defaults when opened
   useEffect(() => {
@@ -83,14 +107,13 @@ export default function MovementModal() {
     const defaultCuenta = lastCuenta
       ? cuentas.find(c => String(c.id) === lastCuenta)?.id ?? cuentas[0]?.id ?? null
       : cuentas[0]?.id ?? null
-    const defaultCat = lastCat ?? categorias[0]?.name ?? ''
     setCuentaId(defaultCuenta)
-    setCategoria(defaultCat)
+    setCategoria(pickDefaultCategoria(categorias, 'expense', lastCat))
     setCuotas('')
     setNota('')
     setAudit(false)
     setTimeout(() => montoRef.current?.focus(), 30)
-  }, [open])
+  }, [open, cuentas, categorias])
 
   // Ctrl+Enter saves; Escape closes
   useEffect(() => {
@@ -105,19 +128,12 @@ export default function MovementModal() {
 
   if (!open) return null
 
-  const cuentaSel  = cuentas.find(c => c.id === cuentaId)
+  const cuentaSel  = cuentas.find(c => String(c.id) === String(cuentaId ?? ''))
   const isIncome   = tipo === 'income'
   const accentVar  = isIncome ? 'var(--income)' : 'var(--expense)'
   const montoNum   = parseFloat(monto.replace(',', '.')) || 0
   const cuotasNum  = parseInt(cuotas, 10) || 0
   const valid      = montoNum > 0 && descripcion.trim().length > 0 && cuentaSel
-
-  // Warning: Ahorro category without matching objetivo
-  const isAhorro = categoria.toLowerCase() === 'ahorro'
-  const objetivosNames = (finObjetivos || []).map(o => o.nombre?.toLowerCase())
-  const ahorroSinObjetivo = isAhorro && tipo === 'expense'
-    && descripcion.trim().length > 0
-    && !objetivosNames.includes(descripcion.trim().toLowerCase())
 
   // Apply a quick-fill template
   const applyPlantilla = (p) => {
@@ -172,10 +188,14 @@ export default function MovementModal() {
       onClick={close}
     >
       <form
+        ref={containerRef}
         onSubmit={handleSubmit}
         onClick={e => e.stopPropagation()}
         className="panel-strong w-full max-w-[520px] max-h-[92vh] overflow-y-auto panel-scroll anim-card-in"
         style={{ background: 'var(--surface)' }}
+        role="dialog"
+        aria-modal="true"
+        aria-label={isIncome ? t(lang, 'newIncome') : t(lang, 'newExpense')}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
@@ -232,7 +252,10 @@ export default function MovementModal() {
                 <button
                   key={opt.id}
                   type="button"
-                  onClick={() => setTipo(opt.id)}
+                  onClick={() => {
+                    setTipo(opt.id)
+                    setCategoria(prev => pickDefaultCategoria(categorias, opt.id, prev))
+                  }}
                   className="flex items-center justify-center gap-1.5 py-2 rounded-lg text-[12.5px] font-medium transition-all"
                   style={{
                     background: active ? `color-mix(in oklch, ${opt.color} 14%, transparent)` : 'transparent',
@@ -323,7 +346,7 @@ export default function MovementModal() {
               <label className="label block mb-1.5">{t(lang, 'account')}</label>
               <select
                 value={cuentaId ?? ''}
-                onChange={e => setCuentaId(e.target.value)}
+                onChange={e => setCuentaId(Number(e.target.value) || e.target.value)}
                 className="w-full px-3 py-2 rounded-xl border outline-none text-[12.5px]"
                 style={{ borderColor: 'var(--border)', background: 'var(--bg)', color: 'var(--text)' }}
               >
@@ -338,16 +361,7 @@ export default function MovementModal() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label block mb-1.5">{t(lang, 'category')}</label>
-              <select
-                value={categoria}
-                onChange={e => setCategoria(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border outline-none text-[12.5px]"
-                style={{ borderColor: 'var(--border)', background: 'var(--bg)', color: 'var(--text)' }}
-              >
-                {categorias.map(c => (
-                  <option key={c.name} value={c.name}>{c.name}</option>
-                ))}
-              </select>
+              <FinCategoriaPicker tipo={tipo} value={categoria} onChange={setCategoria} />
             </div>
             <div>
               <label className="label block mb-1.5">{t(lang, 'installments')}</label>
@@ -362,25 +376,6 @@ export default function MovementModal() {
               />
             </div>
           </div>
-
-          {/* Warning: Ahorro sin objetivo */}
-          {ahorroSinObjetivo && (
-            <div
-              className="flex items-start gap-2 px-3 py-2.5 rounded-xl text-[12px]"
-              style={{
-                background: 'color-mix(in oklch, var(--warning) 12%, transparent)',
-                border: '1px solid color-mix(in oklch, var(--warning) 30%, transparent)',
-                color: 'var(--warning)',
-              }}
-              role="alert"
-            >
-              <span style={{ fontSize: 14, lineHeight: 1.3 }}>⚠</span>
-              <span>
-                La descripción <strong>"{descripcion.trim()}"</strong> no coincide con ningún objetivo de ahorro.
-                El monto sumará al total bruto pero no se asignará a un objetivo.
-              </span>
-            </div>
-          )}
 
           {/* Nota */}
           <div>
@@ -424,8 +419,18 @@ export default function MovementModal() {
                 {cuotasNum > 1 && <span> · {cuotasNum} cuotas</span>}
               </>
             )}
-            {!montoNum && (
-              <span className="opacity-50">Ctrl+Enter para guardar</span>
+            {!valid && (
+              <span className={montoNum > 0 ? 'block mt-0.5 opacity-70' : 'opacity-70'}>
+                {cuentas.length === 0
+                  ? 'Creá una cuenta en el panel izquierdo'
+                  : !montoNum
+                    ? 'Ingresá un monto'
+                    : !descripcion.trim()
+                      ? 'Ingresá una descripción'
+                      : !cuentaSel
+                        ? 'Elegí una cuenta'
+                        : null}
+              </span>
             )}
           </div>
 

@@ -6,19 +6,22 @@ import { buildCategories } from './CategoryDonutCard'
 import CardHeader from './CardHeader'
 import MovimientosTableModal from './MovimientosTableModal'
 
-export default function MovimientosListCard({ type = 'expense' }) {
+export default function MovimientosListCard({ type = 'expense', filterCat = null }) {
   const lang = useStore(s => s.lang)
   const finMovimientos = useStore(s => s.finMovimientos)
+  const finCategorias  = useStore(s => s.finCategorias)
   const [modalOpen, setModalOpen] = useState(false)
 
   const catColors = useMemo(() => {
-    const { cats } = buildCategories(finMovimientos, type)
+    const { cats } = buildCategories(finMovimientos, type, finCategorias)
     return Object.fromEntries(cats.map(c => [c.name, c.color]))
-  }, [finMovimientos, type])
+  }, [finMovimientos, type, finCategorias])
 
-  const items = finMovimientos
-    .filter(m => (m.type ?? m.tipo) === type)
-    .slice(0, 4)
+  const items = useMemo(() => {
+    let base = finMovimientos.filter(m => (m.type ?? m.tipo) === type)
+    if (filterCat) base = base.filter(m => (m.cat ?? m.categoria_nombre ?? '') === filterCat)
+    return base.slice(0, filterCat ? 8 : 4)
+  }, [finMovimientos, type, filterCat])
 
   const title = type === 'income' ? t(lang, 'incomeMovements') : t(lang, 'expenseMovements')
 

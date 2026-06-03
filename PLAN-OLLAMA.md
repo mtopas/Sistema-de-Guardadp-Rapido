@@ -2,6 +2,19 @@
 
 > Documento de diseño y roadmap. Arrancamos con el bot de Telegram como canal principal; la visión completa es un asistente conversacional que conoce toda tu vida (Bóveda, Finanzas, Agenda, Hábitos) y responde preguntas sobre ella.
 
+**Estado (jun 2026):**
+
+| Capa | Estado | Notas |
+|------|--------|-------|
+| 0 — Instalación Ollama | ✅ | Variables en `project/.env.example`; modelos documentados |
+| 1 — `llm_client.py` | ✅ | Cliente síncrono con `requests`; ver `project/Bot.md` |
+| 2 — `intent_router.py` | ✅ | Captura Finanzas/Agenda/Hábitos + detección de consultas |
+| 3 — `assistant.py` | ✅ | Consultas Finanzas/Hábitos/Agenda/Bóveda; síntesis LLM |
+| 4 — RAG Bóveda | ✅ | `app/semantic.py` + ChromaDB + hooks CRUD + `/pregunta` bot |
+| 5 — Memoria de sesión | ⏳ | Contexto conversacional entre preguntas de seguimiento |
+
+Detalle técnico del bot: `project/Bot.md` · README: `project/README.md` § Bot Telegram — LLM.
+
 ---
 
 ## Visión completa
@@ -66,14 +79,15 @@ El bot pasa de ser una interfaz de comandos a ser un **asistente personal** que 
                    API SGR                           lenguaje natural
 ```
 
-### Componentes nuevos
+### Componentes
 
-| Archivo | Rol |
-|---------|-----|
-| `mybot/llm_client.py` | Cliente HTTP a Ollama (generate + chat); manejo de timeout y fallback |
-| `mybot/intent_router.py` | Clasifica intención + extrae datos estructurados del mensaje |
-| `mybot/assistant.py` | Modo consulta: reúne contexto de APIs + llama al LLM + formatea respuesta |
-| `mybot/embeddings.py` | (Fase RAG) Genera embeddings via Ollama + interfaz a ChromaDB |
+| Archivo | Rol | Estado |
+|---------|-----|--------|
+| `mybot/llm_client.py` | Cliente HTTP a Ollama (`classify`, `chat`, `embed`, `is_available`) | ✅ |
+| `mybot/intent_router.py` | Clasifica intención + extrae datos estructurados; `route()`, `execute()` | ✅ |
+| `mybot/assistant.py` | Modo consulta: reúne contexto de APIs + llama al LLM + respuesta texto plano | ✅ |
+| `mybot/embeddings.py` | Wrapper REST → `GET /hojas/buscar-semantico` (RAG bot-side) | ✅ |
+| `app/semantic.py` | Backend RAG: ChromaDB + embeddings Ollama; `index_hoja`, `search_hojas` | ✅ |
 
 ### Modelos Ollama
 
@@ -91,30 +105,23 @@ El bot pasa de ser una interfaz de comandos a ser un **asistente personal** que 
 
 ---
 
-### Capa 0 — Instalación Ollama
-
-**Tiempo estimado:** 30 min (incluye descarga del modelo)
+### Capa 0 — Instalación Ollama — ✅
 
 ```powershell
-# 1. Instalar Ollama (Windows)
-# Descargar de https://ollama.com/download/windows e instalar
-
-
+# 1. Instalar Ollama (Windows): https://ollama.com/download/windows
 
 # 2. Verificar que corre
 ollama --version
 
-# 3. Bajar el modelo de clasificación (2 GB aprox)
-ollama pull llama3.2:3b
+# 3. Bajar modelos
+ollama pull llama3.2:3b        # ~2 GB — clasificación y chat
+ollama pull nomic-embed-text   # ~270 MB — embeddings RAG
 
-# 4. Bajar el modelo de embeddings (270 MB)
-ollama pull nomic-embed-text
-
-# 5. Verificar que responde
+# 4. Verificar
 ollama run llama3.2:3b "Hola, respondé en español"
 ```
 
-**Variables nuevas en `.env`:**
+**Variables en `.env`:**
 ```
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL_CLASSIFY=llama3.2:3b
@@ -124,194 +131,128 @@ OLLAMA_TIMEOUT=15
 LLM_CONFIDENCE_THRESHOLD=0.75
 ```
 
-**Checklist:**
-- [✅] Instalar Ollama
-- [✅] Bajar `llama3.2:3b`
-- [✅] Bajar `nomic-embed-text`
-- [✅] Agregar variables a `.env` y `.env.example`
-
 ---
 
-### Capa 1 — Cliente LLM (`llm_client.py`)
+### Capa 1 — Cliente LLM (`llm_client.py`) — ✅
 
-**Tiempo estimado:** 2–3 h
-
-Wrapper liviano sobre la API HTTP de Ollama. Centraliza configuración, timeout y fallback.
+Wrapper síncrono sobre la API HTTP de Ollama. Centraliza configuración, timeout y fallback.
 
 ```python
-# Interface pública
-async def classify(prompt: str) -> dict          # → {modulo, accion, datos, confianza}
-async def chat(messages: list[dict]) -> str      # → respuesta en texto libre
-async def embed(text: str) -> list[float]        # → vector de embeddings
-async def is_available() -> bool                 # healthcheck para fallback
+def classify(system_prompt: str, user_message: str) -> dict   # → {modulo, accion, datos, confianza}
+def chat(messages: list[dict], system: str | None = None) -> str
+def embed(text: str) -> list[float]
+def is_available() -> bool
 ```
 
-**Consideraciones:**
-- Timeout configurable vía `OLLAMA_TIMEOUT` (default 15s; clasificación puede ser 5s)
-- Si `is_available()` falla → el bot cae al sistema de prefijos actual, sin excepción visible al usuario
-- Usar `httpx.AsyncClient` (ya puede estar en el proyecto) o `aiohttp`
-
-**Checklist:**
-- [✅] Crear `mybot/llm_client.py` con `classify`, `chat`, `embed`, `is_available`
-- [✅] Test manual: enviar prompt hardcodeado y verificar respuesta JSON válida
-- [✅] Manejo de timeout + fallback sin romper el bot
-- [✅] Actualizar el README.md . .
+- Timeout configurable vía `OLLAMA_TIMEOUT` (default 15s; healthcheck usa 3s)
+- Si `is_available()` falla → el bot cae al sistema de prefijos actual, sin excepción visible
 
 ---
 
-### Capa 2 — Router de intención (`intent_router.py`)
-
-**Tiempo estimado:** 1 día
+### Capa 2 — Router de intención (`intent_router.py`) — ✅
 
 **El corazón del sistema.** Recibe el mensaje crudo del usuario y devuelve intención estructurada.
 
 #### Prompt de clasificación
 
 ```
-Sos el clasificador de intención de una app personal en español.
-Tu única tarea es devolver JSON válido. Sin texto adicional.
+Clasificá la intención del mensaje. Devolvé SOLO JSON válido.
 
-Módulos disponibles:
-- finanzas: movimientos de dinero, gastos, ingresos, saldos, metas de ahorro
-- agenda: eventos, tareas, recordatorios, reuniones, fechas
-- habitos: hábitos, rutinas, completar actividades físicas o mentales
-- boveda: notas, apuntes, links, ideas, libros, citas, conocimiento
-- consulta_finanzas: preguntas sobre gastos, informes, resúmenes financieros
-- consulta_habitos: preguntas sobre progreso, rachas, estadísticas de hábitos
-- consulta_agenda: preguntas sobre qué tengo hoy, pendientes, semana
-- consulta_boveda: búsqueda o preguntas sobre el conocimiento guardado
-- desconocido: no encaja en ningún módulo
+Módulos: finanzas | agenda | habitos | boveda |
+         consulta_finanzas | consulta_habitos | consulta_agenda | consulta_boveda | desconocido
 
-Mensaje del usuario: "{mensaje}"
-Fecha y hora actual: {fecha_hora}
-
-Responde SOLO con este JSON:
-{
-  "modulo": "<nombre>",
-  "accion": "<guardar|consultar|modificar|eliminar>",
-  "datos": { ... campos extraídos según módulo ... },
-  "confianza": <0.0 a 1.0>,
-  "es_pregunta": <true|false>
-}
-
-Campos por módulo (incluir solo los presentes en el mensaje):
-- finanzas/guardar: monto, descripcion, cuenta, tipo (gasto|ingreso|transferencia), categoria
-- agenda/guardar: titulo, fecha, hora, duracion, lista, es_tarea (true|false)
-- habitos/guardar: nombre_habito, valor (total|parcial), nota
-- boveda/guardar: contenido, url (si es link), categoria
+Respuesta: {"modulo": "...", "accion": "guardar|consultar", "datos": {...}, "confianza": 0.0-1.0, "es_pregunta": bool}
 ```
 
 #### Lógica del router
 
 ```python
-async def route(message: str, context: dict) -> RouteResult:
-    result = await llm_client.classify(prompt)
-    
-    if result.confianza >= THRESHOLD:
-        return RouteResult(action="direct", **result)
-    elif result.confianza >= 0.5:
-        return RouteResult(action="confirm", **result)  # pide confirmación
-    else:
-        return RouteResult(action="fallback")  # sistema de prefijos
+def route(mensaje: str) -> RouteResult:
+    raw = llm_client.classify(_PROMPT_TMPL, mensaje)
+    # consulta_* o es_pregunta → action="question"
+    # boveda / desconocido / confianza < 0.5 / campos faltantes → action="fallback"
+    # confianza >= 0.75 → action="direct"; 0.5–0.74 → action="confirm"
 ```
 
 #### Flujo en `bot.py`
 
 ```
-Mensaje llega → is_available()?
-  NO  → handler actual (prefijos)
+Mensaje llega → is_available()? (caché 30s)
+  NO  → handler actual (prefijos / Bóveda)
   SÍ  → intent_router.route()
-          → direct (confianza alta): ejecuta sin preguntar
-          → confirm (confianza media): muestra resumen y pide ✅/❌
-          → fallback: "No entendí bien. Podés usar $: para gastos, t: para tareas..."
-          → es_pregunta: → assistant.py (modo consulta)
+          → direct | confirm: resumen + teclado ✅ Confirmar / ✏️ Corregir / ❌ Cancelar
+            → llm_ok → intent_router.execute() → API SGR
+          → fallback: continúa flujo Bóveda / prefijos (sin mensaje de error)
+          → question: "🔍 Consultando…" → assistant.answer_question() → respuesta texto plano
 ```
 
+**Desvíos respecto al diseño original:**
+
+| Diseño original | Implementación actual |
+|-----------------|----------------------|
+| `direct` ejecuta sin preguntar | `direct` y `confirm` usan el mismo teclado de confirmación (UX más segura) |
+| Captura Bóveda vía LLM | Módulo `boveda` → siempre `fallback` al selector de categorías existente |
+
 **Checklist:**
-- [ ] Crear `mybot/intent_router.py` con `route()` y `RouteResult`
-- [ ] Prompt de clasificación calibrado (testeado con 20+ frases)
-- [ ] Integrar en el handler `handle_message` de `bot.py`
-- [ ] Flujo de confirmación: inline keyboard ✅ Confirmar / ✏️ Corregir / ❌ Cancelar
-- [ ] Fallback transparente si Ollama no está disponible
-- [ ] Log de clasificaciones (módulo, confianza, acción) para debugging
+- [✅] `route()`, `RouteResult`, `execute()`, `format_summary()`
+- [✅] Prompt con 8 módulos + ejemplos
+- [✅] Integrado en `bot.py` (después de prefijos, antes de Bóveda)
+- [✅] Teclado ✅ Confirmar / ✏️ Corregir / ❌ Cancelar
+- [✅] `execute()` → `POST /fin/movimientos`, `POST /agenda/tareas|eventos`, `PUT /habitos/{id}/registro`
+- [✅] Detección de consultas → `action="question"` → `assistant.answer_question()`
+- [✅] Fallback transparente si Ollama no disponible
+- [⏳] Calibración formal con 20+ frases (sin suite automatizada)
 
 ---
 
-### Capa 3 — Modo consulta: datos estructurados (`assistant.py`)
+### Capa 3 — Modo consulta: datos estructurados (`assistant.py`) — ✅
 
-**Tiempo estimado:** 2–3 días
+Cuando el usuario hace una **pregunta**, el asistente:
+1. Identifica qué datos necesita según el módulo detectado
+2. Los busca en la API de SGR y los pre-agrega (no pasa filas crudas al LLM)
+3. Llama a `llm_client.chat()` con un prompt de síntesis
+4. Devuelve texto plano (sin Markdown de Telegram — evita parse errors con `_` o `[`)
 
-Cuando el usuario hace una **pregunta** (no quiere guardar nada, quiere saber algo), el asistente:
-1. Identifica qué datos necesita
-2. Los busca en la API de SGR
-3. Los pasa como contexto al LLM
-4. El LLM genera una respuesta en lenguaje natural
+#### Función pública
 
-#### Consultas por módulo
-
-**Finanzas:**
-```
-"¿cuánto gasté en delivery este mes?"
-"¿cómo va mi ahorro?"
-"¿cuánto gasté en total?"
-"comparame este mes con el anterior"
-"¿cuánto tengo en la Naranja X?"
-```
-
-Flujo:
 ```python
-# 1. Obtener movimientos del mes
-movimientos = await api.get("/fin/movimientos?mes=YYYY-MM")
-# 2. Filtrar/agregar si la pregunta es específica (delivery, categoría X)
-# 3. Pasar contexto al LLM con prompt de síntesis
+def answer_question(pregunta: str, modulo: str, api_base: str) -> str
 ```
 
-**Hábitos:**
-```
-"¿cómo van mis hábitos esta semana?"
-"¿cuál es mi racha de correr?"
-"¿qué hábitos cumplí hoy?"
-```
+Normaliza `finanzas`/`consulta_finanzas` → mismo handler (cubre el caso donde `route()` devuelve `modulo="finanzas"` con `es_pregunta=True`).
 
-**Agenda:**
-```
-"¿qué tengo pendiente hoy?"
-"¿cuándo tengo libre esta semana?"
-"¿qué completé esta semana?"
-```
+#### Contexto por módulo
+
+| Módulo | Datos que reúne |
+|--------|----------------|
+| `finanzas` | Movimientos del mes (normalizados, sin transferencias), saldos de cuentas, config dólar, objetivos |
+| `habitos` | Hábitos activos: racha, estado de hoy (completado/parcial/pendiente), % últimos 7 días |
+| `agenda` | Eventos de hoy, tareas pendientes próximos 15 días, eventos próximos 7 días |
+| `boveda` | Top-5 hits RAG via `embeddings.search()` → ver Capa 4 |
 
 #### Prompt de síntesis
 
 ```
-Sos el asistente personal de {nombre}. Respondé en español, tono directo y amigable.
-Máximo 4 oraciones. Sin markdown innecesario en Telegram (usá negrita con *).
-Usá los datos reales, no inventes cifras.
-
-Pregunta del usuario: "{pregunta}"
-Fecha actual: {fecha}
-
-Datos disponibles:
-{datos_json}
-
-Respondé la pregunta basándote SOLO en los datos proporcionados.
+Sos el asistente personal del usuario. Respondé en español, tono directo y amigable.
+Máximo 4 oraciones cortas. No uses markdown, asteriscos, guiones bajos ni corchetes.
+Basate solo en los datos proporcionados, no inventes cifras.
 Si algo no está en los datos, decilo claramente.
+Fecha actual: {fecha}.
 ```
 
 **Checklist:**
-- [ ] Crear `mybot/assistant.py` con `answer_question(pregunta, modulo, context)`
-- [ ] Handler para `consulta_finanzas`: pull de `/fin/movimientos` + síntesis LLM
-- [ ] Handler para `consulta_habitos`: pull de `/habitos/registros` + stats + síntesis LLM
-- [ ] Handler para `consulta_agenda`: pull de `/agenda/eventos` + `/agenda/tareas` + síntesis LLM
-- [ ] Prompt de síntesis calibrado (respuestas cortas, sin inventar datos)
-- [ ] Manejo de preguntas sin datos suficientes ("No tenés movimientos registrados este mes")
+- [✅] `answer_question()` con dispatch por módulo
+- [✅] `_gather_finanzas` / `_gather_habitos` / `_gather_agenda` / `_gather_boveda`
+- [✅] Integrado en `bot.py` con "🔍 Consultando…" + edit del mensaje
+- [✅] Prompt calibrado (sin markdown, sin inventar datos, máx 4 oraciones)
+- [✅] Fallback a comandos manuales si API no responde o Ollama no disponible
+- [✅] Normalización dual módulo (`finanzas` con `es_pregunta` y `consulta_finanzas`)
 
 ---
 
-### Capa 4 — RAG sobre Bóveda (`embeddings.py`)
+### Capa 4 — RAG sobre Bóveda — ✅ (core)
 
-**Tiempo estimado:** 2–3 días
-
-> Convierte tu knowledge vault en algo con lo que podés conversar.
+> Convierte el knowledge vault en algo con lo que podés conversar.
 
 ```
 "¿qué sé sobre machine learning?"
@@ -321,38 +262,48 @@ Si algo no está en los datos, decilo claramente.
 
 **Flujo:**
 ```
-Hoja guardada/editada → generate embedding → almacenar en ChromaDB
-                              (nomic-embed-text)
+Hoja guardada/editada → BackgroundTask → embed (nomic-embed-text) → upsert en ChromaDB
+DELETE hoja           → BackgroundTask → delete de ChromaDB
 
-Pregunta del usuario → generate embedding → k-NN search ChromaDB
-                     → recuperar top-K hojas relevantes
-                     → LLM genera respuesta citando hojas
+Pregunta del usuario → /pregunta o texto libre
+  → embeddings.search() → GET /hojas/buscar-semantico?q=
+  → backend: embed query → k-NN ChromaDB → hojas con score
+  → assistant._gather_boveda() → top-5 hits → _synthesize() → respuesta LLM
 ```
 
 **Stack:**
 - `nomic-embed-text` vía Ollama para embeddings
-- ChromaDB como vector store (ligero, sin servidor separado, funciona como librería Python)
-- Índice almacenado en `database/chroma/` (mismo directorio que `app.db`)
+- `chromadb` (librería Python, sin servidor separado) en el proceso FastAPI
+- Índice en `database/chroma/` (junto a `app.db`, excluido de git)
+- Bot llama al backend REST — no accede a ChromaDB directamente
 
-**Integración con la API de SGR:**
-- `POST /hojas` y `PATCH /hojas/{id}` disparan indexado asíncrono
-- `GET /hojas/buscar-semantico?q=` → busca en ChromaDB + devuelve hojas con score
-- El bot tiene `/pregunta <texto>` que usa este endpoint
+**Archivos:**
+
+| Archivo | Rol |
+|---------|-----|
+| `app/semantic.py` | `embed_text`, `index_hoja`, `delete_hoja`, `search_hojas`, `backfill_missing` |
+| `app/main.py` | Hooks `BackgroundTasks` en POST/PATCH/DELETE `/hojas`; `GET /hojas/buscar-semantico`; `POST /hojas/reindexar`; backfill en lifespan |
+| `mybot/embeddings.py` | `search(query, top_k, api_base)` → REST wrapper |
+| `mybot/assistant.py` | `_gather_boveda(pregunta, api)` → `emb.search()` → contexto para síntesis |
+| `mybot/bot.py` | `/pregunta <texto>` → `assistant.answer_question("consulta_boveda", ...)` |
 
 **Checklist:**
-- [ ] Instalar `chromadb` en el venv del proyecto
-- [ ] Crear `mybot/embeddings.py` con `index_hoja()` y `search(query, top_k=5)`
-- [ ] Script de indexado inicial: indexar todas las hojas existentes
-- [ ] Hook en `POST /hojas` y `PATCH /hojas/{id}` para indexado automático
-- [ ] `GET /hojas/buscar-semantico?q=` en `main.py` + función en `crud.py`
-- [ ] Comando `/pregunta <texto>` en bot: responde citando hojas con título + categoría
-- [ ] Toggle "búsqueda semántica" en `LeftPanel` (frontend)
+- [✅] `chromadb>=0.6` instalado en el venv del proyecto
+- [✅] `app/semantic.py`: colección con vectores explícitos (sin embedding function propia), espacio coseno
+- [✅] Hook en POST `/hojas` → `background_tasks.add_task(semantic.index_hoja, ...)`
+- [✅] Hook en PATCH `/hojas/{id}` → re-index con contenido actualizado (fetch completo post-update)
+- [✅] Hook en DELETE `/hojas/{id}` → `background_tasks.add_task(semantic.delete_hoja, ...)`
+- [✅] Backfill en lifespan al arrancar (best-effort; omite si Ollama no disponible)
+- [✅] `GET /hojas/buscar-semantico?q=&top_k=` — definido antes de `{hoja_id}` para evitar conflicto de ruta
+- [✅] `POST /hojas/reindexar` — re-indexado completo en background
+- [✅] `mybot/embeddings.py` — wrapper REST, una sola función `search()`
+- [✅] `/pregunta <texto>` en el bot (responde citando título + categoría)
+- [✅] `consulta_boveda` en modo conversacional (texto libre → router → `answer_question`)
+- [ ] Toggle "búsqueda semántica" en `LeftPanel` (frontend — pendiente)
 
 ---
 
-### Capa 5 — Contexto de conversación (memoria de sesión)
-
-**Tiempo estimado:** 1 día
+### Capa 5 — Contexto de conversación (memoria de sesión) — ⏳
 
 Para que las preguntas de seguimiento funcionen:
 
@@ -368,24 +319,22 @@ Bot:     "El mes pasado fueron $14.200, un 22% menos."
 # En memoria (dict por chat_id), no persiste entre reinicios del bot
 conversation_context: dict[int, list[dict]] = {}
 
-# Cada mensaje agrega al historial (role: user/assistant)
-# Se pasan los últimos N turnos como contexto al LLM
-# Se limpia si hay silencio > 10 minutos o si el usuario cambia de tema
+# Cada respuesta de assistant.py agrega al historial (role: user/assistant)
+# Se pasan los últimos 4 turnos como contexto en cada llamada al LLM
+# Se limpia si hay silencio > 10 minutos o comando /nuevo
 ```
 
 **Checklist:**
 - [ ] `conversation_context` por `chat_id` en `assistant.py`
-- [ ] Pasar últimos 4 turnos como contexto en cada llamada al LLM
-- [ ] Limpiar contexto por timeout (10 min) o comando `/nuevo`
-- [ ] No incluir comandos de captura (`$:`, `t:`) en el historial conversacional
+- [ ] Pasar últimos 4 turnos en cada `llm_client.chat()`
+- [ ] Limpiar contexto por timeout (10 min) o `/nuevo`
+- [ ] No incluir comandos de captura (`$:`, `t:`, prefijos) en el historial
 
 ---
 
 ## Testing — 30 frases de uso real
 
-Antes de considerar cada capa completa, testar con frases reales. Para la Capa 2:
-
-### Finanzas (comandos de captura)
+### Finanzas — captura (Capa 2)
 1. "gasté 1500 en el super con la Naranja X"
 2. "pagué 8000 de luz con débito"
 3. "me transfirieron 50000 de sueldo"
@@ -393,24 +342,24 @@ Antes de considerar cada capa completa, testar con frases reales. Para la Capa 2
 5. "pagué Netflix 4500 Mercado Pago"
 6. "compré ropa 15000 con Galicia"
 
-### Agenda (comandos de captura)
+### Agenda — captura (Capa 2)
 7. "recordame llamar al dentista el viernes"
 8. "reunión con Mati mañana a las 18"
 9. "tengo que pagar el alquiler el 5 de junio"
 10. "clase de guitarra el martes a las 20"
 
-### Hábitos (comandos de captura)
+### Hábitos — captura (Capa 2)
 11. "corrí 40 minutos hoy"
 12. "leí 20 páginas"
 13. "hice meditación parcial, solo 5 minutos"
 14. "fui al gimnasio"
 
-### Bóveda (comandos de captura)
+### Bóveda — captura (Capa 2, fallback al flujo manual)
 15. "el libro Atomic Habits habla de identidad y sistemas"
 16. "link a ver: https://example.com/articulo"
 17. "nota: el método Zettelkasten usa notas atómicas"
 
-### Consultas (Capa 3)
+### Consultas — Capa 3
 18. "¿cuánto gasté esta semana?"
 19. "¿cuánto gasté en delivery este mes?"
 20. "¿cómo van mis hábitos?"
@@ -424,32 +373,27 @@ Antes de considerar cada capa completa, testar con frases reales. Para la Capa 2
 26. "mañana hay algo" (sin datos suficientes)
 27. "pagué" (incompleto)
 
-### Bóveda RAG (Capa 4)
+### Bóveda RAG — Capa 4
 28. "¿qué sé sobre machine learning?"
 29. "¿qué decía esa nota sobre productividad?"
 30. "¿qué libros tengo guardados?"
 
 ---
 
-## Roadmap de implementación
+## Roadmap
 
 ```
-Semana 1:
-  Capa 0 — Instalación Ollama (30 min)
-  Capa 1 — llm_client.py (1 día)
-  Capa 2 — intent_router.py para COMANDOS (2–3 días)
-    → testar con frases 1–17
+✅ Implementado:
+  Capa 0 — Instalación Ollama + variables .env
+  Capa 1 — llm_client.py (classify, chat, embed, is_available)
+  Capa 2 — intent_router.py: captura Finanzas/Agenda/Hábitos + detección consultas
+  Capa 3 — assistant.py: consultas Finanzas/Hábitos/Agenda/Bóveda con síntesis LLM
+  Capa 4 — RAG Bóveda: app/semantic.py + ChromaDB + hooks CRUD + /pregunta
 
-Semana 2:
-  Capa 2 — router para CONSULTAS + flujo de confirmación
-  Capa 3 — assistant.py consultas Finanzas (1–2 días)
-  Capa 3 — consultas Hábitos + Agenda (1 día)
-    → testar con frases 18–27
-
-Semana 3:
-  Capa 4 — RAG Bóveda (2–3 días)
-  Capa 5 — Contexto de conversación (1 día)
-    → testar con frases 28–30 + seguimiento
+⏳ Pendiente:
+  Capa 4 — Toggle búsqueda semántica en LeftPanel (frontend)
+  Capa 4 — Calibración formal con frases 1–30
+  Capa 5 — Memoria de sesión (contexto conversacional)
 ```
 
 ---
@@ -459,12 +403,15 @@ Semana 3:
 | Decisión | Motivo |
 |----------|--------|
 | Ollama local, no API externa | Offline-first, cero costo, privacidad — datos financieros y personales no salen de la máquina |
-| llama3.2:3b para clasificación | Rápido en CPU (< 3s), sigue instrucciones JSON bien, suficiente para 4 módulos |
-| ChromaDB como librería (no servidor) | Sin proceso extra; `chromadb` embeddido en el proceso Python del bot |
-| Fallback transparente | Si Ollama no está corriendo, el bot funciona igual con prefijos — no se rompe |
-| Confianza threshold 0.75 | Por encima → acción directa; 0.5–0.75 → confirmación; < 0.5 → fallback |
-| Contexto de sesión en memoria (no BD) | Conversaciones son efímeras; no vale la complejidad de persistirlas |
-| Datos al LLM como JSON, no en texto libre | Respuestas más precisas; menos alucinaciones; fácil de validar |
+| `llama3.2:3b` para clasificación | Rápido en CPU (< 3s), sigue instrucciones JSON bien, suficiente para 8 módulos |
+| ChromaDB embebido en el backend | Single-writer (evita corrupción multi-proceso); el backend ya es dueño de las hojas; el bot consume via REST |
+| BackgroundTasks para indexado | No bloquea el CRUD; si Ollama tarda, la respuesta al usuario es inmediata |
+| Best-effort en toda la capa semántica | Si Ollama no está corriendo, el CRUD y el bot funcionan igual — nada se rompe |
+| Datos al LLM como JSON pre-agregado | Respuestas más precisas; menos alucinaciones; reglas de negocio (isTransferencia, Ahorro) aplicadas en Python antes del LLM |
+| Síntesis en texto plano (sin Markdown) | Evita `BadRequest` de Telegram por `_` o `[` en respuestas libres del LLM |
+| Fallback transparente en router | Si Ollama no responde, el bot sigue con prefijos y flujo Bóveda — el usuario no ve el error |
+| Bóveda siempre fallback en captura | El selector de categorías existente es más fiable que guardar sin categoría |
+| Contexto de sesión en memoria (no BD) | Conversaciones son efímeras; no vale la complejidad de persistirlas entre reinicios |
 
 ---
 
@@ -472,7 +419,8 @@ Semana 3:
 
 | Idea | Por qué no |
 |------|-----------|
-| Fine-tuning del modelo | Overkill para clasificación de 4 módulos; prompt engineering es suficiente |
+| Fine-tuning del modelo | Overkill para clasificación de 8 módulos; prompt engineering es suficiente |
 | Streaming de respuestas en Telegram | Telegram no tiene soporte nativo de streaming; no vale la complejidad |
 | Multimodalidad (imágenes → LLM) | El bot ya procesa fotos como hojas de Bóveda; no necesita visión del LLM |
 | LLM para generar código o análisis financiero complejo | El modelo local no es confiable para esto; mejor mantener la lógica en Python |
+| ChromaDB como servicio Docker separado | La librería embebida es suficiente para uso personal; un servicio separado complica el setup sin beneficio real |

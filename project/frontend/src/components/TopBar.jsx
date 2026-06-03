@@ -86,7 +86,7 @@ function IconButton({ children, onClick, ariaLabel, badge = false }) {
   )
 }
 
-export default function TopBar({ searchQuery = '', onSearchChange }) {
+export default function TopBar({ searchQuery = '', onSearchChange, searchInputRef }) {
   const navigate    = useNavigate()
   const location    = useLocation()
   const userName     = useStore(s => s.userName)
@@ -97,15 +97,41 @@ export default function TopBar({ searchQuery = '', onSearchChange }) {
   const openHabitoModal  = useStore(s => s.openHabitoModal)
   const initial      = userName ? userName.trim()[0].toUpperCase() : '?'
 
-  const isHabitos = location.pathname.startsWith('/habitos')
-  const isAgenda  = location.pathname.startsWith('/agenda')
+  const isHabitos  = location.pathname.startsWith('/habitos')
+  const isAgenda   = location.pathname.startsWith('/agenda')
+  const isFinanzas = location.pathname.startsWith('/finanzas')
   const [bellOpen, setBellOpen]             = useState(false)
   const [pendingHabitos, setPendingHabitos]   = useState([])
   const [agendaNotifPending, setAgendaNotifPending] = useState([])
   const notifShownRef = useRef(new Set())
   const bellRef = useRef(null)
   const searchRef = useRef(null)
-  const [agendaResults, setAgendaResults] = useState(null) // null | {eventos, tareas}
+  const [agendaResults, setAgendaResults] = useState(null)
+  const [finResults,    setFinResults]    = useState(null)
+
+  // Finanzas data for local search
+  const finMovAll    = useStore(s => s.finMovimientosAll)
+  const finNotas     = useStore(s => s.finNotas)
+  const finObjetivos = useStore(s => s.finObjetivos)
+
+  // Debounced Finanzas search (local)
+  useEffect(() => {
+    if (!isFinanzas || !searchQuery.trim()) { setFinResults(null); return }
+    const q = searchQuery.trim().toLowerCase()
+    const timer = setTimeout(() => {
+      const movs = finMovAll
+        .filter(m => (m.descripcion ?? m.desc ?? '').toLowerCase().includes(q) || (m.categoria_nombre ?? m.cat ?? '').toLowerCase().includes(q))
+        .slice(0, 8)
+      const notas = (finNotas || [])
+        .filter(n => n.contenido.toLowerCase().includes(q))
+        .slice(0, 4)
+      const objs = (finObjetivos || [])
+        .filter(o => o.nombre.toLowerCase().includes(q))
+        .slice(0, 4)
+      setFinResults({ movs, notas, objs })
+    }, 200)
+    return () => clearTimeout(timer)
+  }, [searchQuery, isFinanzas, finMovAll, finNotas, finObjetivos])
 
   // Debounced agenda search
   useEffect(() => {
@@ -119,13 +145,18 @@ export default function TopBar({ searchQuery = '', onSearchChange }) {
     return () => clearTimeout(timer)
   }, [searchQuery, isAgenda])
 
-  // Close agenda dropdown on outside click
+  // Close search dropdowns on outside click
   useEffect(() => {
-    if (!agendaResults) return
-    const h = (e) => { if (searchRef.current && !searchRef.current.contains(e.target)) setAgendaResults(null) }
+    if (!agendaResults && !finResults) return
+    const h = (e) => {
+      if (searchRef.current && !searchRef.current.contains(e.target)) {
+        setAgendaResults(null)
+        setFinResults(null)
+      }
+    }
     document.addEventListener('mousedown', h)
     return () => document.removeEventListener('mousedown', h)
-  }, [agendaResults])
+  }, [agendaResults, finResults])
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -237,6 +268,7 @@ export default function TopBar({ searchQuery = '', onSearchChange }) {
         >
           <Search size={15} style={{ color: 'var(--subtext)', flexShrink: 0 }} />
           <input
+            ref={searchInputRef}
             value={searchQuery}
             onChange={e => onSearchChange(e.target.value)}
             placeholder={isAgenda ? t(lang, 'agendaBuscarPlaceholder') : t(lang, 'searchPlaceholder')}
@@ -248,6 +280,80 @@ export default function TopBar({ searchQuery = '', onSearchChange }) {
             <kbd className="px-1.5 py-0.5 rounded border text-[10px]" style={kbdStyle}>M</kbd>
           </div>
         </div>
+
+        {/* Finanzas search dropdown */}
+        {isFinanzas && finResults && (
+          <div
+            className="absolute top-full left-0 right-0 mt-1.5 rounded-xl border shadow-2xl z-50 overflow-hidden"
+            style={{ background: 'var(--panel-bg)', borderColor: 'var(--border)' }}
+          >
+            {finResults.movs.length === 0 && finResults.notas.length === 0 && finResults.objs.length === 0 ? (
+              <div className="px-4 py-3 text-[12.5px] italic" style={{ color: 'var(--subtext)' }}>Sin resultados</div>
+            ) : (
+              <div className="max-h-[320px] overflow-y-auto">
+                {finResults.movs.length > 0 && (
+                  <div className="px-4 pt-2 pb-1 text-[9.5px] uppercase tracking-wider font-semibold" style={{ color: 'var(--subtext)' }}>Movimientos</div>
+                )}
+                {finResults.movs.map(m => (
+                  <button
+                    key={`m-${m.id}`}
+                    className="w-full flex items-center gap-3 px-4 py-2 text-left transition-colors"
+                    style={{ color: 'var(--text)' }}
+                    onMouseEnter={ev => ev.currentTarget.style.background = 'var(--surface)'}
+                    onMouseLeave={ev => ev.currentTarget.style.background = 'transparent'}
+                    onClick={() => { setFinResults(null); onSearchChange('') }}
+                  >
+                    <span style={{ fontSize: 13 }}>{(m.tipo ?? m.type) === 'income' ? '💰' : '💸'}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[12.5px] font-medium truncate">{m.descripcion ?? m.desc}</div>
+                      <div className="text-[10.5px] mono" style={{ color: 'var(--subtext)' }}>
+                        {m.fecha?.slice(0,10)} · {m.categoria_nombre ?? m.cat}
+                      </div>
+                    </div>
+                    <span className="mono tnum text-[11.5px] shrink-0" style={{ color: (m.tipo ?? m.type) === 'income' ? 'var(--income)' : 'var(--expense)' }}>
+                      {Math.abs(m.monto ?? m.amount ?? 0).toLocaleString('es-AR', { minimumFractionDigits: 0 })}
+                    </span>
+                  </button>
+                ))}
+                {finResults.objs.length > 0 && (
+                  <div className="px-4 pt-2 pb-1 text-[9.5px] uppercase tracking-wider font-semibold" style={{ color: 'var(--subtext)' }}>Objetivos</div>
+                )}
+                {finResults.objs.map(o => (
+                  <button
+                    key={`o-${o.id}`}
+                    className="w-full flex items-center gap-3 px-4 py-2 text-left transition-colors"
+                    style={{ color: 'var(--text)' }}
+                    onMouseEnter={ev => ev.currentTarget.style.background = 'var(--surface)'}
+                    onMouseLeave={ev => ev.currentTarget.style.background = 'transparent'}
+                    onClick={() => { setFinResults(null); onSearchChange('') }}
+                  >
+                    <span style={{ fontSize: 13 }}>🎯</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[12.5px] font-medium truncate">{o.nombre}</div>
+                      <div className="text-[10.5px] mono" style={{ color: 'var(--subtext)' }}>Meta: {o.meta?.toLocaleString('es-AR')} {o.moneda}</div>
+                    </div>
+                  </button>
+                ))}
+                {finResults.notas.length > 0 && (
+                  <div className="px-4 pt-2 pb-1 text-[9.5px] uppercase tracking-wider font-semibold" style={{ color: 'var(--subtext)' }}>Notas</div>
+                )}
+                {finResults.notas.map(n => (
+                  <button
+                    key={`n-${n.id}`}
+                    className="w-full flex items-center gap-3 px-4 py-2 text-left transition-colors"
+                    style={{ color: 'var(--text)' }}
+                    onMouseEnter={ev => ev.currentTarget.style.background = 'var(--surface)'}
+                    onMouseLeave={ev => ev.currentTarget.style.background = 'transparent'}
+                    onClick={() => { setFinResults(null); onSearchChange('') }}
+                  >
+                    <span style={{ fontSize: 13 }}>📝</span>
+                    <div className="text-[12.5px] truncate">{n.contenido}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Agenda search dropdown */}
         {isAgenda && agendaResults && (

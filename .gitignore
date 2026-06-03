@@ -10,6 +10,7 @@ project/build/
 # Datos y secretos — nunca commitear
 project/.env
 project/database/app.db
+project/database/chroma/
 project/uploads/
 project/mybot/rapido.json
 project/mybot/chat_id.json

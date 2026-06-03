@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useStore } from '../store/useStore'
+import { buildCategoriaColorMap } from '../utils/categoriaColors'
 import { BRANCH_COLORS } from '../utils/themes'
 import { extractTags } from '../utils/tags'
 
@@ -9,6 +10,7 @@ const BRANCH_DIST = 165
 const MAX_LEAVES_PER_BRANCH = 14
 
 function buildGraph(categorias, hojas) {
+  const colorMap = buildCategoriaColorMap(categorias)
   const rootOf = {}
   const findRoot = (id, seen = new Set()) => {
     if (id == null || seen.has(id)) return null
@@ -33,7 +35,7 @@ function buildGraph(categorias, hojas) {
     const angle = (i / Math.max(roots.length, 1)) * Math.PI * 2 - Math.PI / 2
     const all   = hojasByRoot[c.id] || []
     const extra = Math.max(0, all.length - MAX_LEAVES_PER_BRANCH)
-    const color = BRANCH_COLORS[i % BRANCH_COLORS.length]
+    const color = colorMap[c.id] || BRANCH_COLORS[i % BRANCH_COLORS.length]
     return {
       id: c.id, name: c.nombre, count: all.length, extra, color, angle,
       x: HUB.x + Math.cos(angle) * BRANCH_DIST,

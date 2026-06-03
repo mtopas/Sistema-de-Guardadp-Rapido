@@ -79,7 +79,8 @@ HELP_TEXT = """\
 Enviá cualquier texto, foto o ubicación y te pide la categoría.
 Prefijos rápidos: `t: comprar leche` (tarea) · `e: dentista 10:30` (evento)
 /ultimas — últimas hojas guardadas (con botón para eliminar)
-/buscar <texto> — buscar en la Bóveda
+/buscar <texto> — buscar en la Bóveda (texto exacto)
+/pregunta <texto> — preguntarle al asistente sobre tus notas (búsqueda semántica)
 /rapido on|off — modo rápido (guarda en última categoría sin pedir)
 
 ℹ️ *General*

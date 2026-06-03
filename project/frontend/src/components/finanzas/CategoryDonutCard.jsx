@@ -1,40 +1,10 @@
 import { useMemo, useState } from 'react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
-import { fmtARS, isTransferencia } from '../../data/finanzas'
-import { BRANCH_COLORS as B } from '../../utils/themes'
+import { fmtARS } from '../../data/finanzas'
+import { buildCategories } from '../../data/finCategoriaColors'
 
-// Palette fallback for dynamic categories
-const PALETTE = [B[0], B[1], B[2], B[3], B[5], B[6], B[7], B[8], B[9] ?? '#888']
-
-export function buildCategories(movimientos, type) {
-  const filtered = movimientos.filter(m => {
-    const t = m.type ?? m.tipo
-    return t === type && !isTransferencia(m)
-  })
-
-  if (filtered.length === 0) {
-    return { cats: [], total: 0 }
-  }
-
-  const map = {}
-  filtered.forEach(m => {
-    const cat = m.cat ?? m.categoria_nombre ?? 'Otros'
-    const amt = Math.abs(m.amount ?? m.monto ?? 0)
-    if (!map[cat]) map[cat] = { name: cat, amount: 0 }
-    map[cat].amount += amt
-  })
-
-  const entries = Object.values(map).sort((a, b) => b.amount - a.amount)
-  const total = entries.reduce((a, c) => a + c.amount, 0)
-  const cats = entries.map((c, i) => ({
-    ...c,
-    color: c.color ?? PALETTE[i % PALETTE.length],
-    pct: total > 0 ? Math.round((c.amount / total) * 100) : 0,
-  }))
-
-  return { cats, total }
-}
+export { buildCategories } from '../../data/finCategoriaColors'
 
 function mesLabel(selectedMes, lang) {
   const [year, month] = selectedMes.split('-')
@@ -42,14 +12,15 @@ function mesLabel(selectedMes, lang) {
   return d.toLocaleDateString(lang === 'en' ? 'en-US' : 'es-AR', { month: 'long', year: 'numeric' })
 }
 
-export default function DonutCard({ type = 'expense' }) {
+export default function DonutCard({ type = 'expense', activeCat = null, onFilterCat }) {
   const lang         = useStore(s => s.lang)
   const selectedMes  = useStore(s => s.selectedMes)
   const finMovimientos = useStore(s => s.finMovimientos)
+  const finCategorias  = useStore(s => s.finCategorias)
 
   const { cats, total } = useMemo(
-    () => buildCategories(finMovimientos, type),
-    [finMovimientos, type]
+    () => buildCategories(finMovimientos, type, finCategorias),
+    [finMovimientos, type, finCategorias]
   )
 
   const title = type === 'income' ? t(lang, 'incomesByCategory') : t(lang, 'expensesByCategory')
@@ -57,6 +28,10 @@ export default function DonutCard({ type = 'expense' }) {
 
   const [hoveredCat, setHoveredCat] = useState(null)
   const hoveredData = hoveredCat != null ? cats[hoveredCat] : null
+
+  const handleSegmentClick = (catName) => {
+    if (onFilterCat) onFilterCat(activeCat === catName ? null : catName)
+  }
 
   const R = 46
   const SW = 10
@@ -70,27 +45,33 @@ export default function DonutCard({ type = 'expense' }) {
         <svg viewBox="0 0 100 100" width="160" height="160" className="-rotate-90">
           <circle cx="50" cy="50" r={R} fill="none" stroke="var(--surface)" strokeWidth={SW} />
           {cats.map((c, i) => {
-            const dash   = (c.pct / 100) * C
-            const offset = -((acc / 100) * C)
+            const dash      = (c.pct / 100) * C
+            const offset    = -((acc / 100) * C)
             acc += c.pct
             const isHovered = hoveredCat === i
+            const isActive  = activeCat === c.name
             return (
               <circle
                 key={i}
                 cx="50" cy="50" r={R}
                 fill="none"
                 stroke={c.color}
-                strokeWidth={isHovered ? SW + 3 : SW}
+                strokeWidth={isHovered || isActive ? SW + 3 : SW}
                 strokeDasharray={`${dash} ${C - dash}`}
                 strokeDashoffset={offset}
                 strokeLinecap="butt"
                 style={{
                   cursor: 'pointer',
                   transition: 'stroke-width 0.15s ease, opacity 0.15s ease',
-                  opacity: hoveredCat != null && !isHovered ? 0.4 : 1,
+                  opacity: (hoveredCat != null && !isHovered) || (activeCat && !isActive) ? 0.35 : 1,
                 }}
                 onMouseEnter={() => setHoveredCat(i)}
                 onMouseLeave={() => setHoveredCat(null)}
+                onClick={() => handleSegmentClick(c.name)}
+                role="button"
+                aria-label={`Filtrar por ${c.name}`}
+                tabIndex={0}
+                onKeyDown={e => e.key === 'Enter' && handleSegmentClick(c.name)}
               />
             )
           })}
@@ -135,28 +116,47 @@ export default function DonutCard({ type = 'expense' }) {
           </div>
         </div>
 
+        {activeCat && (
+          <button
+            type="button"
+            onClick={() => onFilterCat?.(null)}
+            className="text-[10.5px] px-2 py-0.5 rounded-md mb-1"
+            style={{ background: 'color-mix(in oklch, var(--accent) 12%, transparent)', color: 'var(--accent)', border: 'none', cursor: 'pointer' }}
+          >
+            ✕ {activeCat}
+          </button>
+        )}
         <div className="flex flex-col gap-1.5 mt-1">
-          {cats.map((c, i) => (
-            <div
-              key={c.name}
-              className="flex items-center gap-2 rounded-lg px-1 transition-all cursor-default"
-              style={{
-                opacity: hoveredCat != null && hoveredCat !== i ? 0.45 : 1,
-                background: hoveredCat === i ? `color-mix(in oklch, ${c.color} 10%, transparent)` : 'transparent',
-              }}
-              onMouseEnter={() => setHoveredCat(i)}
-              onMouseLeave={() => setHoveredCat(null)}
-            >
-              <span className="shrink-0 rounded-sm" style={{ width: 8, height: 8, background: c.color }} />
-              <span className="flex-1 truncate text-[12px]" style={{ color: 'var(--text)' }}>{c.name}</span>
-              <span className="mono tnum text-[11px] shrink-0" style={{ color: 'var(--subtext)', minWidth: 28, textAlign: 'right' }}>
-                {c.pct}%
-              </span>
-              <span className="tnum text-[11px] shrink-0" style={{ color: 'var(--text)', minWidth: 72, textAlign: 'right' }}>
-                {fmtARS(c.amount)}
-              </span>
-            </div>
-          ))}
+          {cats.map((c, i) => {
+            const isActive = activeCat === c.name
+            return (
+              <div
+                key={c.name}
+                role="button"
+                tabIndex={0}
+                className="flex items-center gap-2 rounded-lg px-1 transition-all"
+                style={{
+                  cursor: 'pointer',
+                  opacity: (hoveredCat != null && hoveredCat !== i) || (activeCat && !isActive) ? 0.45 : 1,
+                  background: hoveredCat === i || isActive ? `color-mix(in oklch, ${c.color} 10%, transparent)` : 'transparent',
+                  outline: isActive ? `1.5px solid ${c.color}` : 'none',
+                }}
+                onMouseEnter={() => setHoveredCat(i)}
+                onMouseLeave={() => setHoveredCat(null)}
+                onClick={() => handleSegmentClick(c.name)}
+                onKeyDown={e => e.key === 'Enter' && handleSegmentClick(c.name)}
+              >
+                <span className="shrink-0 rounded-sm" style={{ width: 8, height: 8, background: c.color }} />
+                <span className="flex-1 truncate text-[12px]" style={{ color: 'var(--text)' }}>{c.name}</span>
+                <span className="mono tnum text-[11px] shrink-0" style={{ color: 'var(--subtext)', minWidth: 28, textAlign: 'right' }}>
+                  {c.pct}%
+                </span>
+                <span className="tnum text-[11px] shrink-0" style={{ color: 'var(--text)', minWidth: 72, textAlign: 'right' }}>
+                  {fmtARS(c.amount)}
+                </span>
+              </div>
+            )
+          })}
         </div>
       </div>
     </div>

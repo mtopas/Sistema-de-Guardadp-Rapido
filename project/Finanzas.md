@@ -31,7 +31,7 @@ MovementModal (global en App.jsx)
         ▼
 useStore.js ──fetch──► FastAPI /fin/* ──► crud.py ──► SQLite
         │
-        └── fallback optimista + mock FINANZAS si falla red
+        └── fallback optimista local si falla red
 ```
 
 | Capa | Archivos clave |
@@ -39,7 +39,7 @@ useStore.js ──fetch──► FastAPI /fin/* ──► crud.py ──► SQLi
 | Pantalla | `screens/FinanzasScreen.jsx` |
 | Tabs | `components/finanzas/DashboardTabs.jsx` |
 | Componentes | `components/finanzas/*` (22 archivos) |
-| Helpers | `data/finanzas.js` (`isTransferencia`, `fmtARS`, `fmtUSD`) — **sin mock** |
+| Helpers | `data/finanzas.js`, `data/finCategorias.js`, `data/finCategoriaColors.js` — **sin mock de movimientos** |
 | Store | `store/useStore.js` (prefijo `fin*`, `selectedMes`, modales) |
 | API | `app/main.py` rutas `/fin/*` |
 | SQL | `app/db/crud.py`, esquema en `app/db/database.py` |
@@ -65,11 +65,11 @@ useStore.js ──fetch──► FastAPI /fin/* ──► crud.py ──► SQLi
 
 | Tab | Centro | Panel derecho | Selector mes/año |
 |-----|--------|---------------|------------------|
-| **dashboard** | Donuts ingreso/gasto, listas movimientos, cuotas, notas | Cuotas, gasto por categoría, KPIs, metas FIRE/emergencia (legacy) | Sí (`selectedMes`) |
+| **dashboard** | Donuts ingreso/gasto, listas movimientos, cuotas, notas | Cuotas, gasto por categoría, KPIs, metas (tasa ahorro / fondo emergencia) | Sí (`selectedMes`) |
 | **anual** | Resumen año, barras nominal/real, tabla meses | Highlights, comparación, inflación editable | Solo año |
 | **fire** | Tabla plan mensual + proyección | % aumento aporte, rentabilidad | Oculto |
-| **ahorro** | Totales ARS/USD, distribución, instrumentos | Objetivos + meta FIRE del mes | Oculto |
-| **datos** | Tabla histórica inline editable | KPIs del histórico | Oculto |
+| **ahorro** | Reparto FIRE/objetivos/líquido, portafolio, ledger | Objetivos + meta FIRE del mes (cat. `FIRE`) | Oculto |
+| **datos** | Tabla histórica inline editable | KPIs histórico + CRUD categorías (`DatosRightPanel`) | Oculto |
 
 `selectedMes` formato `YYYY-MM`. Al cambiar mes: `setSelectedMes` → `fetchFinMovimientos(mes)`.
 
@@ -85,44 +85,64 @@ isTransferencia(m) → categoría exacta "transferencia" (case-insensitive)
 
 Excluidas de ingresos/gastos, donuts, KPIs, Anual, Datos, totales de ahorro.
 
-### Categoría `Ahorro` (nombre exacto)
+### Asignación por categoría (modelo actual)
 
-| Tipo movimiento | Efecto |
-|-----------------|--------|
-| **Gasto** + `Ahorro` | Suma al total ahorrado |
-| **Ingreso** + `Ahorro` | Resta del total (retiro desde ahorros) |
+| Cajón | Categoría de movimiento |
+|-------|-------------------------|
+| Plan FIRE | `FIRE` (exacta) |
+| Cada objetivo | Mismo nombre que el objetivo (creada al alta, `objetivo_id` en DB) |
+| Sistema | `Transferencia`, `Ajuste` — no eliminables |
 
-**Objetivos:** descripción del movimiento **idéntica** al `nombre` del objetivo → asigna al objetivo. Sin match → **sin asignar**, pero el monto **sí** entra al total bruto.
+| Tipo movimiento | Efecto en el cajón |
+|-----------------|-------------------|
+| **Gasto** | Suma |
+| **Ingreso** | Resta (puede quedar negativo) |
 
-### Dólar oficial
+**Objetivos:** no se renombran; al eliminar el objetivo la categoría queda `oculta=1`. Legacy: categoría `Ahorro` — migrar a mano a `FIRE` u objetivo.
 
-- Clave `fin_config.dolar_oficial` — carga **manual** en panel izquierdo.
-- Conversión ARS ↔ USD en Ahorro/Anual/portafolio.
-- Sin API de cotización en runtime.
-- Fórmulas: Total ARS = inst.ARS + inst.USD × dólar; Total USD = inst.USD + inst.ARS / dólar.
+### Dólar (MEP + oficial)
+
+- **`dolar_mep`** (principal) y **`dolar_oficial_compra`** en `fin_config`; botón **↻ Actualizar** en `FinanzasLeftPanel` → `GET /fin/dolar/cotizacion` (dolarapi.com), cache en config.
+- UI: `dolar_mep ?? dolar_oficial ?? dolar_default` (fallback manual legacy).
+- Conversión ARS ↔ USD en Ahorro/Anual/portafolio/FIRE display.
+- Fórmulas portafolio: Total ARS = inst.ARS + inst.USD × dólar; Total USD = inst.USD + inst.ARS / dólar.
 
 ### Dual schema movimientos
 
-El mock usa `type`/`amount`/`cat`/`desc`/`method`. La API devuelve `tipo`/`monto`/`categoria_nombre`/`descripcion`/`cuenta_nombre`. `DatosTab` y otros normalizan con helpers (`getVal`, `patchKey`).
+Algunos consumidores aceptan `type`/`amount`/`cat`/`desc`/`method` (shape legacy). La API devuelve `tipo`/`monto`/`categoria_nombre`/`descripcion`/`cuenta_nombre`. `normalizeMovimiento()` en `finanzas.js` unifica al leer.
 
 ### Cuotas
 
 Movimientos con `cuotas > 1` alimentan `CuotasCard` y panel derecho.
 
-### Emergencia (legacy)
+### Emergencia
 
-- API `GET /fin/emergencia`, categoría seed `Emergencia`, `fondo_emergencia_meta` en config.
-- **Spec:** migrar a objetivo `Fondo de Emergencia`. Pendiente.
+- Objetivo seed **Fondo de emergencia** + categoría vinculada.
+- `GET /fin/emergencia` (deprecated): saldo = movimientos de esa categoría.
+- Meta en `fin_config.fondo_emergencia_meta`.
 
-### Ahorro: dos mundos de datos
+### Tab Ahorro — reparto
 
-1. **Movimientos** categoría `Ahorro` → total líquido ahorrado.
-2. **Instrumentos** (`fin_instrumentos`) → portafolio con P&L, plazos fijos, etc.
+1. **Cajones** (movimientos): FIRE + cada objetivo.
+2. **Instrumentos** (`fin_instrumentos`): portafolio; costo usado para líquido.
+3. **Líquido sin invertir** = suma cajones − costo instrumentos (puede ser negativo).
 
-Concepto **"líquido sin invertir"** en `AhorroTab` reconcilia parcialmente ambos.
+### Categorías y objetivos (sync)
+
+| Acción | Efecto en `fin_categorias` |
+|--------|---------------------------|
+| Crear objetivo | INSERT categoría mismo nombre, `objetivo_id`, `tipo: both` |
+| Actualizar objetivo | Solo `meta`, `moneda`, `fecha_limite`, `cuota_mensual` — **no** `nombre` |
+| Eliminar objetivo | `oculta=1` en categoría vinculada; DELETE objetivo (excepto Fondo de emergencia) |
+| PATCH categoría | Sistema y vinculadas a objetivo: no renombrar; color/tipo sí |
+
+`GET /fin/categorias?include_ocultas=true` para ver categorías ocultas (Datos/admin). Selectores de movimiento usan lista sin ocultas.
+
+Colores de categoría en UI: `buildFinCategoriaColorByName` / `getFinCategoriaColor` (`finCategoriaColors.js`).
 
 ### FIRE
 
+- **Ahorrado real del plan:** movimientos con categoría exacta **`FIRE`** (`contribucionFire` en front).
 - Filas mensuales con proyección (aporte compuesto, interés, saldo).
 - Overrides por mes en `fin_fire_filas` (`ahorrado_override`).
 - Config: `fire_meta_usd`, `fire_meta_edad`, `fire_aumento_aporte`, `fire_rentabilidad_anual`, `fire_fecha_nacimiento`, `fire_aporte_inicial`, `fire_saldo_inicial`, `fire_inicio_mes`.
@@ -140,7 +160,7 @@ Concepto **"líquido sin invertir"** en `AhorroTab` reconcilia parcialmente ambo
 | Anual | `AnualTab`, `AnualRightPanel` |
 | FIRE | `FireTab`, `FireRightPanel` |
 | Ahorro | `AhorroTab`, `AhorroRightPanel` |
-| Datos | `DatosTab`, `DatosRightPanel` |
+| Datos | `DatosTab`, `DatosRightPanel` (KPIs + lista categorías: crear/editar/eliminar; clic derecho) |
 | Global | `MovementModal`, `MovimientosTableModal` (sort 3-clicks + filtro categoría) |
 | Panel izq. | `FinanzasLeftPanel` — saldos, ingresos/gastos mes, tasa ahorro, grupos cuenta, config dólar + **CRUD cuentas** |
 
@@ -153,7 +173,7 @@ Concepto **"líquido sin invertir"** en `AhorroTab` reconcilia parcialmente ambo
 | Tabla | Uso |
 |-------|-----|
 | `fin_cuentas` | Billeteras / bancos / efectivo; `tipo`, saldos ARS/USD |
-| `fin_categorias` | Gasto / ingreso / both; seeds `Ahorro`, `Emergencia` |
+| `fin_categorias` | `nombre`, `color`, `tipo`, `oculta`, `objetivo_id`; seeds `Transferencia`, `Ajuste`, `FIRE` |
 | `fin_movimientos` | Histórico; FK cuenta y categoría |
 | `fin_config` | KV: `dolar_oficial`, `fire_*`, `tasa_ahorro_objetivo`, … |
 | `fin_notas` | Notas del dashboard |
@@ -166,17 +186,19 @@ Concepto **"líquido sin invertir"** en `AhorroTab` reconcilia parcialmente ambo
 
 | Método | Ruta | Notas |
 |--------|------|-------|
-| GET/POST | `/fin/cuentas` | Listar / crear cuenta |
+| GET/POST | `/fin/cuentas` | Listar / crear cuenta; POST acepta `saldo_ars`/`saldo_usd` opcionales → movimientos «Saldo inicial» (categoría Ajuste) |
 | PATCH | `/fin/cuentas/{id}` | Editar metadata (nombre, tipo, color, initials) |
-| PATCH | `/fin/cuentas/{id}/saldo` | Actualizar saldos ARS/USD |
+| POST | `/fin/recalcular-saldos` | Recalcula `saldo_ars`/`saldo_usd` de todas las cuentas desde movimientos |
+| PATCH | `/fin/cuentas/{id}/saldo` | **410** — obsoleto; usar movimientos (Ajuste) o recalcular |
 | DELETE | `/fin/cuentas/{id}` | Eliminar cuenta |
-| GET/POST/DELETE | `/fin/categorias` | Auto-create al crear movimiento si no existe |
+| GET | `/fin/categorias?include_ocultas=` | Lista; por defecto excluye `oculta=1` |
+| POST/PATCH/DELETE | `/fin/categorias` | CRUD; PATCH sin rename en sistema/objetivo; DELETE bloqueado si `objetivo_id` o movimientos |
 | GET | `/fin/movimientos?mes=YYYY-MM` | Mes actual vs histórico sin query |
 | POST/PATCH/DELETE | `/fin/movimientos` | PATCH resuelve cuenta/categoría por nombre |
 | GET/PUT | `/fin/config` | Dict clave-valor |
 | GET/POST/DELETE | `/fin/notas` | |
-| GET | `/fin/emergencia` | Legacy |
-| CRUD | `/fin/instrumentos`, `/fin/objetivos` | |
+| GET | `/fin/emergencia` | Deprecated; saldo = movimientos cat. objetivo **Fondo de emergencia** |
+| CRUD | `/fin/instrumentos`, `/fin/objetivos` | Objetivo: POST crea categoría; PATCH sin `nombre`; DELETE oculta categoría |
 | GET/PUT | `/fin/fire-filas/{mes}`, `/fin/inflacion/{mes}` | |
 
 **Al crear movimiento:** si la categoría no existe se **crea automáticamente**. Riesgo de typos ("Comida" vs "comida").
@@ -210,7 +232,7 @@ mybot/
 | `/mov` | Flujo guiado: tipo (inline kb) → monto (texto) → descripción (texto) → cuenta (inline kb) → categoría (inline kb) → confirmación con preview → POST | `GET /fin/cuentas`, `GET /fin/categorias`, `POST /fin/movimientos` |
 | `/saldo` | Saldos ARS/USD por cuenta + total + equivalente USD con `dolar_oficial` | `GET /fin/cuentas`, `GET /fin/config` |
 | `/mes [YYYY-MM]` | Ingresos, gastos, balance, tasa ahorro del mes (sin transferencias). Default: mes actual | `GET /fin/movimientos?mes=` |
-| `/ahorro` | Total categoría Ahorro del mes + lista de objetivos con meta y cuota | `GET /fin/movimientos?mes=`, `GET /fin/objetivos` |
+| `/ahorro` | FIRE del mes + aporte por objetivo (categoría homónima) | `GET /fin/movimientos?mes=`, `GET /fin/objetivos` |
 | `/ultimo` | Últimos 5 movimientos ordenados por fecha; botón `🗑 #N` para eliminar | `GET /fin/movimientos`, `DELETE /fin/movimientos/{id}` |
 | `/dolar [valor]` | Sin arg: muestra valor actual. Con arg: actualiza `fin_config.dolar_oficial` | `GET /fin/config`, `PUT /fin/config` |
 | `/objetivo [nombre]` | Sin arg: lista todos. Con nombre (fuzzy): barra de progreso, % ahorrado, meses restantes | `GET /fin/objetivos`, `GET /fin/movimientos` |
@@ -277,8 +299,8 @@ Parsing: `{tipo?} {monto} {descripción…} {cuenta_hint?}` — el último token
   - Botón **"+ Nueva cuenta"** expande form con mismo layout.
   - Store: `createFinCuenta` (optimista), `editFinCuentaMeta` (optimista), `deleteFinCuenta` (optimista).
   - Backend: `fin_editar_cuenta` en `crud.py`; `FinCuentaUpdate` model + `PATCH /fin/cuentas/{id}` en `main.py`.
-- **`data/finanzas.js`:** eliminado el export `FINANZAS` (mock con cuentas/movimientos hardcodeados — era dead code, nunca importado). Solo quedan `fmtARS`, `fmtUSD`, `isTransferencia`.
-- **`MovementModal`:** `Ctrl+Enter` guarda; validación visual "Ahorro sin objetivo"; chips de plantillas rápidas (Alquiler, SUBE, Spotify, etc.); autocompletar última cuenta/categoría desde `localStorage`.
+- **`data/finanzas.js`:** helpers de cajón por categoría (`contribucionCategoria`, `contribucionFire`, `acumuladoPorCategoriaNombre`); sin mock `FINANZAS`.
+- **`MovementModal`:** `Ctrl+Enter` guarda; `FinCategoriaPicker`; plantillas rápidas; autocompletar cuenta/categoría desde `localStorage`.
 - **Code-split:** `AnualTab`, `FireTab`, `AhorroTab`, `DatosTab` con `React.lazy` + `Suspense`.
 - **`finActiveTab`** en store Zustand; `normalizeMovimiento()` centralizado.
 - **`fetchFinMovimientosAll`** prefetcheado al entrar en `/finanzas` (no espera a que el usuario cambie de tab).
@@ -294,23 +316,58 @@ Parsing: `{tipo?} {monto} {descripción…} {cuenta_hint?}` — el último token
 - Scrollbars tematizados (`.panel-scroll` + accent Finanzas).
 - Patrón offline: update optimista + try/catch en store.
 
+### Estado implementado (junio 2026 — segunda ronda)
+
+- **`MovimientosTableModal`:** click en fila → edición inline (descripción, monto, fecha) con confirmación; botón eliminar por fila con confirmación; focus trap + return focus al cerrar; `scope="col"` en headers.
+- **`CategoryDonutCard`:** click en segmento o leyenda → filtra `MovimientosListCard` del mismo tipo; badge "✕ cat" para limpiar filtro; highlight visual del segmento activo; atajos `activeCat` / `onFilterCat` como props.
+- **FireTab:** botón "Hoy — [mes]" sobre la tabla para volver a la fila actual; `ProyeccionRow` usa `saldoRealCuentas` (suma de `fin_cuentas.saldo_ars + saldo_usd × dolar`) como base real en lugar de `fire_saldo_inicial`; `scope="col"` en headers.
+- **AhorroTab:** `LedgerSection` al pie del tab — selector de instrumento, tabla de transacciones (compra/venta) con fecha/cantidad/precio/total/nota, formulario de alta, eliminar por fila. Llama a `/fin/instrumentos/{id}/transacciones` y `/fin/transacciones/{id}`. `scope="col"` en todas las tablas de headers.
+- **TopBar búsqueda Finanzas:** debounce 200ms → filtra localmente `finMovimientosAll` + `finNotas` + `finObjetivos`; dropdown con secciones Movimientos/Objetivos/Notas; se cierra al hacer click fuera o al seleccionar resultado. `searchInputRef` prop en TopBar para focus programático.
+- **Mobile tabs:** chip bar fija en `< md` con las 5 tabs (Dash/Anual/FIRE/Ahorro/Datos); accent activo; bottom padding en centro para no tapar contenido.
+- **Panel derecho bottom sheet:** visible en `lg` (entre `md` y `xl`) como panel flotante en esquina inferior derecha; muestra el panel derecho de la tab activa.
+- **DatosTab virtualización:** `@tanstack/react-virtual` — solo renderiza las filas visibles; scroll container separado con `maxHeight: calc(100vh - 280px)`; padding rows top/bottom para altura total correcta.
+- **DatosTab tab order:** `tabIndex={-1}` en `<select>` y botón delete de filas no en edición; evita que Tab cicle por centenas de celdas.
+- **Ctrl+M atajos Finanzas:** sección dinámica en TweaksPanel muestra atajos globales + del tab activo; handlers en `FinanzasScreen`: `N` → nuevo movimiento, `1–5` → cambiar tab, `← →` → mes (en dashboard), `/` → focus buscador.
+- **Focus trap MovementModal:** `containerRef` en `<form>`; cicla Tab/Shift-Tab dentro del modal; retorna focus al trigger al cerrar; `role="dialog"` + `aria-modal`.
+- **Backend — PATCH /fin/categorias/{id}:** renombrar, cambiar color o tipo de una categoría de finanzas; 409 si nombre duplicado.
+- **Backend — GET /fin/movimientos/duplicados?ventana_horas=24:** detecta movimientos con mismo tipo/monto/categoría dentro de una ventana de horas.
+- **Backend — GET /fin/export/csv:** descarga CSV completo del histórico de movimientos (Content-Disposition attachment, UTF-8 BOM).
+- **Backend — POST /fin/import/csv:** importa lista de filas `{tipo, monto, fecha, descripcion, categoria_nombre?, cuenta_nombre?, moneda?, nota?, cuotas?}`; auto-crea categorías inexistentes; devuelve cantidad importada y movimientos creados.
+- **Backend — paginación opt-in:** `GET /fin/movimientos?limit=N&offset=M`; sin params = histórico completo (no rompe Anual/FIRE/Ahorro).
+- **Backend — bulk ops:** `PATCH /fin/movimientos/bulk` (lista `[{id, ...campos}]`) y `DELETE /fin/movimientos/bulk` (lista `{ids: [...]}`).
+- **Backend — ledger instrumentos:** tabla `fin_transacciones_instrumento`; endpoints `GET /fin/instrumentos/{id}/transacciones`, `POST /fin/instrumentos/{id}/transacciones`, `DELETE /fin/transacciones/{trans_id}`.
+- **Backend — emergencia deprecated:** `GET /fin/emergencia` marcado `deprecated=True` en FastAPI; respuesta incluye `_deprecated: true`.
+- **Bot — fecha en captura `$:`:** parser detecta `ayer`, `anteayer`, `hoy`, `DD/MM`, `DD-MM-YYYY` en cualquier posición; sobreescribe la fecha del movimiento.
+- **Bot — cuotas en captura `$:`:** detecta `cuotas:N` o `c:N` en el texto; incluye `cuotas` en el payload POST.
+- **Bot — resumen semanal:** `resumen_semanal_finanzas` como job diario que sólo ejecuta si `weekday() == 0` (lunes); envía `_build_mes` del mes actual a las 9:00 vía `job_queue`.
+
+### Estado implementado (junio 2026 — modelo ahorro por categoría)
+
+- **Migración** (`database.py` → `_migrate_fin_categorias_objetivos`): columnas `oculta`, `objetivo_id`; seed FIRE; objetivo **Fondo de emergencia**; Emergencia legacy `oculta=1`.
+- **Backend** (`crud.py`): sync categoría al crear/eliminar objetivo; `fin_obtener_emergencia_saldo` por categoría del objetivo; protección PATCH/DELETE categorías reservadas.
+- **Frontend:** `FireTab`/`FireRightPanel`/`AhorroRightPanel` usan cat. `FIRE`; `AhorroTab` panel Reparto; `finCategorias.js` reservadas; store refresca categorías tras CRUD objetivos.
+- **Bot:** `/ahorro` y `/objetivo` por categoría homónima; categorías ocultas filtradas en teclados.
+- **Dashboard emergencia:** `fetchFinEmergencia` → endpoint deprecated que ya suma movimientos de la categoría del objetivo seed.
+
 ### Deuda conocida
 
 | Ítem | Detalle |
 |------|---------|
-| Emergencia → objetivo | Migración pendiente (`GET /fin/emergencia` sigue en código) |
+| Migración `Ahorro` | Usuarios con movimientos en categoría legacy `Ahorro` deben reasignarlos manualmente a `FIRE` u objetivo |
+| `GET /fin/emergencia` | Deprecated pero el dashboard aún lo consume (saldo correcto vía objetivo) |
 | Instrumentos avanzados | Ventas parciales, splits, dividendos |
-| Dual schema movimientos | `type/amount/cat` vs `tipo/monto/categoria_nombre` — `normalizeMovimiento()` existe pero no se aplica en todos los consumidores |
-| TopBar búsqueda | `searchQuery` en `FinanzasScreen` existe pero no filtra nada todavía |
+| Dual schema movimientos | `type/amount/cat` vs `tipo/monto/categoria_nombre` — fallbacks en consumidores; optimistic add en offline sigue usando shape legacy |
 | Campana notificaciones | Badge visual, sin handler (requiere `fin_alertas`) |
+| Atajos teclado avanzados | Vi/Ve/C (Dashboard), Ctrl+S/Supr (Datos), I/E (Ahorro/FIRE) — pendiente de levantar estado a store |
+| Fusionar categorías | Renombrar sí; merge de dos categorías en una — pendiente |
 
 ---
 
 ## 8. Checklist para agentes
 
-1. Leer sección relevante en `Prompt.md`.
+1. Leer `../CLAUDE.md` (resumen) y este archivo (detalle).
 2. Confirmar si la tab usa `finMovimientos` (mes) vs `finMovimientosAll` (histórico).
-3. Respetar `isTransferencia` y categoría exacta `Ahorro`.
+3. Respetar `isTransferencia`; cajón FIRE = cat. `FIRE`; objetivo = cat. con mismo nombre que `fin_objetivos.nombre`.
 4. Normalizar campos API/mock al leer y escribir.
 5. Mantener patrón optimista en `useStore.js`.
 6. Panel derecho solo en `xl+` — probar layout sin él.
@@ -324,6 +381,10 @@ project/frontend/src/screens/FinanzasScreen.jsx
 project/frontend/src/components/finanzas/
 project/frontend/src/store/useStore.js
 project/frontend/src/data/finanzas.js
+project/frontend/src/data/finCategorias.js
+project/frontend/src/data/finCategoriaColors.js
+project/frontend/src/components/finanzas/DatosRightPanel.jsx
+project/frontend/src/components/finanzas/EditFinCategoriaModal.jsx
 project/frontend/src/index.css           # .panel-strong, .anim-card-in, .panel-scroll
 project/app/main.py                      # rutas /fin/*
 project/app/db/crud.py

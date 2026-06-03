@@ -42,17 +42,18 @@ export default function FinanzasLeftPanel() {
   const finMovimientos   = useStore(s => s.finMovimientos)
   const finConfig        = useStore(s => s.finConfig)
   const fetchDolarCotizacion = useStore(s => s.fetchDolarCotizacion)
-  const updateFinCuenta    = useStore(s => s.updateFinCuenta)
-  const createFinCuenta    = useStore(s => s.createFinCuenta)
-  const editFinCuentaMeta  = useStore(s => s.editFinCuentaMeta)
-  const deleteFinCuenta    = useStore(s => s.deleteFinCuenta)
+  const createFinCuenta       = useStore(s => s.createFinCuenta)
+  const editFinCuentaMeta     = useStore(s => s.editFinCuentaMeta)
+  const deleteFinCuenta       = useStore(s => s.deleteFinCuenta)
+  const recalcularFinSaldos   = useStore(s => s.recalcularFinSaldos)
+  const showToast             = useStore(s => s.showToast)
   const agendaTareas       = useStore(s => s.agendaTareas)
 
   const [configOpen, setConfigOpen] = useState(false)
   const [refreshState, setRefreshState] = useState('idle')
-  const [saldoEdits, setSaldoEdits] = useState({})
+  const [recalcState, setRecalcState] = useState('idle')
 
-  const EMPTY_CUENTA = { nombre: '', tipo: 'wallet', color: BRANCH_COLORS[0], initials: '' }
+  const EMPTY_CUENTA = { nombre: '', tipo: 'wallet', color: BRANCH_COLORS[0], initials: '', saldo_ars: '', saldo_usd: '' }
   const [newOpen, setNewOpen] = useState(false)
   const [newForm, setNewForm] = useState(EMPTY_CUENTA)
   const [editId, setEditId] = useState(null)
@@ -331,33 +332,19 @@ export default function FinanzasLeftPanel() {
               </div>
             </div>
 
-            {/* Account balances + CRUD */}
+            {/* Cuentas + saldos (derivados de movimientos) */}
             <div>
-              <div className="label mb-2">{t(lang, 'finSaldosCuenta')}</div>
+              <div className="label mb-1">{t(lang, 'finSaldosCuenta')}</div>
+              <p className="text-[10px] mb-2 leading-snug" style={{ color: 'var(--subtext)' }}>
+                Los saldos se calculan desde tus movimientos. Para corregir, cargá un ingreso o gasto (categoría Ajuste).
+              </p>
               <div className="flex flex-col gap-2">
                 {cuentas.flatMap(g => g.items ?? []).map(cuenta => {
-                  const sEdit = saldoEdits[cuenta.id] ?? {}
-                  const arsVal = sEdit.ars ?? ''
-                  const usdVal = sEdit.usd ?? ''
-                  const hasUSD = (cuenta.usd ?? 0) > 0 || usdVal !== ''
+                  const hasUSD = (cuenta.usd ?? 0) > 0
                   const isEditing = editId === cuenta.id
                   const isDeleting = deleteConfirm === cuenta.id
 
                   const inputStyle = { borderColor: 'var(--border)', background: 'var(--bg)', color: 'var(--text)' }
-
-                  const setSaldoEdit = (field, val) =>
-                    setSaldoEdits(prev => ({ ...prev, [cuenta.id]: { ...(prev[cuenta.id] ?? {}), [field]: val } }))
-
-                  const handleSaldoSave = () => {
-                    const newArs = parseFloat(String(arsVal).replace(',', '.'))
-                    const newUsd = parseFloat(String(usdVal).replace(',', '.'))
-                    updateFinCuenta(
-                      cuenta.id,
-                      isNaN(newArs) ? (cuenta.ars ?? 0) : newArs,
-                      isNaN(newUsd) ? (cuenta.usd ?? 0) : newUsd,
-                    )
-                    setSaldoEdits(prev => { const n = { ...prev }; delete n[cuenta.id]; return n })
-                  }
 
                   const startEdit = () => {
                     setEditForm({ nombre: cuenta.name, tipo: cuenta.tipo ?? 'wallet', color: cuenta.color ?? BRANCH_COLORS[0], initials: cuenta.initials ?? '' })
@@ -370,8 +357,6 @@ export default function FinanzasLeftPanel() {
                     editFinCuentaMeta(cuenta.id, editForm.nombre.trim(), editForm.tipo, editForm.color, editForm.initials.slice(0, 3).toUpperCase())
                     setEditId(null)
                   }
-
-                  const dirty = arsVal !== '' || usdVal !== ''
 
                   return (
                     <div key={cuenta.id} className="flex flex-col gap-1 pb-2" style={{ borderBottom: '1px solid var(--border)' }}>
@@ -388,6 +373,7 @@ export default function FinanzasLeftPanel() {
                         </span>
                         <span className="text-[10px] mono tnum shrink-0 mr-1" style={{ color: 'var(--subtext)' }}>
                           {fmtARS(cuenta.ars ?? 0)}
+                          {hasUSD ? ` · ${fmtUSD(cuenta.usd ?? 0)}` : ''}
                         </span>
                         <button type="button" onClick={startEdit} title="Editar"
                           className="shrink-0 p-0.5 rounded transition-colors"
@@ -467,39 +453,26 @@ export default function FinanzasLeftPanel() {
                           </div>
                         </div>
                       )}
-
-                      {/* Saldo inputs */}
-                      <div className={hasUSD ? 'grid grid-cols-2 gap-1.5' : 'flex gap-1.5'}>
-                        <input type="number" value={arsVal}
-                          onChange={e => setSaldoEdit('ars', e.target.value)}
-                          placeholder={`ARS ${Math.round(cuenta.ars ?? 0)}`}
-                          className="min-w-0 w-full px-2 py-1 rounded-lg border outline-none text-[11px] mono tnum"
-                          style={inputStyle}
-                          onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
-                          onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
-                        />
-                        {hasUSD && (
-                          <input type="number" value={usdVal}
-                            onChange={e => setSaldoEdit('usd', e.target.value)}
-                            placeholder={`USD ${cuenta.usd ?? 0}`}
-                            className="min-w-0 w-full px-2 py-1 rounded-lg border outline-none text-[11px] mono tnum"
-                            style={inputStyle}
-                            onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
-                            onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
-                          />
-                        )}
-                      </div>
-                      {dirty && (
-                        <button type="button" onClick={handleSaldoSave}
-                          className="w-full py-1 rounded-lg text-[11px] font-semibold transition-all"
-                          style={{ background: 'var(--cta-bg)', color: 'var(--cta-text)', border: 'none' }}>
-                          OK
-                        </button>
-                      )}
                     </div>
                   )
                 })}
               </div>
+
+              <button
+                type="button"
+                disabled={recalcState === 'loading'}
+                onClick={async () => {
+                  setRecalcState('loading')
+                  const ok = await recalcularFinSaldos()
+                  setRecalcState(ok ? 'ok' : 'err')
+                  showToast(ok ? 'Saldos recalculados desde movimientos' : 'No se pudo recalcular', ok ? 'success' : 'error')
+                  setTimeout(() => setRecalcState('idle'), 2000)
+                }}
+                className="mt-2 w-full py-1.5 rounded-lg text-[11px] font-medium border transition-colors"
+                style={{ borderColor: 'var(--border)', color: 'var(--subtext)', background: 'transparent' }}
+              >
+                {recalcState === 'loading' ? 'Recalculando…' : 'Recalcular saldos desde movimientos'}
+              </button>
 
               {/* Nueva cuenta */}
               <button type="button" onClick={() => { setNewOpen(v => !v); setNewForm(EMPTY_CUENTA) }}
@@ -544,12 +517,40 @@ export default function FinanzasLeftPanel() {
                       />
                     ))}
                   </div>
+                  <p className="text-[10px]" style={{ color: 'var(--subtext)' }}>Saldo inicial (opcional, crea movimientos)</p>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <input
+                      type="number"
+                      value={newForm.saldo_ars}
+                      onChange={e => setNewForm(p => ({ ...p, saldo_ars: e.target.value }))}
+                      placeholder="ARS 0"
+                      className="min-w-0 w-full px-2 py-1 rounded-lg border outline-none text-[11px] mono tnum"
+                      style={{ borderColor: 'var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
+                    />
+                    <input
+                      type="number"
+                      value={newForm.saldo_usd}
+                      onChange={e => setNewForm(p => ({ ...p, saldo_usd: e.target.value }))}
+                      placeholder="USD 0"
+                      className="min-w-0 w-full px-2 py-1 rounded-lg border outline-none text-[11px] mono tnum"
+                      style={{ borderColor: 'var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
+                    />
+                  </div>
                   <div className="flex gap-1.5">
                     <button type="button"
                       disabled={!newForm.nombre.trim()}
                       onClick={() => {
                         if (!newForm.nombre.trim()) return
-                        createFinCuenta(newForm.nombre.trim(), newForm.tipo, newForm.color, newForm.initials.slice(0, 3).toUpperCase() || newForm.nombre.slice(0, 2).toUpperCase())
+                        const ars = parseFloat(String(newForm.saldo_ars).replace(',', '.'))
+                        const usd = parseFloat(String(newForm.saldo_usd).replace(',', '.'))
+                        createFinCuenta(
+                          newForm.nombre.trim(),
+                          newForm.tipo,
+                          newForm.color,
+                          newForm.initials.slice(0, 3).toUpperCase() || newForm.nombre.slice(0, 2).toUpperCase(),
+                          isNaN(ars) ? 0 : ars,
+                          isNaN(usd) ? 0 : usd,
+                        )
                         setNewOpen(false)
                         setNewForm(EMPTY_CUENTA)
                       }}

@@ -1,12 +1,20 @@
 # CLAUDE.md
 
-Guía para agentes en este repositorio. **Arquitectura detallada y estado implementado:** `project/README.md`. **Specs de producto (tabs Finanzas, temas, Hábitos, etc.):** `Prompt.md`.
+Guía para agentes en este repositorio.
+
+| Documento | Contenido |
+|-----------|-----------|
+| `project/README.md` | Arquitectura, estado implementado, mapa de archivos |
+| `project/Finanzas.md` | Finanzas: reglas, API, componentes, bot |
+| `project/Finanzas-Roadmap.md` | Pendientes y deuda Finanzas |
+| `project/Boveda.md`, `Agenda.md`, `Habitos.md`, `Bot.md` | Otros módulos (en `project/` si existen) |
 
 ---
 
 ## Commands
 
 ### Backend (FastAPI)
+
 ```bash
 cd project
 .\venv\Scripts\activate          # Windows
@@ -14,6 +22,7 @@ uvicorn app.main:app --reload --port 8765    # API SGR (default :8765, no :8000)
 ```
 
 ### Frontend (React/Vite)
+
 ```bash
 cd project/frontend
 npm install
@@ -22,6 +31,7 @@ npm run build    # → frontend/dist
 ```
 
 ### Telegram Bot (única pieza "online")
+
 ```bash
 cd project
 python mybot/bot.py   # TELEGRAM_BOT_TOKEN en .env — API en :8765 (API_BASE_URL)
@@ -29,18 +39,28 @@ python mybot/bot.py   # TELEGRAM_BOT_TOKEN en .env — API en :8765 (API_BASE_UR
 
 ### Puertos (local)
 
-| Qué | Puerto / URL |
-|-----|----------------|
-| API SGR | **8765** — `uvicorn … --port 8765`, `.exe`, `app/config.py` |
+
+| Qué        | Puerto / URL                                                          |
+| ---------- | --------------------------------------------------------------------- |
+| API SGR    | **8765** — `uvicorn … --port 8765`, `.exe`, `app/config.py`           |
 | Vite (dev) | **5173** — llama a `http://127.0.0.1:8765` (`frontend/src/config.js`) |
-| Override | `SGR_PORT`, `API_BASE_URL` en `.env` — ver `project/.env.example` |
+| Override   | `SGR_PORT`, `API_BASE_URL` en `.env` — ver `project/.env.example`     |
+
 
 No usar `:8000` por defecto (conflicto frecuente con otros proyectos en la misma máquina).
 
 SQLite y migraciones: `init_db()` al arrancar el backend (`app/db/database.py`).
 
+### Datos de demo (opcional)
+
+```bash
+cd project
+python seed_demo.py   # ADVERTENCIA: borra toda la DB y inserta datos de ejemplo
+```
+
 ### Ejecutable Windows
-Ver **`project/BUILD.md`** — PyInstaller desde `project/` → `dist/SGR/`; abre **`http://127.0.0.1:8765/`**; datos en `project/database/` (fuera de `dist/`). El bot **no** va en el `.exe` (proceso aparte, misma API `:8765`).
+
+Ver `project/BUILD.md` — PyInstaller desde `project/` → `dist/SGR/`; abre `http://127.0.0.1:8765/`; datos en `project/database/` (fuera de `dist/`). El bot **no** va en el `.exe` (proceso aparte, misma API `:8765`).
 
 ---
 
@@ -48,12 +68,14 @@ Ver **`project/BUILD.md`** — PyInstaller desde `project/` → `dist/SGR/`; abr
 
 **SGR** — app local full-stack en español con cuatro módulos principales:
 
-| Módulo | Ruta | Rol |
-|--------|------|-----|
-| **Bóveda** | `/` | Captura texto/link/foto en categorías jerárquicas; grafo D3 o lista |
-| **Finanzas** | `/finanzas` | Movimientos, dashboard mensual, Anual, FIRE, Ahorro, Datos |
-| **Agenda** | `/agenda` | Calendario (Mes/Semana), HOY + time blocking, Tareas por listas, Revisión semanal |
-| **Hábitos** | `/habitos` | Grilla mensual, Progreso (heatmap/stats/momentum), Historial |
+
+| Módulo       | Ruta        | Rol                                                                               |
+| ------------ | ----------- | --------------------------------------------------------------------------------- |
+| **Bóveda**   | `/`         | Captura texto/link/foto en categorías jerárquicas; grafo D3 o lista               |
+| **Finanzas** | `/finanzas` | Movimientos, dashboard mensual, Anual, FIRE, Ahorro, Datos                        |
+| **Agenda**   | `/agenda`   | Calendario (Mes/Semana), HOY + time blocking, Tareas por listas, Revisión semanal |
+| **Hábitos**  | `/habitos`  | Grilla mensual, Progreso (heatmap/stats/momentum), Historial                      |
+
 
 Referencia visual estática: `ClaudeDesign/` (no es el runtime). Implementación: `project/`.
 
@@ -79,9 +101,10 @@ project/
 │   ├── screens/             # Browse, Finanzas, Agenda, Habitos, Detail, Settings, Capture (legacy)
 │   ├── components/          # Bóveda + finanzas/* + agenda/* + habitos/*
 │   ├── store/useStore.js
-│   ├── data/finanzas.js     # Mock + isTransferencia
+│   ├── data/finanzas.js, finCategorias.js, finCategoriaColors.js
 │   └── utils/themes.js, i18n.js, detectType.js
-├── mybot/bot.py
+├── mybot/bot.py, finanzas_handlers.py
+├── seed_demo.py           # demo: vacía DB + seed (no producción)
 ├── database/app.db
 └── uploads/
 ```
@@ -106,10 +129,23 @@ Modal Hábitos en `HabitosScreen`: `NuevoHabitoModal` (TopBar CTA o botón del p
 ### Finanzas (resumen)
 
 - **Movimientos:** `fin_movimientos`; mes actual → `finMovimientos`; histórico → `finMovimientosAll`.
-- **Reglas:** `isTransferencia()` excluye categoría transferencia; categoría exacta **`Ahorro`** para ahorro/objetivos (descripción = nombre objetivo).
-- **Tabs:** ver tabla en `project/README.md`. Componentes en `components/finanzas/` (`DatosTab`, `AhorroTab`, `FireTab`, `AnualTab`, …).
-- **API:** prefijo `/fin/*` (cuentas, categorías, movimientos, config, notas, instrumentos, objetivos, fire-filas, inflación).
-- **Dual schema movimientos:** mock usa `type`/`amount`/`cat`; API usa `tipo`/`monto`/`categoria_nombre` — normalizar al leer/escribir.
+- **Transferencias:** `isTransferencia()` — categoría `transferencia` (case-insensitive); excluida de ingresos/gastos y KPIs del mes.
+- **Asignación por categoría (modelo actual):**
+  - **`FIRE`** — única categoría que alimenta el plan FIRE (`contribucionFire` / tab FIRE).
+  - **Objetivos** — cada objetivo crea categoría **homónima** (`fin_categorias.objetivo_id`); el movimiento se asigna solo por categoría, no por descripción.
+  - **Gasto** suma al cajón; **ingreso** resta (puede quedar negativo).
+  - Sistema: `Transferencia`, `Ajuste`, `FIRE` — no renombrar/eliminar desde UI. Al borrar objetivo → categoría `oculta=1`.
+  - Legacy: categoría `Ahorro` (modelo viejo) — migración manual del usuario.
+  - Emergencia: objetivo seed **Fondo de emergencia** + categoría vinculada; `GET /fin/emergencia` deprecated.
+- **Tab Ahorro:** reparto FIRE + objetivos + **líquido sin invertir** (suma cajones − costo instrumentos); portafolio + ledger.
+- **Saldos cuentas:** derivados de movimientos; saldo inicial vía movimiento cat. **Ajuste**; `POST /fin/recalcular-saldos`; `PATCH /fin/cuentas/{id}/saldo` → 410.
+- **Helpers:** `data/finanzas.js` (`contribucionCategoria`, `acumuladoPorCategoriaNombre`, …); `data/finCategorias.js` (`isFinCategoriaReservada`); colores en `finCategoriaColors.js`.
+- **Tabs:** dashboard | anual | fire | ahorro | datos — ver `project/README.md`. Datos: CRUD categorías en `DatosRightPanel`.
+- **API:** `/fin/*` — categorías con `?include_ocultas=`, objetivos sin PATCH de `nombre`, emergencia deprecated.
+- **Dual schema:** algunos consumidores aceptan `type`/`amount`/`cat`; API usa `tipo`/`monto`/`categoria_nombre` — usar `normalizeMovimiento()`.
+- **Dólar:** `GET /fin/dolar/cotizacion` → cache en `fin_config` (`dolar_mep`, `dolar_oficial_compra`); UI usa MEP con fallback.
+- **Demo opcional:** `project/seed_demo.py` — **borra** la DB y rellena datos de ejemplo (aún usa cat. `Ahorro` legacy; no alineado al modelo nuevo).
+- **Bot Telegram:** `mybot/finanzas_handlers.py` — `/mov`, `/mes`, `/ahorro` (FIRE + objetivos por categoría), `/objetivo`, captura `$:`; categorías `oculta` no en teclados. Ver `project/Finanzas.md` §6.
 
 ### Agenda (resumen)
 
@@ -137,12 +173,14 @@ Modal Hábitos en `HabitosScreen`: `NuevoHabitoModal` (TopBar CTA o botón del p
 
 `utils/themes.js`: **6 temas** + **tonos** (`TONES`) + **6 pares tipográficos** (`FONT_PAIRS`). Vars CSS en `document.documentElement`; Tailwind alias `app-*`. Arcoíris cambia `--accent` por ruta:
 
-| Ruta | Accent |
-|------|--------|
+
+| Ruta         | Accent            |
+| ------------ | ----------------- |
 | `/` (Bóveda) | violeta `#7c3aed` |
-| `/finanzas` | ámbar `#d97706` |
-| `/agenda` | azul `#2563eb` |
-| `/habitos` | verde `#059669` |
+| `/finanzas`  | ámbar `#d97706`   |
+| `/agenda`    | azul `#2563eb`    |
+| `/habitos`   | verde `#059669`   |
+
 
 Lógica en `Layout.jsx` (`ARCOIRIS_ACCENTS`).
 
@@ -159,6 +197,8 @@ Lógica en `Layout.jsx` (`ARCOIRIS_ACCENTS`).
 
 ## Antes de implementar
 
-1. Leer la sección relevante en **`Prompt.md`** (producto, sin duplicar aquí).
-2. Leer **`project/README.md`** para estado real (qué está hecho / pendiente).
-3. No re-explorar el árbol completo si el cambio es acotado a rutas ya documentadas allí.
+1. Leer `project/README.md` (arquitectura y estado global).
+2. Si el cambio es Finanzas: `project/Finanzas.md` + pendientes en `project/Finanzas-Roadmap.md`.
+3. No re-explorar el árbol completo si el cambio es acotado a rutas ya documentadas en esos archivos.
+4. Finanzas: respetar `isTransferencia`, cajón FIRE = cat. `FIRE`, objetivo = cat. con mismo nombre; decidir si la tab usa `finMovimientos` (mes) o `finMovimientosAll` (histórico).
+

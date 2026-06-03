@@ -104,7 +104,11 @@ function DesktopGraph() {
         <div className="absolute top-0 bottom-0" style={{ left: 300, right: 425 }}>
           <NetworkGraph onOpenHoja={(id) => setOpenHojaId(id)} />
         </div>
-        <LeftPanel searchQuery={searchQuery} onOpenHoja={(id) => setOpenHojaId(id)} />
+        <LeftPanel
+          searchQuery={searchQuery}
+          onOpenHoja={(id) => setOpenHojaId(id)}
+          onHojaDeleted={(id) => { if (openHojaId === id) setOpenHojaId(null) }}
+        />
         <RightPanel openHojaId={openHojaId} onClose={() => setOpenHojaId(null)} />
       </div>
     </div>

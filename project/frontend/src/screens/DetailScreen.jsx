@@ -6,7 +6,7 @@ import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import { useStore } from '../store/useStore'
 import LinkPreview from '../components/LinkPreview'
-import { BRANCH_COLORS } from '../utils/themes'
+import { getCategoriaColor } from '../utils/categoriaColors'
 import { getLeafIcon } from '../utils/leafIcons'
 import { extractTags } from '../utils/tags'
 import { DEBUG } from '../config'
@@ -46,14 +46,7 @@ export default function DetailScreen() {
 
   const hoja = hojas.find(h => h.id === parseInt(id))
 
-  // Category color
-  const rootCats = categorias.filter(c => !c.padre_id)
-  const colorMap = {}
-  rootCats.forEach((c, i) => { colorMap[c.id] = BRANCH_COLORS[i % BRANCH_COLORS.length] })
-  categorias.filter(c => c.padre_id).forEach(c => {
-    colorMap[c.id] = colorMap[c.padre_id] || 'var(--accent)'
-  })
-  const color = hoja ? (colorMap[hoja.categoria_id] || 'var(--accent)') : 'var(--accent)'
+  const color = hoja ? getCategoriaColor(categorias, hoja.categoria_id) : 'var(--accent)'
 
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [isDirty,       setIsDirty]       = useState(false)

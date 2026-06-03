@@ -1,11 +1,15 @@
 import { useState, useCallback, useMemo } from 'react'
 import { ChevronDown, ChevronRight, Maximize2, Minimize2, Plus, FolderPlus, ChevronsUpDown } from 'lucide-react'
 import { useStore } from '../store/useStore'
-import { BRANCH_COLORS } from '../utils/themes'
 import { extractTags } from '../utils/tags'
+import { buildCategoriaColorMap } from '../utils/categoriaColors'
 import { t } from '../utils/i18n'
 import { getLeafIcon } from '../utils/leafIcons'
 import ScrollArea from './ScrollArea'
+import AgendaContextMenu from './agenda/AgendaContextMenu'
+import EditCategoriaModal from './EditCategoriaModal'
+import EditHojaModal from './EditHojaModal'
+import { getHojaDisplayTitle } from '../utils/hojaUtils'
 
 const LS_TREE_KEY = 'sgr-boveda-tree-open'
 
@@ -46,15 +50,17 @@ function Highlight({ text, query }) {
 }
 
 // ── Note card ─────────────────────────────────────────────────────────────────
-function NoteCard({ hoja, dotColor, onClick, query }) {
+function NoteCard({ hoja, dotColor, onClick, onContextMenu, query }) {
   const tags     = extractTags(hoja.contenido, hoja.apuntes)
-  const title    = hoja.contenido.replace(/https?:\/\/\S+/g, '').trim().slice(0, 80) || hoja.contenido.slice(0, 80)
+  const title    = getHojaDisplayTitle(hoja).slice(0, 80)
   const color    = dotColor || 'var(--accent)'
   const LeafIcon = getLeafIcon(hoja.icono, hoja.tipo)
 
   return (
     <button
+      type="button"
       onClick={onClick}
+      onContextMenu={e => onContextMenu?.(e, hoja)}
       className="group w-full text-left rounded-xl px-2.5 py-1.5 flex flex-col gap-1 transition-all duration-150"
       style={{ background: 'transparent' }}
       onMouseEnter={e => e.currentTarget.style.background = color + '12'}
@@ -90,8 +96,9 @@ function NoteCard({ hoja, dotColor, onClick, query }) {
 
 // ── Category tree item ────────────────────────────────────────────────────────
 function CategoryItem({
-  cat, allCats, hojas, color, depth = 0, onNoteClick,
-  openState, toggleOpen, query, onAddHoja, onAddSubcat,
+  cat, allCats, hojas, color, colorMap, depth = 0, onNoteClick,
+  openState, toggleOpen, query, onAddHoja,
+  onContextMenu, onHojaContextMenu, subcatFormForId, onSubcatFormClose,
 }) {
   const crearCategoria = useStore(s => s.crearCategoria)
 
@@ -101,17 +108,21 @@ function CategoryItem({
   const count       = catHojas.length
   const open        = openState.has(cat.id)
 
-  // Inline subcategory form
-  const [addingSubcat, setAddingSubcat] = useState(false)
-  const [subcatName, setSubcatName]     = useState('')
+  const [addingSubcatLocal, setAddingSubcatLocal] = useState(false)
+  const [subcatName, setSubcatName]               = useState('')
+  const showSubcatForm = addingSubcatLocal || subcatFormForId === cat.id
+
+  const closeSubcatForm = () => {
+    setAddingSubcatLocal(false)
+    setSubcatName('')
+    onSubcatFormClose?.()
+  }
 
   const handleAddSubcat = async () => {
     const nombre = subcatName.trim()
     if (!nombre) return
     await crearCategoria(nombre, cat.id)
-    setSubcatName('')
-    setAddingSubcat(false)
-    // Open parent to show new subcat
+    closeSubcatForm()
     if (!open) toggleOpen(cat.id)
   }
 
@@ -124,6 +135,7 @@ function CategoryItem({
           background: open ? `color-mix(in oklch, ${color} 10%, transparent)` : 'transparent',
           borderLeft: open ? `2px solid ${color}` : '2px solid transparent',
         }}
+        onContextMenu={e => onContextMenu?.(e, cat)}
         onMouseEnter={e => { if (!open) e.currentTarget.style.background = 'color-mix(in oklch, var(--surface) 60%, transparent)' }}
         onMouseLeave={e => { if (!open) e.currentTarget.style.background = 'transparent' }}
       >
@@ -164,7 +176,7 @@ function CategoryItem({
           </button>
           <button
             title="Nueva subcategoría"
-            onClick={() => { setAddingSubcat(v => !v); if (!open) toggleOpen(cat.id) }}
+            onClick={() => { setAddingSubcatLocal(true); if (!open) toggleOpen(cat.id) }}
             className="w-5 h-5 rounded grid place-items-center transition-colors"
             style={{ color: 'var(--subtext)' }}
             onMouseEnter={e => { e.currentTarget.style.color = 'var(--text)'; e.currentTarget.style.background = 'var(--surface)' }}
@@ -176,14 +188,17 @@ function CategoryItem({
       </div>
 
       {/* Subcategory creation form */}
-      {addingSubcat && (
+      {showSubcatForm && (
         <div className="flex gap-1 mt-0.5" style={{ paddingLeft: 6 + (depth + 1) * 12 }}>
           <input
             autoFocus
             type="text"
             value={subcatName}
             onChange={e => setSubcatName(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') handleAddSubcat(); if (e.key === 'Escape') setAddingSubcat(false) }}
+            onKeyDown={e => {
+              if (e.key === 'Enter') handleAddSubcat()
+              if (e.key === 'Escape') closeSubcatForm()
+            }}
             placeholder="Nombre de subcategoría…"
             className="flex-1 text-[12px] px-2 py-1 rounded-lg border outline-none bg-transparent"
             style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
@@ -201,17 +216,25 @@ function CategoryItem({
           {hasChildren && subcats.map(sub => (
             <CategoryItem
               key={sub.id}
-              cat={sub} allCats={allCats} hojas={hojas} color={color}
+              cat={sub} allCats={allCats} hojas={hojas}
+              color={colorMap[sub.id] || color}
+              colorMap={colorMap}
               depth={depth + 1} onNoteClick={onNoteClick}
               openState={openState} toggleOpen={toggleOpen}
-              query={query} onAddHoja={onAddHoja} onAddSubcat={onAddSubcat}
+              query={query} onAddHoja={onAddHoja}
+              onContextMenu={onContextMenu}
+              onHojaContextMenu={onHojaContextMenu}
+              subcatFormForId={subcatFormForId}
+              onSubcatFormClose={onSubcatFormClose}
             />
           ))}
           {catHojas.length > 0 && (
             <div className="space-y-0.5" style={{ paddingLeft: 6 + (depth + 1) * 12 }}>
               {catHojas.map(h => (
                 <NoteCard key={h.id} hoja={h} dotColor={color}
-                  onClick={() => onNoteClick(h.id)} query={query} />
+                  onClick={() => onNoteClick(h.id)}
+                  onContextMenu={onHojaContextMenu}
+                  query={query} />
               ))}
             </div>
           )}
@@ -222,14 +245,21 @@ function CategoryItem({
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
-export default function LeftPanel({ onOpenHoja, searchQuery = '' }) {
+export default function LeftPanel({ onOpenHoja, onHojaDeleted, searchQuery = '' }) {
   const hojas           = useStore(s => s.hojas)
   const categorias      = useStore(s => s.categorias)
   const lang            = useStore(s => s.lang)
   const openCaptureWith = useStore(s => s.openCaptureWith)
+  const eliminarHoja    = useStore(s => s.eliminarHoja)
+  const showToast       = useStore(s => s.showToast)
 
   const [expanded, setExpanded] = useState(false)
   const [openState, setOpenState] = useState(() => loadOpenState())
+  const [contextMenu, setContextMenu] = useState(null)
+  const [hojaMenu, setHojaMenu] = useState(null)
+  const [editCat, setEditCat] = useState(null)
+  const [editHoja, setEditHoja] = useState(null)
+  const [subcatFormFor, setSubcatFormFor] = useState(null)
 
   const toggleOpen = useCallback((catId) => {
     setOpenState(prev => {
@@ -242,14 +272,57 @@ export default function LeftPanel({ onOpenHoja, searchQuery = '' }) {
 
   const rootCats = useMemo(() => categorias.filter(c => !c.padre_id), [categorias])
 
-  const colorMap = useMemo(() => {
-    const map = {}
-    rootCats.forEach((c, i) => { map[c.id] = BRANCH_COLORS[i % BRANCH_COLORS.length] })
-    categorias.filter(c => c.padre_id).forEach(c => {
-      map[c.id] = map[c.padre_id] || 'var(--accent)'
-    })
-    return map
-  }, [rootCats, categorias])
+  const colorMap = useMemo(() => buildCategoriaColorMap(categorias), [categorias])
+
+  const openContextMenu = useCallback((e, cat) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setContextMenu({ x: e.clientX, y: e.clientY, cat })
+  }, [])
+
+  const buildContextItems = useCallback((cat) => [
+    {
+      label: 'Crear Hoja',
+      onClick: () => openCaptureWith(cat.id),
+    },
+    {
+      label: 'Crear Subcategoría',
+      onClick: () => {
+        setSubcatFormFor(cat.id)
+        setOpenState(prev => {
+          if (prev.has(cat.id)) return prev
+          const next = new Set(prev)
+          next.add(cat.id)
+          saveOpenState(next)
+          return next
+        })
+      },
+    },
+    {
+      label: 'Editar Categoría',
+      onClick: () => setEditCat(cat),
+    },
+  ], [openCaptureWith])
+
+  const openHojaContextMenu = useCallback((e, hoja) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setHojaMenu({ x: e.clientX, y: e.clientY, hoja })
+  }, [])
+
+  const buildHojaContextItems = useCallback((hoja) => [
+    { label: 'Editar Hoja', onClick: () => setEditHoja(hoja) },
+    {
+      label: 'Eliminar Hoja',
+      danger: true,
+      onClick: async () => {
+        if (!window.confirm('¿Eliminar esta hoja?')) return
+        await eliminarHoja(hoja.id)
+        onHojaDeleted?.(hoja.id)
+        showToast('Hoja eliminada', 'success')
+      },
+    },
+  ], [eliminarHoja, onHojaDeleted, showToast])
 
   const filteredHojas = useMemo(() =>
     searchQuery
@@ -336,15 +409,48 @@ export default function LeftPanel({ onOpenHoja, searchQuery = '' }) {
             allCats={categorias}
             hojas={filteredHojas}
             color={colorMap[cat.id]}
+            colorMap={colorMap}
             onNoteClick={(id) => onOpenHoja?.(id)}
             openState={openState}
             toggleOpen={toggleOpen}
             query={searchQuery}
             onAddHoja={handleAddHoja}
-            onAddSubcat={() => {}}
+            onContextMenu={openContextMenu}
+            onHojaContextMenu={openHojaContextMenu}
+            subcatFormForId={subcatFormFor}
+            onSubcatFormClose={() => setSubcatFormFor(null)}
           />
         ))}
       </ScrollArea>
+
+      {hojaMenu && (
+        <AgendaContextMenu
+          x={hojaMenu.x}
+          y={hojaMenu.y}
+          items={buildHojaContextItems(hojaMenu.hoja)}
+          onClose={() => setHojaMenu(null)}
+        />
+      )}
+
+      {contextMenu && (
+        <AgendaContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={buildContextItems(contextMenu.cat)}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      <EditCategoriaModal
+        cat={editCat}
+        color={editCat ? colorMap[editCat.id] : null}
+        onClose={() => setEditCat(null)}
+      />
+
+      <EditHojaModal
+        hoja={editHoja}
+        onClose={() => setEditHoja(null)}
+      />
     </div>
   )
 }

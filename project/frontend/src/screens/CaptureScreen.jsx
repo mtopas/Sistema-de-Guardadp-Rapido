@@ -6,7 +6,7 @@ import CategoryPicker from '../components/CategoryPicker'
 import IconPicker from '../components/IconPicker'
 import LinkPreview from '../components/LinkPreview'
 import { detectType } from '../utils/detectType'
-import { BRANCH_COLORS } from '../utils/themes'
+import { getCategoriaColor } from '../utils/categoriaColors'
 import { DEBUG } from '../config'
 
 export default function CaptureScreen() {
@@ -23,10 +23,9 @@ export default function CaptureScreen() {
   const [saving,      setSaving]      = useState(false)
   const textareaRef   = useRef(null)
 
-  // Derive accent color from selected category position
-  const rootCats  = categorias.filter(c => !c.padre_id)
-  const catIndex  = rootCats.findIndex(c => c.id === categoriaId)
-  const catColor  = catIndex >= 0 ? BRANCH_COLORS[catIndex % BRANCH_COLORS.length] : 'var(--accent)'
+  const catColor = categoriaId
+    ? getCategoriaColor(categorias, categoriaId)
+    : 'var(--accent)'
 
   const tipo  = detectType(contenido)
   const isUrl = tipo === 'link'

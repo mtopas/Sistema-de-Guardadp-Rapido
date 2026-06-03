@@ -1,8 +1,10 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
+import { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { Trash2 } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
 import { isTransferencia } from '../../data/finanzas'
+import { buildFinCategoriaColorByName, getFinCategoriaColor } from '../../data/finCategoriaColors'
 
 // Normalize field access across mock (type/amount/date/cat/desc/method) and API schemas
 function getVal(mov, field) {
@@ -68,21 +70,45 @@ const TH = {
   position: 'sticky',
   top: 0,
   background: 'var(--surface)',
-  zIndex: 1,
+  zIndex: 2,
+}
+
+// Porcentajes → ocupan todo el ancho del panel (antes: px fijos ~820px pegados a la izquierda)
+const COL_WIDTHS = ['10%', '9%', '11%', '6%', '12%', '12%', '32%', '6%', '2%']
+
+function ColGroup() {
+  return (
+    <colgroup>
+      {COL_WIDTHS.map((w, i) => (
+        <col key={i} style={{ width: w }} />
+      ))}
+    </colgroup>
+  )
+}
+
+const TABLE_STYLE = {
+  width: '100%',
+  borderCollapse: 'collapse',
+  tableLayout: 'fixed',
+  fontFamily: 'var(--font-mono)',
+  fontSize: 12,
 }
 
 export default function DatosTab() {
   const lang      = useStore(s => s.lang)
-  const movAll    = useStore(s => s.finMovimientosAll)
-  const fetchAll  = useStore(s => s.fetchFinMovimientosAll)
-  const updateMov = useStore(s => s.updateFinMovimiento)
-  const deleteMov = useStore(s => s.deleteFinMovimiento)
+  const movAll           = useStore(s => s.finMovimientosAll)
+  const finCategorias    = useStore(s => s.finCategorias)
+  const updateMov        = useStore(s => s.updateFinMovimiento)
+  const deleteMov        = useStore(s => s.deleteFinMovimiento)
+  const setFinSyncPaused = useStore(s => s.setFinSyncPaused)
 
-  useEffect(() => { fetchAll() }, [])
+  const catColorByName = useMemo(
+    () => buildFinCategoriaColorByName(finCategorias),
+    [finCategorias],
+  )
 
   const rows = useMemo(() =>
     movAll
-      .filter(m => !isTransferencia(m))
       .slice()
       .sort((a, b) => {
         const ts = v => { const d = new Date(v ?? 0); return isNaN(d) ? 0 : d.getTime() }
@@ -94,6 +120,11 @@ export default function DatosTab() {
   const [editing, setEditing] = useState(null) // { id, field }
   const [editVal, setEditVal] = useState('')
   const debounceRef = useRef(null)
+
+  useEffect(() => {
+    setFinSyncPaused(!!editing)
+    return () => setFinSyncPaused(false)
+  }, [editing, setFinSyncPaused])
 
   const startEdit = (mov, field) => {
     const raw = getVal(mov, field)
@@ -177,13 +208,21 @@ export default function DatosTab() {
         </td>
       )
     }
+    const catColor = field === 'cat' && val
+      ? getFinCategoriaColor(catColorByName, String(val), 0)
+      : null
     return (
       <td
         style={{ ...TD, cursor: 'text', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
         onClick={() => startEdit(mov, field)}
       >
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: val ? 'var(--text)' : 'var(--subtext)' }}>
-          {String(val) || '—'}
+        <span className="inline-flex items-center gap-1.5 min-w-0 max-w-full">
+          {catColor && (
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: catColor }} aria-hidden />
+          )}
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: val ? 'var(--text)' : 'var(--subtext)' }} className="truncate">
+            {String(val) || '—'}
+          </span>
         </span>
       </td>
     )
@@ -219,13 +258,14 @@ export default function DatosTab() {
     )
   }
 
-  const SelectCell = ({ mov, field, options }) => {
+  const SelectCell = ({ mov, field, options, tabIdx = 0 }) => {
     const val      = getVal(mov, field)
     const isIncome = val === 'income'
     return (
       <td style={TD}>
         <select
           value={val}
+          tabIndex={tabIdx}
           onChange={e => commitDirect(mov, field, e.target.value)}
           style={{
             ...INPUT,
@@ -242,13 +282,15 @@ export default function DatosTab() {
     )
   }
 
-  const DeleteCell = ({ mov }) => (
+  const DeleteCell = ({ mov, tabIdx = 0 }) => (
     <td style={{ ...TD, textAlign: 'center' }}>
       <button
+        tabIndex={tabIdx}
         onClick={() => deleteMov(mov.id)}
         style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--subtext)', padding: 4, lineHeight: 0 }}
         onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
         onMouseLeave={e => (e.currentTarget.style.color = 'var(--subtext)')}
+        aria-label="Eliminar movimiento"
       >
         <Trash2 size={13} />
       </button>
@@ -264,68 +306,109 @@ export default function DatosTab() {
     { value: 'USD', label: 'USD' },
   ]
 
+  const parentRef = useRef(null)
+  const VIRTUAL_THRESHOLD = 150
+  const useVirtual = rows.length > VIRTUAL_THRESHOLD
+
+  const virtualizer = useVirtualizer({
+    count: useVirtual ? rows.length : 0,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 34,
+    overscan: 15,
+  })
+  const virtualItems = useVirtual ? virtualizer.getVirtualItems() : []
+
+  useLayoutEffect(() => {
+    if (useVirtual && rows.length > 0) virtualizer.measure()
+  }, [rows.length, useVirtual, virtualizer])
+
+  const totalSize     = useVirtual ? virtualizer.getTotalSize() : 0
+  const paddingTop    = useVirtual && virtualItems.length > 0 ? (virtualItems[0]?.start ?? 0) : 0
+  const paddingBottom = useVirtual && virtualItems.length > 0
+    ? totalSize - (virtualItems[virtualItems.length - 1]?.end ?? totalSize)
+    : 0
+  // Si el viewport colapsa (solo maxHeight), el virtualizer devuelve 0 ítems → tabla vacía
+  const renderPlain = !useVirtual || virtualItems.length === 0
+
   return (
-    <div
-      className="panel-strong"
-      style={{ overflowX: 'auto', fontFamily: 'var(--font-mono)', fontSize: 12 }}
-    >
-      <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: 820 }}>
-        <colgroup>
-          <col style={{ width: 110 }} />  {/* fecha */}
-          <col style={{ width: 95  }} />  {/* tipo */}
-          <col style={{ width: 105 }} />  {/* monto */}
-          <col style={{ width: 68  }} />  {/* moneda */}
-          <col style={{ width: 120 }} />  {/* método */}
-          <col style={{ width: 130 }} />  {/* categoría */}
-          <col />                         {/* descripción — toma el resto */}
-          <col style={{ width: 68  }} />  {/* cuotas */}
-          <col style={{ width: 36  }} />  {/* delete */}
-        </colgroup>
-        <caption className="sr-only">Historial de movimientos</caption>
-        <thead>
-          <tr>
-            <th scope="col" style={TH}>{t(lang, 'colFecha')}</th>
-            <th scope="col" style={TH}>{t(lang, 'colTipo')}</th>
-            <th scope="col" style={{ ...TH, textAlign: 'right' }}>{t(lang, 'colMonto')}</th>
-            <th scope="col" style={TH}>{t(lang, 'colMoneda')}</th>
-            <th scope="col" style={TH}>{t(lang, 'colMetodo')}</th>
-            <th scope="col" style={TH}>{t(lang, 'colCategoria')}</th>
-            <th scope="col" style={TH}>{t(lang, 'colDesc')}</th>
-            <th scope="col" style={TH}>{t(lang, 'colCuotas')}</th>
-            <th scope="col" style={TH}></th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((mov, i) => (
-            <tr
-              key={mov.id}
-              style={{
-                borderBottom: '1px solid var(--border)',
-                background: i % 2 === 0
-                  ? 'transparent'
-                  : 'color-mix(in oklch, var(--surface) 35%, transparent)',
-              }}
-            >
-              <FechaCell  mov={mov} />
-              <SelectCell mov={mov} field="tipo"   options={tipoOptions}   />
-              <NumberCell mov={mov} />
-              <SelectCell mov={mov} field="moneda" options={monedaOptions} />
-              <TextCell   mov={mov} field="method" />
-              <TextCell   mov={mov} field="cat"    />
-              <TextCell   mov={mov} field="desc"   />
-              <TextCell   mov={mov} field="cuotas" />
-              <DeleteCell mov={mov} />
-            </tr>
-          ))}
-          {rows.length === 0 && (
+    <div className="panel-strong" style={{ width: '100%', overflow: 'hidden' }}>
+      <div
+        ref={parentRef}
+        style={{
+          width: '100%',
+          overflow: 'auto',
+          height: 'calc(100vh - 280px)',
+          minHeight: 200,
+        }}
+        className="panel-scroll"
+      >
+        <table style={TABLE_STYLE}>
+          <ColGroup />
+          <caption className="sr-only">Historial de movimientos</caption>
+          <thead>
             <tr>
-              <td colSpan={9} style={{ padding: 32, textAlign: 'center', color: 'var(--subtext)' }}>
-                {t(lang, 'sinMovimientos')}
-              </td>
+              <th scope="col" style={TH}>{t(lang, 'colFecha')}</th>
+              <th scope="col" style={TH}>{t(lang, 'colTipo')}</th>
+              <th scope="col" style={{ ...TH, textAlign: 'right' }}>{t(lang, 'colMonto')}</th>
+              <th scope="col" style={TH}>{t(lang, 'colMoneda')}</th>
+              <th scope="col" style={TH}>{t(lang, 'colMetodo')}</th>
+              <th scope="col" style={TH}>{t(lang, 'colCategoria')}</th>
+              <th scope="col" style={TH}>{t(lang, 'colDesc')}</th>
+              <th scope="col" style={TH}>{t(lang, 'colCuotas')}</th>
+              <th scope="col" style={TH}></th>
             </tr>
-          )}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={9} style={{ padding: 32, textAlign: 'center', color: 'var(--subtext)' }}>
+                  {t(lang, 'sinMovimientos')}
+                </td>
+              </tr>
+            )}
+            {!renderPlain && paddingTop > 0 && (
+              <tr><td colSpan={9} style={{ height: paddingTop, padding: 0 }} /></tr>
+            )}
+            {(renderPlain ? rows.map((mov, index) => ({ mov, index, size: 34 })) : virtualItems.map(vr => ({
+              mov: rows[vr.index],
+              index: vr.index,
+              size: vr.size,
+            }))).map(({ mov, index, size }) => {
+              const xfer = isTransferencia(mov)
+              const isEditingRow = editing?.id === mov.id
+              return (
+                <tr
+                  key={mov.id}
+                  data-index={index}
+                  style={{
+                    height: size,
+                    borderBottom: '1px solid var(--border)',
+                    background: xfer
+                      ? 'color-mix(in oklch, var(--subtext) 8%, transparent)'
+                      : index % 2 === 0
+                        ? 'transparent'
+                        : 'color-mix(in oklch, var(--surface) 35%, transparent)',
+                    opacity: xfer ? 0.85 : 1,
+                  }}
+                >
+                  <FechaCell  mov={mov} />
+                  <SelectCell mov={mov} field="tipo"   options={tipoOptions}   tabIdx={isEditingRow ? 0 : -1} />
+                  <NumberCell mov={mov} />
+                  <SelectCell mov={mov} field="moneda" options={monedaOptions} tabIdx={isEditingRow ? 0 : -1} />
+                  <TextCell   mov={mov} field="method" />
+                  <TextCell   mov={mov} field="cat"    />
+                  <TextCell   mov={mov} field="desc"   />
+                  <TextCell   mov={mov} field="cuotas" />
+                  <DeleteCell mov={mov} tabIdx={isEditingRow ? 0 : -1} />
+                </tr>
+              )
+            })}
+            {!renderPlain && paddingBottom > 0 && (
+              <tr><td colSpan={9} style={{ height: paddingBottom, padding: 0 }} /></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

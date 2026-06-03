@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, ArrowUp, ArrowDown, ArrowUpDown, Download } from 'lucide-react'
+import { X, ArrowUp, ArrowDown, ArrowUpDown, Download, Pencil, Trash2, Check } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
 import { fmtARS, fmtUSD } from '../../data/finanzas'
@@ -65,21 +65,44 @@ function SortIcon({ col, sortCol, sortDir }) {
 export default function MovimientosTableModal({ open, onClose, type = 'expense' }) {
   const lang = useStore(s => s.lang)
   const finMovimientos = useStore(s => s.finMovimientos)
+  const finCategorias  = useStore(s => s.finCategorias)
+  const deleteMov = useStore(s => s.deleteFinMovimiento)
+  const updateMov = useStore(s => s.updateFinMovimiento)
   const catColors = useMemo(() => {
-    const { cats } = buildCategories(finMovimientos, type)
+    const { cats } = buildCategories(finMovimientos, type, finCategorias)
     return Object.fromEntries(cats.map(c => [c.name, c.color]))
-  }, [finMovimientos, type])
+  }, [finMovimientos, type, finCategorias])
 
   const { sortCol, sortDir, handleSort } = useColumnSort()
   const [filterCat, setFilterCat] = useState('__all__')
+  const [editingId, setEditingId] = useState(null)
+  const [editForm, setEditForm] = useState({})
+  const containerRef = useRef(null)
+
+  // Focus trap + return focus on close
+  useEffect(() => {
+    if (!open) return
+    const prev = document.activeElement
+    const FOCUSABLE = 'button:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])'
+    const handler = (e) => {
+      if (e.key !== 'Tab' || !containerRef.current) return
+      const els = [...containerRef.current.querySelectorAll(FOCUSABLE)]
+      if (!els.length) return
+      const first = els[0], last = els[els.length - 1]
+      if (e.shiftKey) { if (document.activeElement === first) { e.preventDefault(); last.focus() } }
+      else            { if (document.activeElement === last)  { e.preventDefault(); first.focus() } }
+    }
+    window.addEventListener('keydown', handler, true)
+    return () => { window.removeEventListener('keydown', handler, true); prev?.focus() }
+  }, [open])
 
   // ESC to close
   useEffect(() => {
     if (!open) return
-    const h = e => { if (e.key === 'Escape') onClose() }
+    const h = e => { if (e.key === 'Escape') { if (editingId) setEditingId(null); else onClose() } }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
-  }, [open, onClose])
+  }, [open, onClose, editingId])
 
   // Reset filter when closed
   useEffect(() => {
@@ -167,6 +190,24 @@ export default function MovimientosTableModal({ open, onClose, type = 'expense' 
     whiteSpace: 'nowrap',
   }
 
+  const startEdit = (m) => {
+    setEditingId(m.id)
+    setEditForm({
+      descripcion: m.desc ?? m.descripcion ?? '',
+      monto:       String(Math.abs(m.amount ?? m.monto ?? 0)),
+      fecha:       m.date ?? m.fecha ?? '',
+    })
+  }
+
+  const commitEdit = async (m) => {
+    const monto = parseFloat(editForm.monto.replace(',', '.'))
+    if (!isNaN(monto) && monto > 0) {
+      const signed = (m.type ?? m.tipo) === 'income' ? monto : -monto
+      await updateMov(m.id, { monto: signed, descripcion: editForm.descripcion, fecha: editForm.fecha })
+    }
+    setEditingId(null)
+  }
+
   return createPortal(
     <div
       className="fixed inset-0 z-[9999] grid place-items-center px-4"
@@ -177,7 +218,11 @@ export default function MovimientosTableModal({ open, onClose, type = 'expense' 
       onClick={onClose}
     >
       <div
-        className="panel-strong w-full max-w-[780px] anim-card-in flex flex-col"
+        ref={containerRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={isIncome ? 'Todos los ingresos' : 'Todos los gastos'}
+        className="panel-strong w-full max-w-[820px] anim-card-in flex flex-col"
         style={{ maxHeight: '88vh', background: 'var(--surface)' }}
         onClick={e => e.stopPropagation()}
       >
@@ -263,6 +308,7 @@ export default function MovimientosTableModal({ open, onClose, type = 'expense' 
                 ].map(({ col, label }) => (
                   <th
                     key={col}
+                    scope="col"
                     style={{ ...thStyle, textAlign: col === 'monto' ? 'right' : 'left' }}
                     onClick={() => handleSort(col)}
                   >
@@ -272,6 +318,7 @@ export default function MovimientosTableModal({ open, onClose, type = 'expense' 
                     </span>
                   </th>
                 ))}
+                <th scope="col" style={{ ...thStyle, width: 64 }} />
               </tr>
             </thead>
             <tbody>
@@ -282,13 +329,59 @@ export default function MovimientosTableModal({ open, onClose, type = 'expense' 
                 const method = m.method ?? m.cuenta_nombre ?? '—'
                 const icon   = m.icon ?? m.icono ?? (isIncome ? '💰' : '💸')
                 const date   = m.date ?? (m.fecha ? new Date(m.fecha).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' }) : '')
+                const isEditing = editingId === m.id
+
+                if (isEditing) {
+                  return (
+                    <tr key={m.id} style={{ background: 'color-mix(in oklch, var(--accent) 6%, transparent)' }}>
+                      <td style={{ ...tdStyle, fontSize: 11.5 }} className="mono">
+                        <input
+                          type="date"
+                          value={editForm.fecha?.slice(0,10) ?? ''}
+                          onChange={e => setEditForm(f => ({ ...f, fecha: e.target.value }))}
+                          style={{ background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: 6, padding: '2px 5px', fontSize: 11, color: 'var(--text)', outline: 'none', width: 110 }}
+                        />
+                      </td>
+                      <td style={tdStyle} colSpan={2}>
+                        <input
+                          autoFocus
+                          value={editForm.descripcion}
+                          onChange={e => setEditForm(f => ({ ...f, descripcion: e.target.value }))}
+                          onKeyDown={e => { if (e.key === 'Enter') commitEdit(m); if (e.key === 'Escape') setEditingId(null) }}
+                          style={{ background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: 6, padding: '2px 8px', fontSize: 12, color: 'var(--text)', outline: 'none', width: '100%' }}
+                        />
+                      </td>
+                      <td style={tdStyle} />
+                      <td style={{ ...tdStyle, textAlign: 'right' }}>
+                        <input
+                          type="number"
+                          value={editForm.monto}
+                          onChange={e => setEditForm(f => ({ ...f, monto: e.target.value }))}
+                          onKeyDown={e => { if (e.key === 'Enter') commitEdit(m); if (e.key === 'Escape') setEditingId(null) }}
+                          style={{ background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: 6, padding: '2px 5px', fontSize: 12, color: 'var(--text)', outline: 'none', width: 90, textAlign: 'right', fontFamily: 'var(--font-mono)' }}
+                        />
+                      </td>
+                      <td style={{ ...tdStyle, textAlign: 'right' }}>
+                        <button
+                          type="button"
+                          onClick={() => commitEdit(m)}
+                          className="icon-btn-fin"
+                          aria-label="Guardar"
+                          style={{ color: 'var(--accent)' }}
+                        >
+                          <Check size={13} />
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                }
 
                 return (
                   <tr
                     key={m.id}
                     style={{ transition: 'background 0.1s' }}
-                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg)')}
-                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg)'; e.currentTarget.querySelector('.row-actions')?.style.setProperty('opacity','1') }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.querySelector('.row-actions')?.style.setProperty('opacity','0') }}
                   >
                     <td style={{ ...tdStyle, color: 'var(--subtext)', fontSize: 11.5 }} className="mono">
                       {date}
@@ -332,12 +425,34 @@ export default function MovimientosTableModal({ open, onClose, type = 'expense' 
                         {isIncome ? '+' : '−'}{m.currency === 'USD' ? fmtUSD(Math.abs(monto)) : fmtARS(Math.abs(monto))}
                       </span>
                     </td>
+                    <td style={{ ...tdStyle, textAlign: 'right', padding: '4px 6px' }}>
+                      <span className="row-actions flex items-center justify-end gap-1" style={{ opacity: 0, transition: 'opacity 0.1s' }}>
+                        <button
+                          type="button"
+                          onClick={() => startEdit(m)}
+                          className="icon-btn-fin"
+                          aria-label="Editar"
+                          style={{ padding: '3px' }}
+                        >
+                          <Pencil size={11} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteMov(m.id)}
+                          className="icon-btn-fin"
+                          aria-label="Eliminar"
+                          style={{ padding: '3px', color: 'var(--expense)' }}
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      </span>
+                    </td>
                   </tr>
                 )
               })}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={5} style={{ ...tdStyle, textAlign: 'center', color: 'var(--subtext)', padding: '32px' }}>
+                  <td colSpan={6} style={{ ...tdStyle, textAlign: 'center', color: 'var(--subtext)', padding: '32px' }}>
                     {t(lang, 'noResults')}
                   </td>
                 </tr>

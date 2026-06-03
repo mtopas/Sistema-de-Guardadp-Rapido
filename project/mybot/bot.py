@@ -2,7 +2,7 @@ import json
 import os
 import re
 import time as _time
-from datetime import time as datetime_time
+from datetime import datetime, time as datetime_time
 from pathlib import Path
 
 import requests
@@ -21,6 +21,8 @@ import logging
 from api_config import API_BASE
 
 import agenda_handlers as ah
+import assistant
+import dev_reporter as dr
 import finanzas_handlers as fh
 import intent_router as ir
 
@@ -291,6 +293,51 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Acción cancelada.")
 
 
+async def cmd_dev(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Modo dev: reenvío de logs/errores a este chat. /dev on | off | test | tail"""
+    chat_id = update.effective_chat.id
+    _register_chat_id(context.bot_data, chat_id)
+
+    if not dr.is_chat_allowed(chat_id):
+        await update.message.reply_text("No autorizado para /dev.")
+        return
+
+    args = [a.lower() for a in (context.args or [])]
+
+    if not args or args[0] == "status":
+        await update.message.reply_text(dr.status_text(), parse_mode="Markdown")
+        return
+    if args[0] in ("on", "1", "true", "activar"):
+        await update.message.reply_text(
+            dr.set_enabled(chat_id, True),
+            parse_mode="Markdown",
+        )
+        logger.info("Modo dev activado por chat_id=%s", chat_id)
+        return
+    if args[0] in ("off", "0", "false", "desactivar"):
+        await update.message.reply_text(
+            dr.set_enabled(chat_id, False),
+            parse_mode="Markdown",
+        )
+        logger.info("Modo dev desactivado por chat_id=%s", chat_id)
+        return
+    if args[0] == "test":
+        if not dr.is_enabled():
+            await update.message.reply_text("Activá primero con `/dev on`.", parse_mode="Markdown")
+            return
+        await dr.send_test(f"Prueba dev {datetime.now().isoformat(timespec='seconds')}")
+        await update.message.reply_text("Mensaje de prueba enviado.")
+        return
+    if args[0] == "tail":
+        await update.message.reply_text(dr.tail_text(), parse_mode="Markdown")
+        return
+
+    await update.message.reply_text(
+        "Usá: `/dev on`, `/dev off`, `/dev test`, `/dev tail`",
+        parse_mode="Markdown",
+    )
+
+
 async def cmd_rapido(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Toggle rapid mode: /rapido on | /rapido off"""
     _register_chat_id(context.bot_data, update.effective_chat.id)
@@ -353,6 +400,26 @@ async def cmd_ultimas(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(buttons),
     )
+
+
+async def cmd_pregunta(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Búsqueda semántica + respuesta LLM sobre la Bóveda: /pregunta <texto>"""
+    _register_chat_id(context.bot_data, update.effective_chat.id)
+    query = " ".join(context.args).strip() if context.args else ""
+    if not query:
+        await update.message.reply_text(
+            "Usá /pregunta <texto> para consultar tu Bóveda.\n"
+            "Ejemplo: /pregunta ¿qué sé sobre machine learning?"
+        )
+        return
+
+    thinking_msg = await update.message.reply_text("🔍 Buscando en la Bóveda…")
+    api = context.bot_data.get("api_base", API_BASE)
+    respuesta = assistant.answer_question(query, "consulta_boveda", api)
+    try:
+        await thinking_msg.edit_text(respuesta)
+    except Exception:
+        await update.message.reply_text(respuesta)
 
 
 async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -442,10 +509,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await msg.reply_text(summary, reply_markup=kb, parse_mode="Markdown")
             return
         elif rr.action == "question":
-            await msg.reply_text(
-                "🔍 Modo consulta próximamente.\n"
-                "Por ahora usá los comandos: /saldo, /mes, /habitos, /hoy…"
-            )
+            thinking_msg = await msg.reply_text("🔍 Consultando…")
+            api = context.bot_data.get("api_base", API_BASE)
+            respuesta = assistant.answer_question(texto, rr.modulo, api)
+            try:
+                await thinking_msg.edit_text(respuesta)
+            except Exception:
+                await msg.reply_text(respuesta)
             return
         # "fallback": continúa al flujo Bóveda normal
 
@@ -765,6 +835,19 @@ async def _handle_llm_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 # Dispatcher de callbacks (LLM → Bóveda → Finanzas → Agenda)
 # ──────────────────────────────────────────────────────────────
 
+async def _global_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    err = context.error
+    logger.exception("Error no manejado en el bot", exc_info=err)
+    hint = ""
+    if update and getattr(update, "effective_chat", None):
+        hint = f"chat_id={update.effective_chat.id}"
+    await dr.notify_exception(err, where="handler PTB", update_hint=hint)
+
+
+async def _post_init(application) -> None:
+    dr.install(application)
+
+
 async def _dispatch_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data  = query.data or ""
@@ -791,8 +874,14 @@ def main():
     if not cat_ok:
         print("[bot] ⚠ Bóveda: /categorias no responde al arrancar. Verificá el backend.")
 
-    app = ApplicationBuilder().token(TOKEN).build()
+    app = (
+        ApplicationBuilder()
+        .token(TOKEN)
+        .post_init(_post_init)
+        .build()
+    )
     app.bot_data["api_base"] = API_BASE
+    app.add_error_handler(_global_error_handler)
 
     # Cargar chat_id guardado
     saved_chat_id = _load_chat_id()
@@ -803,9 +892,11 @@ def main():
     # ── Comandos generales ────────────────────────────────────
     app.add_handler(CommandHandler(["start", "help"], cmd_help))
     app.add_handler(CommandHandler("cancel",  cmd_cancel))
+    app.add_handler(CommandHandler("dev",     cmd_dev))
     app.add_handler(CommandHandler("rapido",  cmd_rapido))
     app.add_handler(CommandHandler("ultimas", cmd_ultimas))
-    app.add_handler(CommandHandler("buscar",  cmd_buscar))
+    app.add_handler(CommandHandler("buscar",   cmd_buscar))
+    app.add_handler(CommandHandler("pregunta", cmd_pregunta))
 
     # ── Comandos Agenda ───────────────────────────────────────
     app.add_handler(CommandHandler("hoy",        ah.cmd_hoy))
@@ -858,6 +949,14 @@ def main():
             name="check_in_noche",
         )
         print(f"[bot] Check-in nocturno programado para las {_ci_h:02d}:{_ci_m:02d}")
+
+        # ── Resumen semanal de finanzas — lunes 9:00 ─────────
+        app.job_queue.run_daily(
+            fh.resumen_semanal_finanzas,
+            time=datetime_time(9, 0, 0),
+            name="resumen_semanal_finanzas",
+        )
+        print("[bot] Resumen semanal de finanzas programado para lunes 09:00")
 
     app.run_polling()
 

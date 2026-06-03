@@ -10,7 +10,7 @@ import httpx
 from bs4 import BeautifulSoup
 from typing import Any, List, Optional
 
-from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -39,12 +39,14 @@ from app.db.crud import (
     fin_obtener_cuentas,
     fin_crear_cuenta,
     fin_editar_cuenta,
-    fin_actualizar_cuenta_saldo,
+    fin_recalcular_saldos_cuentas,
     fin_eliminar_cuenta,
     fin_buscar_cuenta_por_nombre,
     fin_obtener_categorias,
     fin_crear_categoria,
     fin_eliminar_categoria,
+    fin_contar_movimientos_categoria,
+    FIN_CATEGORIAS_RESERVADAS,
     fin_buscar_categoria_por_nombre,
     fin_obtener_movimientos,
     fin_crear_movimiento,
@@ -73,6 +75,16 @@ from app.db.crud import (
     # Inflación
     fin_obtener_inflacion,
     fin_upsert_inflacion,
+    # Nuevas
+    fin_actualizar_categoria,
+    fin_obtener_movimientos_duplicados,
+    fin_export_csv_data,
+    fin_import_movimientos,
+    fin_bulk_update_movimientos,
+    fin_bulk_delete_movimientos,
+    fin_obtener_transacciones_instrumento,
+    fin_crear_transaccion_instrumento,
+    fin_eliminar_transaccion_instrumento,
     # Agenda
     agenda_obtener_calendarios,
     agenda_crear_calendario,
@@ -109,6 +121,7 @@ from app.db.crud import (
     habitos_registros_eliminar,
 )
 from app.db.database import init_db
+from app import semantic
 from app.models.categoria import CategoriaCreate, CategoriaPatch
 from app.models.hoja import HojaCreate, HojaPatch
 
@@ -241,6 +254,44 @@ class FinFireFilaUpsert(BaseModel):
 class FinInflacionUpsert(BaseModel):
     inflacion: Optional[float] = None
 
+
+class FinCategoriaPatch(BaseModel):
+    nombre: Optional[str] = None
+    color:  Optional[str] = None
+    tipo:   Optional[str] = None
+
+
+class FinMovimientoBulkUpdate(BaseModel):
+    updates: List[dict]
+
+
+class FinMovimientoBulkDelete(BaseModel):
+    ids: List[int]
+
+
+class FinTransaccionCreate(BaseModel):
+    tipo:     str
+    fecha:    str
+    cantidad: float
+    precio:   float
+    nota:     Optional[str] = None
+
+
+class FinImportRow(BaseModel):
+    tipo:             str
+    monto:            float
+    fecha:            str
+    descripcion:      str
+    categoria_nombre: Optional[str] = None
+    cuenta_nombre:    Optional[str] = None
+    moneda:           str = "ARS"
+    nota:             Optional[str] = None
+    cuotas:           Optional[int] = None
+
+
+class FinImportCSV(BaseModel):
+    filas: List[FinImportRow]
+
 DIST_DIR    = dist_directory()
 UPLOADS_DIR = uploads_directory()
 
@@ -248,6 +299,14 @@ UPLOADS_DIR = uploads_directory()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    # Backfill: indexar hojas que faltan en ChromaDB (best-effort, falla si Ollama no está)
+    try:
+        hojas  = obtener_hojas()
+        count  = semantic.backfill_missing(hojas)
+        if count:
+            print(f"[semantic] {count} hojas indexadas al arrancar")
+    except Exception as _exc:
+        print(f"[semantic] backfill omitido: {_exc}")
     yield
 
 
@@ -316,15 +375,20 @@ def crear_categoria_endpoint(body: CategoriaCreate):
     nombre = body.nombre.strip()
     if not nombre:
         raise HTTPException(status_code=400, detail="El nombre no puede estar vacío")
-    cid = crear_categoria(nombre, padre_id=body.padre_id, icono=body.icono)
+    cid = crear_categoria(nombre, padre_id=body.padre_id, icono=body.icono, color=body.color)
     if cid is None:
         raise HTTPException(status_code=400, detail="Ya existe una categoría con ese nombre")
-    return {"id": cid, "nombre": nombre, "padre_id": body.padre_id, "icono": body.icono}
+    created = next((c for c in obtener_categorias() if c["id"] == cid), None)
+    if created:
+        return created
+    return {"id": cid, "nombre": nombre, "padre_id": body.padre_id, "icono": body.icono, "color": body.color}
 
 
 @app.patch("/categorias/{categoria_id}")
 def actualizar_categoria_endpoint(categoria_id: int, body: CategoriaPatch):
-    campos = {k: v for k, v in body.model_dump().items() if v is not None}
+    campos = body.model_dump(exclude_unset=True)
+    if "icono" in body.model_fields_set and body.icono is None:
+        campos["icono"] = None
     result = actualizar_categoria(categoria_id, campos)
     if result is None:
         raise HTTPException(status_code=404, detail="Categoría no encontrada o nombre duplicado")
@@ -346,7 +410,7 @@ def eliminar_categoria_endpoint(categoria_id: int, forzar: bool = Query(False)):
 # --- Hojas ---
 
 @app.post("/hojas")
-async def crear_hoja_endpoint(hoja: HojaCreate):
+async def crear_hoja_endpoint(hoja: HojaCreate, background_tasks: BackgroundTasks):
     if not hoja.contenido.strip():
         raise HTTPException(status_code=400, detail="El contenido no puede estar vacío")
     if not categoria_existe(hoja.categoria_id):
@@ -370,6 +434,9 @@ async def crear_hoja_endpoint(hoja: HojaCreate):
         icono=hoja.icono,
         link_preview=preview,
     )
+    # Indexar en background — no bloquea la respuesta
+    cat = next((c["nombre"] for c in obtener_categorias() if c["id"] == hoja.categoria_id), "")
+    background_tasks.add_task(semantic.index_hoja, hid, hoja.contenido, cat, hoja.tipo)
     return {"mensaje": "Hoja guardada", "id": hid, "link_preview": preview}
 
 
@@ -393,6 +460,43 @@ def listar_hojas_recientes(limit: int = Query(20, ge=1, le=100)):
     return obtener_hojas_recientes(limit)
 
 
+@app.get("/hojas/buscar-semantico")
+def buscar_hojas_semantico(q: str = Query(..., min_length=1), top_k: int = Query(5, ge=1, le=20)):
+    """
+    Búsqueda semántica sobre hojas via embeddings + ChromaDB.
+    Devuelve hits enriquecidos con los datos completos de la hoja desde SQLite.
+    """
+    hits = semantic.search_hojas(q, top_k=top_k)
+    if not hits:
+        return []
+    resultados = []
+    for hit in hits:
+        hoja = obtener_hoja_por_id(hit["hoja_id"])
+        if hoja:
+            resultados.append({**hoja, "score": hit["score"]})
+    return resultados
+
+
+@app.post("/hojas/reindexar")
+def reindexar_hojas(background_tasks: BackgroundTasks):
+    """Dispara re-indexado completo de todas las hojas (best-effort, en background)."""
+    hojas = obtener_hojas()
+    background_tasks.add_task(_reindexar_todo, hojas)
+    return {"mensaje": f"Reindexado iniciado para {len(hojas)} hojas"}
+
+
+def _reindexar_todo(hojas: list):
+    count = 0
+    for h in hojas:
+        ok = semantic.index_hoja(
+            h["id"], h.get("contenido") or "",
+            h.get("categoria_nombre") or "", h.get("tipo") or "texto",
+        )
+        if ok:
+            count += 1
+    print(f"[semantic] reindexar_todo: {count}/{len(hojas)} hojas indexadas")
+
+
 @app.get("/hojas")
 def listar_hojas(
     q:            Optional[str] = Query(None),
@@ -413,7 +517,7 @@ def obtener_hoja(hoja_id: int):
 
 
 @app.patch("/hojas/{hoja_id}")
-def actualizar_hoja_endpoint(hoja_id: int, data: HojaPatch):
+def actualizar_hoja_endpoint(hoja_id: int, data: HojaPatch, background_tasks: BackgroundTasks):
     campos = {k: v for k, v in data.model_dump().items() if k in data.model_fields_set}
     # Delegate specific fields to legacy functions for backward compat, rest to generic
     if not campos:
@@ -421,11 +525,20 @@ def actualizar_hoja_endpoint(hoja_id: int, data: HojaPatch):
     result = actualizar_hoja(hoja_id, campos)
     if result is None:
         raise HTTPException(status_code=404, detail="Hoja no encontrada")
+    # Re-indexar con el contenido actualizado (fetch completo para obtener categoria)
+    hoja = obtener_hoja_por_id(hoja_id)
+    if hoja:
+        background_tasks.add_task(
+            semantic.index_hoja, hoja_id,
+            hoja.get("contenido", ""),
+            hoja.get("categoria_nombre", ""),
+            hoja.get("tipo", "texto"),
+        )
     return {"mensaje": "Hoja actualizada", "fecha_actualizado": result.get("fecha_actualizado")}
 
 
 @app.delete("/hojas/{hoja_id}")
-def eliminar_hoja_endpoint(hoja_id: int):
+def eliminar_hoja_endpoint(hoja_id: int, background_tasks: BackgroundTasks):
     contenido = eliminar_hoja(hoja_id)
     if contenido is None:
         raise HTTPException(status_code=404, detail="Hoja no encontrada")
@@ -436,6 +549,7 @@ def eliminar_hoja_endpoint(hoja_id: int):
             archivo.unlink(missing_ok=True)
             if DEBUG:
                 print(f"eliminar_hoja: archivo borrado {archivo}")
+    background_tasks.add_task(semantic.delete_hoja, hoja_id)
     return {"mensaje": "Hoja eliminada"}
 
 
@@ -505,17 +619,27 @@ def crear_fin_cuenta(body: FinCuentaCreate):
         body.nombre, body.tipo, body.color, body.initials,
         body.saldo_ars, body.saldo_usd,
     )
+    cuenta = next((c for c in fin_obtener_cuentas() if c["id"] == cid), None)
+    if cuenta:
+        return cuenta
     return {"id": cid, "name": body.nombre, "tipo": body.tipo,
             "color": body.color, "initials": body.initials,
-            "ars": body.saldo_ars, "usd": body.saldo_usd}
+            "ars": 0, "usd": 0}
+
+
+@app.post("/fin/recalcular-saldos")
+def recalcular_saldos_fin():
+    """Recalcula saldo_ars/usd de todas las cuentas desde movimientos (reparación / alinear caché)."""
+    fin_recalcular_saldos_cuentas()
+    return fin_obtener_cuentas()
 
 
 @app.patch("/fin/cuentas/{cuenta_id}/saldo")
 def actualizar_saldo_cuenta(cuenta_id: int, body: FinCuentaSaldoUpdate):
-    result = fin_actualizar_cuenta_saldo(cuenta_id, body.saldo_ars, body.saldo_usd)
-    if result is None:
-        raise HTTPException(status_code=404, detail="Cuenta no encontrada")
-    return result
+    raise HTTPException(
+        status_code=410,
+        detail="Los saldos se calculan desde movimientos. Creá un movimiento de ajuste o POST /fin/recalcular-saldos.",
+    )
 
 
 @app.patch("/fin/cuentas/{cuenta_id}")
@@ -538,8 +662,8 @@ def eliminar_fin_cuenta(cuenta_id: int):
 # ---------------------------------------------------------------------------
 
 @app.get("/fin/categorias")
-def listar_fin_categorias():
-    return fin_obtener_categorias()
+def listar_fin_categorias(include_ocultas: bool = False):
+    return fin_obtener_categorias(include_ocultas=include_ocultas)
 
 
 @app.post("/fin/categorias")
@@ -550,8 +674,33 @@ def crear_fin_categoria(body: FinCategoriaCreate):
     return {"id": cid, "name": body.nombre, "color": body.color, "tipo": body.tipo}
 
 
+@app.patch("/fin/categorias/{cat_id}")
+def actualizar_fin_categoria(cat_id: int, body: FinCategoriaPatch):
+    campos = {k: v for k, v in body.model_dump().items() if v is not None}
+    result = fin_actualizar_categoria(cat_id, campos)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Categoría no encontrada o nombre duplicado")
+    return result
+
+
 @app.delete("/fin/categorias/{cat_id}")
 def eliminar_fin_categoria(cat_id: int):
+    cats = fin_obtener_categorias()
+    cat = next((c for c in cats if c["id"] == cat_id), None)
+    if not cat:
+        raise HTTPException(status_code=404, detail="Categoría no encontrada")
+    if cat.get("objetivo_id"):
+        raise HTTPException(
+            status_code=403,
+            detail="Categoría vinculada a un objetivo de ahorro. Eliminá el objetivo desde la pestaña Ahorro.",
+        )
+    if cat["name"] in FIN_CATEGORIAS_RESERVADAS:
+        raise HTTPException(status_code=403, detail="Esta categoría del sistema no se puede eliminar")
+    if fin_contar_movimientos_categoria(cat_id) > 0:
+        raise HTTPException(
+            status_code=409,
+            detail="Hay movimientos con esta categoría. Reasignalos antes de eliminar.",
+        )
     if not fin_eliminar_categoria(cat_id):
         raise HTTPException(status_code=404, detail="Categoría no encontrada")
     return {"mensaje": "Categoría eliminada"}
@@ -610,9 +759,65 @@ def resumen_fin_movimientos(mes: Optional[str] = Query(None)):
     }
 
 
+@app.get("/fin/movimientos/duplicados")
+def listar_fin_movimientos_duplicados(ventana_horas: int = Query(24, ge=1, le=168)):
+    return fin_obtener_movimientos_duplicados(ventana_horas)
+
+
+@app.get("/fin/export/csv")
+def exportar_fin_csv():
+    import csv, io
+    movs = fin_export_csv_data()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["fecha","tipo","monto","moneda","descripcion","categoria","cuenta","cuotas","nota"])
+    for m in movs:
+        writer.writerow([
+            m.get("fecha",""), m.get("tipo",""), m.get("monto",""), m.get("moneda","ARS"),
+            m.get("descripcion",""), m.get("categoria_nombre",""), m.get("cuenta_nombre",""),
+            m.get("cuotas","") or "", m.get("nota","") or "",
+        ])
+    content = output.getvalue()
+    from datetime import date as _d
+    filename = f"movimientos-{_d.today()}.csv"
+    return Response(
+        content=content.encode("utf-8-sig"),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/fin/import/csv")
+def importar_fin_csv(body: FinImportCSV):
+    filas = [row.model_dump() for row in body.filas]
+    created = fin_import_movimientos(filas)
+    return {"importados": len(created), "movimientos": created}
+
+
+@app.patch("/fin/movimientos/bulk")
+def bulk_update_fin_movimientos(body: FinMovimientoBulkUpdate):
+    result = fin_bulk_update_movimientos(body.updates)
+    return {"actualizados": len(result), "movimientos": result}
+
+
+@app.delete("/fin/movimientos/bulk")
+def bulk_delete_fin_movimientos(body: FinMovimientoBulkDelete):
+    count = fin_bulk_delete_movimientos(body.ids)
+    return {"eliminados": count}
+
+
 @app.get("/fin/movimientos")
-def listar_fin_movimientos(mes: Optional[str] = Query(None)):
-    return fin_obtener_movimientos(mes)
+def listar_fin_movimientos(
+    mes:    Optional[str] = Query(None),
+    limit:  Optional[int] = Query(None, ge=1, le=10000),
+    offset: int           = Query(0, ge=0),
+):
+    movs = fin_obtener_movimientos(mes)
+    if limit is not None:
+        movs = movs[offset: offset + limit]
+    elif offset:
+        movs = movs[offset:]
+    return movs
 
 
 @app.post("/fin/movimientos")
@@ -765,9 +970,10 @@ def eliminar_fin_nota(nota_id: int):
 # Finanzas — Fondo de emergencia
 # ---------------------------------------------------------------------------
 
-@app.get("/fin/emergencia")
+@app.get("/fin/emergencia", deprecated=True)
 def obtener_fin_emergencia():
-    return {"saldo": fin_obtener_emergencia_saldo()}
+    """Deprecado — usar objetivo 'Fondo de Emergencia' en /fin/objetivos."""
+    return {"saldo": fin_obtener_emergencia_saldo(), "_deprecated": True}
 
 
 # ---------------------------------------------------------------------------
@@ -815,6 +1021,36 @@ def eliminar_fin_instrumento_endpoint(inst_id: int):
 
 
 # ---------------------------------------------------------------------------
+# Finanzas — Ledger transacciones por instrumento
+# ---------------------------------------------------------------------------
+
+@app.get("/fin/instrumentos/{inst_id}/transacciones")
+def listar_transacciones_instrumento(inst_id: int):
+    return fin_obtener_transacciones_instrumento(inst_id)
+
+
+@app.post("/fin/instrumentos/{inst_id}/transacciones")
+def crear_transaccion_instrumento(inst_id: int, body: FinTransaccionCreate):
+    if body.tipo not in ("compra", "venta"):
+        raise HTTPException(status_code=400, detail="tipo debe ser 'compra' o 'venta'")
+    return fin_crear_transaccion_instrumento(
+        instrumento_id=inst_id,
+        tipo=body.tipo,
+        fecha=body.fecha,
+        cantidad=body.cantidad,
+        precio=body.precio,
+        nota=body.nota,
+    )
+
+
+@app.delete("/fin/transacciones/{trans_id}")
+def eliminar_transaccion_instrumento(trans_id: int):
+    if not fin_eliminar_transaccion_instrumento(trans_id):
+        raise HTTPException(status_code=404, detail="Transacción no encontrada")
+    return {"mensaje": "Transacción eliminada"}
+
+
+# ---------------------------------------------------------------------------
 # Finanzas — Objetivos de ahorro
 # ---------------------------------------------------------------------------
 
@@ -840,6 +1076,11 @@ def crear_fin_objetivo(body: FinObjetivoCreate):
 @app.patch("/fin/objetivos/{obj_id}")
 def actualizar_fin_objetivo(obj_id: int, body: FinObjetivoPatch):
     campos = {k: v for k, v in body.model_dump().items() if v is not None}
+    if "nombre" in campos:
+        raise HTTPException(
+            status_code=400,
+            detail="El nombre del objetivo no se puede cambiar; coincide con su categoría de movimientos.",
+        )
     result = fin_actualizar_objetivo(obj_id, campos)
     if result is None:
         raise HTTPException(status_code=404, detail="Objetivo no encontrado")

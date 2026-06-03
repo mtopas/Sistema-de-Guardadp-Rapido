@@ -1,7 +1,8 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
-import { fmtARS } from '../../data/finanzas'
+import { fmtARS, contribucionFire, mesMovimiento } from '../../data/finanzas'
+import { mergeFireCfg, parseFireForm } from './fireConfigUtils'
 
 function KpiBox({ label, value, valueColor }) {
   return (
@@ -35,12 +36,16 @@ function mesLabel(m) {
 export default function FireRightPanel() {
   const lang              = useStore(s => s.lang)
   const finConfig         = useStore(s => s.finConfig)
+  const finFirePreview    = useStore(s => s.finFirePreview)
   const saveConfigBulk    = useStore(s => s.saveFinConfigBulk)
+  const setFinFirePreview = useStore(s => s.setFinFirePreview)
   const finFireFilas      = useStore(s => s.finFireFilas)
   const finMovAll         = useStore(s => s.finMovimientosAll)
-  const finObjetivos      = useStore(s => s.finObjetivos)
 
-  const cfg = finConfig ?? {}
+  const cfg = useMemo(
+    () => mergeFireCfg(finConfig, finFirePreview),
+    [finConfig, finFirePreview],
+  )
 
   const [form, setForm] = useState({
     fire_aumento_aporte:     String(cfg.fire_aumento_aporte     ?? '1.20'),
@@ -67,23 +72,18 @@ export default function FireRightPanel() {
     })
   }, [finConfig])
 
+  // Vista previa en FireTab (tabla + proyección largo plazo) sin esperar Guardar
+  useEffect(() => {
+    setFinFirePreview(parseFireForm(form))
+  }, [form, setFinFirePreview])
+
   const [saveState, setSaveState] = useState('idle') // 'idle' | 'saving' | 'ok' | 'err'
 
   const setF = (k, v) => setForm(p => ({ ...p, [k]: v }))
 
   const handleSave = async () => {
     if (saveState === 'saving') return
-    const updates = {
-      fire_aumento_aporte:     parseFloat(form.fire_aumento_aporte)     || 1.20,
-      fire_rentabilidad_anual: parseFloat(form.fire_rentabilidad_anual) || 6.00,
-      fire_fecha_nacimiento:   form.fire_fecha_nacimiento,
-      fire_aporte_inicial:     parseFloat(form.fire_aporte_inicial)     || 0,
-      fire_saldo_inicial:      parseFloat(form.fire_saldo_inicial)      || 0,
-      fire_meta_usd:           parseFloat(form.fire_meta_usd)           || 500000,
-    }
-    if (form.fire_inicio_mes) updates.fire_inicio_mes = form.fire_inicio_mes
-    const metaEdad = parseInt(form.fire_meta_edad)
-    if (!isNaN(metaEdad) && metaEdad > 0) updates.fire_meta_edad = metaEdad
+    const updates = parseFireForm(form)
 
     setSaveState('saving')
     try {
@@ -121,23 +121,16 @@ export default function FireRightPanel() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
   }, [])
 
-  const objetivoNombres = useMemo(() => new Set(finObjetivos.map(o => o.nombre)), [finObjetivos])
-
   const ahorroPorMes = useMemo(() => {
     const map = {}
     finMovAll.forEach(m => {
-      const cat  = m.cat ?? m.categoria_nombre ?? ''
-      const desc = m.desc ?? m.descripcion ?? ''
-      if (cat !== 'Ahorro' || objetivoNombres.has(desc)) return
-      const v = m.date ?? m.fecha ?? ''
-      const d = new Date(v)
-      if (isNaN(d.getTime())) return
-      const mes   = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-      const monto = Math.abs(m.amount ?? m.monto ?? 0)
-      map[mes] = (map[mes] ?? 0) + ((m.type ?? m.tipo) === 'expense' ? monto : -monto)
+      const mes = mesMovimiento(m)
+      if (!mes) return
+      const delta = contribucionFire(m)
+      if (delta) map[mes] = (map[mes] ?? 0) + delta
     })
     return map
-  }, [finMovAll, objetivoNombres])
+  }, [finMovAll])
 
   const resumen = useMemo(() => {
     const aporteInicial      = cfg.fire_aporte_inicial ?? 0
@@ -148,21 +141,21 @@ export default function FireRightPanel() {
     const dolar               = cfg.dolar_mep ?? cfg.dolar_oficial ?? cfg.dolar_default ?? 1245
     const metaUSD             = cfg.fire_meta_usd   ?? 500000
 
-    let prevAporte     = aporteInicial
-    let prevFalta      = 0
+    let prevAportePlan = aporteInicial
     let saldo          = saldoInicial
     let mes            = inicioMes
     let totalAhorrado  = 0
     let mesesReales    = 0
 
     while (mes <= currentMes) {
-      const aporte = mes === inicioMes ? aporteInicial : prevAporte * (1 + aumentoMensual) + prevFalta
-      const ahorrado = finFireFilas[mes] !== undefined ? finFireFilas[mes] : (ahorroPorMes[mes] ?? 0)
+      const aporte = mes === inicioMes ? aporteInicial : prevAportePlan * (1 + aumentoMensual)
+      const computed = ahorroPorMes[mes] ?? 0
+      const override = finFireFilas[mes]
+      const ahorrado = computed > 0 ? computed : (override !== undefined ? override : 0)
       const interes  = (saldo + ahorrado) * rentabilidadMensual
       saldo = saldo + ahorrado + interes
       const falta = Math.max(0, aporte - ahorrado)
-      prevAporte = aporte
-      prevFalta  = falta
+      prevAportePlan = aporte
       totalAhorrado += ahorrado
       if (ahorrado > 0) mesesReales++
       mes = nextMes(mes)
@@ -172,7 +165,7 @@ export default function FireRightPanel() {
     const saldoMetaARS  = metaUSD * dolar
     let proyMes = currentMes
     let proySaldo = saldo
-    let proyAporte = prevAporte
+    let proyAporte = prevAportePlan
     let anioFIRE = null
     for (let i = 0; i < 50 * 12; i++) {
       if (proySaldo >= saldoMetaARS) {

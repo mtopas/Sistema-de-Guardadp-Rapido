@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
 import { fmtARS, isTransferencia } from '../../data/finanzas'
+import { buildFinCategoriaColorByName, getFinCategoriaColor } from '../../data/finCategoriaColors'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -44,6 +45,7 @@ function KpiBox({ label, value, sub, valueColor }) {
 export default function FinanzasRightPanel() {
   const lang               = useStore(s => s.lang)
   const finMovimientos     = useStore(s => s.finMovimientos)
+  const finCategorias      = useStore(s => s.finCategorias)
   const finConfig          = useStore(s => s.finConfig)
   const finEmergenciaSaldo = useStore(s => s.finEmergenciaSaldo)
   const selectedMes        = useStore(s => s.selectedMes)
@@ -71,8 +73,10 @@ export default function FinanzasRightPanel() {
       const cat = m.cat ?? m.categoria_nombre ?? 'Otros'
       catMap[cat] = (catMap[cat] ?? 0) + Math.abs(m.amount ?? m.monto ?? 0)
     })
+    const colorByName = buildFinCategoriaColorByName(finCategorias)
     const topEntry  = Object.entries(catMap).sort((a, b) => b[1] - a[1])[0]
     const topCat    = topEntry ? topEntry[0] : '—'
+    const topCatColor = topEntry ? getFinCategoriaColor(colorByName, topCat, 0) : undefined
     const topCatPct = topEntry && totalGastos > 0
       ? Math.round((topEntry[1] / totalGastos) * 100)
       : 0
@@ -86,8 +90,8 @@ export default function FinanzasRightPanel() {
     const spendDays     = new Set(expenses.map(m => (m.fecha ?? '').slice(0, 10)).filter(Boolean))
     const diasSinGastar = Math.max(0, daysElapsed - spendDays.size)
 
-    return { avgDaily, topCat, topCatPct, tasaAhorro, diasSinGastar, totalGastos, totalIngresos }
-  }, [finMovimientos, selectedMes])
+    return { avgDaily, topCat, topCatColor, topCatPct, tasaAhorro, diasSinGastar, totalGastos, totalIngresos }
+  }, [finMovimientos, finCategorias, selectedMes])
 
   // ── Goals ─────────────────────────────────────────────────────────────────
   const tasaObjetivo      = Number(finConfig?.tasa_ahorro_objetivo ?? 40)
@@ -117,6 +121,7 @@ export default function FinanzasRightPanel() {
               label={t(lang, 'topCategory')}
               value={kpis.topCat}
               sub={kpis.topCatPct > 0 ? `${kpis.topCatPct}% ${t(lang, 'ofTotal')}` : undefined}
+              valueColor={kpis.topCatColor}
             />
             <KpiBox
               label={t(lang, 'savingsRate')}

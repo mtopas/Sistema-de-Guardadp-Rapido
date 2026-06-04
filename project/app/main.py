@@ -1,7 +1,11 @@
 # entrypoints (FastAPI)
 
+import os
 import re
 import shutil
+import sqlite3
+import tempfile
+import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -1633,6 +1637,95 @@ def batch_upsert_registros(body: HabitoRegistroBatch):
     return habitos_registros_batch_upsert(items)
 
 
+# --- Sync homelab ↔ Windows ---
+
+_SYNC_TOKEN = os.getenv("SGR_SYNC_TOKEN", "")
+
+
+def _check_sync_token(request: Request) -> None:
+    if _SYNC_TOKEN and request.headers.get("X-Sync-Token") != _SYNC_TOKEN:
+        raise HTTPException(status_code=401, detail="Token de sync inválido")
+
+
+@app.get("/sync/export")
+def sync_export(request: Request):
+    """Backup SQLite online (sin parar el servidor). Usado por sgr-sync-pull.ps1."""
+    _check_sync_token(request)
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        tmp_path = tmp.name
+    try:
+        src = sqlite3.connect(DB_PATH)
+        dst = sqlite3.connect(tmp_path)
+        src.backup(dst)
+        src.close()
+        dst.close()
+        with open(tmp_path, "rb") as f:
+            data = f.read()
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+    return Response(
+        content=data,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": 'attachment; filename="app.db"'},
+    )
+
+
+@app.post("/sync/import")
+async def sync_import(request: Request, file: UploadFile = File(...)):
+    """Reemplaza la DB canónica con el archivo subido. Usado por sgr-sync-push.ps1."""
+    _check_sync_token(request)
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        tmp_path = tmp.name
+        tmp.write(await file.read())
+
+    try:
+        # Validar integridad y tablas mínimas antes de tocar producción
+        try:
+            check = sqlite3.connect(tmp_path)
+            result = check.execute("PRAGMA integrity_check").fetchone()
+            if result[0] != "ok":
+                raise HTTPException(status_code=400, detail="integrity_check falló en el archivo subido")
+            tables = {r[0] for r in check.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            check.close()
+            required = {"fin_movimientos", "hojas", "habitos"}
+            missing = required - tables
+            if missing:
+                raise HTTPException(status_code=400, detail=f"Tablas faltantes: {missing}")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"DB inválida: {exc}")
+
+        # Backup server-side con timestamp antes de sobrescribir
+        bak_path = str(Path(DB_PATH).parent / f"app.db.bak.{int(time.time())}")
+        try:
+            prod = sqlite3.connect(DB_PATH)
+            bak = sqlite3.connect(bak_path)
+            prod.backup(bak)
+            prod.close()
+            bak.close()
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"No se pudo crear backup server-side: {exc}")
+
+        # Reemplazar producción
+        src = sqlite3.connect(tmp_path)
+        dst = sqlite3.connect(DB_PATH)
+        src.backup(dst)
+        src.close()
+        dst.close()
+
+        return {"ok": True, "mensaje": "Base de datos importada", "backup": bak_path}
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+
+
 # --- SPA (UI empaquetada / producción; puerto por defecto :8765 vía SGR_PORT) ---
 
 _SPA_API_PREFIXES = (
@@ -1646,6 +1739,7 @@ _SPA_API_PREFIXES = (
     "upload",
     "assets/",
     "uploads/",
+    "sync/",
 )
 
 

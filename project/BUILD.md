@@ -62,3 +62,5 @@ Tras cambios en `run_sgr.py` o el puerto, volvé a correr PyInstaller (`python -
 | Uploads | `project/uploads/` | `project/uploads/` |
 
 El bot de Telegram (`mybot/bot.py`) **no** se incluye en el `.exe`; sigue siendo un proceso aparte apuntando a la misma API.
+
+**Homelab + `.exe` en Windows:** la DB canónica vive en el gabinete; antes de abrir el ejecutable conviene sincronizar. Diseño y scripts previstos: [`SYNC-WINDOWS.md`](SYNC-WINDOWS.md).

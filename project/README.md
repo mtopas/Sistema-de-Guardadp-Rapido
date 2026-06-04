@@ -41,6 +41,8 @@ Bot opcional: `python mybot/bot.py` + `TELEGRAM_BOT_TOKEN` en `.env` (misma API 
 
 **Ejecutable Windows (.exe):** ver [`BUILD.md`](BUILD.md) — PyInstaller → `dist/SGR/`; abre **`http://127.0.0.1:8765/`**; mismos datos que en dev en `project/database/` y `project/uploads/`.
 
+**Sync homelab ↔ .exe:** si `HOMELAB_HOST` está definido en `.env`, `SGR.exe` muestra "Sincronizando..." al abrirse (pull vía `GET /sync/export`), y al cerrar ofrece subir cambios (push vía `POST /sync/import`) si detecta que la DB cambió (SHA-256). Sin parar Docker. Ver [`SYNC-WINDOWS.md`](SYNC-WINDOWS.md) y `scripts/` para uso manual o desde PowerShell.
+
 ### Puertos y URLs (local)
 
 | Servicio | URL / puerto | Notas |
@@ -50,7 +52,7 @@ Bot opcional: `python mybot/bot.py` + `TELEGRAM_BOT_TOKEN` en `.env` (misma API 
 | UI prod / `.exe` | mismo origen que la API | `API_URL` vacío en build; todo en `:8765` |
 | Bot Telegram | `API_BASE_URL` en `.env` | Default `http://127.0.0.1:8765` vía `app/config.py` |
 
-Override: `SGR_PORT`, `SGR_HOST`, `API_BASE_URL`, `DB_PATH`, `SGR_DEBUG` — ver [`BUILD.md`](BUILD.md). Ejemplo: copiá `.env.example` → `.env`.
+Override: `SGR_PORT`, `SGR_HOST`, `API_BASE_URL`, `DB_PATH`, `SGR_DEBUG`, `HOMELAB_HOST`, `HOMELAB_PORT`, `SGR_SYNC_TOKEN` — ver [`BUILD.md`](BUILD.md). Ejemplo: copiá `.env.example` → `.env`.
 
 ---
 
@@ -461,6 +463,13 @@ project/
 ├── mybot/intent_router.py        # Router LLM: route(), execute(), format_summary() — Capa 2 Ollama
 ├── mybot/assistant.py            # Modo consulta: answer_question() — Capas 3 y 4 (Bóveda RAG incluido)
 ├── mybot/embeddings.py           # Wrapper REST para /hojas/buscar-semantico (RAG bot-side)
+├── scripts/
+│   ├── sync-config.ps1      # Variables: rutas, IPs, token — editar antes de usar
+│   ├── sgr-abrir.ps1        # Launcher: pull → SGR.exe → push opcional (acceso directo escritorio)
+│   ├── sgr-sync-pull.ps1    # Pull DB y uploads desde homelab (GET /sync/export, sin parar Docker)
+│   ├── sgr-sync-push.ps1    # Push DB y uploads al homelab (POST /sync/import, sin parar Docker)
+│   ├── dev-start.ps1        # Sandbox dev: copia app.db → app.db.dev, levanta uvicorn con DB_PATH
+│   └── dev-stop.ps1         # Limpieza de archivos .dev si dev-start terminó de forma abrupta
 ├── Boveda.md                # Documentación técnica del módulo Bóveda
 ├── Boveda-Roadmap.md        # Pendientes Bóveda
 ├── Finanzas.md              # Documentación técnica del módulo Finanzas
@@ -470,6 +479,7 @@ project/
 ├── Habitos.md               # Documentación técnica del módulo Hábitos
 ├── Habitos-Roadmap.md       # Pendientes Hábitos
 ├── Bot.md                   # Documentación técnica del bot Telegram + integración Ollama/LLM
+├── SYNC-WINDOWS.md          # Especificación del sistema de sync homelab ↔ .exe
 ├── database/app.db          # excluido de git (.gitignore)
 ├── uploads/                 # excluido de git (.gitignore)
 ├── .env                     # excluido de git — copiar de .env.example
@@ -493,6 +503,11 @@ project/
 **Agenda** (`/agenda/*`): calendarios, eventos, listas, tareas, horario-facultad.
 
 **Hábitos** (`/habitos/*`): hábitos CRUD, registros GET/PUT/DELETE.
+
+**Sync** (`/sync/*`):
+- `GET /sync/export` — backup SQLite online sin parar el servidor; usado por `sgr-sync-pull.ps1`.
+- `POST /sync/import` — valida integridad + tablas mínimas, hace backup server-side con timestamp, reemplaza DB canónica; usado por `sgr-sync-push.ps1`.
+- Token opcional: `SGR_SYNC_TOKEN` en `.env` del homelab; scripts leen `$SyncToken` en `sync-config.ps1`.
 
 CORS dev: `http://localhost:5173` y `http://127.0.0.1:5173` (API en `:8765`).
 

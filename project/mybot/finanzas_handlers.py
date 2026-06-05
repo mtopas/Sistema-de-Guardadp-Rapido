@@ -170,6 +170,11 @@ def _is_transfer(mv: dict) -> bool:
     return (mv.get("categoria_nombre") or "").lower() == "transferencia"
 
 
+def _monto_abs(mv: dict) -> float:
+    """Monto siempre positivo para totales (la DB puede tener gastos con signo −)."""
+    return abs(float(mv.get("monto") or 0))
+
+
 # ──────────────────────────────────────────────────────────────
 # Fuzzy match
 # ──────────────────────────────────────────────────────────────
@@ -421,9 +426,9 @@ def _build_mes(movimientos: list, mes: str) -> str:
         if _is_transfer(mv):
             continue
         if mv["tipo"] == "income":
-            ingresos += mv["monto"]
+            ingresos += _monto_abs(mv)
         else:
-            gastos += mv["monto"]
+            gastos += _monto_abs(mv)
 
     balance = ingresos - gastos
     tasa    = balance / ingresos * 100 if ingresos else 0.0
@@ -439,9 +444,17 @@ def _build_mes(movimientos: list, mes: str) -> str:
     return "\n".join(lines)
 
 
-def _contribucion_categoria(mv: dict, nombre_cat: str) -> float:
+def _movimiento_asignado_a_cajon(mv: dict, nombre_cat: str) -> bool:
+    key = (nombre_cat or "").strip().lower()
+    if not key:
+        return False
     cat = (mv.get("categoria_nombre") or "").strip().lower()
-    if cat != (nombre_cat or "").strip().lower():
+    desc = (mv.get("descripcion") or "").strip().lower()
+    return cat == key or desc == key
+
+
+def _contribucion_categoria(mv: dict, nombre_cat: str) -> float:
+    if not _movimiento_asignado_a_cajon(mv, nombre_cat):
         return 0.0
     if mv["tipo"] == "expense":
         return mv["monto"]

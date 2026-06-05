@@ -1,8 +1,13 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
 import { fmtARS, contribucionFire, mesMovimiento } from '../../data/finanzas'
-import { mergeFireCfg, parseFireForm } from './fireConfigUtils'
+import {
+  fireFormFromConfig,
+  fireFormDirty,
+  mergeFireCfg,
+  parseFireForm,
+} from './fireConfigUtils'
 
 function KpiBox({ label, value, valueColor }) {
   return (
@@ -26,64 +31,58 @@ function nextMes(m) {
   return `${y}-${String(mo + 1).padStart(2, '0')}`
 }
 
-function mesLabel(m) {
-  if (!m) return '—'
-  const [y, mo] = m.split('-').map(Number)
-  const names = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
-  return `${names[mo - 1]} ${y}`
-}
-
 export default function FireRightPanel() {
-  const lang              = useStore(s => s.lang)
-  const finConfig         = useStore(s => s.finConfig)
-  const finFirePreview    = useStore(s => s.finFirePreview)
-  const saveConfigBulk    = useStore(s => s.saveFinConfigBulk)
-  const setFinFirePreview = useStore(s => s.setFinFirePreview)
-  const finFireFilas      = useStore(s => s.finFireFilas)
-  const finMovAll         = useStore(s => s.finMovimientosAll)
+  const lang               = useStore(s => s.lang)
+  const finConfig          = useStore(s => s.finConfig)
+  const finFirePreview     = useStore(s => s.finFirePreview)
+  const saveConfigBulk     = useStore(s => s.saveFinConfigBulk)
+  const setFinFirePreview  = useStore(s => s.setFinFirePreview)
+  const clearFinFirePreview = useStore(s => s.clearFinFirePreview)
+  const finFireFilas       = useStore(s => s.finFireFilas)
+  const finMovAll          = useStore(s => s.finMovimientosAll)
 
   const cfg = useMemo(
     () => mergeFireCfg(finConfig, finFirePreview),
     [finConfig, finFirePreview],
   )
 
-  const [form, setForm] = useState({
-    fire_aumento_aporte:     String(cfg.fire_aumento_aporte     ?? '1.20'),
-    fire_rentabilidad_anual: String(cfg.fire_rentabilidad_anual ?? '6.00'),
-    fire_fecha_nacimiento:   cfg.fire_fecha_nacimiento ?? '',
-    fire_aporte_inicial:     String(cfg.fire_aporte_inicial     ?? '0'),
-    fire_saldo_inicial:      String(cfg.fire_saldo_inicial      ?? '0'),
-    fire_inicio_mes:         cfg.fire_inicio_mes ?? '',
-    fire_meta_usd:           String(cfg.fire_meta_usd           ?? '500000'),
-    fire_meta_edad:          String(cfg.fire_meta_edad           ?? ''),
-  })
+  const [form, setForm] = useState(() => fireFormFromConfig(finConfig ?? {}))
+  const skipPreviewRef = useRef(true)
 
+  // Hidratar desde config guardada (no pisa edición en curso ni preview stale)
   useEffect(() => {
-    if (!finConfig) return
-    setForm({
-      fire_aumento_aporte:     String(finConfig.fire_aumento_aporte     ?? '1.20'),
-      fire_rentabilidad_anual: String(finConfig.fire_rentabilidad_anual ?? '6.00'),
-      fire_fecha_nacimiento:   finConfig.fire_fecha_nacimiento ?? '',
-      fire_aporte_inicial:     String(finConfig.fire_aporte_inicial     ?? '0'),
-      fire_saldo_inicial:      String(finConfig.fire_saldo_inicial      ?? '0'),
-      fire_inicio_mes:         finConfig.fire_inicio_mes ?? '',
-      fire_meta_usd:           String(finConfig.fire_meta_usd           ?? '500000'),
-      fire_meta_edad:          String(finConfig.fire_meta_edad           ?? ''),
+    if (!finConfig || Object.keys(finConfig).length === 0) return
+    setForm(prev => {
+      if (fireFormDirty(prev, finConfig)) return prev
+      skipPreviewRef.current = true
+      clearFinFirePreview()
+      return fireFormFromConfig(finConfig)
     })
-  }, [finConfig])
+  }, [finConfig, clearFinFirePreview])
 
-  // Vista previa en FireTab (tabla + proyección largo plazo) sin esperar Guardar
+  // Al salir de FIRE: descartar preview no guardado
+  useEffect(() => () => clearFinFirePreview(), [clearFinFirePreview])
+
+  // Vista previa en FireTab solo mientras editás (no al montar/hidratar)
   useEffect(() => {
+    if (skipPreviewRef.current) {
+      skipPreviewRef.current = false
+      return
+    }
+    if (!fireFormDirty(form, finConfig)) {
+      clearFinFirePreview()
+      return
+    }
     setFinFirePreview(parseFireForm(form))
-  }, [form, setFinFirePreview])
+  }, [form, finConfig, setFinFirePreview, clearFinFirePreview])
 
-  const [saveState, setSaveState] = useState('idle') // 'idle' | 'saving' | 'ok' | 'err'
+  const [saveState, setSaveState] = useState('idle')
 
   const setF = (k, v) => setForm(p => ({ ...p, [k]: v }))
 
   const handleSave = async () => {
     if (saveState === 'saving') return
-    const updates = parseFireForm(form)
+    const updates = parseFireForm(form, { forSave: true })
 
     setSaveState('saving')
     try {
@@ -115,7 +114,6 @@ export default function FireRightPanel() {
     </div>
   )
 
-  // Resumen: saldo acumulado real (last non-future row)
   const currentMes = useMemo(() => {
     const d = new Date()
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
@@ -145,7 +143,6 @@ export default function FireRightPanel() {
     let saldo          = saldoInicial
     let mes            = inicioMes
     let totalAhorrado  = 0
-    let mesesReales    = 0
 
     while (mes <= currentMes) {
       const aporte = mes === inicioMes ? aporteInicial : prevAportePlan * (1 + aumentoMensual)
@@ -154,14 +151,11 @@ export default function FireRightPanel() {
       const ahorrado = computed > 0 ? computed : (override !== undefined ? override : 0)
       const interes  = (saldo + ahorrado) * rentabilidadMensual
       saldo = saldo + ahorrado + interes
-      const falta = Math.max(0, aporte - ahorrado)
       prevAportePlan = aporte
       totalAhorrado += ahorrado
-      if (ahorrado > 0) mesesReales++
       mes = nextMes(mes)
     }
 
-    // Project from current saldo to find FIRE year
     const saldoMetaARS  = metaUSD * dolar
     let proyMes = currentMes
     let proySaldo = saldo
@@ -210,7 +204,6 @@ export default function FireRightPanel() {
         gap: 12,
       }}
     >
-      {/* Resumen */}
       <div className="label">{t(lang, 'fireResumen')}</div>
       <KpiBox label={t(lang,'fireSaldoAcum')} value={fmtARS(resumen.saldoAcum)} />
       <KpiBox label={t(lang,'fireAnioFIRE')} value={resumen.anioFIRE ?? '—'} valueColor="var(--accent)" />
@@ -218,7 +211,6 @@ export default function FireRightPanel() {
 
       <hr style={{ borderColor: 'var(--border)', margin: '4px 0' }} />
 
-      {/* Config */}
       <div className="label">{t(lang, 'fireConfigTitle')}</div>
 
       <div className="flex flex-col gap-2.5">

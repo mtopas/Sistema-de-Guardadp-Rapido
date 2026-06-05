@@ -29,9 +29,9 @@ services:
     command: python mybot/bot.py
     env_file:
       - .env
-    # Sin `environment:` acá: respeta API_BASE_URL del .env del homelab.
-    # Modo gabinete completo: API_BASE_URL=http://backend:8765
-    # Modo DB en Windows: usar docker-compose.bot-only.yml (ver HOMELAB.md)
+    environment:
+      # Default Modo A; override en .env si usás bot-only (192.168.137.1)
+      API_BASE_URL: ${API_BASE_URL:-http://backend:8765}
     depends_on:
       - backend
     restart: unless-stopped

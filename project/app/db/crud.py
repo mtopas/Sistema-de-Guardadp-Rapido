@@ -539,6 +539,7 @@ def fin_crear_categoria(nombre: str, color: Optional[str] = None, tipo: str = "e
 FIN_CATEGORIAS_SISTEMA = frozenset({"Transferencia", "Ajuste", "FIRE"})
 FIN_CATEGORIAS_RESERVADAS = FIN_CATEGORIAS_SISTEMA
 OBJETIVO_EMERGENCIA_NOMBRE = "Fondo de emergencia"
+FIN_EMERGENCIA_OBJETIVO_DESHABILITADO = "fin_emergencia_objetivo_deshabilitado"
 
 
 def _fin_vincular_categoria_objetivo(cursor, objetivo_id: int, nombre: str) -> int:
@@ -1153,11 +1154,14 @@ def fin_eliminar_objetivo(obj_id: int) -> bool:
     if not row:
         conn.close()
         return False
-    if row[0] == OBJETIVO_EMERGENCIA_NOMBRE:
-        conn.close()
-        return False
+    nombre = row[0]
+    if nombre == OBJETIVO_EMERGENCIA_NOMBRE:
+        cursor.execute(
+            "INSERT OR REPLACE INTO fin_config (clave, valor) VALUES (?, '1')",
+            (FIN_EMERGENCIA_OBJETIVO_DESHABILITADO,),
+        )
     cursor.execute(
-        "UPDATE fin_categorias SET oculta = 1 WHERE objetivo_id = ?",
+        "UPDATE fin_categorias SET oculta = 1, objetivo_id = NULL WHERE objetivo_id = ?",
         (obj_id,),
     )
     cursor.execute("DELETE FROM fin_objetivos WHERE id = ?", (obj_id,))

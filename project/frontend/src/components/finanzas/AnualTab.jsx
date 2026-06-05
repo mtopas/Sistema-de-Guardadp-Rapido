@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useStore } from '../../store/useStore'
-import { fmtARS, isTransferencia, movimientoAnio } from '../../data/finanzas'
+import { fmtARS, fmtARSShort, isTransferencia, movimientoAnio } from '../../data/finanzas'
 import { buildFinCategoriaColorByName, getFinCategoriaColor } from '../../data/finCategoriaColors'
 import CardHeader from './CardHeader'
 
@@ -9,11 +9,7 @@ const MONTHS_EN = ['January','February','March','April','May','June','July','Aug
 const SHORT_ES  = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
 const SHORT_EN  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
-function fmtShort(n) {
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000)     return `$${(n / 1_000).toFixed(0)}K`
-  return `$${Math.round(n)}`
-}
+const fmtShort = fmtARSShort
 
 function fmtPct(n, decimals = 1) {
   return `${n >= 0 ? '' : '-'}${Math.abs(n).toFixed(decimals)}%`

@@ -24,7 +24,8 @@ export function isFinCategoriaReservada(catOrName) {
 
 export function categoriaAplicaATipo(cat, tipoMov) {
   if (!cat) return false
-  if (isTransferencia({ categoria_nombre: cat.name })) return false
+  // Transferencia: sistema, pero elegible en ingreso y gasto (par entre cuentas).
+  if (isTransferencia({ categoria_nombre: cat.name })) return true
   const t = cat.tipo ?? 'expense'
   if (t === 'both') return true
   return t === tipoMov

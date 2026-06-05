@@ -3,7 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import { Trash2 } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
-import { isTransferencia } from '../../data/finanzas'
+import { fmtARS, isTransferencia } from '../../data/finanzas'
 import { buildFinCategoriaColorByName, getFinCategoriaColor } from '../../data/finCategoriaColors'
 
 // Normalize field access across mock (type/amount/date/cat/desc/method) and API schemas
@@ -253,7 +253,7 @@ export default function DatosTab() {
         style={{ ...TD, cursor: 'text', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, color }}
         onClick={() => startEdit(mov, 'monto')}
       >
-        {Math.abs(raw).toLocaleString('es-AR')}
+        {fmtARS(Math.abs(raw))}
       </td>
     )
   }

@@ -85,12 +85,14 @@ isTransferencia(m) → categoría exacta "transferencia" (case-insensitive)
 
 Excluidas de ingresos/gastos, donuts, KPIs, Anual, Datos, totales de ahorro.
 
-### Asignación por categoría (modelo actual)
+### Asignación a cajones (modelo actual)
 
-| Cajón | Categoría de movimiento |
-|-------|-------------------------|
-| Plan FIRE | `FIRE` (exacta) |
-| Cada objetivo | Mismo nombre que el objetivo (creada al alta, `objetivo_id` en DB) |
+Un movimiento suma (o resta si es ingreso) al cajón si su **categoría** o su **descripción** coincide exactamente con el nombre del cajón (sin importar mayúsculas; comparación tras `trim`).
+
+| Cajón | Nombre que debe coincidir |
+|-------|---------------------------|
+| Plan FIRE | `FIRE` |
+| Cada objetivo | Mismo nombre que el objetivo (categoría creada al alta, `objetivo_id` en DB) |
 | Sistema | `Transferencia`, `Ajuste` — no eliminables |
 
 | Tipo movimiento | Efecto en el cajón |
@@ -133,7 +135,7 @@ Movimientos con `cuotas > 1` alimentan `CuotasCard` y panel derecho.
 |--------|---------------------------|
 | Crear objetivo | INSERT categoría mismo nombre, `objetivo_id`, `tipo: both` |
 | Actualizar objetivo | Solo `meta`, `moneda`, `fecha_limite`, `cuota_mensual` — **no** `nombre` |
-| Eliminar objetivo | `oculta=1` en categoría vinculada; DELETE objetivo (excepto Fondo de emergencia) |
+| Eliminar objetivo | `oculta=1` en categoría vinculada; DELETE objetivo. Si borrás **Fondo de emergencia**, no se vuelve a crear al reiniciar la API (`fin_emergencia_objetivo_deshabilitado` en config). |
 | PATCH categoría | Sistema y vinculadas a objetivo: no renombrar; color/tipo sí |
 
 `GET /fin/categorias?include_ocultas=true` para ver categorías ocultas (Datos/admin). Selectores de movimiento usan lista sin ocultas.
@@ -142,7 +144,7 @@ Colores de categoría en UI: `buildFinCategoriaColorByName` / `getFinCategoriaCo
 
 ### FIRE
 
-- **Ahorrado real del plan:** movimientos con categoría exacta **`FIRE`** (`contribucionFire` en front).
+- **Ahorrado real del plan:** movimientos con categoría o descripción **`FIRE`** (`contribucionFire` / `movimientoAsignadoACajon` en front).
 - Filas mensuales con proyección (aporte compuesto, interés, saldo).
 - Overrides por mes en `fin_fire_filas` (`ahorrado_override`).
 - Config: `fire_meta_usd`, `fire_meta_edad`, `fire_aumento_aporte`, `fire_rentabilidad_anual`, `fire_fecha_nacimiento`, `fire_aporte_inicial`, `fire_saldo_inicial`, `fire_inicio_mes`.
@@ -232,7 +234,7 @@ mybot/
 | `/mov` | Flujo guiado: tipo (inline kb) → monto (texto) → descripción (texto) → cuenta (inline kb) → categoría (inline kb) → confirmación con preview → POST | `GET /fin/cuentas`, `GET /fin/categorias`, `POST /fin/movimientos` |
 | `/saldo` | Saldos ARS/USD por cuenta + total + equivalente USD con `dolar_oficial` | `GET /fin/cuentas`, `GET /fin/config` |
 | `/mes [YYYY-MM]` | Ingresos, gastos, balance, tasa ahorro del mes (sin transferencias). Default: mes actual | `GET /fin/movimientos?mes=` |
-| `/ahorro` | FIRE del mes + aporte por objetivo (categoría homónima) | `GET /fin/movimientos?mes=`, `GET /fin/objetivos` |
+| `/ahorro` | FIRE del mes + aporte por objetivo (categoría o descripción = nombre) | `GET /fin/movimientos?mes=`, `GET /fin/objetivos` |
 | `/ultimo` | Últimos 5 movimientos ordenados por fecha; botón `🗑 #N` para eliminar | `GET /fin/movimientos`, `DELETE /fin/movimientos/{id}` |
 | `/dolar [valor]` | Sin arg: muestra valor actual. Con arg: actualiza `fin_config.dolar_oficial` | `GET /fin/config`, `PUT /fin/config` |
 | `/objetivo [nombre]` | Sin arg: lista todos. Con nombre (fuzzy): barra de progreso, % ahorrado, meses restantes | `GET /fin/objetivos`, `GET /fin/movimientos` |
@@ -299,7 +301,7 @@ Parsing: `{tipo?} {monto} {descripción…} {cuenta_hint?}` — el último token
   - Botón **"+ Nueva cuenta"** expande form con mismo layout.
   - Store: `createFinCuenta` (optimista), `editFinCuentaMeta` (optimista), `deleteFinCuenta` (optimista).
   - Backend: `fin_editar_cuenta` en `crud.py`; `FinCuentaUpdate` model + `PATCH /fin/cuentas/{id}` en `main.py`.
-- **`data/finanzas.js`:** helpers de cajón por categoría (`contribucionCategoria`, `contribucionFire`, `acumuladoPorCategoriaNombre`); sin mock `FINANZAS`.
+- **`data/finanzas.js`:** helpers de cajón (`movimientoAsignadoACajon`, `contribucionCategoria`, `contribucionFire`, `acumuladoPorCategoriaNombre`); sin mock `FINANZAS`.
 - **`MovementModal`:** `Ctrl+Enter` guarda; `FinCategoriaPicker`; plantillas rápidas; autocompletar cuenta/categoría desde `localStorage`.
 - **Code-split:** `AnualTab`, `FireTab`, `AhorroTab`, `DatosTab` con `React.lazy` + `Suspense`.
 - **`finActiveTab`** en store Zustand; `normalizeMovimiento()` centralizado.
@@ -346,7 +348,7 @@ Parsing: `{tipo?} {monto} {descripción…} {cuenta_hint?}` — el último token
 - **Migración** (`database.py` → `_migrate_fin_categorias_objetivos`): columnas `oculta`, `objetivo_id`; seed FIRE; objetivo **Fondo de emergencia**; Emergencia legacy `oculta=1`.
 - **Backend** (`crud.py`): sync categoría al crear/eliminar objetivo; `fin_obtener_emergencia_saldo` por categoría del objetivo; protección PATCH/DELETE categorías reservadas.
 - **Frontend:** `FireTab`/`FireRightPanel`/`AhorroRightPanel` usan cat. `FIRE`; `AhorroTab` panel Reparto; `finCategorias.js` reservadas; store refresca categorías tras CRUD objetivos.
-- **Bot:** `/ahorro` y `/objetivo` por categoría homónima; categorías ocultas filtradas en teclados.
+- **Bot:** `/ahorro` y `/objetivo` por categoría o descripción (= nombre del cajón); categorías ocultas filtradas en teclados.
 - **Dashboard emergencia:** `fetchFinEmergencia` → endpoint deprecated que ya suma movimientos de la categoría del objetivo seed.
 
 ### Deuda conocida

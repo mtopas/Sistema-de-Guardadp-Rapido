@@ -1,5 +1,46 @@
-export const fmtARS = n => '$' + Math.round(n).toLocaleString('es-AR')
-export const fmtUSD = n => 'US$ ' + Math.round(n).toLocaleString('es-AR')
+/** Decimales de montos en todo el módulo Finanzas. */
+export const FIN_MONEY_OPTS = { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+
+export const fmtARS = (n) => {
+  const x = Number(n)
+  if (!Number.isFinite(x)) return '$0,00'
+  const sign = x < 0 ? '−' : ''
+  return `${sign}$${Math.abs(x).toLocaleString('es-AR', FIN_MONEY_OPTS)}`
+}
+
+export const fmtUSD = (n) => {
+  const x = Number(n)
+  if (!Number.isFinite(x)) return 'US$ 0,00'
+  const sign = x < 0 ? '−' : ''
+  return `${sign}US$ ${Math.abs(x).toLocaleString('es-AR', FIN_MONEY_OPTS)}`
+}
+
+/** Ejes y leyendas compactas (K/M) con 2 decimales en el coeficiente. */
+export function fmtARSShort(n) {
+  const x = Number(n) || 0
+  const sign = x < 0 ? '−' : ''
+  const abs = Math.abs(x)
+  if (abs >= 1_000_000) {
+    return `${sign}$${(abs / 1_000_000).toLocaleString('es-AR', FIN_MONEY_OPTS)}M`
+  }
+  if (abs >= 1_000) {
+    return `${sign}$${(abs / 1_000).toLocaleString('es-AR', FIN_MONEY_OPTS)}K`
+  }
+  return fmtARS(x)
+}
+
+/** Cantidades de instrumentos (acciones, CEDEARs). */
+export function fmtCantidad(n) {
+  const x = Number(n)
+  if (!Number.isFinite(x)) return '0,00'
+  return x.toLocaleString('es-AR', FIN_MONEY_OPTS)
+}
+
+/** Cotización USD→ARS (panel dólar). */
+export function fmtDolarQuote(n) {
+  if (n == null || !Number.isFinite(Number(n))) return '—'
+  return `$${Number(n).toLocaleString('es-AR', FIN_MONEY_OPTS)}`
+}
 
 const INTERNAL = new Set(['transferencia'])
 export const isTransferencia = (mov) => {
@@ -9,10 +50,28 @@ export const isTransferencia = (mov) => {
 
 export const CATEGORIA_FIRE = 'FIRE'
 
-/** Categoría exacta FIRE (insensible a mayúsculas). */
+/** Nombre de categoría del movimiento (normalizado). API usa categoria_nombre; mock legacy cat. */
+export function nombreCategoriaMovimiento(mov) {
+  return String(mov?.categoria_nombre || mov?.cat || '').trim().toLowerCase()
+}
+
+/** Descripción del movimiento (normalizada). API usa descripcion; mock legacy desc. */
+export function descripcionMovimiento(mov) {
+  return String(mov?.descripcion || mov?.desc || '').trim().toLowerCase()
+}
+
+/**
+ * Cajón por nombre de categoría/objetivo: coincide categoría O descripción (igualdad exacta, sin importar mayúsculas).
+ */
+export function movimientoAsignadoACajon(mov, nombre) {
+  const key = (nombre || '').trim().toLowerCase()
+  if (!key) return false
+  return nombreCategoriaMovimiento(mov) === key || descripcionMovimiento(mov) === key
+}
+
+/** Movimiento asignado al cajón FIRE (categoría o descripción "FIRE"). */
 export function isCategoriaFire(mov) {
-  const cat = (mov?.cat ?? mov?.categoria_nombre ?? '').trim().toLowerCase()
-  return cat === 'fire'
+  return movimientoAsignadoACajon(mov, CATEGORIA_FIRE)
 }
 
 /** Contribución firmada: gasto suma al cajón, ingreso resta (puede quedar negativo). */
@@ -33,8 +92,7 @@ export function acumuladoPorCategoriaNombre(movs, nombreCategoria) {
   const key = (nombreCategoria || '').trim().toLowerCase()
   if (!key) return 0
   return (movs || []).reduce((sum, m) => {
-    const cat = (m?.cat ?? m?.categoria_nombre ?? '').trim().toLowerCase()
-    if (cat !== key) return sum
+    if (!movimientoAsignadoACajon(m, key)) return sum
     return sum + contribucionCategoria(m)
   }, 0)
 }

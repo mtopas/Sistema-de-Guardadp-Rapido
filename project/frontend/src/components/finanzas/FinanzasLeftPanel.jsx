@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { ArrowDown, ArrowUp, Settings, ChevronDown, ChevronUp, CalendarClock, Plus, Trash2, Pencil, X, Check } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
-import { fmtARS, fmtUSD, isTransferencia } from '../../data/finanzas'
+import { fmtARS, fmtUSD, fmtDolarQuote, isTransferencia } from '../../data/finanzas'
 import { BRANCH_COLORS } from '../../utils/themes'
 
 const FIN_KEYWORDS = /pagar|cuota|vencimiento|cobro|débito|debito|transferir|tarjeta|impuesto|factura|alquiler|servicio|préstamo|prestamo/i
@@ -142,7 +142,7 @@ export default function FinanzasLeftPanel() {
         <div className="text-[11.5px] mt-1.5 flex items-center gap-2 flex-wrap" style={{ color: 'var(--subtext)' }}>
           <span className="mono tnum">≈ {fmtUSD(saldoUSD)}</span>
           <span className="opacity-50">·</span>
-          <span>MEP {(dolarMEP ?? dolarRate) != null ? `$${Math.round(dolarMEP ?? dolarRate).toLocaleString('es-AR')} ARS` : '—'}</span>
+          <span>MEP {(dolarMEP ?? dolarRate) != null ? `${fmtDolarQuote(dolarMEP ?? dolarRate)} ARS` : '—'}</span>
         </div>
 
         <div className="grid grid-cols-2 gap-2 mt-4">
@@ -307,13 +307,13 @@ export default function FinanzasLeftPanel() {
                 <div className="flex justify-between items-center px-2.5 py-1.5 rounded-lg" style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
                   <span className="text-[11px]" style={{ color: 'var(--subtext)' }}>MEP <span className="opacity-60 text-[9px]">(FIRE)</span></span>
                   <span className="text-[12px] font-semibold mono tnum" style={{ color: 'var(--text)' }}>
-                    {dolarMEP != null ? `$${Math.round(dolarMEP).toLocaleString('es-AR')}` : '—'}
+                    {fmtDolarQuote(dolarMEP)}
                   </span>
                 </div>
                 <div className="flex justify-between items-center px-2.5 py-1.5 rounded-lg" style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
                   <span className="text-[11px]" style={{ color: 'var(--subtext)' }}>Oficial compra</span>
                   <span className="text-[12px] font-semibold mono tnum" style={{ color: 'var(--text)' }}>
-                    {dolarOficialComp != null ? `$${Math.round(dolarOficialComp).toLocaleString('es-AR')}` : '—'}
+                    {fmtDolarQuote(dolarOficialComp)}
                   </span>
                 </div>
                 {finConfig?.dolar_actualizado_at && (

@@ -128,6 +128,59 @@ def _check_available() -> bool:
     return _avail
 
 
+_QUESTION_STARTERS = (
+    "cuanto", "cuánto", "como", "cómo", "que ", "qué ", "cual", "cuál",
+    "donde", "dónde", "cuando", "cuándo", "tengo ", "hay ", "recordame",
+    "recordá", "mostrame", "mostrá",
+)
+
+
+def _looks_like_question(texto: str) -> bool:
+    t = texto.strip().lower()
+    if not t:
+        return False
+    if t.startswith("¿") or "?" in t:
+        return True
+    return any(t.startswith(s) for s in _QUESTION_STARTERS)
+
+
+def _consulta_modulo(modulo: str) -> str:
+    if modulo.startswith("consulta_"):
+        return modulo
+    if modulo in ("finanzas", "habitos", "agenda", "boveda"):
+        return f"consulta_{modulo}"
+    return modulo
+
+
+def _normalize_classify(raw: dict) -> dict:
+    """Acepta variantes del JSON del modelo (claves acentuadas, anidado, etc.)."""
+    if not raw:
+        return {}
+
+    nested = raw.get("modulos") or raw.get("módulos")
+    if isinstance(nested, dict) and nested:
+        first_key = next(iter(nested))
+        inner = nested[first_key]
+        if isinstance(inner, dict):
+            raw = {**inner, "modulo": inner.get("modulo") or inner.get("módulo") or first_key}
+
+    modulo = raw.get("modulo") or raw.get("módulo") or raw.get("module")
+    accion = raw.get("accion") or raw.get("acción") or raw.get("action") or raw.get("intencion")
+    datos  = raw.get("datos") or raw.get("data") or {}
+
+    if not modulo and accion == "consultar":
+        modulo = "desconocido"
+
+    out = {
+        "modulo":        modulo or "desconocido",
+        "accion":        accion or "guardar",
+        "datos":         datos if isinstance(datos, dict) else {},
+        "confianza":     raw.get("confianza", raw.get("confidence", 0.0)),
+        "es_pregunta":   raw.get("es_pregunta", raw.get("pregunta", False)),
+    }
+    return out
+
+
 # ── Router principal ───────────────────────────────────────────────────────────
 
 def route(mensaje: str) -> RouteResult:
@@ -137,11 +190,12 @@ def route(mensaje: str) -> RouteResult:
         return RouteResult(action="fallback", modulo="desconocido")
 
     fecha_hora = datetime.now().strftime("%A %d/%m/%Y %H:%M")
-    raw = llm_client.classify(_PROMPT_TMPL.format(fecha_hora=fecha_hora), mensaje)
-
-    if not raw or "modulo" not in raw:
-        logger.warning("[router] respuesta inválida: %s", raw)
+    classified = llm_client.classify(_PROMPT_TMPL.format(fecha_hora=fecha_hora), mensaje)
+    if not classified:
+        logger.warning("[router] respuesta inválida (vacía o timeout)")
         return RouteResult(action="fallback", modulo="desconocido")
+
+    raw = _normalize_classify(classified)
 
     modulo    = raw.get("modulo", "desconocido")
     confianza = max(0.0, min(1.0, float(raw.get("confianza", 0.0))))
@@ -154,9 +208,12 @@ def route(mensaje: str) -> RouteResult:
 
     logger.info("[router] '%s…' → %s (%.2f) pregunta=%s", mensaje[:50], modulo, confianza, es_preg)
 
+    accion = raw.get("accion", "guardar")
+
     # Consultas → modo pregunta (Capa 3)
-    if es_preg or modulo.startswith("consulta_"):
-        return RouteResult(action="question", modulo=modulo, datos=datos,
+    if es_preg or modulo.startswith("consulta_") or accion == "consultar":
+        q_mod = _consulta_modulo(modulo)
+        return RouteResult(action="question", modulo=q_mod, datos=datos,
                            confianza=confianza, es_pregunta=True)
 
     if modulo in ("desconocido", "boveda") or confianza < CONFIDENCE_MEDIUM:
@@ -165,6 +222,11 @@ def route(mensaje: str) -> RouteResult:
     # Verificar campos mínimos
     required = _REQUIRED.get(modulo, [])
     if not all(k in datos and datos[k] is not None for k in required):
+        if _looks_like_question(mensaje) and modulo in ("finanzas", "habitos", "agenda"):
+            q_mod = _consulta_modulo(modulo)
+            logger.info("[router] '%s' sin datos de captura → consulta (%s)", modulo, q_mod)
+            return RouteResult(action="question", modulo=q_mod, datos=datos,
+                               confianza=confianza, es_pregunta=True)
         logger.info("[router] faltan campos mínimos para '%s' → fallback", modulo)
         return RouteResult(action="fallback", modulo=modulo, datos=datos, confianza=confianza)
 

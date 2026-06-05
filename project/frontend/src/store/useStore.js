@@ -175,9 +175,14 @@ export const useStore = create((set, get) => ({
       })
       if (!res.ok) throw new Error('not ok')
       const data = await res.json()
+      const row = {
+        ...data,
+        desc: data.descripcion ?? '',
+        cat: data.categoria_nombre ?? '',
+      }
       set(state => ({
-        finMovimientos:    [data, ...state.finMovimientos],
-        finMovimientosAll: [data, ...state.finMovimientosAll],
+        finMovimientos:    [row, ...state.finMovimientos],
+        finMovimientosAll: [row, ...state.finMovimientosAll],
       }))
       if (DEBUG) console.log('addFinMovimiento (API):', data)
       get().fetchFinMovimientosAll()
@@ -208,9 +213,12 @@ export const useStore = create((set, get) => ({
   },
 
   updateFinMovimiento: async (id, patch) => {
+    const merged = { ...patch }
+    if (merged.descripcion !== undefined) merged.desc = merged.descripcion
+    if (merged.categoria_nombre !== undefined) merged.cat = merged.categoria_nombre
     set(state => ({
-      finMovimientos:    state.finMovimientos.map(m    => m.id === id ? { ...m, ...patch } : m),
-      finMovimientosAll: state.finMovimientosAll.map(m => m.id === id ? { ...m, ...patch } : m),
+      finMovimientos:    state.finMovimientos.map(m    => m.id === id ? { ...m, ...merged } : m),
+      finMovimientosAll: state.finMovimientosAll.map(m => m.id === id ? { ...m, ...merged } : m),
     }))
     try {
       await fetch(`${API_URL}/fin/movimientos/${id}`, {
@@ -218,6 +226,7 @@ export const useStore = create((set, get) => ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       })
+      get().fetchFinMovimientosAll()
     } catch { /* offline ok */ }
     get().fetchFinCuentas()
     if (DEBUG) console.log('updateFinMovimiento:', id, patch)
@@ -582,11 +591,19 @@ export const useStore = create((set, get) => ({
   },
 
   deleteFinObjetivo: async (id) => {
-    set(state => ({ finObjetivos: state.finObjetivos.filter(o => o.id !== id) }))
+    const prev = get().finObjetivos
+    const sid = String(id)
+    set(state => ({
+      finObjetivos: state.finObjetivos.filter(o => String(o.id) !== sid),
+    }))
     try {
-      await fetch(`${API_URL}/fin/objetivos/${id}`, { method: 'DELETE' })
+      const res = await fetch(`${API_URL}/fin/objetivos/${id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('not ok')
       await get().fetchFinCategorias()
-    } catch { /* noop */ }
+    } catch {
+      set({ finObjetivos: prev })
+      get().showToast('No se pudo eliminar el objetivo', 'error')
+    }
   },
 
   // ---------------------------------------------------------------------------

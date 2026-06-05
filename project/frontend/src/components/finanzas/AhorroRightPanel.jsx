@@ -286,6 +286,10 @@ export default function AhorroRightPanel() {
         <NuevoObjetivoForm lang={lang} onSave={handleSaveObj} onCancel={() => setAddingObj(false)} />
       )}
 
+      <p style={{ fontSize: 10.5, color: 'var(--subtext)', lineHeight: 1.35, margin: 0 }}>
+        {t(lang, 'objAsignacionHint')}
+      </p>
+
       {finObjetivos.length === 0 && !addingObj ? (
         <p style={{ fontSize: 12, color: 'var(--subtext)' }}>{t(lang, 'sinObjetivos')}</p>
       ) : (

@@ -25,6 +25,7 @@ import assistant
 import dev_reporter as dr
 import finanzas_handlers as fh
 import intent_router as ir
+import llm_client
 
 logger = logging.getLogger(__name__)
 
@@ -873,6 +874,14 @@ def main():
     api_ok, cat_ok = _healthcheck()
     if not cat_ok:
         print("[bot] ⚠ Bóveda: /categorias no responde al arrancar. Verificá el backend.")
+
+    if llm_client.is_available():
+        print(f"[bot] Ollama OK ({llm_client.OLLAMA_BASE_URL}, modelo {llm_client.MODEL_CLASSIFY})")
+    else:
+        print(
+            f"[bot] ⚠ Ollama NO disponible en {llm_client.OLLAMA_BASE_URL}. "
+            "Texto libre sin prefijos cae a Bóveda. Verificá OLLAMA_BASE_URL en .env."
+        )
 
     app = (
         ApplicationBuilder()

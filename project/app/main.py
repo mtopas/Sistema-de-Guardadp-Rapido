@@ -164,7 +164,7 @@ class FinMovimientoCreate(BaseModel):
     monto: float
     moneda: str = "ARS"
     fecha: str
-    descripcion: str
+    descripcion: str = ""
     icono: Optional[str] = None
     cuenta_id: Optional[Any] = None
     cuenta_nombre: Optional[str] = None

@@ -525,7 +525,7 @@ CORS dev: `http://localhost:5173` y `http://127.0.0.1:5173` (API en `:8765`).
 | AgendaScreen renderizado condicional | Igual que Finanzas/Hábitos; `agendaHoyViewISO`, `agendaMesYear/Month` en store para preservar posición al remontar |
 | `finMovimientos` vs `finMovimientosAll` | Mes actual vs histórico (Datos, Ahorro, Anual, FIRE) |
 | Instrumentos en tabla polimórfica | Un CRUD; campos opcionales por `tipo` |
-| Objetivo ↔ categoría homónima (`objetivo_id`) | Asignación solo por categoría del movimiento; sin match por descripción |
+| Objetivo ↔ categoría homónima (`objetivo_id`) | Asignación por categoría **o** descripción (= nombre del objetivo/FIRE) |
 | FIRE: proyección en front + overrides en BD | Cálculo pesado en cliente; persistir solo excepciones |
 | Temas como CSS variables | ClaudeDesign portado sin reescribir componentes |
 | Hábitos: registros por fecha con UNIQUE | Upsert simple con `ON CONFLICT DO UPDATE` |

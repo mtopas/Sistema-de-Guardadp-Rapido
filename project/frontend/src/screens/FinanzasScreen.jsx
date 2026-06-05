@@ -41,6 +41,7 @@ function isFormFieldFocused() {
 
 export default function FinanzasScreen() {
   const setFinActiveTab         = useStore(s => s.setFinActiveTab)
+  const clearFinFirePreview     = useStore(s => s.clearFinFirePreview)
   const fetchFinMovimientos     = useStore(s => s.fetchFinMovimientos)
   const fetchFinMovimientosAll  = useStore(s => s.fetchFinMovimientosAll)
   const fetchFinCuentas           = useStore(s => s.fetchFinCuentas)
@@ -58,7 +59,11 @@ export default function FinanzasScreen() {
   const setFilterCat = (type, cat) => setFilterCats(prev => ({ ...prev, [type]: cat }))
 
   // Sync to store so other components (Ctrl+M, atajos) can read it
-  const handleTabChange = (t) => { setTab(t); setFinActiveTab(t) }
+  const handleTabChange = (t) => {
+    if (tab === 'fire' && t !== 'fire') clearFinFirePreview()
+    setTab(t)
+    setFinActiveTab(t)
+  }
 
   // Refrescar al entrar / poll (no corre si editás o hay foco en un campo)
   const refreshFinData = useCallback(() => {

@@ -9,9 +9,88 @@ Gabinete Ubuntu con **backend + bot** en Docker. API en **`:8765`** (no `:8000`)
 | **Vite en Windows** (`npm run dev`) | `http://127.0.0.1:8765` | `project/database/app.db` en la PC |
 | **Bot en Docker (homelab)** | `http://backend:8765` en el gabinete | `~/project/database/app.db` en Ubuntu |
 
-Son **dos SQLite distintas** salvo que unifiques. **Setup recomendado: Modo B (DB solo en Windows).**
+Son **dos SQLite distintas** que se sincronizan con los scripts de `project/scripts/`.
 
-### Modo B — una DB en Windows (recomendado)
+**Modo recomendado:** Modo A — DB canónica en homelab, sync automático al abrir/cerrar el `.exe`. Ver flujo detallado abajo y especificación completa en [`project/SYNC-WINDOWS.md`](project/SYNC-WINDOWS.md).
+
+---
+
+### Modo A — DB canónica en homelab + sync scripts (recomendado)
+
+Stack homelab: `backend` + `bot` en Docker, siempre encendidos. El `.exe` en Windows sincroniza al abrir y al cerrar usando los scripts de `project/scripts/`.
+
+**Prerrequisito único: clave SSH sin contraseña** (para scp de uploads):
+
+```powershell
+# En Windows — generar clave si no existe
+ssh-keygen -t ed25519 -C “sgr-sync”
+# Copiar al homelab
+type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh mtopas@192.168.137.10 “mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys”
+# Verificar (debe conectar sin pedir contraseña)
+ssh mtopas@192.168.137.10 “echo OK”
+```
+
+**Configurar `project/scripts/sync-config.ps1`** (una vez):
+
+```powershell
+$HomelabHost    = “192.168.137.10”   # IP del gabinete
+$HomelabUser    = “mtopas”
+$HomelabProject = “~/project”
+$SgrExe         = “D:\Sistema-de-Guardadp-Rapido\project\dist\SGR\SGR.exe”
+$LocalDataRoot  = “D:\Sistema-de-Guardadp-Rapido\project”
+$SyncToken      = “”                  # Igual al SGR_SYNC_TOKEN en .env del homelab (si se configuró)
+```
+
+**Flujo de uso diario:**
+
+```
+Doble clic en acceso directo → sgr-abrir.ps1
+  ├─ Pull: GET http://homelab:8765/sync/export → app.db local   (sin parar Docker)
+  ├─ Lanza SGR.exe → trabaja normalmente
+  └─ Al cerrar: si la DB cambió (SHA-256) → “¿Subir cambios?” → POST /sync/import
+```
+
+**Scripts disponibles:**
+
+| Script | Uso |
+| :--- | :--- |
+| `sgr-abrir.ps1` | Launcher completo (pull → exe → push opcional). Poner como acceso directo. |
+| `sgr-sync-pull.ps1` | Solo pull manual (si querés actualizar sin abrir el exe). |
+| `sgr-sync-push.ps1` | Solo push manual (si cerraste sin hacer push). |
+| `dev-start.ps1` | Sandbox de desarrollo: copia DB a `.dev`, levanta uvicorn aislado. |
+| `dev-stop.ps1` | Limpia archivos `.dev` si `dev-start` terminó de forma abrupta. |
+
+**Modo dev** (para modificar el código):
+
+```powershell
+# Terminal 1 — uvicorn aislado en app.db.dev (nunca toca la DB de producción local)
+.\project\scripts\dev-start.ps1   # Ctrl+C para parar; limpia .dev automáticamente
+
+# Terminal 2 — frontend
+cd project\frontend && npm run dev
+```
+
+**Verificar sync tras pull:**
+
+```powershell
+# Compara counts locales vs homelab
+curl -s http://127.0.0.1:8765/meta    # local (con exe corriendo)
+curl -s http://192.168.137.10:8765/meta  # homelab
+```
+
+**Backup automático en el homelab:** antes de cada push (POST /sync/import), el servidor crea `database/app.db.bak.<timestamp>`. Para limpiar backups viejos:
+
+```bash
+# En el homelab
+ls ~/project/database/app.db.bak.*
+rm ~/project/database/app.db.bak.<timestamp_viejo>
+```
+
+---
+
+### Modo B — una DB en Windows (solo bot en Docker; API siempre en la PC)
+
+> **Legacy.** Requiere uvicorn/`SGR.exe` escuchando en `0.0.0.0` mientras el bot corre. Para uso normal con `.exe` + bot 24/7, usar Modo A con los scripts de sync.
 
 **1. Windows — API en toda la interfaz ICS** (desde `project/`):
 
@@ -337,9 +416,8 @@ En lugar de instalar dependencias en el sistema host, usamos **Docker** (`projec
 
 | Modo | Descripción |
 | :--- | :--- |
-| **A — Todo en el gabinete** | Bot + API en Docker; DB en `~/project/database/`. UI: `http://192.168.137.10:8765` o `VITE_API_URL` apuntando al gabinete. |
-| **B — DB en Windows (recomendado)** | `docker-compose.bot-only.yml` en homelab + `SGR_HOST=0.0.0.0` en Windows. Ver sección arriba. |
-| **C — Sincronizar DB** | `scp` de `app.db` entre PC y gabinete si hiciste pruebas en ambos lados. |
+| **A — Canónico en homelab + sync scripts** ✓ | Bot + API en Docker (`docker-compose.yml`). DB canónica en `~/project/database/`. El `.exe` en Windows sincroniza via `sgr-abrir.ps1` (pull al abrir, push al cerrar). **Modo recomendado.** |
+| **B — DB en Windows (legacy)** | `docker-compose.bot-only.yml` en homelab + uvicorn/`SGR.exe` en `0.0.0.0` permanente en Windows. Sin sync — una sola DB pero exige PC siempre encendida. |
 
 ### Conceptos clave
 

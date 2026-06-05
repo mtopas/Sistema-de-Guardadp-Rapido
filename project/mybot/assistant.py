@@ -38,6 +38,8 @@ _SYSTEM_TMPL = (
     "Máximo 4 oraciones cortas. "
     "No uses markdown, asteriscos, guiones bajos ni corchetes. "
     "Basate solo en los datos proporcionados, no inventes cifras. "
+    "No hagas aritmética propia: usá total_gastos, total_ingresos y balance tal cual vienen en los datos. "
+    "Los montos por categoría ya son positivos (son gastos). "
     "Si algo no está en los datos, decilo claramente. "
     "Fecha actual: {fecha}."
 )
@@ -85,27 +87,38 @@ def answer_question(pregunta: str, modulo: str, api_base: str = DEFAULT_API_BASE
 
 def _gather_finanzas(api: str) -> dict:
     mes = date.today().strftime("%Y-%m")
-    movs_raw  = fh._get_movimientos(api, mes)
     cuentas   = fh._get_cuentas(api)
     config    = fh._get_config(api)
     objetivos = fh._get_objetivos(api)
 
-    # Normalizar y excluir transferencias
-    movs_all  = [fh._normalize_mov(m) for m in movs_raw]
-    movs      = [m for m in movs_all if not fh._is_transfer(m)]
-
-    ingresos = sum(m["monto"] for m in movs if m["tipo"] == "income")
-    gastos   = sum(m["monto"] for m in movs if m["tipo"] != "income")
-    balance  = ingresos - gastos
-    tasa     = round(balance / ingresos * 100, 1) if ingresos else 0.0
-
-    # Top categorías de gasto
-    cat_totales: dict[str, float] = {}
-    for m in movs:
-        if m["tipo"] != "income":
-            cat = m["categoria_nombre"] or "Sin categoría"
-            cat_totales[cat] = cat_totales.get(cat, 0) + m["monto"]
-    top_cats = sorted(cat_totales.items(), key=lambda x: x[1], reverse=True)[:8]
+    # Misma lógica que GET /fin/movimientos/resumen (montos siempre positivos en totales)
+    try:
+        rr = requests.get(f"{api}/fin/movimientos/resumen", params={"mes": mes}, timeout=15)
+        rr.raise_for_status()
+        resumen = rr.json()
+        ingresos = float(resumen.get("ingresos") or 0)
+        gastos   = float(resumen.get("gastos") or 0)
+        balance  = float(resumen.get("balance") or (ingresos - gastos))
+        tasa     = float(resumen.get("tasa_ahorro") or 0)
+        top_cats = [
+            (c["categoria"], float(c.get("gastos") or 0))
+            for c in (resumen.get("por_categoria") or [])
+            if float(c.get("gastos") or 0) > 0
+        ][:8]
+    except requests.RequestException:
+        movs_raw = fh._get_movimientos(api, mes)
+        movs_all = [fh._normalize_mov(m) for m in movs_raw]
+        movs     = [m for m in movs_all if not fh._is_transfer(m)]
+        ingresos = sum(fh._monto_abs(m) for m in movs if m["tipo"] == "income")
+        gastos   = sum(fh._monto_abs(m) for m in movs if m["tipo"] != "income")
+        balance  = ingresos - gastos
+        tasa     = round(balance / ingresos * 100, 1) if ingresos else 0.0
+        cat_totales: dict[str, float] = {}
+        for m in movs:
+            if m["tipo"] != "income":
+                cat = m["categoria_nombre"] or "Sin categoría"
+                cat_totales[cat] = cat_totales.get(cat, 0) + fh._monto_abs(m)
+        top_cats = sorted(cat_totales.items(), key=lambda x: x[1], reverse=True)[:8]
 
     # Saldos de cuentas (máx 6)
     saldos = [

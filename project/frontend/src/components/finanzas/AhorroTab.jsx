@@ -4,16 +4,17 @@ import { API_URL } from '../../config'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
 import {
-  fmtARS, fmtUSD, acumuladoPorCategoriaNombre, CATEGORIA_FIRE,
+  fmtARS, fmtUSD, fmtCantidad, acumuladoPorCategoriaNombre, CATEGORIA_FIRE,
 } from '../../data/finanzas'
 
 const TIPOS = [
-  { id: 'acciones',   labelKey: 'tipoAcciones' },
-  { id: 'fci',        labelKey: 'tipoFCI'      },
-  { id: 'plazo_fijo', labelKey: 'tipoPlazoFijo'},
-  { id: 'ons',        labelKey: 'tipoONs'      },
-  { id: 'crypto',     labelKey: 'tipoCrypto'   },
-  { id: 'otros',      labelKey: 'tipoOtros'    },
+  { id: 'acciones',       labelKey: 'tipoAcciones'     },
+  { id: 'fci',            labelKey: 'tipoFCI'          },
+  { id: 'plazo_fijo',     labelKey: 'tipoPlazoFijo'    },
+  { id: 'plazo_fijo_uva', labelKey: 'tipoPlazoFijoUVA' },
+  { id: 'ons',            labelKey: 'tipoONs'          },
+  { id: 'crypto',         labelKey: 'tipoCrypto'       },
+  { id: 'otros',          labelKey: 'tipoOtros'        },
 ]
 
 const TH = {
@@ -36,6 +37,20 @@ function calcIntereses(inst) {
   return inst.capital_ars * (inst.tna / 100) * (dias / 365)
 }
 
+/** Precio de la UVA al colocar = monto en pesos ÷ cantidad de UVAs. */
+function calcPrecioUva(inst) {
+  const monto = Number(inst.capital_ars)
+  const uvas = Number(inst.cantidad)
+  if (!Number.isFinite(monto) || !Number.isFinite(uvas) || uvas <= 0) return null
+  return monto / uvas
+}
+
+function valorInstrumentoARS(inst) {
+  if (inst.tipo === 'plazo_fijo') return (inst.capital_ars ?? 0) + calcIntereses(inst)
+  if (inst.tipo === 'plazo_fijo_uva') return inst.capital_ars ?? 0
+  return 0
+}
+
 function pnl(inst) {
   if (inst.costo_usd == null || inst.precio_actual == null) return null
   const costoTotal = inst.costo_usd   // total purchase cost in USD
@@ -54,15 +69,24 @@ function fmtFecha(str) {
 // ── Add instrument form ───────────────────────────────────────────────────────
 
 function AddForm({ tipo, onSave, onCancel, lang }) {
-  const isPF    = tipo === 'plazo_fijo'
-  const isFCI   = tipo === 'fci'
-  const isOtros = tipo === 'otros'
+  const isPF     = tipo === 'plazo_fijo'
+  const isPFUVA  = tipo === 'plazo_fijo_uva'
+  const isFCI    = tipo === 'fci'
+  const isOtros  = tipo === 'otros'
+  const isPFTipo = isPF || isPFUVA
 
   const [f, setF] = useState({
     ticker: '', sociedad: '', nombre: '', cantidad: '', costo_usd: '', tipo_cambio: '',
     precio_actual: '', entidad: '', capital_ars: '', tna: '', fecha_inicio: '', fecha_vencimiento: '',
   })
   const set = (k, v) => setF(p => ({ ...p, [k]: v }))
+
+  const precioUvaPreview = useMemo(() => {
+    const monto = parseFloat(f.capital_ars)
+    const uvas = parseFloat(f.cantidad)
+    if (!monto || !uvas || uvas <= 0) return null
+    return monto / uvas
+  }, [f.capital_ars, f.cantidad])
 
   const inp = (placeholder, key, type = 'text') => (
     <input
@@ -82,7 +106,7 @@ function AddForm({ tipo, onSave, onCancel, lang }) {
 
   const handleSave = () => {
     const payload = { tipo, nombre: f.nombre || f.ticker || '?' }
-    if (!isPF) {
+    if (!isPFTipo) {
       payload.ticker        = isFCI ? null : (f.ticker || null)
       payload.sociedad      = isFCI ? (f.sociedad || null) : null
       payload.cantidad      = parseFloat(f.cantidad)  || 0
@@ -97,6 +121,17 @@ function AddForm({ tipo, onSave, onCancel, lang }) {
       payload.fecha_inicio      = f.fecha_inicio || null
       payload.fecha_vencimiento = f.fecha_vencimiento || null
     }
+    if (isPFUVA) {
+      const monto = parseFloat(f.capital_ars)
+      const uvas = parseFloat(f.cantidad)
+      if (!monto || !uvas || uvas <= 0 || !f.fecha_inicio || !f.fecha_vencimiento) return
+      payload.nombre            = f.entidad || t(lang, 'tipoPlazoFijoUVA')
+      payload.entidad           = f.entidad || null
+      payload.capital_ars       = monto
+      payload.cantidad          = uvas
+      payload.fecha_inicio      = f.fecha_inicio
+      payload.fecha_vencimiento = f.fecha_vencimiento
+    }
     onSave(payload)
   }
 
@@ -104,17 +139,25 @@ function AddForm({ tipo, onSave, onCancel, lang }) {
     <tr style={{ background: 'color-mix(in oklch, var(--accent) 5%, transparent)' }}>
       <td colSpan={99} style={{ ...TD, padding: '8px 10px' }}>
         <div className="flex flex-wrap gap-2 items-end">
-          {!isPF && !isOtros && !isFCI && <div className="flex flex-col gap-0.5" style={{ width: 80 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrTicker')}</span>{inp('AAPL','ticker')}</div>}
+          {!isPFTipo && !isOtros && !isFCI && <div className="flex flex-col gap-0.5" style={{ width: 80 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrTicker')}</span>{inp('AAPL','ticker')}</div>}
           {isFCI && <div className="flex flex-col gap-0.5" style={{ width: 130 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrSociedad')}</span>{inp('Pionero','sociedad')}</div>}
-          <div className="flex flex-col gap-0.5" style={{ width: 140 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrNombre')}</span>{inp(t(lang,'instrNombre'),'nombre')}</div>
-          {!isPF && <div className="flex flex-col gap-0.5" style={{ width: 90 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrCantidad')}</span>{inp('0','cantidad','number')}</div>}
-          {!isPF && <div className="flex flex-col gap-0.5" style={{ width: 100 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrCosto')}</span>{inp('0','costo_usd','number')}</div>}
-          {!isPF && <div className="flex flex-col gap-0.5" style={{ width: 90 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrPrecio')}</span>{inp('0','precio_actual','number')}</div>}
-          {isPF && <div className="flex flex-col gap-0.5" style={{ width: 120 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrEntidad')}</span>{inp('Banco','entidad')}</div>}
+          {!isPFUVA && <div className="flex flex-col gap-0.5" style={{ width: 140 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrNombre')}</span>{inp(t(lang,'instrNombre'),'nombre')}</div>}
+          {!isPFTipo && <div className="flex flex-col gap-0.5" style={{ width: 90 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrCantidad')}</span>{inp('0','cantidad','number')}</div>}
+          {!isPFTipo && <div className="flex flex-col gap-0.5" style={{ width: 100 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrCosto')}</span>{inp('0','costo_usd','number')}</div>}
+          {!isPFTipo && <div className="flex flex-col gap-0.5" style={{ width: 90 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrPrecio')}</span>{inp('0','precio_actual','number')}</div>}
+          {isPFTipo && <div className="flex flex-col gap-0.5" style={{ width: 120 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrEntidad')}</span>{inp('Banco','entidad')}</div>}
           {isPF && <div className="flex flex-col gap-0.5" style={{ width: 110 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrCapital')}</span>{inp('0','capital_ars','number')}</div>}
           {isPF && <div className="flex flex-col gap-0.5" style={{ width: 70 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrTNA')}</span>{inp('97.5','tna','number')}</div>}
-          {isPF && <div className="flex flex-col gap-0.5" style={{ width: 110 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrInicio')}</span>{inp('2026-05-01','fecha_inicio','date')}</div>}
-          {isPF && <div className="flex flex-col gap-0.5" style={{ width: 110 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrVenc')}</span>{inp('2026-06-30','fecha_vencimiento','date')}</div>}
+          {isPFUVA && <div className="flex flex-col gap-0.5" style={{ width: 110 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrMontoColocado')}</span>{inp('0','capital_ars','number')}</div>}
+          {isPFUVA && <div className="flex flex-col gap-0.5" style={{ width: 100 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrUVAs')}</span>{inp('0','cantidad','number')}</div>}
+          {isPFUVA && precioUvaPreview != null && (
+            <div className="flex flex-col gap-0.5 justify-end" style={{ minWidth: 120 }}>
+              <span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'colPrecioUva')}</span>
+              <span className="mono tnum" style={{ fontSize: 12, color: 'var(--accent)', padding: '4px 0' }}>{fmtARS(precioUvaPreview)}</span>
+            </div>
+          )}
+          {isPFTipo && <div className="flex flex-col gap-0.5" style={{ width: 110 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrInicio')}</span>{inp('2026-05-01','fecha_inicio','date')}</div>}
+          {isPFTipo && <div className="flex flex-col gap-0.5" style={{ width: 110 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrVenc')}</span>{inp('2026-06-30','fecha_vencimiento','date')}</div>}
           <button onClick={handleSave} style={{ background: 'var(--cta-bg)', color: 'var(--cta-text)', border: 'none', borderRadius: 8, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>
             <Check size={13} />
           </button>
@@ -170,7 +213,7 @@ function AccionesRows({ items, lang }) {
       <tr key={inst.id} style={{ borderBottom: '1px solid var(--border)' }}>
         <td style={{ ...TD, fontWeight: 700 }}>{inst.ticker ?? '—'}</td>
         <td style={TD}>{inst.nombre}</td>
-        <td style={{ ...TD, textAlign: 'right' }}>{(inst.cantidad ?? 0).toLocaleString('es-AR')}</td>
+        <td style={{ ...TD, textAlign: 'right' }}>{fmtCantidad(inst.cantidad ?? 0)}</td>
         <td style={{ ...TD, textAlign: 'right' }}>{inst.costo_usd != null && inst.cantidad > 0 ? fmtUSD(inst.costo_usd / inst.cantidad) : '—'}</td>
         <PrecioCell inst={inst} lang={lang} />
         <td style={{ ...TD, textAlign: 'right' }}>{fmtUSD(valor)}</td>
@@ -190,7 +233,7 @@ function FCIRows({ items, lang }) {
       <tr key={inst.id} style={{ borderBottom: '1px solid var(--border)' }}>
         <td style={{ ...TD, color: 'var(--subtext)' }}>{inst.sociedad ?? '—'}</td>
         <td style={TD}>{inst.nombre}</td>
-        <td style={{ ...TD, textAlign: 'right' }}>{(inst.cantidad ?? 0).toLocaleString('es-AR')}</td>
+        <td style={{ ...TD, textAlign: 'right' }}>{fmtCantidad(inst.cantidad ?? 0)}</td>
         <PrecioCell inst={inst} lang={lang} />
         <td style={{ ...TD, textAlign: 'right' }}>{fmtUSD(valor)}</td>
         <DeleteCell id={inst.id} />
@@ -212,6 +255,25 @@ function PlazoFijoRows({ items }) {
         <td style={TD}>{fmtFecha(inst.fecha_vencimiento)}</td>
         <td style={{ ...TD, textAlign: 'right', color: 'var(--success)' }}>{fmtARS(intereses)}</td>
         <td style={{ ...TD, textAlign: 'right', fontWeight: 600 }}>{fmtARS(total)}</td>
+        <DeleteCell id={inst.id} />
+      </tr>
+    )
+  })
+}
+
+function PlazoFijoUVARows({ items }) {
+  return items.map(inst => {
+    const precioUva = calcPrecioUva(inst)
+    return (
+      <tr key={inst.id} style={{ borderBottom: '1px solid var(--border)' }}>
+        <td style={TD}>{inst.entidad ?? inst.nombre ?? '—'}</td>
+        <td style={{ ...TD, textAlign: 'right' }}>{fmtARS(inst.capital_ars ?? 0)}</td>
+        <td style={{ ...TD, textAlign: 'right' }}>{fmtCantidad(inst.cantidad ?? 0)}</td>
+        <td style={{ ...TD, textAlign: 'right', color: 'var(--accent)' }}>
+          {precioUva != null ? fmtARS(precioUva) : '—'}
+        </td>
+        <td style={TD}>{fmtFecha(inst.fecha_inicio)}</td>
+        <td style={TD}>{fmtFecha(inst.fecha_vencimiento)}</td>
         <DeleteCell id={inst.id} />
       </tr>
     )
@@ -277,6 +339,16 @@ function PlazoFijoHeader({ lang }) {
   )
 }
 
+function PlazoFijoUVAHeader({ lang }) {
+  return (
+    <tr>
+      {['colEntidad','colMontoColocado','colUVAs','colPrecioUva','colInicio','colVencimiento',''].map(k => (
+        <th key={k} scope="col" style={TH}>{k ? t(lang, k) : ''}</th>
+      ))}
+    </tr>
+  )
+}
+
 function OtrosHeader({ lang }) {
   return (
     <tr>
@@ -294,7 +366,7 @@ function DistribBar({ items, dolar }) {
     const totals = {}
     items.forEach(i => {
       let val = 0
-      if (i.tipo === 'plazo_fijo') val = (i.capital_ars ?? 0) + calcIntereses(i)
+      if (i.tipo === 'plazo_fijo' || i.tipo === 'plazo_fijo_uva') val = valorInstrumentoARS(i)
       else val = ((i.cantidad ?? 0) * (i.precio_actual ?? 0)) * dolar
       totals[i.tipo] = (totals[i.tipo] ?? 0) + val
     })
@@ -308,7 +380,7 @@ function DistribBar({ items, dolar }) {
 
   const COLORS = {
     acciones: 'var(--accent)', fci: 'var(--success)', plazo_fijo: 'var(--warning)',
-    ons: '#8b5cf6', crypto: '#ec4899', otros: 'var(--subtext)',
+    plazo_fijo_uva: '#0d9488', ons: '#8b5cf6', crypto: '#ec4899', otros: 'var(--subtext)',
   }
 
   if (!data.length) return null
@@ -346,22 +418,25 @@ function TipoSection({ tipo, items, lang, addInstrumento }) {
     setAdding(false)
   }
 
-  const isPF    = tipo === 'plazo_fijo'
-  const isFCI   = tipo === 'fci'
-  const isOtros = tipo === 'otros'
-  const isStock = ['acciones', 'ons', 'crypto'].includes(tipo)
+  const isPF     = tipo === 'plazo_fijo'
+  const isPFUVA  = tipo === 'plazo_fijo_uva'
+  const isFCI    = tipo === 'fci'
+  const isOtros  = tipo === 'otros'
+  const isStock  = ['acciones', 'ons', 'crypto'].includes(tipo)
 
   const renderHeader = () => {
-    if (isStock)  return <AccionesHeader lang={lang} />
-    if (isFCI)    return <FCIHeader lang={lang} />
-    if (isPF)     return <PlazoFijoHeader lang={lang} />
+    if (isStock)   return <AccionesHeader lang={lang} />
+    if (isFCI)     return <FCIHeader lang={lang} />
+    if (isPF)      return <PlazoFijoHeader lang={lang} />
+    if (isPFUVA)   return <PlazoFijoUVAHeader lang={lang} />
     return <OtrosHeader lang={lang} />
   }
 
   const renderRows = () => {
-    if (isStock)  return <AccionesRows items={items} lang={lang} />
-    if (isFCI)    return <FCIRows items={items} lang={lang} />
-    if (isPF)     return <PlazoFijoRows items={items} />
+    if (isStock)   return <AccionesRows items={items} lang={lang} />
+    if (isFCI)     return <FCIRows items={items} lang={lang} />
+    if (isPF)      return <PlazoFijoRows items={items} />
+    if (isPFUVA)   return <PlazoFijoUVARows items={items} />
     return <OtrosRows items={items} />
   }
 
@@ -642,8 +717,8 @@ export default function AhorroTab() {
     let usd  = 0
     let arsPF = 0
     finInstrumentos.forEach(i => {
-      if (i.tipo === 'plazo_fijo') {
-        arsPF += (i.capital_ars ?? 0) + calcIntereses(i)
+      if (i.tipo === 'plazo_fijo' || i.tipo === 'plazo_fijo_uva') {
+        arsPF += valorInstrumentoARS(i)
       } else {
         usd += (i.cantidad ?? 0) * (i.precio_actual ?? 0)
       }
@@ -657,7 +732,7 @@ export default function AhorroTab() {
 
   const costoTotalInstrumentos = useMemo(() => {
     return finInstrumentos.reduce((sum, i) => {
-      if (i.tipo === 'plazo_fijo') return sum + (i.capital_ars ?? 0)
+      if (i.tipo === 'plazo_fijo' || i.tipo === 'plazo_fijo_uva') return sum + (i.capital_ars ?? 0)
       return sum + (i.costo_usd ?? 0) * dolar
     }, 0)
   }, [finInstrumentos, dolar])
@@ -705,7 +780,7 @@ export default function AhorroTab() {
           }}
         >
           Hay {legacyAhorroCount} movimiento(s) con categoría <strong>Ahorro</strong> (modelo anterior).
-          Reasignalos a <strong>FIRE</strong> o a la categoría del objetivo correspondiente en Datos.
+          Reasignalos a <strong>FIRE</strong> o al nombre del objetivo (categoría o descripción del movimiento).
         </div>
       )}
       <RepartoPanel lang={lang} segments={reparto.segments} liquido={reparto.liquido} />

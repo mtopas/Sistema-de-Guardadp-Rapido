@@ -18,7 +18,9 @@ DEBUG = os.getenv("SGR_DEBUG", _DEBUG_DEFAULT).lower() in ("1", "true", "yes")
 # Puerto distinto de 8000 (p. ej. SimLab/uvicorn por defecto) — override: SGR_PORT / API_BASE_URL
 SGR_HOST = os.getenv("SGR_HOST", "127.0.0.1")
 SGR_PORT = int(os.getenv("SGR_PORT", "8765"))
-API_BASE_URL = os.getenv("API_BASE_URL", f"http://{SGR_HOST}:{SGR_PORT}")
+# 0.0.0.0 es bind del servidor; un cliente HTTP no puede conectarse ahí.
+_api_host = "127.0.0.1" if SGR_HOST in ("0.0.0.0", "::", "[::]") else SGR_HOST
+API_BASE_URL = os.getenv("API_BASE_URL", f"http://{_api_host}:{SGR_PORT}")
 MAX_IMAGE_SIZE_MB = 5
 
 import builtins as _builtins

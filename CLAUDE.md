@@ -8,6 +8,8 @@ Guía para agentes en este repositorio.
 | `project/Finanzas.md` | Finanzas: reglas, API, componentes, bot |
 | `project/Finanzas-Roadmap.md` | Pendientes y deuda Finanzas |
 | `project/Boveda.md`, `Agenda.md`, `Habitos.md`, `Bot.md` | Otros módulos (en `project/` si existen) |
+| `project/SYNC-WINDOWS.md` | Sync homelab ↔ `.exe` (pull al abrir, push al cerrar, dev sandbox) |
+| `HOMELAB.md` | Docker, ICS, modos A/B/C en el gabinete |
 
 ---
 
@@ -132,7 +134,7 @@ Modal Hábitos en `HabitosScreen`: `NuevoHabitoModal` (TopBar CTA o botón del p
 - **Transferencias:** `isTransferencia()` — categoría `transferencia` (case-insensitive); excluida de ingresos/gastos y KPIs del mes.
 - **Asignación por categoría (modelo actual):**
   - **`FIRE`** — única categoría que alimenta el plan FIRE (`contribucionFire` / tab FIRE).
-  - **Objetivos** — cada objetivo crea categoría **homónima** (`fin_categorias.objetivo_id`); el movimiento se asigna solo por categoría, no por descripción.
+  - **Objetivos** — cada objetivo crea categoría **homónima** (`fin_categorias.objetivo_id`); el movimiento se asigna por categoría **o** descripción (= nombre del objetivo/FIRE).
   - **Gasto** suma al cajón; **ingreso** resta (puede quedar negativo).
   - Sistema: `Transferencia`, `Ajuste`, `FIRE` — no renombrar/eliminar desde UI. Al borrar objetivo → categoría `oculta=1`.
   - Legacy: categoría `Ahorro` (modelo viejo) — migración manual del usuario.

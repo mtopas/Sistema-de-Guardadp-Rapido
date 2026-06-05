@@ -381,47 +381,54 @@ def _migrate_fin_categorias_objetivos(cursor):
     )
 
     emergencia_nombre = "Fondo de emergencia"
-    cursor.execute("SELECT id FROM fin_objetivos WHERE nombre = ? LIMIT 1", (emergencia_nombre,))
-    row = cursor.fetchone()
-    if not row:
-        meta = 0.0
-        cursor.execute("SELECT valor FROM fin_config WHERE clave = 'fondo_emergencia_meta'")
-        cfg = cursor.fetchone()
-        if cfg and cfg[0]:
-            try:
-                meta = float(cfg[0])
-            except ValueError:
-                meta = 0.0
-        cursor.execute(
-            """INSERT INTO fin_objetivos (nombre, meta, moneda, fecha_limite, cuota_mensual, fecha_creacion)
-               VALUES (?, ?, 'ARS', NULL, NULL, ?)""",
-            (emergencia_nombre, meta, _dt.now().isoformat()),
-        )
-        oid = cursor.lastrowid
-    else:
-        oid = row[0]
+    cursor.execute(
+        "SELECT valor FROM fin_config WHERE clave = 'fin_emergencia_objetivo_deshabilitado'"
+    )
+    _cfg_em = cursor.fetchone()
+    emergencia_deshabilitada = _cfg_em is not None and _cfg_em[0] == "1"
 
-    cursor.execute("SELECT id FROM fin_categorias WHERE objetivo_id = ?", (oid,))
-    cat_row = cursor.fetchone()
-    if cat_row:
-        cursor.execute(
-            "UPDATE fin_categorias SET nombre = ?, oculta = 0, tipo = 'both' WHERE id = ?",
-            (emergencia_nombre, cat_row[0]),
-        )
-    else:
-        cursor.execute("SELECT id FROM fin_categorias WHERE nombre = ?", (emergencia_nombre,))
-        existing = cursor.fetchone()
-        if existing:
+    if not emergencia_deshabilitada:
+        cursor.execute("SELECT id FROM fin_objetivos WHERE nombre = ? LIMIT 1", (emergencia_nombre,))
+        row = cursor.fetchone()
+        if not row:
+            meta = 0.0
+            cursor.execute("SELECT valor FROM fin_config WHERE clave = 'fondo_emergencia_meta'")
+            cfg = cursor.fetchone()
+            if cfg and cfg[0]:
+                try:
+                    meta = float(cfg[0])
+                except ValueError:
+                    meta = 0.0
             cursor.execute(
-                "UPDATE fin_categorias SET objetivo_id = ?, oculta = 0, tipo = 'both' WHERE id = ?",
-                (oid, existing[0]),
+                """INSERT INTO fin_objetivos (nombre, meta, moneda, fecha_limite, cuota_mensual, fecha_creacion)
+                   VALUES (?, ?, 'ARS', NULL, NULL, ?)""",
+                (emergencia_nombre, meta, _dt.now().isoformat()),
+            )
+            oid = cursor.lastrowid
+        else:
+            oid = row[0]
+
+        cursor.execute("SELECT id FROM fin_categorias WHERE objetivo_id = ?", (oid,))
+        cat_row = cursor.fetchone()
+        if cat_row:
+            cursor.execute(
+                "UPDATE fin_categorias SET nombre = ?, oculta = 0, tipo = 'both' WHERE id = ?",
+                (emergencia_nombre, cat_row[0]),
             )
         else:
-            cursor.execute(
-                """INSERT INTO fin_categorias (nombre, color, tipo, oculta, objetivo_id)
-                   VALUES (?, NULL, 'both', 0, ?)""",
-                (emergencia_nombre, oid),
-            )
+            cursor.execute("SELECT id FROM fin_categorias WHERE nombre = ?", (emergencia_nombre,))
+            existing = cursor.fetchone()
+            if existing:
+                cursor.execute(
+                    "UPDATE fin_categorias SET objetivo_id = ?, oculta = 0, tipo = 'both' WHERE id = ?",
+                    (oid, existing[0]),
+                )
+            else:
+                cursor.execute(
+                    """INSERT INTO fin_categorias (nombre, color, tipo, oculta, objetivo_id)
+                       VALUES (?, NULL, 'both', 0, ?)""",
+                    (emergencia_nombre, oid),
+                )
 
     cursor.execute("SELECT id, nombre FROM fin_objetivos")
     for oid, nombre in cursor.fetchall():

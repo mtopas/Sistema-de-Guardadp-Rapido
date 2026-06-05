@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
-import { fmtARS, fmtUSD, contribucionFire, mesMovimiento } from '../../data/finanzas'
+import { fmtARS, fmtUSD, fmtARSShort, contribucionFire, mesMovimiento } from '../../data/finanzas'
 import { mergeFireCfg } from './fireConfigUtils'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -107,12 +107,6 @@ function monthsUntil(fechaNac, edad) {
   const cumple = new Date(nac.getFullYear() + edad, nac.getMonth(), nac.getDate())
   const meses = (cumple.getFullYear() - hoy.getFullYear()) * 12 + (cumple.getMonth() - hoy.getMonth())
   return { meses, anio: cumple.getFullYear() }
-}
-
-function fmtARSShort(n) {
-  if (n >= 1_000_000) return '$' + (n / 1_000_000).toLocaleString('es-AR', { maximumFractionDigits: 1 }) + 'M'
-  if (n >= 1_000)     return '$' + (n / 1_000).toLocaleString('es-AR',     { maximumFractionDigits: 0 }) + 'K'
-  return '$' + Math.round(n).toLocaleString('es-AR')
 }
 
 function usdFontSize(n) {

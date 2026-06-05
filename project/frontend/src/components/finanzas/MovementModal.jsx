@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { X, ArrowDown, ArrowUp, Calendar as CalIcon, Zap } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
-import { fmtARS, isTransferencia, pickDefaultCategoria } from '../../data/finanzas'
+import { fmtARS, fmtUSD, pickDefaultCategoria } from '../../data/finanzas'
 import FinCategoriaPicker from './FinCategoriaPicker'
 
 const CURRENCIES = [
@@ -52,10 +52,7 @@ export default function MovementModal() {
     return finCuentas
   }, [finCuentas])
 
-  const categorias = useMemo(() => {
-    if (!finCategorias || finCategorias.length === 0) return []
-    return finCategorias.filter(c => !isTransferencia({ categoria_nombre: c.name }))
-  }, [finCategorias])
+  const categorias = useMemo(() => finCategorias ?? [], [finCategorias])
 
   const [tipo,        setTipo]        = useState('expense')
   const [monto,       setMonto]       = useState('')
@@ -133,7 +130,7 @@ export default function MovementModal() {
   const accentVar  = isIncome ? 'var(--income)' : 'var(--expense)'
   const montoNum   = parseFloat(monto.replace(',', '.')) || 0
   const cuotasNum  = parseInt(cuotas, 10) || 0
-  const valid      = montoNum > 0 && descripcion.trim().length > 0 && cuentaSel
+  const valid      = montoNum > 0 && cuentaSel
 
   // Apply a quick-fill template
   const applyPlantilla = (p) => {
@@ -315,7 +312,7 @@ export default function MovementModal() {
 
           {/* Descripción */}
           <div>
-            <label className="label block mb-1.5">{t(lang, 'description')}</label>
+            <label className="label block mb-1.5">{t(lang, 'descriptionOptional')}</label>
             <input
               type="text"
               value={descripcion}
@@ -414,7 +411,7 @@ export default function MovementModal() {
             {montoNum > 0 && (
               <>
                 <span style={{ color: accentVar }}>
-                  {isIncome ? '+' : '−'}{moneda === 'ARS' ? fmtARS(montoNum) : `US$ ${montoNum}`}
+                  {isIncome ? '+' : '−'}{moneda === 'ARS' ? fmtARS(montoNum) : fmtUSD(montoNum)}
                 </span>
                 {cuotasNum > 1 && <span> · {cuotasNum} cuotas</span>}
               </>
@@ -425,11 +422,9 @@ export default function MovementModal() {
                   ? 'Creá una cuenta en el panel izquierdo'
                   : !montoNum
                     ? 'Ingresá un monto'
-                    : !descripcion.trim()
-                      ? 'Ingresá una descripción'
-                      : !cuentaSel
-                        ? 'Elegí una cuenta'
-                        : null}
+                    : !cuentaSel
+                      ? 'Elegí una cuenta'
+                      : null}
               </span>
             )}
           </div>

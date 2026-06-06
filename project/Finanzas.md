@@ -244,7 +244,7 @@ mybot/
 
 - **`/mov` tipo:** `[💸 Gasto]` `[💰 Ingreso]` → `ft:expense` / `ft:income`
 - **`/mov` cuenta:** un botón por cuenta (2 columnas) → `fcc:{id}`
-- **`/mov` categoría:** hasta 10 categorías (2 columnas) + `[✏️ Otra…]` → `fcat:{id}` / `fcat_text`
+- **`/mov` categoría:** todas las categorías visibles (2 columnas, orden tipo + A-Z como la app) + `[➕ Nueva categoría…]` → `fcat:{id}` / `fcat_text`
 - **`/mov` confirmar:** `[✓ Confirmar]` `[✕ Cancelar]` → `fok` / `fno`
 - **`/ultimo` eliminar:** `[🗑 #N descripción]` por movimiento → `fdel:{id}`; lista se refresca tras eliminar
 

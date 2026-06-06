@@ -9,13 +9,11 @@ Gabinete Ubuntu con **backend + bot** en Docker. API en **`:8765`** (no `:8000`)
 | **Vite en Windows** (`npm run dev`) | `http://127.0.0.1:8765` | `project/database/app.db` en la PC |
 | **Bot en Docker (homelab)** | `http://backend:8765` en el gabinete | `~/project/database/app.db` en Ubuntu |
 
-Son **dos SQLite distintas** que se sincronizan con los scripts de `project/scripts/`.
-
-**Modo recomendado:** Modo A — DB canónica en homelab, sync automático al abrir/cerrar el `.exe`. Ver flujo detallado abajo y especificación completa en [`project/SYNC-WINDOWS.md`](project/SYNC-WINDOWS.md).
+Son **dos SQLite distintas** que se sincronizan con los scripts de `project/scripts/`. La **canónica** vive en el homelab; Windows mantiene una **réplica** local para el `.exe`. Especificación completa en [`project/SYNC-WINDOWS.md`](project/SYNC-WINDOWS.md).
 
 ---
 
-### Modo A — DB canónica en homelab + sync scripts (recomendado)
+### Sync homelab ↔ Windows
 
 Stack homelab: `backend` + `bot` en Docker, siempre encendidos. El `.exe` en Windows sincroniza al abrir y al cerrar usando los scripts de `project/scripts/`.
 
@@ -60,7 +58,7 @@ Doble clic en acceso directo → sgr-abrir.ps1
 | `dev-start.ps1` | Sandbox de desarrollo: copia DB a `.dev`, levanta uvicorn aislado. |
 | `dev-stop.ps1` | Limpia archivos `.dev` si `dev-start` terminó de forma abrupta. |
 
-**Modo dev** (para modificar el código):
+**Desarrollo local** (para modificar el código):
 
 ```powershell
 # Terminal 1 — uvicorn aislado en app.db.dev (nunca toca la DB de producción local)
@@ -85,99 +83,6 @@ curl -s http://192.168.137.10:8765/meta  # homelab
 ls ~/project/database/app.db.bak.*
 rm ~/project/database/app.db.bak.<timestamp_viejo>
 ```
-
----
-
-### Modo B — una DB en Windows (solo bot en Docker; API siempre en la PC)
-
-> **Legacy.** Requiere uvicorn/`SGR.exe` escuchando en `0.0.0.0` mientras el bot corre. Para uso normal con `.exe` + bot 24/7, usar Modo A con los scripts de sync.
-
-**1. Windows — API en toda la interfaz ICS** (desde `project/`):
-
-```powershell
-.\venv\Scripts\activate
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8765
-```
-
-**Importante:** `--host 0.0.0.0` es obligatorio. Sin eso uvicorn solo escucha en `127.0.0.1` y el `curl` desde el homelab **cuelga**. La variable `SGR_HOST` del `.env` **no** cambia el bind de uvicorn si lo arrancás a mano.
-
-Vite sigue en `http://127.0.0.1:8765` (`npm run dev` en `frontend/`).
-
-**2. Homelab — solo el bot** (sin contenedor `backend`):
-
-```bash
-cd ~/project
-# En .env del gabinete:
-#   API_BASE_URL=http://192.168.137.1:8765
-sudo docker compose down
-sudo docker compose -f docker-compose.bot-only.yml up -d --build
-sudo docker compose -f docker-compose.bot-only.yml logs -f bot
-```
-
-**3. Firewall Windows:** permitir entrada TCP **8765** en red **Privada** (perfil ICS).
-
-**4. Traer movimientos que quedaron solo en el gabinete** (una vez):
-
-```powershell
-scp mtopas@192.168.137.10:~/project/database/app.db D:\Sistema-de-Guardadp-Rapido\project\database\app.db
-```
-
-(Reiniciá uvicorn si estaba corriendo.)
-
-**5. Probar desde el gabinete:**
-
-```bash
-curl -s http://192.168.137.1:8765/fin/movimientos
-```
-
-Debe listar lo mismo que en Windows (respuesta al instante, no colgado).
-
-#### Si `curl` a `192.168.137.1:8765` se queda colgado
-
-**1. En Windows — comprobar en qué IP escucha la API:**
-
-```powershell
-netstat -an | findstr 8765
-```
-
-| Lo que ves | Significado |
-| :--- | :--- |
-| `127.0.0.1:8765` | Solo local → **reiniciá** uvicorn con `--host 0.0.0.0` |
-| `0.0.0.0:8765` | Correcto para Modo B |
-
-**2. Probar desde la misma PC (Windows):**
-
-```powershell
-curl http://127.0.0.1:8765/fin/movimientos
-curl http://192.168.137.1:8765/fin/movimientos
-```
-
-El segundo debe responder igual que el primero. Si el segundo falla o cuelga, el problema es el bind o el firewall, no el homelab.
-
-**3. Firewall Windows (PowerShell como administrador):**
-
-```powershell
-New-NetFirewallRule -DisplayName "SGR API 8765" -Direction Inbound -Protocol TCP -LocalPort 8765 -Profile Private -Action Allow
-```
-
-**4. En el homelab — timeout corto para no esperar eterno:**
-
-```bash
-curl -s --connect-timeout 5 http://192.168.137.1:8765/fin/movimientos
-```
-
-Si devuelve *Connection timed out*: Windows no acepta conexiones en ese puerto/IP.  
-Si devuelve JSON: listo.
-
----
-
-Otros modos:
-
-- **UI contra homelab:** `VITE_API_URL=http://192.168.137.10:8765` en `frontend/.env.local`.
-- **Stack completo en gabinete:** `docker compose up -d` con `API_BASE_URL=http://backend:8765` en `.env`.
-
-Comprobar en homelab: `curl -s http://127.0.0.1:8765/fin/movimientos | head`  
-En Windows: `curl http://127.0.0.1:8765/fin/movimientos`
 
 ---
 
@@ -249,20 +154,19 @@ scp "D:\Sistema-de-Guardadp-Rapido\project\mybot\finanzas_handlers.py" mtopas@19
 ```
 
 ```powershell
-# Solo la base de datos (Modo C — una sola DB)
+# Solo la base de datos (seed o migración manual — detener backend antes)
 scp project/database/app.db mtopas@192.168.137.10:~/project/database/
 ```
 
 **2. Rebuild y levantar (SSH en el gabinete):**
 
 ```bash
-cd ~/project
-# Modo B — solo bot, DB en Windows (recomendado):
-sudo docker compose down
-sudo docker compose -f docker-compose.bot-only.yml up -d --build
+ssh mtopas@192.168.137.10
+```
 
-# Modo gabinete completo (API + bot en Ubuntu):
-# sudo docker compose up -d --build
+```bash
+cd ~/project
+sudo docker-compose up -d --build
 ```
 
 `./database` es volumen: un `scp -r ./project` **no** pisa `app.db` salvo que copies `database/app.db` explícitamente.
@@ -273,14 +177,14 @@ sudo docker compose -f docker-compose.bot-only.yml up -d --build
 
 | Acción | Comando |
 | :--- | :--- |
-| Levantar stack | `cd ~/project && sudo docker compose up -d` |
-| Actualizar y reiniciar | `sudo docker compose up -d --build` |
-| Ver contenedores | `sudo docker compose ps` |
-| Logs en vivo (todos) | `sudo docker compose logs -f` |
-| Logs del bot | `sudo docker compose logs -f bot` |
-| Logs del backend | `sudo docker compose logs -f backend` |
-| Apagar stack | `sudo docker compose down` |
-| Limpiar imágenes viejas | `sudo docker image prune -f` |
+| Levantar stack | `cd ~/project && sudo docker-compose up -d` |
+| Actualizar y reiniciar | `sudo docker-compose up -d --build` |
+| Ver contenedores | `sudo docker-compose ps` |
+| Logs en vivo (todos) | `sudo docker-compose logs -f` |
+| Logs del bot | `sudo docker-compose logs -f bot` |
+| Logs del backend | `sudo docker-compose logs -f backend` |
+| Apagar stack | `sudo docker-compose down` |
+| Limpiar imágenes viejas | `sudo-docker image prune -f` |
 | Apagar el gabinete | `sudo shutdown now` |
 
 ---
@@ -293,7 +197,7 @@ sudo docker compose -f docker-compose.bot-only.yml up -d --build
 | Rutas | `ip route` |
 | Internet | `ping 8.8.8.8` |
 | DNS | `ping github.com` |
-| Contenedores | `sudo docker ps` |
+| Contenedores | `sudo-docker ps` |
 | API local | `curl -s http://127.0.0.1:8765/docs` |
 
 ---
@@ -306,7 +210,9 @@ sudo docker compose -f docker-compose.bot-only.yml up -d --build
 | Swagger | `http://192.168.137.10:8765/docs` |
 | Frontend (si servís `dist`) | mismo host `:8765` |
 
-En dev en Windows: Vite `:5173` → API local `:8765`.
+En dev en Windows: Vite `:5173` → API local `:8765` (sandbox con `dev-start.ps1`).
+
+Opcional: Vite apuntando al homelab → `VITE_API_URL=http://192.168.137.10:8765` en `frontend/.env.local`.
 
 ---
 
@@ -412,12 +318,9 @@ En lugar de instalar dependencias en el sistema host, usamos **Docker** (`projec
 | `backend` | `uvicorn app.main:app --host 0.0.0.0 --port 8765` | `8765` |
 | `bot` | `python mybot/bot.py` | — (solo sale a Telegram y a la API) |
 
-### Modos de operación
+### Arquitectura
 
-| Modo | Descripción |
-| :--- | :--- |
-| **A — Canónico en homelab + sync scripts** ✓ | Bot + API en Docker (`docker-compose.yml`). DB canónica en `~/project/database/`. El `.exe` en Windows sincroniza via `sgr-abrir.ps1` (pull al abrir, push al cerrar). **Modo recomendado.** |
-| **B — DB en Windows (legacy)** | `docker-compose.bot-only.yml` en homelab + uvicorn/`SGR.exe` en `0.0.0.0` permanente en Windows. Sin sync — una sola DB pero exige PC siempre encendida. |
+Bot + API en Docker (`docker-compose.yml`). DB canónica en `~/project/database/`. El `.exe` en Windows mantiene una réplica local y sincroniza con `sgr-abrir.ps1` (pull al abrir, push opcional al cerrar). Ver [`project/SYNC-WINDOWS.md`](project/SYNC-WINDOWS.md).
 
 ### Conceptos clave
 
@@ -463,6 +366,7 @@ Sobreviven reinicios y `docker compose up --build`.
 ## Referencias en el repo
 
 * `project/docker-compose.yml` — stack homelab
+* `project/SYNC-WINDOWS.md` — sync homelab ↔ `.exe`
 * `project/Bot.md` — comandos y flujos del bot
 * `project/BUILD.md` — ejecutable Windows
 * `CLAUDE.md` — puertos y arranque local

@@ -230,6 +230,18 @@ def _filtrar_categorias_por_tipo(categorias: list, tipo_mov: str) -> list:
     return [c for c in categorias if _categoria_aplica_tipo(c, tipo_mov)]
 
 
+def _ordenar_categorias_para_teclado(categorias: list) -> list:
+    """Mismo criterio que la app (DatosRightPanel): tipo expense → income → both, luego A-Z."""
+    tipo_order = {"expense": 0, "income": 1, "both": 2}
+    return sorted(
+        categorias,
+        key=lambda c: (
+            tipo_order.get(c.get("tipo", "expense"), 9),
+            (c.get("nombre") or "").casefold(),
+        ),
+    )
+
+
 def _post_categoria(api: str, nombre: str, tipo_mov: str) -> dict:
     """Crea categoría en la API o devuelve la existente si ya hay mismo nombre."""
     nombre = nombre.strip()
@@ -251,7 +263,9 @@ def _post_categoria(api: str, nombre: str, tipo_mov: str) -> dict:
 
 def _kb_categorias(categorias: list, tipo_mov: str = "expense") -> InlineKeyboardMarkup:
     rows = []
-    visible = _filtrar_categorias_por_tipo(categorias, tipo_mov)[:10]
+    visible = _ordenar_categorias_para_teclado(
+        _filtrar_categorias_por_tipo(categorias, tipo_mov)
+    )
     for i in range(0, len(visible), 2):
         fila = [InlineKeyboardButton(visible[i]["nombre"], callback_data=f"fcat:{visible[i]['id']}")]
         if i + 1 < len(visible):

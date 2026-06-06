@@ -55,13 +55,12 @@ Windows   →  SGR.exe (uvicorn embebido)  →  SQLite  →  project/database/ap
 - El `.exe` **sí** abre SQLite local vía `DB_PATH` / `app/paths.py`.
 - Vite en dev (`:5173`) habla con la API en `:8765`; no toca la DB directamente.
 
-### Modo de despliegue elegido
+### Despliegue en el homelab
 
-**Modo A — stack completo en homelab** (`docker-compose.yml`):
+Stack completo en el gabinete (`docker-compose.yml`):
 
 - Servicios: `backend` + `bot`.
 - En `~/project/.env` del gabinete: `API_BASE_URL=http://backend:8765`.
-- **No** usar `docker-compose.bot-only.yml` (ese modo exige uvicorn en Windows siempre).
 
 ### Red
 
@@ -98,7 +97,7 @@ Override: `SGR_DATA_DIR`, `DB_PATH` (ver `app/paths.py`, `BUILD.md`).
 - Sigue funcionando con el homelab encendido, sin Windows.
 - Escribe siempre en la DB canónica del gabinete.
 
-### Desarrollador — modo dev
+### Desarrollador — sandbox local
 
 1. `dev-start` (script): copia `app.db` → `database/app.db.dev`, exporta `DB_PATH` a la copia, levanta uvicorn.
 2. `npm run dev` en otra terminal (sin cambios; `VITE_API_URL` default `127.0.0.1:8765`).
@@ -159,7 +158,7 @@ La copia dev puede generarse desde el `app.db` ya sincronizado (réplica local),
 
 | Caso | Comportamiento |
 |------|----------------|
-| Homelab inalcanzable | Avisar; ofrecer abrir `.exe` con **DB local anterior** (modo offline) o cancelar |
+| Homelab inalcanzable | Avisar; ofrecer abrir `.exe` con **DB local anterior** (sin sync) o cancelar |
 | `backend` no para | Timeout; abortar pull, no sobrescribir local |
 | Push rechazado por usuario | Mantener réplica local; homelab sigue con versión vieja (usuario debe saberlo) |
 
@@ -199,9 +198,8 @@ Acceso directo en el escritorio → `sgr-abrir.ps1`.
 
 | Archivo | Por qué |
 |---------|---------|
-| [`HOMELAB.md`](../HOMELAB.md) | Modos A/B/C, ICS, `scp`, firewall, dos DBs |
-| [`project/docker-compose.yml`](docker-compose.yml) | Stack canónico `backend` + `bot` |
-| [`project/docker-compose.bot-only.yml`](docker-compose.bot-only.yml) | **Evitar** para este diseño |
+| [`HOMELAB.md`](../HOMELAB.md) | Docker, ICS, sync, `scp`, dos DBs |
+| [`project/docker-compose.yml`](docker-compose.yml) | Stack `backend` + `bot` |
 | [`project/Bot.md`](Bot.md) | Bot → API, no SQLite |
 | [`project/LevantarDev.txt`](LevantarDev.txt) | Uvicorn local (solo dev) |
 
@@ -286,9 +284,8 @@ $SgrDataRoot = "D:\Sistema-de-Guardadp-Rapido\project"  # contiene database/ y u
 
 1. **Abrir producción** siempre con `sgr-abrir.ps1` (pull).
 2. **Editar en `.exe`** y cerrar → subir si preguntó (push).
-3. **No** correr `docker-compose.bot-only` + `.exe` local a la vez sobre dos DB distintas.
-4. **Dev:** solo `app.db.dev`; nunca editar producción local y homelab en paralelo sin push/pull consciente.
-5. Tras **migración de schema** en dev: aplicar migración en homelab (deploy backend nuevo + un pull), no copiar `.dev` a producción.
+3. **Dev:** solo `app.db.dev`; nunca editar producción local y homelab en paralelo sin push/pull consciente.
+4. Tras **migración de schema** en dev: aplicar migración en homelab (deploy backend nuevo + un pull), no copiar `.dev` a producción.
 
 ---
 
@@ -312,18 +309,11 @@ Comparar `counts.fin_movimientos`, `counts.hojas` entre ambos lados justo despu�
 
 | Idea | Motivo de descarte |
 |------|-------------------|
-| Modo B (bot → API en Windows 24/7) | Obliga uvicorn siempre en PC |
+| API + DB siempre en Windows (bot remoto) | Obliga uvicorn encendido 24/7 en la PC |
 | Push homelab → PC en cada cambio | PC debe estar on; riesgo de pisar `.exe` abierto; más infra (SMB/SSH inverso) |
 | SQLite en carpeta compartida | Corrupción en red |
 | Solo frontend apuntando a homelab | No cubre el `.exe` (objetivo principal) |
 | Lock distribuido entre dos archivos | No unifica datos; solo reduce escrituras simultáneas |
-
----
-
-## Relación con documentación existente
-
-- Actualizar [`HOMELAB.md`](../HOMELAB.md): Modo A + sync Windows como flujo recomendado para `.exe`.
-- Mantener Modo B documentado como legado / no recomendado si usás `.exe` local.
 
 ---
 

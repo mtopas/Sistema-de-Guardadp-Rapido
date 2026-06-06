@@ -11,4 +11,4 @@ npm run dev
 cd ..
 python mybot/bot.py
 
-# Bot en homelab + DB acá: ver HOMELAB.md (docker-compose.bot-only.yml)
+# Bot y stack en homelab: ver HOMELAB.md

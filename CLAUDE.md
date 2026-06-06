@@ -9,7 +9,7 @@ Guía para agentes en este repositorio.
 | `project/Finanzas-Roadmap.md` | Pendientes y deuda Finanzas |
 | `project/Boveda.md`, `Agenda.md`, `Habitos.md`, `Bot.md` | Otros módulos (en `project/` si existen) |
 | `project/SYNC-WINDOWS.md` | Sync homelab ↔ `.exe` (pull al abrir, push al cerrar, dev sandbox) |
-| `HOMELAB.md` | Docker, ICS, modos A/B/C en el gabinete |
+| `HOMELAB.md` | Docker, ICS, sync homelab ↔ Windows |
 
 ---
 

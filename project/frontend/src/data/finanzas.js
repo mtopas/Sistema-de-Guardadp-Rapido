@@ -97,6 +97,60 @@ export function acumuladoPorCategoriaNombre(movs, nombreCategoria) {
   }, 0)
 }
 
+/** Meses calendario (inclusivo) desde refDate hasta el mes de fecha_limite. Ej: ene → 1/dic = 12. */
+export function mesesCalendarioHasta(fechaLimite, refDate = new Date()) {
+  const m = String(fechaLimite ?? '').match(/^(\d{4})-(\d{2})/)
+  if (!m) return null
+  const endY = parseInt(m[1], 10)
+  const endM = parseInt(m[2], 10)
+  const startY = refDate.getFullYear()
+  const startM = refDate.getMonth() + 1
+  const diff = (endY - startY) * 12 + (endM - startM) + 1
+  return diff > 0 ? diff : null
+}
+
+/** Cuota mensual = falta ÷ meses hasta fecha límite (requiere fecha_limite). */
+export function cuotaMensualObjetivo(obj, acumulado = 0, refDate = new Date()) {
+  const meses = mesesCalendarioHasta(obj?.fecha_limite, refDate)
+  if (!meses) return null
+  const meta = Number(obj?.meta) || 0
+  const falta = Math.max(0, meta - (Number(acumulado) || 0))
+  return falta / meses
+}
+
+export function nextFinMes(m) {
+  const [y, mo] = m.split('-').map(Number)
+  if (mo === 12) return `${y + 1}-01`
+  return `${y}-${String(mo + 1).padStart(2, '0')}`
+}
+
+/** Aporte FIRE planificado para un mes (compuesto desde fire_inicio_mes). */
+export function fireAportePlanMes(finConfig, mes) {
+  const cfg = finConfig ?? {}
+  const aumento = (cfg.fire_aumento_aporte ?? 1.20) / 100
+  const aporteInicial = cfg.fire_aporte_inicial ?? 0
+  const inicioMes = cfg.fire_inicio_mes ?? mes
+  if (mes < inicioMes) return 0
+  let aporte = aporteInicial
+  let cursor = inicioMes
+  while (cursor < mes) {
+    aporte = aporte * (1 + aumento)
+    cursor = nextFinMes(cursor)
+  }
+  return aporte
+}
+
+/** Ahorrado categoría FIRE en un mes (movimientos; fallback override en fin_fire_filas). */
+export function ahorradoFireEnMes(finMovimientosAll, finFireFilas, mes) {
+  const computed = (finMovimientosAll ?? [])
+    .filter(m => mesMovimiento(m) === mes)
+    .reduce((sum, m) => sum + contribucionFire(m), 0)
+  const override = finFireFilas?.[mes]
+  if (computed !== 0) return computed
+  if (override !== undefined) return override
+  return 0
+}
+
 /** @deprecated Usar isCategoriaFire */
 export function isCategoriaAhorro(mov) {
   return isCategoriaFire(mov)

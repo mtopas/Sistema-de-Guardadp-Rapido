@@ -186,13 +186,13 @@ def _normalize_classify(raw: dict) -> dict:
 def route(mensaje: str) -> RouteResult:
     """Clasifica la intención del mensaje. Siempre devuelve un RouteResult válido."""
     if not _check_available():
-        logger.info("[router] Ollama no disponible — fallback")
+        logger.info("[router] fallback: Ollama no disponible")
         return RouteResult(action="fallback", modulo="desconocido")
 
     fecha_hora = datetime.now().strftime("%A %d/%m/%Y %H:%M")
     classified = llm_client.classify(_PROMPT_TMPL.format(fecha_hora=fecha_hora), mensaje)
     if not classified:
-        logger.warning("[router] respuesta inválida (vacía o timeout)")
+        logger.warning("[router] fallback: classify vacío o timeout")
         return RouteResult(action="fallback", modulo="desconocido")
 
     raw = _normalize_classify(classified)
@@ -217,6 +217,10 @@ def route(mensaje: str) -> RouteResult:
                            confianza=confianza, es_pregunta=True)
 
     if modulo in ("desconocido", "boveda") or confianza < CONFIDENCE_MEDIUM:
+        logger.info(
+            "[router] fallback: modulo=%s confianza=%.2f (umbral %.2f)",
+            modulo, confianza, CONFIDENCE_MEDIUM,
+        )
         return RouteResult(action="fallback", modulo=modulo, datos=datos, confianza=confianza)
 
     # Verificar campos mínimos
@@ -227,7 +231,11 @@ def route(mensaje: str) -> RouteResult:
             logger.info("[router] '%s' sin datos de captura → consulta (%s)", modulo, q_mod)
             return RouteResult(action="question", modulo=q_mod, datos=datos,
                                confianza=confianza, es_pregunta=True)
-        logger.info("[router] faltan campos mínimos para '%s' → fallback", modulo)
+        logger.info(
+            "[router] fallback: faltan campos %s para modulo=%s",
+            [k for k in required if k not in datos or datos[k] is None],
+            modulo,
+        )
         return RouteResult(action="fallback", modulo=modulo, datos=datos, confianza=confianza)
 
     action = "direct" if confianza >= CONFIDENCE_HIGH else "confirm"

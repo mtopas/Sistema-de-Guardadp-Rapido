@@ -609,7 +609,7 @@ def _apply_migrations(cursor):
     )
 
     # --- fin_config: claves nuevas ---
-    for clave, default in [("dolar_oficial_updated_at", ""), ("mes_cierre", "25"), ("dolar_default", "")]:
+    for clave, default in [("dolar_oficial_updated_at", ""), ("mes_cierre", "25"), ("dolar_default", ""), ("uva_valor", "")]:
         cursor.execute(
             "INSERT OR IGNORE INTO fin_config (clave, valor) VALUES (?, ?)",
             (clave, default),

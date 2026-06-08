@@ -1,7 +1,13 @@
-import { useMemo } from 'react'
+import { useMemo, useEffect } from 'react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
-import { fmtARS, isTransferencia } from '../../data/finanzas'
+import {
+  fmtARS,
+  isTransferencia,
+  acumuladoPorCategoriaNombre,
+  fireAportePlanMes,
+  ahorradoFireEnMes,
+} from '../../data/finanzas'
 import { buildFinCategoriaColorByName, getFinCategoriaColor } from '../../data/finCategoriaColors'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -40,15 +46,69 @@ function KpiBox({ label, value, sub, valueColor }) {
   )
 }
 
+const FIN_INT_OPTS = { minimumFractionDigits: 0, maximumFractionDigits: 0 }
+
+function fmtMontoInt(monto, moneda) {
+  const x = Number(monto)
+  if (!Number.isFinite(x)) return moneda === 'USD' ? 'US$ 0' : '$0'
+  const sign = x < 0 ? '−' : ''
+  const abs = Math.abs(x).toLocaleString('es-AR', FIN_INT_OPTS)
+  return moneda === 'USD' ? `${sign}US$ ${abs}` : `${sign}$${abs}`
+}
+
+function OkChip({ lang }) {
+  return (
+    <span
+      className="text-[10px] chip shrink-0"
+      style={{
+        color: 'var(--income)',
+        borderColor: 'color-mix(in oklch, var(--income) 30%, transparent)',
+        background: 'color-mix(in oklch, var(--income) 10%, transparent)',
+      }}
+    >
+      ✓ {t(lang, 'dashGoalOk')}
+    </span>
+  )
+}
+
+function MetaRow({ lang, label, ok, barValue, barMax, barColor, subLeft, subRight }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-2 min-w-0">
+        <span className="text-[12.5px] font-medium truncate min-w-0" style={{ color: 'var(--text)' }}>
+          {label}
+        </span>
+        {ok && <OkChip lang={lang} />}
+      </div>
+      <ProgressBar value={barValue} max={barMax} color={barColor} />
+      <div className="flex justify-between text-[10.5px] mono tnum gap-2" style={{ color: 'var(--subtext)' }}>
+        <span className="truncate" style={{ color: barColor }}>{subLeft}</span>
+        <span className="shrink-0">{subRight}</span>
+      </div>
+    </div>
+  )
+}
+
 // ── main component ────────────────────────────────────────────────────────────
 
 export default function FinanzasRightPanel() {
   const lang               = useStore(s => s.lang)
   const finMovimientos     = useStore(s => s.finMovimientos)
+  const finMovimientosAll = useStore(s => s.finMovimientosAll)
   const finCategorias      = useStore(s => s.finCategorias)
   const finConfig          = useStore(s => s.finConfig)
-  const finEmergenciaSaldo = useStore(s => s.finEmergenciaSaldo)
+  const finObjetivos       = useStore(s => s.finObjetivos)
+  const finFireFilas       = useStore(s => s.finFireFilas)
+  const fetchFinObjetivos  = useStore(s => s.fetchFinObjetivos)
+  const fetchFinFireFilas  = useStore(s => s.fetchFinFireFilas)
   const selectedMes        = useStore(s => s.selectedMes)
+
+  useEffect(() => {
+    fetchFinObjetivos()
+    fetchFinFireFilas()
+  }, [])
+
+  const tasaObjetivo = Number(finConfig?.tasa_ahorro_objetivo ?? 40)
 
   // ── KPIs ──────────────────────────────────────────────────────────────────
   const kpis = useMemo(() => {
@@ -58,7 +118,6 @@ export default function FinanzasRightPanel() {
     const totalGastos   = expenses.reduce((a, m) => a + Math.abs(m.amount ?? m.monto ?? 0), 0)
     const totalIngresos = incomes.reduce((a, m)  => a + Math.abs(m.amount ?? m.monto ?? 0), 0)
 
-    // Days elapsed in selected month
     const [year, month] = selectedMes.split('-').map(Number)
     const daysInMonth   = new Date(year, month, 0).getDate()
     const now           = new Date()
@@ -67,7 +126,6 @@ export default function FinanzasRightPanel() {
 
     const avgDaily = daysElapsed > 0 ? totalGastos / daysElapsed : 0
 
-    // Top category
     const catMap = {}
     expenses.forEach(m => {
       const cat = m.cat ?? m.categoria_nombre ?? 'Otros'
@@ -81,24 +139,44 @@ export default function FinanzasRightPanel() {
       ? Math.round((topEntry[1] / totalGastos) * 100)
       : 0
 
-    // Savings rate
     const tasaAhorro = totalIngresos > 0
       ? Math.round(((totalIngresos - totalGastos) / totalIngresos) * 100)
       : 0
 
-    // No-spend days
     const spendDays     = new Set(expenses.map(m => (m.fecha ?? '').slice(0, 10)).filter(Boolean))
     const diasSinGastar = Math.max(0, daysElapsed - spendDays.size)
 
     return { avgDaily, topCat, topCatColor, topCatPct, tasaAhorro, diasSinGastar, totalGastos, totalIngresos }
   }, [finMovimientos, finCategorias, selectedMes])
 
-  // ── Goals ─────────────────────────────────────────────────────────────────
-  const tasaObjetivo      = Number(finConfig?.tasa_ahorro_objetivo ?? 40)
-  const fondoMeta         = Number(finConfig?.fondo_emergencia_meta ?? 500000)
-  const fireOk            = kpis.tasaAhorro >= tasaObjetivo
+  const savingsColor = kpis.tasaAhorro >= tasaObjetivo ? 'var(--income)' : 'var(--expense)'
 
-  const savingsColor = fireOk ? 'var(--income)' : 'var(--expense)'
+  const fireMeta = useMemo(() => {
+    const aporte   = fireAportePlanMes(finConfig, selectedMes)
+    const ahorrado = ahorradoFireEnMes(finMovimientosAll, finFireFilas, selectedMes)
+    const ok       = aporte > 0 && ahorrado >= aporte
+    const color    = ok ? '#22c55e' : 'var(--cta-bg)'
+    return { aporte, ahorrado, ok, color }
+  }, [finConfig, finMovimientosAll, finFireFilas, selectedMes])
+
+  const objetivosMetas = useMemo(() => {
+    return finObjetivos.map(obj => {
+      const acumulado = acumuladoPorCategoriaNombre(finMovimientosAll, obj.nombre)
+      const meta = Number(obj.meta) || 0
+      const pct = meta > 0 ? Math.min(100, (acumulado / meta) * 100) : 0
+      const ok = pct >= 100
+      return {
+        id: obj.id,
+        nombre: obj.nombre,
+        acumulado,
+        meta,
+        moneda: obj.moneda ?? 'ARS',
+        pct,
+        ok,
+        color: ok ? '#22c55e' : 'var(--accent)',
+      }
+    })
+  }, [finObjetivos, finMovimientosAll])
 
   return (
     <aside
@@ -143,56 +221,37 @@ export default function FinanzasRightPanel() {
         <div>
           <div className="label mb-3">{t(lang, 'goalsTitle')}</div>
 
-          {/* Goal 1: Ahorro FIRE */}
-          <div className="flex flex-col gap-2 mb-4">
-            <div className="flex items-center justify-between">
-              <span className="text-[12.5px] font-medium" style={{ color: 'var(--text)' }}>
-                {t(lang, 'goalFire')}
-              </span>
-              {fireOk && (
-                <span className="text-[10px] chip" style={{ color: 'var(--income)', borderColor: 'color-mix(in oklch, var(--income) 30%, transparent)', background: 'color-mix(in oklch, var(--income) 10%, transparent)' }}>
-                  ✓ OK
-                </span>
-              )}
-            </div>
-            <ProgressBar
-              value={kpis.tasaAhorro}
-              max={tasaObjetivo}
-              color={savingsColor}
+          <div className="flex flex-col gap-4">
+            <MetaRow
+              lang={lang}
+              label={t(lang, 'metaFIREMes')}
+              ok={fireMeta.ok}
+              barValue={fireMeta.ahorrado}
+              barMax={fireMeta.aporte || fireMeta.ahorrado || 1}
+              barColor={fireMeta.color}
+              subLeft={fmtARS(fireMeta.ahorrado)}
+              subRight={fireMeta.aporte > 0 ? `/ ${fmtARS(fireMeta.aporte)}` : '—'}
             />
-            <div className="flex justify-between text-[10.5px] mono tnum" style={{ color: 'var(--subtext)' }}>
-              <span style={{ color: savingsColor }}>{kpis.tasaAhorro}%</span>
-              <span>{t(lang, 'goalOf')} {tasaObjetivo}% {t(lang, 'objective')}</span>
-            </div>
-            <div className="text-[10px]" style={{ color: 'var(--subtext)' }}>
-              {t(lang, 'goalFireDesc')}
-            </div>
-          </div>
 
-          {/* Goal 2: Fondo de emergencia */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[12.5px] font-medium" style={{ color: 'var(--text)' }}>
-                {t(lang, 'goalEmergency')}
-              </span>
-              {finEmergenciaSaldo >= fondoMeta && (
-                <span className="text-[10px] chip" style={{ color: 'var(--income)', borderColor: 'color-mix(in oklch, var(--income) 30%, transparent)', background: 'color-mix(in oklch, var(--income) 10%, transparent)' }}>
-                  ✓ OK
-                </span>
-              )}
-            </div>
-            <ProgressBar
-              value={finEmergenciaSaldo}
-              max={fondoMeta}
-              color="var(--accent)"
-            />
-            <div className="flex justify-between text-[10.5px] mono tnum" style={{ color: 'var(--subtext)' }}>
-              <span className="gradient-text font-semibold">{fmtARS(finEmergenciaSaldo)}</span>
-              <span>{t(lang, 'goalOf')} {fmtARS(fondoMeta)}</span>
-            </div>
-            <div className="text-[10px]" style={{ color: 'var(--subtext)' }}>
-              {t(lang, 'goalEmergencyDesc')}
-            </div>
+            {objetivosMetas.length === 0 ? (
+              <p className="text-[11px]" style={{ color: 'var(--subtext)' }}>
+                {t(lang, 'sinObjetivos')}
+              </p>
+            ) : (
+              objetivosMetas.map(obj => (
+                <MetaRow
+                  key={obj.id}
+                  lang={lang}
+                  label={obj.nombre}
+                  ok={obj.ok}
+                  barValue={obj.acumulado}
+                  barMax={obj.meta || obj.acumulado || 1}
+                  barColor={obj.color}
+                  subLeft={fmtMontoInt(obj.acumulado, obj.moneda)}
+                  subRight={`/ ${fmtMontoInt(obj.meta, obj.moneda)}`}
+                />
+              ))
+            )}
           </div>
         </div>
       </div>

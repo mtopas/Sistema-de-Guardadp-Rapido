@@ -19,7 +19,7 @@ const TIPOS = [
 
 const TH = {
   padding: '5px 8px',
-  textAlign: 'left',
+  textAlign: 'center',
   fontSize: 10,
   fontWeight: 700,
   letterSpacing: '0.06em',
@@ -29,20 +29,78 @@ const TH = {
   whiteSpace: 'nowrap',
   background: 'var(--surface)',
 }
-const TD = { padding: '5px 8px', fontSize: 12, fontFamily: 'var(--font-mono)' }
+const TD = { padding: '5px 8px', fontSize: 12, fontFamily: 'var(--font-mono)', verticalAlign: 'middle' }
+
+const INST_INPUT = {
+  background: 'transparent',
+  border: 'none',
+  outline: 'none',
+  color: 'var(--text)',
+  fontFamily: 'var(--font-mono)',
+  fontSize: 12,
+  width: '100%',
+  padding: 0,
+  minWidth: 0,
+}
+
+function todayISO() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function addDaysISO(iso, days) {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!m) return iso
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+  d.setDate(d.getDate() + days)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function isValidDateISO(str) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(str)) return false
+  const [y, mo, da] = str.split('-').map(Number)
+  if (y < 1900 || y > 2100) return false
+  const d = new Date(y, mo - 1, da)
+  return d.getFullYear() === y && d.getMonth() === mo - 1 && d.getDate() === da
+}
 
 function calcIntereses(inst) {
   if (!inst.fecha_inicio || !inst.fecha_vencimiento || !inst.tna || !inst.capital_ars) return 0
-  const dias = Math.max(0, (new Date(inst.fecha_vencimiento) - new Date(inst.fecha_inicio)) / 86400000)
+  const inicio = inst.fecha_inicio.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  const venc   = inst.fecha_vencimiento.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!inicio || !venc) return 0
+  const d0 = new Date(Number(inicio[1]), Number(inicio[2]) - 1, Number(inicio[3]))
+  const d1 = new Date(Number(venc[1]), Number(venc[2]) - 1, Number(venc[3]))
+  const dias = Math.max(0, (d1 - d0) / 86400000)
   return inst.capital_ars * (inst.tna / 100) * (dias / 365)
 }
 
-/** Precio de la UVA al colocar = monto en pesos ÷ cantidad de UVAs. */
-function calcPrecioUva(inst) {
+/** Precio de la UVA al colocar: guardado en precio_actual, o monto ÷ UVAs. */
+function calcPrecioUvaColocacion(inst) {
+  const stored = Number(inst.precio_actual)
+  if (Number.isFinite(stored) && stored > 0) return stored
   const monto = Number(inst.capital_ars)
   const uvas = Number(inst.cantidad)
   if (!Number.isFinite(monto) || !Number.isFinite(uvas) || uvas <= 0) return null
   return monto / uvas
+}
+
+/** Valor estimado hoy = cantidad de UVAs × cotización UVA actual. */
+function calcValorUvaHoy(inst, uvaHoy) {
+  const uvas = Number(inst.cantidad)
+  if (!Number.isFinite(uvas) || uvas <= 0 || !uvaHoy || uvaHoy <= 0) return null
+  return uvas * uvaHoy
+}
+
+function sumValorUvaHoy(items, uvaHoy) {
+  if (!uvaHoy || uvaHoy <= 0 || !items.length) return null
+  let sum = 0
+  let count = 0
+  for (const inst of items) {
+    const v = calcValorUvaHoy(inst, uvaHoy)
+    if (v != null) { sum += v; count++ }
+  }
+  return count > 0 ? sum : null
 }
 
 function valorInstrumentoARS(inst) {
@@ -62,8 +120,22 @@ function pnl(inst) {
 
 function fmtFecha(str) {
   if (!str) return '—'
+  const iso = str.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`
   const d = new Date(str)
-  return isNaN(d) ? str : `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`
+  return isNaN(d.getTime()) ? str : `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`
+}
+
+/** Valor para `<input type="date">` (YYYY-MM-DD), sin depender del timezone. */
+function dateToInputIso(str) {
+  if (!str) return ''
+  const iso = String(str).match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`
+  const dmy = String(str).match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/)
+  if (dmy) {
+    return `${dmy[3]}-${String(dmy[2]).padStart(2, '0')}-${String(dmy[1]).padStart(2, '0')}`
+  }
+  return ''
 }
 
 // ── Add instrument form ───────────────────────────────────────────────────────
@@ -75,29 +147,36 @@ function AddForm({ tipo, onSave, onCancel, lang }) {
   const isOtros  = tipo === 'otros'
   const isPFTipo = isPF || isPFUVA
 
+  const defaultInicio = todayISO()
   const [f, setF] = useState({
     ticker: '', sociedad: '', nombre: '', cantidad: '', costo_usd: '', tipo_cambio: '',
-    precio_actual: '', entidad: '', capital_ars: '', tna: '', fecha_inicio: '', fecha_vencimiento: '',
+    precio_actual: '', entidad: '', capital_ars: '', tna: '', precio_uva: '',
+    fecha_inicio: defaultInicio,
+    fecha_vencimiento: addDaysISO(defaultInicio, 30),
   })
+  const [dateError, setDateError] = useState('')
   const set = (k, v) => setF(p => ({ ...p, [k]: v }))
 
   const precioUvaPreview = useMemo(() => {
+    const manual = parseFloat(f.precio_uva)
+    if (manual > 0) return manual
     const monto = parseFloat(f.capital_ars)
     const uvas = parseFloat(f.cantidad)
     if (!monto || !uvas || uvas <= 0) return null
     return monto / uvas
-  }, [f.capital_ars, f.cantidad])
+  }, [f.precio_uva, f.capital_ars, f.cantidad])
 
   const inp = (placeholder, key, type = 'text') => (
     <input
       type={type}
-      placeholder={placeholder}
+      placeholder={type === 'date' ? undefined : placeholder}
       value={f[key]}
-      onChange={e => set(key, e.target.value)}
+      onChange={e => { setDateError(''); set(key, e.target.value) }}
       style={{
         background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)',
         borderRadius: 8, padding: '4px 8px', fontSize: 12, fontFamily: 'var(--font-mono)',
         outline: 'none', width: '100%',
+        minWidth: type === 'date' ? 130 : undefined,
       }}
       onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
       onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
@@ -105,6 +184,16 @@ function AddForm({ tipo, onSave, onCancel, lang }) {
   )
 
   const handleSave = () => {
+    if (isPFTipo) {
+      if (!isValidDateISO(f.fecha_inicio) || !isValidDateISO(f.fecha_vencimiento)) {
+        setDateError(lang === 'en' ? 'Invalid date — use the calendar picker' : 'Fecha inválida — usá el selector de calendario')
+        return
+      }
+      if (f.fecha_vencimiento < f.fecha_inicio) {
+        setDateError(lang === 'en' ? 'Maturity must be after start date' : 'El vencimiento debe ser posterior al inicio')
+        return
+      }
+    }
     const payload = { tipo, nombre: f.nombre || f.ticker || '?' }
     if (!isPFTipo) {
       payload.ticker        = isFCI ? null : (f.ticker || null)
@@ -124,11 +213,13 @@ function AddForm({ tipo, onSave, onCancel, lang }) {
     if (isPFUVA) {
       const monto = parseFloat(f.capital_ars)
       const uvas = parseFloat(f.cantidad)
-      if (!monto || !uvas || uvas <= 0 || !f.fecha_inicio || !f.fecha_vencimiento) return
+      const precioUva = parseFloat(f.precio_uva) || (monto && uvas > 0 ? monto / uvas : null)
+      if (!monto || !uvas || uvas <= 0 || !precioUva || !f.fecha_inicio || !f.fecha_vencimiento) return
       payload.nombre            = f.entidad || t(lang, 'tipoPlazoFijoUVA')
       payload.entidad           = f.entidad || null
       payload.capital_ars       = monto
       payload.cantidad          = uvas
+      payload.precio_actual     = precioUva
       payload.fecha_inicio      = f.fecha_inicio
       payload.fecha_vencimiento = f.fecha_vencimiento
     }
@@ -150,14 +241,18 @@ function AddForm({ tipo, onSave, onCancel, lang }) {
           {isPF && <div className="flex flex-col gap-0.5" style={{ width: 70 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrTNA')}</span>{inp('97.5','tna','number')}</div>}
           {isPFUVA && <div className="flex flex-col gap-0.5" style={{ width: 110 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrMontoColocado')}</span>{inp('0','capital_ars','number')}</div>}
           {isPFUVA && <div className="flex flex-col gap-0.5" style={{ width: 100 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrUVAs')}</span>{inp('0','cantidad','number')}</div>}
+          {isPFUVA && <div className="flex flex-col gap-0.5" style={{ width: 110 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrPrecioUva')}</span>{inp('0','precio_uva','number')}</div>}
           {isPFUVA && precioUvaPreview != null && (
-            <div className="flex flex-col gap-0.5 justify-end" style={{ minWidth: 120 }}>
+            <div className="flex flex-col gap-0.5 justify-end" style={{ minWidth: 100 }}>
               <span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'colPrecioUva')}</span>
               <span className="mono tnum" style={{ fontSize: 12, color: 'var(--accent)', padding: '4px 0' }}>{fmtARS(precioUvaPreview)}</span>
             </div>
           )}
-          {isPFTipo && <div className="flex flex-col gap-0.5" style={{ width: 110 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrInicio')}</span>{inp('2026-05-01','fecha_inicio','date')}</div>}
-          {isPFTipo && <div className="flex flex-col gap-0.5" style={{ width: 110 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrVenc')}</span>{inp('2026-06-30','fecha_vencimiento','date')}</div>}
+          {isPFTipo && <div className="flex flex-col gap-0.5" style={{ width: 136 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrInicio')}</span>{inp('','fecha_inicio','date')}</div>}
+          {isPFTipo && <div className="flex flex-col gap-0.5" style={{ width: 136 }}><span style={{ fontSize: 10, color: 'var(--subtext)' }}>{t(lang,'instrVenc')}</span>{inp('','fecha_vencimiento','date')}</div>}
+          {dateError && (
+            <span style={{ fontSize: 11, color: '#ef4444', alignSelf: 'center' }}>{dateError}</span>
+          )}
           <button onClick={handleSave} style={{ background: 'var(--cta-bg)', color: 'var(--cta-text)', border: 'none', borderRadius: 8, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>
             <Check size={13} />
           </button>
@@ -170,72 +265,252 @@ function AddForm({ tipo, onSave, onCancel, lang }) {
   )
 }
 
-// ── Precio editable inline ────────────────────────────────────────────────────
+// ── Inline edit cells (mismo patrón que DatosTab) ─────────────────────────────
 
-function PrecioCell({ inst, lang }) {
+function InstTextCell({ inst, field, display, getEditValue, tdStyle = {} }) {
+  const updateInst = useStore(s => s.updateFinInstrumento)
+  const [editing, setEditing] = useState(false)
+  const [val, setVal] = useState('')
+  const shown = display ?? inst[field]
+
+  const commit = () => {
+    const trimmed = val.trim()
+    const prev = String(getEditValue ? getEditValue(inst) : inst[field] ?? '').trim()
+    if (trimmed !== prev) updateInst(inst.id, { [field]: trimmed || null })
+    setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <td style={{ ...TD, ...tdStyle }}>
+        <input
+          type="text"
+          value={val}
+          autoFocus
+          onChange={e => setVal(e.target.value)}
+          onBlur={commit}
+          onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false) }}
+          style={INST_INPUT}
+        />
+      </td>
+    )
+  }
+
+  return (
+    <td
+      style={{ ...TD, cursor: 'text', ...tdStyle }}
+      onClick={() => { setVal(String(getEditValue ? getEditValue(inst) : inst[field] ?? '')); setEditing(true) }}
+    >
+      <span style={{ color: shown ? 'var(--text)' : 'var(--subtext)' }}>{shown || '—'}</span>
+    </td>
+  )
+}
+
+function InstNumberCell({
+  inst, field, display, tdStyle = {}, inputStyle = {}, patchTransform,
+}) {
   const updateInst = useStore(s => s.updateFinInstrumento)
   const [editing, setEditing] = useState(false)
   const [val, setVal] = useState('')
 
   const commit = () => {
-    const n = parseFloat(val)
-    if (!isNaN(n)) updateInst(inst.id, { precio_actual: n })
+    const n = parseFloat(String(val).replace(',', '.'))
+    if (!Number.isFinite(n)) { setEditing(false); return }
+    const patch = patchTransform ? patchTransform(n, inst) : { [field]: n }
+    updateInst(inst.id, patch)
     setEditing(false)
   }
 
-  if (editing) return (
-    <td style={TD}>
-      <input
-        type="number" autoFocus value={val} onChange={e => setVal(e.target.value)}
-        onBlur={commit} onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false) }}
-        style={{ background: 'transparent', border: 'none', outline: 'none', color: 'var(--accent)', fontFamily: 'var(--font-mono)', fontSize: 12, width: 80 }}
-      />
-    </td>
-  )
+  if (editing) {
+    return (
+      <td style={{ ...TD, ...tdStyle }}>
+        <input
+          type="number"
+          step="any"
+          value={val}
+          autoFocus
+          onChange={e => setVal(e.target.value)}
+          onBlur={commit}
+          onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false) }}
+          style={{ ...INST_INPUT, ...inputStyle }}
+        />
+      </td>
+    )
+  }
 
   return (
-    <td style={{ ...TD, cursor: 'text' }} onClick={() => { setVal(String(inst.precio_actual ?? '')); setEditing(true) }}>
-      <span style={{ color: 'var(--accent)', textDecoration: 'underline dotted' }}>
-        {inst.precio_actual != null ? fmtUSD(inst.precio_actual) : '—'}
+    <td
+      style={{ ...TD, cursor: 'text', ...tdStyle }}
+      onClick={() => { setVal(String(inst[field] ?? '')); setEditing(true) }}
+    >
+      <span style={{ color: display != null && display !== '—' ? 'var(--text)' : 'var(--subtext)' }}>
+        {display ?? '—'}
       </span>
     </td>
   )
 }
 
+function InstDerivedNumberCell({ inst, getValue, display, patchTransform, tdStyle = {}, inputStyle = {} }) {
+  const updateInst = useStore(s => s.updateFinInstrumento)
+  const [editing, setEditing] = useState(false)
+  const [val, setVal] = useState('')
+
+  const commit = () => {
+    const n = parseFloat(String(val).replace(',', '.'))
+    if (!Number.isFinite(n)) { setEditing(false); return }
+    updateInst(inst.id, patchTransform(n, inst))
+    setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <td style={{ ...TD, ...tdStyle }}>
+        <input
+          type="number"
+          step="any"
+          value={val}
+          autoFocus
+          onChange={e => setVal(e.target.value)}
+          onBlur={commit}
+          onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false) }}
+          style={{ ...INST_INPUT, ...inputStyle }}
+        />
+      </td>
+    )
+  }
+
+  return (
+    <td
+      style={{ ...TD, cursor: 'text', ...tdStyle }}
+      onClick={() => { setVal(String(getValue(inst) ?? '')); setEditing(true) }}
+    >
+      <span style={{ color: display !== '—' ? 'var(--text)' : 'var(--subtext)' }}>{display}</span>
+    </td>
+  )
+}
+
+function InstDateCell({ inst, field, tdStyle = {} }) {
+  const updateInst = useStore(s => s.updateFinInstrumento)
+  const [editing, setEditing] = useState(false)
+  const [val, setVal] = useState('')
+  const storedIso = dateToInputIso(inst[field])
+
+  const startEdit = () => {
+    setVal(storedIso)
+    setEditing(true)
+  }
+
+  const commit = () => {
+    const next = val || storedIso
+    if (next && next !== storedIso) updateInst(inst.id, { [field]: next })
+    setEditing(false)
+  }
+
+  const cancel = () => {
+    setVal('')
+    setEditing(false)
+  }
+
+  if (editing) {
+    const inputVal = val || storedIso
+    return (
+      <td style={{ ...TD, ...tdStyle }}>
+        <input
+          type="date"
+          value={inputVal}
+          autoFocus
+          onChange={e => setVal(e.target.value)}
+          onBlur={commit}
+          onKeyDown={e => {
+            if (e.key === 'Enter') commit()
+            if (e.key === 'Escape') cancel()
+          }}
+          style={{ ...INST_INPUT, minWidth: 120 }}
+        />
+      </td>
+    )
+  }
+
+  return (
+    <td
+      style={{ ...TD, cursor: 'text', ...tdStyle }}
+      onClick={startEdit}
+    >
+      {fmtFecha(inst[field])}
+    </td>
+  )
+}
+
+function InstReadOnlyCell({ children, tdStyle = {} }) {
+  return <td style={{ ...TD, ...tdStyle }}>{children}</td>
+}
+
 // ── Instrument rows by type ───────────────────────────────────────────────────
 
-function AccionesRows({ items, lang }) {
+function AccionesRows({ items }) {
   return items.map(inst => {
     const valor  = (inst.cantidad ?? 0) * (inst.precio_actual ?? 0)
     const pl     = pnl(inst)
     const plColor = pl == null ? 'var(--text)' : pl.diff >= 0 ? 'var(--success)' : '#ef4444'
+    const ppp = inst.costo_usd != null && inst.cantidad > 0 ? inst.costo_usd / inst.cantidad : null
     return (
       <tr key={inst.id} style={{ borderBottom: '1px solid var(--border)' }}>
-        <td style={{ ...TD, fontWeight: 700 }}>{inst.ticker ?? '—'}</td>
-        <td style={TD}>{inst.nombre}</td>
-        <td style={{ ...TD, textAlign: 'right' }}>{fmtCantidad(inst.cantidad ?? 0)}</td>
-        <td style={{ ...TD, textAlign: 'right' }}>{inst.costo_usd != null && inst.cantidad > 0 ? fmtUSD(inst.costo_usd / inst.cantidad) : '—'}</td>
-        <PrecioCell inst={inst} lang={lang} />
-        <td style={{ ...TD, textAlign: 'right' }}>{fmtUSD(valor)}</td>
-        <td style={{ ...TD, textAlign: 'right', color: plColor }}>
+        <InstTextCell inst={inst} field="ticker" tdStyle={{ fontWeight: 700 }} />
+        <InstTextCell inst={inst} field="nombre" />
+        <InstNumberCell
+          inst={inst}
+          field="cantidad"
+          display={fmtCantidad(inst.cantidad ?? 0)}
+          tdStyle={{ textAlign: 'right' }}
+          inputStyle={{ textAlign: 'right' }}
+        />
+        <InstDerivedNumberCell
+          inst={inst}
+          getValue={i => (i.costo_usd != null && i.cantidad > 0 ? i.costo_usd / i.cantidad : '')}
+          display={ppp != null ? fmtUSD(ppp) : '—'}
+          patchTransform={(n, i) => ({ costo_usd: n * (i.cantidad || 0) })}
+          tdStyle={{ textAlign: 'right' }}
+          inputStyle={{ textAlign: 'right' }}
+        />
+        <InstNumberCell
+          inst={inst}
+          field="precio_actual"
+          display={inst.precio_actual != null ? fmtUSD(inst.precio_actual) : '—'}
+          tdStyle={{ textAlign: 'right', color: 'var(--accent)' }}
+          inputStyle={{ textAlign: 'right', color: 'var(--accent)' }}
+        />
+        <InstReadOnlyCell tdStyle={{ textAlign: 'right' }}>{fmtUSD(valor)}</InstReadOnlyCell>
+        <InstReadOnlyCell tdStyle={{ textAlign: 'right', color: plColor }}>
           {pl != null ? `${pl.diff >= 0 ? '+' : ''}${fmtUSD(pl.diff)} (${pl.pct >= 0 ? '+' : ''}${pl.pct.toFixed(1)}%)` : '—'}
-        </td>
+        </InstReadOnlyCell>
         <DeleteCell id={inst.id} />
       </tr>
     )
   })
 }
 
-function FCIRows({ items, lang }) {
+function FCIRows({ items }) {
   return items.map(inst => {
     const valor = (inst.cantidad ?? 0) * (inst.precio_actual ?? 0)
     return (
       <tr key={inst.id} style={{ borderBottom: '1px solid var(--border)' }}>
-        <td style={{ ...TD, color: 'var(--subtext)' }}>{inst.sociedad ?? '—'}</td>
-        <td style={TD}>{inst.nombre}</td>
-        <td style={{ ...TD, textAlign: 'right' }}>{fmtCantidad(inst.cantidad ?? 0)}</td>
-        <PrecioCell inst={inst} lang={lang} />
-        <td style={{ ...TD, textAlign: 'right' }}>{fmtUSD(valor)}</td>
+        <InstTextCell inst={inst} field="sociedad" tdStyle={{ color: 'var(--subtext)' }} />
+        <InstTextCell inst={inst} field="nombre" />
+        <InstNumberCell
+          inst={inst}
+          field="cantidad"
+          display={fmtCantidad(inst.cantidad ?? 0)}
+          tdStyle={{ textAlign: 'right' }}
+          inputStyle={{ textAlign: 'right' }}
+        />
+        <InstNumberCell
+          inst={inst}
+          field="precio_actual"
+          display={inst.precio_actual != null ? fmtUSD(inst.precio_actual) : '—'}
+          tdStyle={{ textAlign: 'right', color: 'var(--accent)' }}
+          inputStyle={{ textAlign: 'right', color: 'var(--accent)' }}
+        />
+        <InstReadOnlyCell tdStyle={{ textAlign: 'right' }}>{fmtUSD(valor)}</InstReadOnlyCell>
         <DeleteCell id={inst.id} />
       </tr>
     )
@@ -248,32 +523,80 @@ function PlazoFijoRows({ items }) {
     const total     = (inst.capital_ars ?? 0) + intereses
     return (
       <tr key={inst.id} style={{ borderBottom: '1px solid var(--border)' }}>
-        <td style={TD}>{inst.entidad ?? '—'}</td>
-        <td style={{ ...TD, textAlign: 'right' }}>{fmtARS(inst.capital_ars ?? 0)}</td>
-        <td style={{ ...TD, textAlign: 'right' }}>{inst.tna != null ? `${inst.tna}%` : '—'}</td>
-        <td style={TD}>{fmtFecha(inst.fecha_inicio)}</td>
-        <td style={TD}>{fmtFecha(inst.fecha_vencimiento)}</td>
-        <td style={{ ...TD, textAlign: 'right', color: 'var(--success)' }}>{fmtARS(intereses)}</td>
-        <td style={{ ...TD, textAlign: 'right', fontWeight: 600 }}>{fmtARS(total)}</td>
+        <InstTextCell inst={inst} field="entidad" />
+        <InstNumberCell
+          inst={inst}
+          field="capital_ars"
+          display={fmtARS(inst.capital_ars ?? 0)}
+          tdStyle={{ textAlign: 'right' }}
+          inputStyle={{ textAlign: 'right' }}
+        />
+        <InstNumberCell
+          inst={inst}
+          field="tna"
+          display={inst.tna != null ? `${inst.tna}%` : '—'}
+          tdStyle={{ textAlign: 'right' }}
+          inputStyle={{ textAlign: 'right' }}
+        />
+        <InstDateCell inst={inst} field="fecha_inicio" />
+        <InstDateCell inst={inst} field="fecha_vencimiento" />
+        <InstReadOnlyCell tdStyle={{ textAlign: 'right', color: 'var(--success)' }}>{fmtARS(intereses)}</InstReadOnlyCell>
+        <InstReadOnlyCell tdStyle={{ textAlign: 'right', fontWeight: 600 }}>{fmtARS(total)}</InstReadOnlyCell>
         <DeleteCell id={inst.id} />
       </tr>
     )
   })
 }
 
-function PlazoFijoUVARows({ items }) {
+function PlazoFijoUVARows({ items, uvaHoy }) {
   return items.map(inst => {
-    const precioUva = calcPrecioUva(inst)
+    const precioUva = calcPrecioUvaColocacion(inst)
+    const valorHoy  = calcValorUvaHoy(inst, uvaHoy)
+    const colocado  = inst.capital_ars ?? 0
+    const diff      = valorHoy != null ? valorHoy - colocado : null
     return (
       <tr key={inst.id} style={{ borderBottom: '1px solid var(--border)' }}>
-        <td style={TD}>{inst.entidad ?? inst.nombre ?? '—'}</td>
-        <td style={{ ...TD, textAlign: 'right' }}>{fmtARS(inst.capital_ars ?? 0)}</td>
-        <td style={{ ...TD, textAlign: 'right' }}>{fmtCantidad(inst.cantidad ?? 0)}</td>
-        <td style={{ ...TD, textAlign: 'right', color: 'var(--accent)' }}>
-          {precioUva != null ? fmtARS(precioUva) : '—'}
-        </td>
-        <td style={TD}>{fmtFecha(inst.fecha_inicio)}</td>
-        <td style={TD}>{fmtFecha(inst.fecha_vencimiento)}</td>
+        <InstTextCell
+          inst={inst}
+          field="entidad"
+          display={inst.entidad ?? inst.nombre}
+          getEditValue={i => i.entidad ?? i.nombre ?? ''}
+        />
+        <InstNumberCell
+          inst={inst}
+          field="capital_ars"
+          display={fmtARS(colocado)}
+          tdStyle={{ textAlign: 'right' }}
+          inputStyle={{ textAlign: 'right' }}
+        />
+        <InstNumberCell
+          inst={inst}
+          field="cantidad"
+          display={fmtCantidad(inst.cantidad ?? 0)}
+          tdStyle={{ textAlign: 'right' }}
+          inputStyle={{ textAlign: 'right' }}
+        />
+        <InstNumberCell
+          inst={inst}
+          field="precio_actual"
+          display={precioUva != null ? fmtARS(precioUva) : '—'}
+          tdStyle={{ textAlign: 'right', color: 'var(--accent)' }}
+          inputStyle={{ textAlign: 'right', color: 'var(--accent)' }}
+        />
+        <InstDateCell inst={inst} field="fecha_inicio" />
+        <InstDateCell inst={inst} field="fecha_vencimiento" />
+        <InstReadOnlyCell tdStyle={{ textAlign: 'right' }}>
+          {valorHoy != null ? (
+            <div className="flex flex-col items-end gap-0.5">
+              <span style={{ fontWeight: 600 }}>{fmtARS(valorHoy)}</span>
+              {diff != null && (
+                <span style={{ fontSize: 10, color: diff >= 0 ? 'var(--success)' : '#ef4444' }}>
+                  {diff >= 0 ? '+' : ''}{fmtARS(diff)}
+                </span>
+              )}
+            </div>
+          ) : '—'}
+        </InstReadOnlyCell>
         <DeleteCell id={inst.id} />
       </tr>
     )
@@ -282,11 +605,27 @@ function PlazoFijoUVARows({ items }) {
 
 function OtrosRows({ items }) {
   return items.map(inst => {
-    const valor = (inst.cantidad > 0 ? inst.cantidad : 1) * (inst.precio_actual ?? inst.costo_usd ?? 0)
+    const qty   = inst.cantidad > 0 ? inst.cantidad : 1
+    const unit  = inst.precio_actual ?? inst.costo_usd ?? 0
+    const valor = qty * unit
     return (
       <tr key={inst.id} style={{ borderBottom: '1px solid var(--border)' }}>
-        <td style={TD}>{inst.nombre}</td>
-        <td style={{ ...TD, textAlign: 'right' }}>{fmtUSD(valor)}</td>
+        <InstTextCell inst={inst} field="nombre" />
+        <InstDerivedNumberCell
+          inst={inst}
+          getValue={i => {
+            const q = i.cantidad > 0 ? i.cantidad : 1
+            return (i.precio_actual ?? i.costo_usd ?? 0) * q
+          }}
+          display={fmtUSD(valor)}
+          patchTransform={(total, i) => {
+            const q = i.cantidad > 0 ? i.cantidad : 1
+            const unit = total / q
+            return { precio_actual: unit, costo_usd: total }
+          }}
+          tdStyle={{ textAlign: 'right' }}
+          inputStyle={{ textAlign: 'right' }}
+        />
         <DeleteCell id={inst.id} />
       </tr>
     )
@@ -342,10 +681,77 @@ function PlazoFijoHeader({ lang }) {
 function PlazoFijoUVAHeader({ lang }) {
   return (
     <tr>
-      {['colEntidad','colMontoColocado','colUVAs','colPrecioUva','colInicio','colVencimiento',''].map(k => (
+      {['colEntidad','colMontoColocado','colUVAs','colPrecioUva','colInicio','colVencimiento','colValorHoy',''].map(k => (
         <th key={k} scope="col" style={TH}>{k ? t(lang, k) : ''}</th>
       ))}
     </tr>
+  )
+}
+
+function UvaHoyBar({ lang }) {
+  const finConfig       = useStore(s => s.finConfig)
+  const updateFinConfig = useStore(s => s.updateFinConfig)
+  const [val, setVal]   = useState('')
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    setVal(finConfig?.uva_valor ?? '')
+  }, [finConfig?.uva_valor])
+
+  const commit = async () => {
+    const raw = String(val).trim().replace(',', '.')
+    if (!raw) return
+    const n = parseFloat(raw)
+    if (!Number.isFinite(n) || n <= 0) return
+    await updateFinConfig('uva_valor', String(n))
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
+  }
+
+  return (
+    <div
+      className="flex flex-wrap items-center gap-2 px-4 py-2 border-b"
+      style={{ borderColor: 'var(--border)', background: 'color-mix(in oklch, #0d9488 6%, transparent)' }}
+    >
+      <span className="text-[11px] font-medium" style={{ color: 'var(--text)' }}>{t(lang, 'uvaHoyLabel')}</span>
+      <input
+        type="number"
+        step="0.01"
+        value={val}
+        onChange={e => setVal(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commit() } }}
+        placeholder="1680.50"
+        style={{
+          background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)',
+          borderRadius: 8, padding: '4px 8px', fontSize: 12, fontFamily: 'var(--font-mono)',
+          outline: 'none', width: 110,
+        }}
+      />
+      <span className="text-[10px]" style={{ color: 'var(--subtext)' }}>{t(lang, 'uvaHoyHint')}</span>
+      {saved && <span className="text-[10px]" style={{ color: 'var(--success)' }}>✓</span>}
+    </div>
+  )
+}
+
+function UvaValorHoyTotal({ total, lang }) {
+  return (
+    <div
+      className="flex justify-end items-baseline gap-2 px-4 pt-2 pb-0.5"
+      style={{ paddingRight: 44 }}
+    >
+      <span
+        style={{
+          fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
+          textTransform: 'uppercase', color: 'var(--mute)',
+        }}
+      >
+        {t(lang, 'colTotal')}
+      </span>
+      <span className="mono tnum" style={{ fontSize: 13, color: 'var(--subtext)' }}>
+        {fmtARS(total)}
+      </span>
+    </div>
   )
 }
 
@@ -412,6 +818,8 @@ function TipoSection({ tipo, items, lang, addInstrumento }) {
   const hasItems = items.length > 0
   const [open, setOpen]     = useState(hasItems)
   const [adding, setAdding] = useState(false)
+  const finConfig           = useStore(s => s.finConfig)
+  const uvaHoy              = parseFloat(finConfig?.uva_valor) || null
 
   const handleSave = async (payload) => {
     await addInstrumento(payload)
@@ -424,6 +832,11 @@ function TipoSection({ tipo, items, lang, addInstrumento }) {
   const isOtros  = tipo === 'otros'
   const isStock  = ['acciones', 'ons', 'crypto'].includes(tipo)
 
+  const totalValorHoy = useMemo(
+    () => (isPFUVA ? sumValorUvaHoy(items, uvaHoy) : null),
+    [isPFUVA, items, uvaHoy],
+  )
+
   const renderHeader = () => {
     if (isStock)   return <AccionesHeader lang={lang} />
     if (isFCI)     return <FCIHeader lang={lang} />
@@ -433,22 +846,23 @@ function TipoSection({ tipo, items, lang, addInstrumento }) {
   }
 
   const renderRows = () => {
-    if (isStock)   return <AccionesRows items={items} lang={lang} />
-    if (isFCI)     return <FCIRows items={items} lang={lang} />
+    if (isStock)   return <AccionesRows items={items} />
+    if (isFCI)     return <FCIRows items={items} />
     if (isPF)      return <PlazoFijoRows items={items} />
-    if (isPFUVA)   return <PlazoFijoUVARows items={items} />
+    if (isPFUVA)   return <PlazoFijoUVARows items={items} uvaHoy={uvaHoy} />
     return <OtrosRows items={items} />
   }
 
   const labelKey = TIPOS.find(t => t.id === tipo)?.labelKey ?? tipo
 
   return (
-    <div
-      className="rounded-xl border overflow-hidden"
-      style={{ borderColor: 'var(--border)' }}
-    >
-      {/* Section header */}
-      <button
+    <div>
+      <div
+        className="rounded-xl border overflow-hidden"
+        style={{ borderColor: 'var(--border)' }}
+      >
+        {/* Section header */}
+        <button
         type="button"
         onClick={() => setOpen(v => !v)}
         className="flex items-center justify-between w-full px-4 py-2.5 transition-colors"
@@ -475,7 +889,9 @@ function TipoSection({ tipo, items, lang, addInstrumento }) {
 
       {/* Table */}
       {open && (
-        <div style={{ overflowX: 'auto' }}>
+        <>
+          {isPFUVA && <UvaHoyBar lang={lang} />}
+          <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 520, fontFamily: 'var(--font-mono)', fontSize: 12 }}>
             <thead>{renderHeader()}</thead>
             <tbody>
@@ -489,21 +905,270 @@ function TipoSection({ tipo, items, lang, addInstrumento }) {
             </tbody>
           </table>
         </div>
+        </>
+      )}
+      </div>
+      {open && isPFUVA && totalValorHoy != null && (
+        <UvaValorHoyTotal total={totalValorHoy} lang={lang} />
       )}
     </div>
   )
 }
 
-// ── Ledger de transacciones por instrumento ───────────────────────────────────
+// ── Ledger (entidad bancaria vs ticker) ───────────────────────────────────────
+
+const LEDGER_ENTITY_TYPES = new Set(['plazo_fijo', 'plazo_fijo_uva'])
+
+function isLedgerEntityGrouped(inst) {
+  return LEDGER_ENTITY_TYPES.has(inst.tipo)
+}
+
+function isLedgerTradable(inst) {
+  return !isLedgerEntityGrouped(inst)
+}
+
+function ledgerEntidadKey(inst, lang) {
+  const e = (inst.entidad ?? '').trim()
+  if (e) return e
+  const n = (inst.nombre ?? '').trim()
+  return n || t(lang, 'ledgerSinEntidad')
+}
+
+function ledgerIndividualLabel(inst) {
+  if (['acciones', 'ons', 'crypto'].includes(inst.tipo)) {
+    return (inst.ticker ?? '').trim() || (inst.nombre ?? '').trim() || '?'
+  }
+  if (inst.tipo === 'fci') {
+    const n = (inst.nombre ?? '').trim()
+    const s = (inst.sociedad ?? '').trim()
+    if (s && n) return `${s} · ${n}`
+    return n || s || '?'
+  }
+  return (inst.nombre ?? '').trim() || (inst.ticker ?? '').trim() || '?'
+}
+
+function ledgerSubLabel(inst, lang) {
+  if (inst.tipo === 'plazo_fijo_uva') {
+    return `${t(lang, 'tipoPlazoFijoUVA')} · ${fmtARS(inst.capital_ars ?? 0)} · ${fmtFecha(inst.fecha_vencimiento)}`
+  }
+  if (inst.tipo === 'plazo_fijo') {
+    const tna = inst.tna != null ? ` · TNA ${inst.tna}%` : ''
+    return `${t(lang, 'tipoPlazoFijo')} · ${fmtARS(inst.capital_ars ?? 0)}${tna} · ${fmtFecha(inst.fecha_vencimiento)}`
+  }
+  return ledgerIndividualLabel(inst)
+}
+
+function ledgerChipStyle(active) {
+  return {
+    borderColor: active ? 'var(--accent)' : 'var(--border)',
+    background: active ? 'color-mix(in oklch, var(--accent) 12%, transparent)' : 'transparent',
+    color: active ? 'var(--accent)' : 'var(--subtext)',
+  }
+}
+
+function ColocacionDetail({ inst, lang }) {
+  const finConfig = useStore(s => s.finConfig)
+  const uvaHoy = parseFloat(finConfig?.uva_valor) || null
+
+  const rows = useMemo(() => {
+    if (inst.tipo === 'plazo_fijo') {
+      const intereses = calcIntereses(inst)
+      const total = (inst.capital_ars ?? 0) + intereses
+      return [
+        [t(lang, 'colCapital'), fmtARS(inst.capital_ars ?? 0)],
+        ...(inst.tna != null ? [[t(lang, 'colTNA'), `${inst.tna}%`]] : []),
+        [t(lang, 'colInicio'), fmtFecha(inst.fecha_inicio)],
+        [t(lang, 'colVencimiento'), fmtFecha(inst.fecha_vencimiento)],
+        [t(lang, 'colIntereses'), fmtARS(intereses)],
+        [t(lang, 'colCapitalTotal'), fmtARS(total)],
+      ]
+    }
+    if (inst.tipo === 'plazo_fijo_uva') {
+      const valorHoy = calcValorUvaHoy(inst, uvaHoy)
+      return [
+        [t(lang, 'colMontoColocado'), fmtARS(inst.capital_ars ?? 0)],
+        [t(lang, 'colUVAs'), fmtCantidad(inst.cantidad ?? 0)],
+        [t(lang, 'colPrecioUva'), fmtARS(calcPrecioUvaColocacion(inst) ?? 0)],
+        [t(lang, 'colInicio'), fmtFecha(inst.fecha_inicio)],
+        [t(lang, 'colVencimiento'), fmtFecha(inst.fecha_vencimiento)],
+        ...(valorHoy != null ? [[t(lang, 'colValorHoy'), fmtARS(valorHoy)]] : []),
+      ]
+    }
+    return []
+  }, [inst, lang, uvaHoy])
+
+  return (
+    <div
+      className="rounded-xl border p-3 flex flex-col gap-2.5"
+      style={{ borderColor: 'var(--border)', background: 'color-mix(in oklch, var(--accent) 4%, transparent)' }}
+    >
+      <p className="text-[11px] leading-snug" style={{ color: 'var(--subtext)' }}>
+        {t(lang, 'ledgerColocacionNote')}
+      </p>
+      <dl className="grid gap-1.5" style={{ gridTemplateColumns: 'auto 1fr' }}>
+        {rows.map(([label, value]) => (
+          <div key={label} className="contents">
+            <dt className="text-[10px] uppercase tracking-wider pr-3" style={{ color: 'var(--subtext)' }}>{label}</dt>
+            <dd className="text-[12px] mono tnum font-medium m-0" style={{ color: 'var(--text)' }}>{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  )
+}
+
+function LedgerTradablePanel({ inst, lang, trans, loading, showForm, setShowForm, form, setForm, onAdd, onDelete }) {
+  const TH2 = { ...TH, fontSize: 10 }
+  const TD2 = { ...TD, fontSize: 11 }
+  const title = ledgerIndividualLabel(inst)
+
+  return (
+    <>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <span className="text-[12px] font-medium" style={{ color: 'var(--text)' }}>{title}</span>
+        <button
+          type="button"
+          onClick={() => setShowForm(v => !v)}
+          className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium"
+          style={{ background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer' }}
+        >
+          <Plus size={11} /> {t(lang, 'ledgerNewTx')}
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="flex flex-wrap gap-2 p-3 rounded-xl border" style={{ borderColor: 'var(--accent)', background: 'color-mix(in oklch, var(--accent) 5%, transparent)' }}>
+          {[
+            { label: t(lang, 'ledgerTxTipo'), el: (
+              <select value={form.tipo} onChange={e => setForm(f => ({ ...f, tipo: e.target.value }))} style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '3px 6px', fontSize: 11 }}>
+                <option value="compra">{t(lang, 'ledgerTxCompra')}</option>
+                <option value="venta">{t(lang, 'ledgerTxVenta')}</option>
+              </select>
+            ) },
+            { label: t(lang, 'ledgerTxFecha'), el: (
+              <input type="date" value={form.fecha} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '3px 6px', fontSize: 11, outline: 'none' }} />
+            ) },
+            { label: t(lang, 'ledgerTxCantidad'), el: (
+              <input type="number" placeholder="0" value={form.cantidad} onChange={e => setForm(f => ({ ...f, cantidad: e.target.value }))} style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '3px 6px', fontSize: 11, width: 80, outline: 'none' }} />
+            ) },
+            { label: t(lang, 'ledgerTxPrecio'), el: (
+              <input type="number" placeholder="0" value={form.precio} onChange={e => setForm(f => ({ ...f, precio: e.target.value }))} style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '3px 6px', fontSize: 11, width: 80, outline: 'none' }} />
+            ) },
+            { label: t(lang, 'ledgerTxNota'), el: (
+              <input type="text" placeholder="…" value={form.nota} onChange={e => setForm(f => ({ ...f, nota: e.target.value }))} style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '3px 6px', fontSize: 11, width: 120, outline: 'none' }} />
+            ) },
+          ].map(({ label, el }) => (
+            <label key={label} className="flex flex-col gap-0.5">
+              <span className="text-[9px] uppercase tracking-wider" style={{ color: 'var(--subtext)' }}>{label}</span>
+              {el}
+            </label>
+          ))}
+          <div className="flex items-end gap-1">
+            <button type="button" onClick={onAdd} className="px-2.5 py-1 rounded-lg text-[11px] font-medium" style={{ background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer' }}><Check size={11} /></button>
+            <button type="button" onClick={() => setShowForm(false)} className="px-2.5 py-1 rounded-lg text-[11px]" style={{ background: 'var(--bg)', color: 'var(--subtext)', border: '1px solid var(--border)', cursor: 'pointer' }}><X size={11} /></button>
+          </div>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="text-[11px] py-2" style={{ color: 'var(--subtext)' }}>{t(lang, 'ledgerLoading')}</div>
+      ) : trans.length === 0 ? (
+        <div className="text-[11px] py-2" style={{ color: 'var(--subtext)' }}>{t(lang, 'ledgerNoTrans')}</div>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 420, fontFamily: 'var(--font-mono)', fontSize: 11 }}>
+            <thead>
+              <tr>
+                {[t(lang, 'ledgerTxFecha'), t(lang, 'ledgerTxTipo'), t(lang, 'ledgerTxCantidad'), t(lang, 'ledgerTxPrecio'), t(lang, 'ledgerTxTotal'), t(lang, 'ledgerTxNota'), ''].map(h => (
+                  <th key={h || 'act'} scope="col" style={TH2}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {trans.map(tx => (
+                <tr key={tx.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                  <td style={TD2}>{tx.fecha?.slice(0, 10)}</td>
+                  <td style={{ ...TD2, color: tx.tipo === 'compra' ? 'var(--income)' : 'var(--expense)', fontWeight: 600 }}>
+                    {tx.tipo === 'compra' ? t(lang, 'ledgerTxCompra') : t(lang, 'ledgerTxVenta')}
+                  </td>
+                  <td style={TD2}>{tx.cantidad}</td>
+                  <td style={TD2}>{fmtARS(tx.precio)}</td>
+                  <td style={{ ...TD2, fontWeight: 600 }}>{fmtARS(tx.monto_total)}</td>
+                  <td style={{ ...TD2, color: 'var(--subtext)' }}>{tx.nota || '—'}</td>
+                  <td style={TD2}>
+                    <button type="button" onClick={() => onDelete(tx.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--subtext)', lineHeight: 0, padding: 2 }}
+                      onMouseEnter={e => { e.currentTarget.style.color = '#ef4444' }}
+                      onMouseLeave={e => { e.currentTarget.style.color = 'var(--subtext)' }}
+                    ><Trash2 size={11} /></button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  )
+}
 
 function LedgerSection({ instrumentos, lang }) {
+  const [selEntity, setSelEntity] = useState(null)
   const [selId, setSelId]         = useState(null)
   const [trans, setTrans]         = useState([])
   const [loading, setLoading]     = useState(false)
   const [showForm, setShowForm]   = useState(false)
-  const [form, setForm]           = useState({ tipo: 'compra', fecha: new Date().toISOString().slice(0,10), cantidad: '', precio: '', nota: '' })
+  const [form, setForm]           = useState({
+    tipo: 'compra',
+    fecha: new Date().toISOString().slice(0, 10),
+    cantidad: '',
+    precio: '',
+    nota: '',
+  })
 
-  const flatInst = useMemo(() => instrumentos.flatMap(g => g), [instrumentos])
+  const { entityGroups, individualChips } = useMemo(() => {
+    const groups = new Map()
+    const individuals = []
+    for (const inst of instrumentos) {
+      if (isLedgerEntityGrouped(inst)) {
+        const key = ledgerEntidadKey(inst, lang)
+        if (!groups.has(key)) groups.set(key, [])
+        groups.get(key).push(inst)
+      } else {
+        individuals.push(inst)
+      }
+    }
+    for (const items of groups.values()) {
+      items.sort((a, b) => String(a.fecha_vencimiento ?? '').localeCompare(String(b.fecha_vencimiento ?? '')))
+    }
+    const labelCounts = {}
+    for (const inst of individuals) {
+      const base = ledgerIndividualLabel(inst)
+      labelCounts[base] = (labelCounts[base] || 0) + 1
+    }
+    const chips = individuals
+      .map(inst => {
+        const base = ledgerIndividualLabel(inst)
+        const label = labelCounts[base] > 1 && inst.nombre && inst.nombre !== base
+          ? `${base} · ${inst.nombre}`
+          : base
+        return { inst, label }
+      })
+      .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }))
+    return {
+      entityGroups: [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], undefined, { sensitivity: 'base' })),
+      individualChips: chips,
+    }
+  }, [instrumentos, lang])
+
+  const entityItems = useMemo(() => {
+    if (!selEntity) return []
+    return entityGroups.find(([key]) => key === selEntity)?.[1] ?? []
+  }, [entityGroups, selEntity])
+
+  const selInst = useMemo(
+    () => instrumentos.find(i => i.id === selId) ?? null,
+    [instrumentos, selId],
+  )
 
   const fetchTrans = useCallback(async (id) => {
     if (!id) return
@@ -511,11 +1176,32 @@ function LedgerSection({ instrumentos, lang }) {
     try {
       const res = await fetch(`${API_URL}/fin/instrumentos/${id}/transacciones`)
       if (res.ok) setTrans(await res.json())
-    } catch { /* noop */ }
+      else setTrans([])
+    } catch {
+      setTrans([])
+    }
     setLoading(false)
   }, [])
 
-  const handleSelect = (id) => { setSelId(id); fetchTrans(id); setShowForm(false) }
+  const selectInstrument = useCallback((inst, entityKey) => {
+    if (!inst) return
+    setSelId(inst.id)
+    setSelEntity(entityKey ?? null)
+    setShowForm(false)
+    if (isLedgerTradable(inst)) fetchTrans(inst.id)
+    else setTrans([])
+  }, [fetchTrans])
+
+  const handleSelectEntity = (key) => {
+    const items = entityGroups.find(([k]) => k === key)?.[1] ?? []
+    setSelEntity(key)
+    if (items[0]) selectInstrument(items[0], key)
+    else { setSelId(null); setTrans([]) }
+  }
+
+  const handleSelectIndividual = (inst) => {
+    selectInstrument(inst, null)
+  }
 
   const handleAdd = async () => {
     if (!selId || !form.cantidad || !form.precio) return
@@ -523,7 +1209,13 @@ function LedgerSection({ instrumentos, lang }) {
       const res = await fetch(`${API_URL}/fin/instrumentos/${selId}/transacciones`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tipo: form.tipo, fecha: form.fecha, cantidad: parseFloat(form.cantidad), precio: parseFloat(form.precio), nota: form.nota || null }),
+        body: JSON.stringify({
+          tipo: form.tipo,
+          fecha: form.fecha,
+          cantidad: parseFloat(form.cantidad),
+          precio: parseFloat(form.precio),
+          nota: form.nota || null,
+        }),
       })
       if (res.ok) { await fetchTrans(selId); setShowForm(false) }
     } catch { /* noop */ }
@@ -532,123 +1224,96 @@ function LedgerSection({ instrumentos, lang }) {
   const handleDelete = async (transId) => {
     try {
       await fetch(`${API_URL}/fin/transacciones/${transId}`, { method: 'DELETE' })
-      setTrans(t => t.filter(x => x.id !== transId))
+      setTrans(prev => prev.filter(x => x.id !== transId))
     } catch { /* noop */ }
   }
 
-  const selInst = flatInst.find(i => i.id === selId)
-
-  const TH2 = { ...TH, fontSize: 10 }
-  const TD2 = { ...TD, fontSize: 11 }
+  const entityChipActive = (key) => selEntity === key
+  const individualChipActive = (id) => selId === id && selEntity == null
 
   return (
     <div className="panel-strong overflow-hidden">
-      <button
-        type="button"
-        className="flex items-center gap-2 w-full px-4 py-3 border-b text-left"
-        style={{ borderColor: 'var(--border)', background: 'var(--surface)', border: 'none' }}
-        onClick={() => setSelId(p => p ? null : flatInst[0]?.id ?? null)}
+      <div
+        className="flex items-center gap-2 w-full px-4 py-3 border-b"
+        style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}
       >
         <BookOpen size={14} style={{ color: 'var(--accent)' }} />
-        <span className="text-[13px] font-semibold" style={{ color: 'var(--text)' }}>Ledger — Transacciones por instrumento</span>
-      </button>
+        <div className="flex flex-col gap-0.5 min-w-0">
+          <span className="text-[13px] font-semibold" style={{ color: 'var(--text)' }}>{t(lang, 'ledgerTitle')}</span>
+          <span className="text-[10px] truncate" style={{ color: 'var(--subtext)' }}>{t(lang, 'ledgerSubtitle')}</span>
+        </div>
+      </div>
 
-      {selId !== undefined && (
-        <div className="p-4 flex flex-col gap-3">
-          {/* Instrument selector */}
+      <div className="p-4 flex flex-col gap-3">
           <div className="flex items-center gap-2 flex-wrap">
-            {flatInst.map(i => (
+            {entityGroups.map(([key, items]) => (
               <button
-                key={i.id}
+                key={`ent-${key}`}
                 type="button"
-                onClick={() => handleSelect(i.id)}
+                onClick={() => handleSelectEntity(key)}
                 className="px-2.5 py-1 rounded-lg text-[11px] font-medium border transition-all"
-                style={{
-                  borderColor: selId === i.id ? 'var(--accent)' : 'var(--border)',
-                  background: selId === i.id ? 'color-mix(in oklch, var(--accent) 12%, transparent)' : 'transparent',
-                  color: selId === i.id ? 'var(--accent)' : 'var(--subtext)',
-                }}
+                style={ledgerChipStyle(entityChipActive(key))}
               >
-                {i.ticker ?? i.nombre}
+                {key}
+                <span className="opacity-60 ml-1">({items.length})</span>
+              </button>
+            ))}
+            {individualChips.map(({ inst, label }) => (
+              <button
+                key={`inst-${inst.id}`}
+                type="button"
+                onClick={() => handleSelectIndividual(inst)}
+                className="px-2.5 py-1 rounded-lg text-[11px] font-medium border transition-all"
+                style={ledgerChipStyle(individualChipActive(inst.id))}
+              >
+                {label}
               </button>
             ))}
           </div>
 
           {selInst && (
             <>
-              <div className="flex items-center justify-between">
-                <span className="text-[12px] font-medium" style={{ color: 'var(--text)' }}>{selInst.nombre}</span>
-                <button
-                  type="button"
-                  onClick={() => setShowForm(v => !v)}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium"
-                  style={{ background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer' }}
-                >
-                  <Plus size={11} /> Nueva
-                </button>
-              </div>
-
-              {showForm && (
-                <div className="flex flex-wrap gap-2 p-3 rounded-xl border" style={{ borderColor: 'var(--accent)', background: 'color-mix(in oklch, var(--accent) 5%, transparent)' }}>
-                  {[
-                    { label: 'Tipo', el: <select value={form.tipo} onChange={e => setForm(f => ({...f, tipo: e.target.value}))} style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '3px 6px', fontSize: 11 }}>
-                      <option value="compra">Compra</option><option value="venta">Venta</option></select> },
-                    { label: 'Fecha', el: <input type="date" value={form.fecha} onChange={e => setForm(f => ({...f, fecha: e.target.value}))} style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '3px 6px', fontSize: 11, outline:'none' }} /> },
-                    { label: 'Cantidad', el: <input type="number" placeholder="0" value={form.cantidad} onChange={e => setForm(f => ({...f, cantidad: e.target.value}))} style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '3px 6px', fontSize: 11, width: 80, outline:'none' }} /> },
-                    { label: 'Precio', el: <input type="number" placeholder="0" value={form.precio} onChange={e => setForm(f => ({...f, precio: e.target.value}))} style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '3px 6px', fontSize: 11, width: 80, outline:'none' }} /> },
-                    { label: 'Nota', el: <input type="text" placeholder="opcional" value={form.nota} onChange={e => setForm(f => ({...f, nota: e.target.value}))} style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '3px 6px', fontSize: 11, width: 120, outline:'none' }} /> },
-                  ].map(({ label, el }) => (
-                    <label key={label} className="flex flex-col gap-0.5">
-                      <span className="text-[9px] uppercase tracking-wider" style={{ color: 'var(--subtext)' }}>{label}</span>
-                      {el}
-                    </label>
-                  ))}
-                  <div className="flex items-end gap-1">
-                    <button type="button" onClick={handleAdd} className="px-2.5 py-1 rounded-lg text-[11px] font-medium" style={{ background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer' }}><Check size={11} /></button>
-                    <button type="button" onClick={() => setShowForm(false)} className="px-2.5 py-1 rounded-lg text-[11px]" style={{ background: 'var(--bg)', color: 'var(--subtext)', border: '1px solid var(--border)', cursor: 'pointer' }}><X size={11} /></button>
+              {selEntity && entityItems.length > 1 && (
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--subtext)' }}>{selEntity}</span>
+                  <div className="flex flex-col gap-1">
+                    {entityItems.map(inst => (
+                      <button
+                        key={inst.id}
+                        type="button"
+                        onClick={() => selectInstrument(inst, selEntity)}
+                        className="text-left px-3 py-2 rounded-lg border text-[11px] transition-all"
+                        style={{
+                          ...ledgerChipStyle(selId === inst.id),
+                          fontFamily: 'var(--font-mono)',
+                        }}
+                      >
+                        {ledgerSubLabel(inst, lang)}
+                      </button>
+                    ))}
                   </div>
                 </div>
               )}
 
-              {loading ? (
-                <div className="text-[11px] py-2" style={{ color: 'var(--subtext)' }}>Cargando…</div>
-              ) : trans.length === 0 ? (
-                <div className="text-[11px] py-2" style={{ color: 'var(--subtext)' }}>Sin transacciones registradas.</div>
+              {isLedgerEntityGrouped(selInst) ? (
+                <ColocacionDetail inst={selInst} lang={lang} />
               ) : (
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 420, fontFamily: 'var(--font-mono)', fontSize: 11 }}>
-                    <thead>
-                      <tr>
-                        {['Fecha','Tipo','Cantidad','Precio','Total','Nota',''].map(h => (
-                          <th key={h} scope="col" style={TH2}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {trans.map(tx => (
-                        <tr key={tx.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                          <td style={TD2}>{tx.fecha?.slice(0,10)}</td>
-                          <td style={{ ...TD2, color: tx.tipo === 'compra' ? 'var(--income)' : 'var(--expense)', fontWeight: 600 }}>{tx.tipo}</td>
-                          <td style={TD2}>{tx.cantidad}</td>
-                          <td style={TD2}>{fmtARS(tx.precio)}</td>
-                          <td style={{ ...TD2, fontWeight: 600 }}>{fmtARS(tx.monto_total)}</td>
-                          <td style={{ ...TD2, color: 'var(--subtext)' }}>{tx.nota || '—'}</td>
-                          <td style={TD2}>
-                            <button type="button" onClick={() => handleDelete(tx.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--subtext)', lineHeight: 0, padding: 2 }}
-                              onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
-                              onMouseLeave={e => e.currentTarget.style.color = 'var(--subtext)'}
-                            ><Trash2 size={11} /></button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <LedgerTradablePanel
+                  inst={selInst}
+                  lang={lang}
+                  trans={trans}
+                  loading={loading}
+                  showForm={showForm}
+                  setShowForm={setShowForm}
+                  form={form}
+                  setForm={setForm}
+                  onAdd={handleAdd}
+                  onDelete={handleDelete}
+                />
               )}
             </>
           )}
-        </div>
-      )}
+      </div>
     </div>
   )
 }

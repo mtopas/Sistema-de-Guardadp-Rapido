@@ -27,7 +27,10 @@ OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 MODEL_CLASSIFY  = os.environ.get("OLLAMA_MODEL_CLASSIFY", "llama3.2:3b")
 MODEL_CHAT      = os.environ.get("OLLAMA_MODEL_CHAT",     "llama3.2:3b")
 MODEL_EMBED     = os.environ.get("OLLAMA_MODEL_EMBED",    "nomic-embed-text")
-TIMEOUT         = int(os.environ.get("OLLAMA_TIMEOUT", "15"))
+TIMEOUT         = int(os.environ.get("OLLAMA_TIMEOUT", "60"))
+# Primera carga del modelo (cold start) puede tardar mucho más que inferencias siguientes.
+WARMUP_TIMEOUT  = int(os.environ.get("OLLAMA_WARMUP_TIMEOUT", str(max(TIMEOUT, 120))))
+KEEP_ALIVE      = os.environ.get("OLLAMA_KEEP_ALIVE", "30m")
 
 
 # ── Funciones públicas ─────────────────────────────────────────────────────────
@@ -41,6 +44,36 @@ def is_available() -> bool:
         return False
 
 
+def warmup() -> bool:
+    """
+    Precarga el modelo de clasificación en RAM (cold start).
+    /api/tags responde al instante; la primera /api/generate puede superar OLLAMA_TIMEOUT.
+    """
+    try:
+        logger.info(
+            "llm_client.warmup: cargando %s (timeout %ss)…",
+            MODEL_CLASSIFY,
+            WARMUP_TIMEOUT,
+        )
+        r = requests.post(
+            f"{OLLAMA_BASE_URL}/api/generate",
+            json={
+                "model":      MODEL_CLASSIFY,
+                "prompt":     'Respondé solo JSON: {"ok":true}',
+                "stream":     False,
+                "format":     "json",
+                "keep_alive": KEEP_ALIVE,
+            },
+            timeout=WARMUP_TIMEOUT,
+        )
+        r.raise_for_status()
+        logger.info("llm_client.warmup: modelo listo")
+        return True
+    except Exception as exc:
+        logger.warning("llm_client.warmup: %s", exc)
+        return False
+
+
 def classify(system_prompt: str, user_message: str) -> dict:
     """
     Clasifica la intención del mensaje y extrae datos estructurados.
@@ -50,6 +83,17 @@ def classify(system_prompt: str, user_message: str) -> dict:
     """
     prompt = f"{system_prompt}\n\nMensaje del usuario: {user_message}"
     try:
+        import dev_reporter as dr
+
+        dr.notify_llm_context(
+            "classify",
+            system=system_prompt,
+            user=user_message,
+            model=MODEL_CLASSIFY,
+        )
+    except Exception:
+        pass
+    try:
         r = requests.post(
             f"{OLLAMA_BASE_URL}/api/generate",
             json={
@@ -57,6 +101,7 @@ def classify(system_prompt: str, user_message: str) -> dict:
                 "prompt": prompt,
                 "stream": False,
                 "format": "json",
+                "keep_alive": KEEP_ALIVE,
             },
             timeout=TIMEOUT,
         )
@@ -87,6 +132,17 @@ def chat(messages: list[dict], system: str | None = None) -> str:
     }
     if system:
         payload["system"] = system
+    try:
+        import dev_reporter as dr
+
+        dr.notify_llm_context(
+            "chat",
+            system=system,
+            messages=messages,
+            model=MODEL_CHAT,
+        )
+    except Exception:
+        pass
     try:
         r = requests.post(
             f"{OLLAMA_BASE_URL}/api/chat",

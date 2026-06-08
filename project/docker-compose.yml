@@ -1,13 +1,19 @@
 # SGR en homelab — backend + bot, DB en ./database
 #
 # En ~/project/.env del gabinete:
-#   API_BASE_URL=http://backend:8765
+#   TELEGRAM_BOT_TOKEN=...
+# NO pongas OLLAMA_BASE_URL=http://localhost:11434 — el bot usa la IP de Windows (ICS).
+#
+# El bot usa network_mode: host (DNS/Internet vía ICS de Ubuntu).
+# La API local del bot es 127.0.0.1:8765 (puerto publicado del backend).
 #
 # Levantar: cd ~/project && sudo docker compose up -d --build
 
 services:
   backend:
-    build: .
+    build:
+      context: .
+    image: sgr-app:latest
     command: uvicorn app.main:app --host 0.0.0.0 --port 8765
     ports:
       - "8765:8765"
@@ -17,18 +23,30 @@ services:
       SGR_DATA_DIR: /app
       SGR_HOST: 0.0.0.0
       SGR_PORT: "8765"
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     volumes:
       - ./database:/app/database
       - ./uploads:/app/uploads
     restart: unless-stopped
 
   bot:
-    build: .
-    command: python mybot/bot.py
+    image: sgr-app:latest
+    network_mode: host
+    command: python -u mybot/bot.py
     env_file:
       - .env
     environment:
-      API_BASE_URL: ${API_BASE_URL:-http://backend:8765}
+      PYTHONUNBUFFERED: "1"
+      API_BASE_URL: http://127.0.0.1:8765
+      # Fijo: ${OLLAMA_BASE_URL} en compose lee el .env del host y reinyecta localhost.
+      OLLAMA_BASE_URL: http://192.168.137.1:11434
+      OLLAMA_TIMEOUT: "90"
+      OLLAMA_WARMUP_TIMEOUT: "180"
+    volumes:
+      # Código del bot en vivo (sin rebuild por cada cambio en mybot/)
+      - ./mybot:/app/mybot:ro
     depends_on:
       - backend
     restart: unless-stopped

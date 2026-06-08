@@ -67,6 +67,28 @@ def _mes_actual() -> str:
     return date.today().strftime("%Y-%m")
 
 
+def _meses_calendario_hasta(fecha_limite: str, ref: date | None = None) -> int | None:
+    """Meses calendario inclusivos desde ref hasta el mes de fecha_limite."""
+    if not fecha_limite:
+        return None
+    m = re.match(r"^(\d{4})-(\d{2})", str(fecha_limite))
+    if not m:
+        return None
+    end_y, end_m = int(m.group(1)), int(m.group(2))
+    ref = ref or date.today()
+    months = (end_y - ref.year) * 12 + (end_m - ref.month) + 1
+    return months if months > 0 else None
+
+
+def _cuota_mensual_objetivo(obj: dict, ahorrado: float = 0.0) -> float | None:
+    meses = _meses_calendario_hasta(obj.get("fecha_limite") or "")
+    if not meses:
+        return None
+    meta = float(obj.get("meta") or 0)
+    falta = max(0.0, meta - ahorrado)
+    return falta / meses
+
+
 # ──────────────────────────────────────────────────────────────
 # Llamadas a la API (normaliza name/nombre, ars/saldo_ars, etc.)
 # ──────────────────────────────────────────────────────────────
@@ -485,7 +507,7 @@ def _contribucion_mes(movimientos: list, mes: str, nombre_cat: str) -> float:
     return total
 
 
-def _build_ahorro(movimientos: list, objetivos: list, mes: str) -> str:
+def _build_ahorro(movimientos: list, objetivos: list, mes: str, movs_all: list | None = None) -> str:
     mn = int(mes[5:7])
     meses_es = ["enero","febrero","marzo","abril","mayo","junio",
                 "julio","agosto","septiembre","octubre","noviembre","diciembre"]
@@ -505,7 +527,11 @@ def _build_ahorro(movimientos: list, objetivos: list, mes: str) -> str:
             mes_obj = _contribucion_mes(movimientos, mes, nombre)
             meta   = float(obj.get("meta") or 0)
             moneda = obj.get("moneda", "ARS")
-            cuota  = float(obj.get("cuota_mensual") or 0)
+            ahorrado = 0.0
+            if movs_all:
+                for m in movs_all:
+                    ahorrado += _contribucion_categoria(_normalize_mov(m), nombre)
+            cuota  = _cuota_mensual_objetivo(obj, ahorrado)
             fmt_m  = _fmt_ars(meta) if moneda == "ARS" else f"USD {meta:,.0f}"
             cuota_str = f" — cuota {_fmt_ars(cuota)}/mes" if cuota else ""
             lines.append(f"  • *{nombre}*: {_fmt_ars(mes_obj)} (meta {fmt_m}){cuota_str}")
@@ -548,7 +574,6 @@ def _build_ultimo(movimientos: list) -> tuple:
 def _build_objetivo(obj: dict, movs_all: list) -> str:
     meta   = float(obj.get("meta") or 0)
     moneda = obj.get("moneda", "ARS")
-    cuota  = float(obj.get("cuota_mensual") or 0)
     vence  = obj.get("fecha_limite") or ""
     nombre = obj["nombre"]
 
@@ -556,6 +581,8 @@ def _build_objetivo(obj: dict, movs_all: list) -> str:
     for m in movs_all:
         mv = _normalize_mov(m)
         ahorrado += _contribucion_categoria(mv, nombre)
+
+    cuota  = _cuota_mensual_objetivo(obj, ahorrado)
 
     pct      = min(ahorrado / meta * 100, 100) if meta else 0
     faltante = max(0.0, meta - ahorrado)
@@ -639,11 +666,12 @@ async def cmd_ahorro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mes = _mes_actual()
     try:
         movs      = _get_movimientos(api, mes)
+        movs_all  = _get_movimientos(api)
         objetivos = _get_objetivos(api)
     except Exception as e:
         await update.message.reply_text(f"No pude conectar con la API: {e}")
         return
-    await update.message.reply_text(_build_ahorro(movs, objetivos, mes), parse_mode="Markdown")
+    await update.message.reply_text(_build_ahorro(movs, objetivos, mes, movs_all), parse_mode="Markdown")
 
 
 async def cmd_ultimo(update: Update, context: ContextTypes.DEFAULT_TYPE):

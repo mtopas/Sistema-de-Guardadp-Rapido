@@ -1,6 +1,8 @@
 import json
+import logging
 import os
 import re
+import sys
 import time as _time
 from datetime import datetime, time as datetime_time
 from pathlib import Path
@@ -15,8 +17,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-
-import logging
+from telegram.request import HTTPXRequest
 
 from api_config import API_BASE
 
@@ -31,15 +32,21 @@ logger = logging.getLogger(__name__)
 
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CONNECT_TIMEOUT = float(os.environ.get("TELEGRAM_CONNECT_TIMEOUT", "30"))
+TELEGRAM_READ_TIMEOUT = float(os.environ.get("TELEGRAM_READ_TIMEOUT", "30"))
+TELEGRAM_PROXY_URL = os.environ.get("TELEGRAM_PROXY_URL", "").strip() or None
+# -1 = reintentar bootstrap indefinidamente (evita crash loop en Docker si Telegram tarda)
+TELEGRAM_BOOTSTRAP_RETRIES = int(os.environ.get("TELEGRAM_BOOTSTRAP_RETRIES", "-1"))
 
 # Archivo local para persistir el chat_id entre reinicios
 _CHAT_ID_FILE  = Path(__file__).parent / "chat_id.json"
 _RAPIDO_FILE   = Path(__file__).parent / "rapido.json"
 
-STEP_NONE              = None
-STEP_PHOTO_TITLE       = "photo_title"
-STEP_CHOOSE_CATEGORY   = "choose_category"   # legacy; not used with inline keyboards
-STEP_NEW_CATEGORY_NAME = "new_category_name"
+STEP_NONE                   = None
+STEP_PHOTO_TITLE            = "photo_title"
+STEP_CHOOSE_CATEGORY        = "choose_category"   # legacy; not used with inline keyboards
+STEP_CHOOSE_CATEGORY_INLINE = "choose_category_inline"
+STEP_NEW_CATEGORY_NAME      = "new_category_name"
 
 URL_REGEX = re.compile(r"https?://\S+", re.IGNORECASE)
 
@@ -92,6 +99,14 @@ def _update_rapido_last_cat(cat_id: int, cat_nombre: str):
     r["cat_id"]     = cat_id
     r["cat_nombre"] = cat_nombre
     _save_rapido(r)
+
+
+def _clear_boveda_picker(ud: dict) -> None:
+    """Cierra el menú inline de categorías sin borrar pasos de finanzas/agenda."""
+    if ud.get("step") == STEP_CHOOSE_CATEGORY_INLINE:
+        ud.pop("step", None)
+    for k in ("draft", "tipo", "categorias_all", "cat_parent_id", "apuntes"):
+        ud.pop(k, None)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -155,6 +170,38 @@ def _healthcheck():
             print(f"[bot] ADVERTENCIA: /categorias no responde al arrancar ({e}). Las capturas de Bóveda pueden fallar.")
 
     return api_ok, cat_ok
+
+
+def _build_telegram_request() -> HTTPXRequest:
+    kwargs = {
+        "connect_timeout": TELEGRAM_CONNECT_TIMEOUT,
+        "read_timeout": TELEGRAM_READ_TIMEOUT,
+        "write_timeout": TELEGRAM_READ_TIMEOUT,
+        "pool_timeout": TELEGRAM_READ_TIMEOUT,
+    }
+    if TELEGRAM_PROXY_URL:
+        kwargs["proxy_url"] = TELEGRAM_PROXY_URL
+        print(f"[bot] Telegram API vía proxy configurado")
+    return HTTPXRequest(**kwargs)
+
+
+def _log_telegram_connectivity():
+    """Diagnóstico previo: el backend puede andar aunque Telegram no sea alcanzable."""
+    try:
+        r = requests.get("https://api.telegram.org", timeout=TELEGRAM_CONNECT_TIMEOUT)
+        print(f"[bot] Conectividad Telegram OK (HTTP {r.status_code})")
+        return True
+    except Exception as e:
+        print(
+            f"[bot] ⚠ No se puede conectar a api.telegram.org ({e}). "
+            "El bot reintentará al iniciar polling."
+        )
+        print(
+            "[bot] Revisá: Internet en el gabinete (ping 8.8.8.8), DNS Docker, "
+            "ICS Windows→Ubuntu, firewall saliente HTTPS. "
+            "Si Telegram está bloqueado, definí TELEGRAM_PROXY_URL en .env."
+        )
+        return False
 
 
 # ──────────────────────────────────────────────────────────────
@@ -295,7 +342,7 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_dev(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Modo dev: reenvío de logs/errores a este chat. /dev on | off | test | tail"""
+    """Modo dev: streams en vivo. /dev logs all|errors|context | off | test | tail"""
     chat_id = update.effective_chat.id
     _register_chat_id(context.bot_data, chat_id)
 
@@ -308,23 +355,36 @@ async def cmd_dev(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not args or args[0] == "status":
         await update.message.reply_text(dr.status_text(), parse_mode="Markdown")
         return
+    if args[0] == "logs" and len(args) >= 2:
+        mode_map = {"all": "all", "errors": "errors", "error": "errors", "context": "context"}
+        mode = mode_map.get(args[1])
+        if mode:
+            await update.message.reply_text(
+                dr.set_log_mode(chat_id, mode),
+                parse_mode="Markdown",
+            )
+            logger.info("Modo dev logs %s por chat_id=%s", mode, chat_id)
+            return
     if args[0] in ("on", "1", "true", "activar"):
         await update.message.reply_text(
-            dr.set_enabled(chat_id, True),
+            dr.set_log_mode(chat_id, "all"),
             parse_mode="Markdown",
         )
-        logger.info("Modo dev activado por chat_id=%s", chat_id)
+        logger.info("Modo dev activado (all) por chat_id=%s", chat_id)
         return
     if args[0] in ("off", "0", "false", "desactivar"):
         await update.message.reply_text(
-            dr.set_enabled(chat_id, False),
+            dr.set_log_mode(chat_id, "off"),
             parse_mode="Markdown",
         )
         logger.info("Modo dev desactivado por chat_id=%s", chat_id)
         return
     if args[0] == "test":
         if not dr.is_enabled():
-            await update.message.reply_text("Activá primero con `/dev on`.", parse_mode="Markdown")
+            await update.message.reply_text(
+                "Activá un stream: `/dev logs all`, `errors` o `context`.",
+                parse_mode="Markdown",
+            )
             return
         await dr.send_test(f"Prueba dev {datetime.now().isoformat(timespec='seconds')}")
         await update.message.reply_text("Mensaje de prueba enviado.")
@@ -334,7 +394,11 @@ async def cmd_dev(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await update.message.reply_text(
-        "Usá: `/dev on`, `/dev off`, `/dev test`, `/dev tail`",
+        "Usá:\n"
+        "`/dev logs all` — todos los logs\n"
+        "`/dev logs errors` — solo errores\n"
+        "`/dev logs context` — payload a la IA\n"
+        "`/dev off` · `/dev test` · `/dev tail`",
         parse_mode="Markdown",
     )
 
@@ -482,6 +546,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ud   = context.user_data
     step = ud.get("step")
 
+    # Menú inline de Bóveda: no bloquea el LLM — texto nuevo = re-clasificar
+    if step == STEP_CHOOSE_CATEGORY_INLINE:
+        logger.info("[bot] Picker Bóveda abierto; nuevo texto → LLM")
+        _clear_boveda_picker(ud)
+        step = None
+
     # ── Pasos de Agenda tienen prioridad ─────────────────────
     if await ah.handle_agenda_step(update, context, texto):
         return
@@ -500,6 +570,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # ── LLM routing (texto libre sin prefijos) ─────────────
         rr = ir.route(texto)
         if rr.action in ("direct", "confirm"):
+            _clear_boveda_picker(ud)
             summary = ir.format_summary(rr)
             kb = InlineKeyboardMarkup([[
                 InlineKeyboardButton("✅ Confirmar", callback_data="llm_ok"),
@@ -583,7 +654,7 @@ async def _show_category_menu(message, context: ContextTypes.DEFAULT_TYPE, ud: d
         await message.reply_text(f"No pude cargar categorías: {e}")
         return
 
-    ud["step"]           = "choose_category_inline"
+    ud["step"]           = STEP_CHOOSE_CATEGORY_INLINE
     ud["categorias_all"] = cats
     ud["cat_parent_id"]  = parent_id
 
@@ -868,6 +939,14 @@ async def _dispatch_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # ──────────────────────────────────────────────────────────────
 
 def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        stream=sys.stdout,
+        force=True,
+    )
+    print("[bot] Iniciando bot SGR…", flush=True)
+
     if not TOKEN:
         raise SystemExit("Definí TELEGRAM_BOT_TOKEN en el entorno.")
 
@@ -877,15 +956,26 @@ def main():
 
     if llm_client.is_available():
         print(f"[bot] Ollama OK ({llm_client.OLLAMA_BASE_URL}, modelo {llm_client.MODEL_CLASSIFY})")
+        if llm_client.warmup():
+            print(f"[bot] Modelo precargado (timeout inferencia {llm_client.TIMEOUT}s)")
+        else:
+            print(
+                f"[bot] ⚠ Warmup Ollama falló — la primera clasificación puede tardar "
+                f">{llm_client.TIMEOUT}s y caer a Bóveda. Subí OLLAMA_TIMEOUT / OLLAMA_WARMUP_TIMEOUT."
+            )
     else:
         print(
             f"[bot] ⚠ Ollama NO disponible en {llm_client.OLLAMA_BASE_URL}. "
-            "Texto libre sin prefijos cae a Bóveda. Verificá OLLAMA_BASE_URL en .env."
+            "Texto libre sin prefijos cae a Bóveda. "
+            "Homelab: OLLAMA_BASE_URL=http://192.168.137.1:11434 y Ollama en Windows escuchando en 0.0.0.0."
         )
+
+    _log_telegram_connectivity()
 
     app = (
         ApplicationBuilder()
         .token(TOKEN)
+        .request(_build_telegram_request())
         .post_init(_post_init)
         .build()
     )
@@ -967,7 +1057,11 @@ def main():
         )
         print("[bot] Resumen semanal de finanzas programado para lunes 09:00")
 
-    app.run_polling()
+    print(
+        f"[bot] Iniciando polling (bootstrap_retries={TELEGRAM_BOOTSTRAP_RETRIES}, "
+        f"connect_timeout={TELEGRAM_CONNECT_TIMEOUT}s)…"
+    )
+    app.run_polling(bootstrap_retries=TELEGRAM_BOOTSTRAP_RETRIES)
 
 
 if __name__ == "__main__":

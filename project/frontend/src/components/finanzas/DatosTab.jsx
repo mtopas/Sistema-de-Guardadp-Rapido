@@ -112,7 +112,7 @@ export default function DatosTab() {
       .slice()
       .sort((a, b) => {
         const ts = v => { const d = new Date(v ?? 0); return isNaN(d) ? 0 : d.getTime() }
-        return ts(a.date ?? a.fecha) - ts(b.date ?? b.fecha)
+        return ts(b.date ?? b.fecha) - ts(a.date ?? a.fecha)
       }),
     [movAll]
   )

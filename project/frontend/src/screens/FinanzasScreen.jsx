@@ -245,7 +245,11 @@ export default function FinanzasScreen() {
         <Suspense fallback={null}>
           <div
             className="fixed bottom-14 right-4 z-40 w-72 panel-strong anim-card-in overflow-y-auto panel-scroll"
-            style={{ maxHeight: '40vh', background: 'var(--surface)', boxShadow: '0 -4px 24px rgba(0,0,0,0.18)' }}
+            style={{
+              maxHeight: tab === 'fire' ? '52vh' : '40vh',
+              background: 'var(--surface)',
+              boxShadow: '0 -4px 24px rgba(0,0,0,0.18)',
+            }}
           >
             {tab === 'dashboard' && <FinanzasRightPanel />}
             {tab === 'anual'     && <AnualRightPanel />}

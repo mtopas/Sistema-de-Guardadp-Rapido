@@ -20,6 +20,12 @@ Cuando algo se complete, **mover la descripción actualizada a `Finanzas.md`** (
 
 ---
 
+## En especificación
+
+- [ ] **Ahorro — ledger unificado y posiciones derivadas** — ver [`Finanzas-Ahorro-Ledger.md`](Finanzas-Ahorro-Ledger.md) (merge por ticker, PPC automático, tabla global de transacciones, fecha/hora editable).
+
+---
+
 ## Bot Finanzas
 
 Implementado en `mybot/finanzas_handlers.py`. Ver `Finanzas.md` §6.

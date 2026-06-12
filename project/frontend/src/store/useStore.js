@@ -543,6 +543,85 @@ export const useStore = create((set, get) => ({
   },
 
   // ---------------------------------------------------------------------------
+  // Finanzas — Ledger transacciones
+  // ---------------------------------------------------------------------------
+  finTransacciones: [],
+
+  fetchFinTransacciones: async (params = {}) => {
+    try {
+      const qs = new URLSearchParams(
+        Object.fromEntries(Object.entries(params).filter(([, v]) => v != null))
+      ).toString()
+      const res = await fetch(`${API_URL}/fin/transacciones${qs ? '?' + qs : ''}`)
+      if (!res.ok) throw new Error('not ok')
+      const data = await res.json()
+      set({ finTransacciones: data })
+    } catch {
+      if (DEBUG) console.log('fetchFinTransacciones: API error')
+    }
+  },
+
+  addFinTransaccion: async (instrumento_id, payload) => {
+    const mock = { id: `t_${Date.now()}`, instrumento_id, ...payload }
+    set(state => ({ finTransacciones: [mock, ...state.finTransacciones] }))
+    try {
+      const res = await fetch(`${API_URL}/fin/instrumentos/${instrumento_id}/transacciones`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail || 'error')
+      }
+      const data = await res.json()
+      set(state => ({
+        finTransacciones: state.finTransacciones.map(t => t.id === mock.id ? data : t),
+      }))
+      await get().fetchFinInstrumentos()
+      return data
+    } catch (err) {
+      set(state => ({ finTransacciones: state.finTransacciones.filter(t => t.id !== mock.id) }))
+      throw err
+    }
+  },
+
+  updateFinTransaccion: async (id, patch) => {
+    const prev = get().finTransacciones
+    set(state => ({
+      finTransacciones: state.finTransacciones.map(t => t.id === id ? { ...t, ...patch } : t),
+    }))
+    try {
+      const res = await fetch(`${API_URL}/fin/transacciones/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      })
+      if (!res.ok) throw new Error('not ok')
+      const data = await res.json()
+      set(state => ({
+        finTransacciones: state.finTransacciones.map(t => t.id === id ? data : t),
+      }))
+      await get().fetchFinInstrumentos()
+      return data
+    } catch {
+      set({ finTransacciones: prev })
+    }
+  },
+
+  deleteFinTransaccion: async (id) => {
+    const prev = get().finTransacciones
+    set(state => ({ finTransacciones: state.finTransacciones.filter(t => t.id !== id) }))
+    try {
+      const res = await fetch(`${API_URL}/fin/transacciones/${id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('not ok')
+      await get().fetchFinInstrumentos()
+    } catch {
+      set({ finTransacciones: prev })
+    }
+  },
+
+  // ---------------------------------------------------------------------------
   // Finanzas — Objetivos de ahorro
   // ---------------------------------------------------------------------------
   finObjetivos: [],

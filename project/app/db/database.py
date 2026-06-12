@@ -631,3 +631,55 @@ def _apply_migrations(cursor):
             print("migration: habitos.minutos_antes added")
 
     _migrate_fin_categorias_objetivos(cursor)
+
+    # --- fin_transacciones_instrumento: moneda + tipo_cambio por tx ---
+    trans_cols = _get_columns(cursor, "fin_transacciones_instrumento")
+    if "moneda" not in trans_cols:
+        cursor.execute(
+            "ALTER TABLE fin_transacciones_instrumento ADD COLUMN moneda TEXT NOT NULL DEFAULT 'ARS'"
+        )
+        if DEBUG:
+            print("migration: fin_transacciones_instrumento.moneda added")
+    if "tipo_cambio" not in trans_cols:
+        cursor.execute(
+            "ALTER TABLE fin_transacciones_instrumento ADD COLUMN tipo_cambio REAL"
+        )
+        if DEBUG:
+            print("migration: fin_transacciones_instrumento.tipo_cambio added")
+
+    # Índices para el ledger
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_fin_trans_inst "
+        "ON fin_transacciones_instrumento(instrumento_id)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_fin_trans_fecha "
+        "ON fin_transacciones_instrumento(instrumento_id, fecha ASC, id ASC)"
+    )
+
+    # Backfill: posiciones manuales sin transacciones → tx sintética "Saldo inicial"
+    # Solo acciones/ons/crypto con cantidad > 0 y costo_usd conocido
+    cursor.execute(
+        """SELECT i.id, i.cantidad, i.costo_usd
+           FROM fin_instrumentos i
+           WHERE i.tipo IN ('acciones', 'ons', 'crypto')
+             AND i.cantidad > 0
+             AND i.costo_usd IS NOT NULL
+             AND NOT EXISTS (
+                 SELECT 1 FROM fin_transacciones_instrumento t
+                 WHERE t.instrumento_id = i.id
+             )"""
+    )
+    backfill_rows = cursor.fetchall()
+    now_iso = datetime.now().isoformat()
+    for inst_id, cantidad, costo_usd in backfill_rows:
+        precio_usd = costo_usd / cantidad if cantidad > 0 else 0.0
+        cursor.execute(
+            """INSERT INTO fin_transacciones_instrumento
+               (instrumento_id, tipo, fecha, cantidad, precio, monto_total,
+                nota, creado_en, moneda, tipo_cambio)
+               VALUES (?, 'compra', date('now'), ?, ?, ?, 'Saldo inicial', ?, 'USD', NULL)""",
+            (inst_id, cantidad, precio_usd, round(precio_usd * cantidad, 6), now_iso),
+        )
+        if DEBUG:
+            print(f"migration: backfill tx for instrumento_id={inst_id}")

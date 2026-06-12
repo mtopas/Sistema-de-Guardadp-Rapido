@@ -15,3 +15,4 @@ project/uploads/
 project/mybot/rapido.json
 project/mybot/chat_id.json
 project/mybot/checkin_config.json
+project/wheelhouse/*.whl

@@ -388,7 +388,9 @@ export default function AhorroRightPanel() {
     return map
   }, [finMovimientosAll, finObjetivos])
 
-  const pctFire = fireAporteActual > 0 ? Math.min(100, (ahorradoFireMes / fireAporteActual) * 100) : 0
+  const dolar = finConfig?.dolar_mep ?? finConfig?.dolar_oficial ?? finConfig?.dolar_default ?? 1245
+  const ahorradoFireUSD = ahorradoFireMes / (dolar || 1)
+  const pctFire = fireAporteActual > 0 ? Math.min(100, (ahorradoFireUSD / fireAporteActual) * 100) : 0
 
   const handleSaveObj = async (payload) => {
     await addObj(payload)
@@ -425,10 +427,10 @@ export default function AhorroRightPanel() {
         >
           <div className="flex justify-between items-baseline">
             <span className="text-[12px] font-semibold tnum" style={{ color: 'var(--text)' }}>
-              {fmtARS(ahorradoFireMes)}
+              {fmtUSD(ahorradoFireUSD)}
             </span>
             <span className="text-[11px] mono" style={{ color: 'var(--subtext)' }}>
-              / {fmtARS(fireAporteActual)}
+              / {fmtUSD(fireAporteActual)}
             </span>
           </div>
           <ProgressBar pct={pctFire} color={pctFire >= 100 ? '#22c55e' : 'var(--cta-bg)'} />

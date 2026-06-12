@@ -197,6 +197,7 @@ sudo docker-compose up -d --build
 | Rutas | `ip route` |
 | Internet | `ping 8.8.8.8` |
 | DNS | `ping github.com` |
+| DNS dentro de Docker (build/run) | `sudo docker run --rm alpine nslookup pypi.org` |
 | Contenedores | `sudo-docker ps` |
 | API local | `curl -s http://127.0.0.1:8765/docs` |
 
@@ -316,7 +317,7 @@ En lugar de instalar dependencias en el sistema host, usamos **Docker** (`projec
 | Servicio | Comando | Puerto |
 | :--- | :--- | :--- |
 | `backend` | `uvicorn app.main:app --host 0.0.0.0 --port 8765` | `8765` |
-| `bot` | `python mybot/bot.py` | — (solo sale a Telegram y a la API) |
+| `bot` | `python mybot/bot.py` | `network_mode: host` (Telegram/Ollama vía red Ubuntu) |
 
 ### Arquitectura
 
@@ -325,8 +326,9 @@ Bot + API en Docker (`docker-compose.yml`). DB canónica en `~/project/database/
 ### Conceptos clave
 
 * **Dockerfile:** imagen (Python 3.11, `requirements.txt`, código).
-* **Docker Compose:** backend y bot en la misma red; el bot resuelve el host `backend`.
-* **Variables:** `API_BASE_URL` en Docker apunta a `http://backend:8765`, no a `localhost`.
+* **Backend:** red bridge Docker, puerto `8765` publicado en el host.
+* **Bot:** `network_mode: host` — usa DNS e Internet del Ubuntu (ICS), no el bridge Docker (suele fallar DNS). Llama a la API en `http://127.0.0.1:8765`.
+* **Ollama:** en Windows → `OLLAMA_BASE_URL=http://192.168.137.1:11434` en `.env`.
 * **No copiar `venv`:** rutas de Windows; el entorno se construye en Linux al hacer `build`.
 
 ### Persistencia (volumes)
@@ -337,6 +339,85 @@ Los contenedores son volátiles; los datos viven en el host:
 * `~/project/uploads/` → archivos subidos
 
 Sobreviven reinicios y `docker compose up --build`.
+
+### Docker sin DNS (`Temporary failure in name resolution` en `pip install`)
+
+En el gabinete **no hay salida a Internet durante `docker build`** (contenedor aislado; `build.network: host` del compose **no aplica** sin el plugin buildx — ver aviso `Docker Compose requires buildx plugin`).
+
+**Solución recomendada — wheelhouse offline (desde Windows):**
+
+```powershell
+cd D:\Sistema-de-Guardadp-Rapido\project
+.\scripts\prepare-docker-wheelhouse.ps1
+scp -r .\wheelhouse mtopas@192.168.137.10:~/project/
+scp .\Dockerfile .\docker-compose.yml .dockerignore mtopas@192.168.137.10:~/project/
+```
+
+En el gabinete:
+
+```bash
+cd ~/project
+sudo docker compose build --no-cache
+sudo docker compose up -d
+```
+
+El `Dockerfile` detecta `wheelhouse/*.whl` e instala con `pip --no-index` (sin red).
+
+**Alternativa — build con red del host** (solo si Ubuntu tiene Internet):
+
+```bash
+cd ~/project
+sudo docker build --network=host --no-cache -t sgr-app:latest .
+sudo docker compose up -d --no-build
+```
+
+**Diagnóstico en el host Ubuntu:**
+
+```bash
+ping -c1 8.8.8.8
+ping -c1 github.com
+curl -sI https://pypi.org | head -1
+```
+
+Si el host no resuelve, arreglar ICS/netplan antes de cualquier build online.
+
+**DNS global del daemon** (opcional, para contenedores en runtime que sigan en bridge):
+
+```bash
+sudo mkdir -p /etc/docker
+printf '%s\n' '{' '  "dns": ["8.8.8.8", "1.1.1.1"]' '}' | sudo tee /etc/docker/daemon.json
+sudo systemctl restart docker
+```
+
+### Bot sin DNS en runtime (`api.telegram.org` no resuelve)
+
+El bridge Docker del homelab **no resuelve nombres** aunque pongas `dns: 8.8.8.8` en compose. El bot necesita Telegram (HTTPS saliente).
+
+**Fix en compose:** `network_mode: host` en el servicio `bot` → comparte red/DNS del Ubuntu. La API local pasa a `http://127.0.0.1:8765`.
+
+Verificá primero **en el host** (no en el contenedor):
+
+```bash
+curl -sI https://api.telegram.org | head -1
+ping -c1 github.com
+```
+
+| Host | Contenedor bridge | Acción |
+| :--- | :--- | :--- |
+| OK | falla | `network_mode: host` en bot (ya en compose) |
+| falla | falla | Arreglar ICS/netplan en Ubuntu (gateway `192.168.137.1`) |
+
+Tras actualizar compose:
+
+```bash
+cd ~/project
+sudo docker-compose up -d
+sudo docker-compose exec bot python -c "import requests; print(requests.get('https://api.telegram.org', timeout=15).status_code)"
+```
+
+Debería imprimir `302` o `200`.
+
+---
 
 ---
 

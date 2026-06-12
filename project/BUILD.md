@@ -15,6 +15,11 @@ python -m PyInstaller -y sgr.spec
 python -m pip install -r requirements.txt -r requirements-build.txt; cd frontend; npm ci; npm run build; cd ..; python -m PyInstaller -y sgr.spec
 ```
 
+Probar:
+```bash
+$ErrorActionPreference = 'Stop'; python -m pip install -q -r requirements.txt -r requirements-build.txt; cd frontend; npm ci --loglevel=error; npm run build -- --logLevel warn; cd ..; python -m PyInstaller -y --log-level WARN sgr.spec
+```
+
 El resultado queda en **`dist\SGR\`**. Para distribuir copiá **toda esa carpeta**, no solo `SGR.exe`.
 
 Los datos **no** van dentro de `dist\`: el `.exe` los busca en **`project\`** (misma base que en desarrollo).

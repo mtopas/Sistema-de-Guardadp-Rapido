@@ -87,8 +87,12 @@ from app.db.crud import (
     fin_bulk_update_movimientos,
     fin_bulk_delete_movimientos,
     fin_obtener_transacciones_instrumento,
+    fin_obtener_transacciones_global,
     fin_crear_transaccion_instrumento,
+    fin_actualizar_transaccion_instrumento,
+    fin_crear_transaccion_unificada,
     fin_eliminar_transaccion_instrumento,
+    fin_instrumento_tiene_transacciones,
     # Agenda
     agenda_obtener_calendarios,
     agenda_crear_calendario,
@@ -274,11 +278,36 @@ class FinMovimientoBulkDelete(BaseModel):
 
 
 class FinTransaccionCreate(BaseModel):
-    tipo:     str
-    fecha:    str
-    cantidad: float
-    precio:   float
-    nota:     Optional[str] = None
+    tipo:        str
+    fecha:       str
+    cantidad:    float
+    precio:      float
+    nota:        Optional[str] = None
+    moneda:      str = "ARS"
+    tipo_cambio: Optional[float] = None
+
+
+class FinTransaccionCreateUnified(BaseModel):
+    tipo:             str
+    instrumento_tipo: str
+    ticker:           str
+    nombre:           str
+    fecha:            str
+    cantidad:         float
+    precio:           float
+    nota:             Optional[str] = None
+    moneda:           str = "ARS"
+    tipo_cambio:      Optional[float] = None
+
+
+class FinTransaccionPatch(BaseModel):
+    tipo:        Optional[str]   = None
+    fecha:       Optional[str]   = None
+    cantidad:    Optional[float] = None
+    precio:      Optional[float] = None
+    nota:        Optional[str]   = None
+    moneda:      Optional[str]   = None
+    tipo_cambio: Optional[float] = None
 
 
 class FinImportRow(BaseModel):
@@ -1011,7 +1040,10 @@ def crear_fin_instrumento(body: FinInstrumentoCreate):
 @app.patch("/fin/instrumentos/{inst_id}")
 def actualizar_fin_instrumento(inst_id: int, body: FinInstrumentoPatch):
     campos = {k: v for k, v in body.model_dump().items() if v is not None}
-    result = fin_actualizar_instrumento(inst_id, campos)
+    try:
+        result = fin_actualizar_instrumento(inst_id, campos)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     if result is None:
         raise HTTPException(status_code=404, detail="Instrumento no encontrado")
     return result
@@ -1037,14 +1069,77 @@ def listar_transacciones_instrumento(inst_id: int):
 def crear_transaccion_instrumento(inst_id: int, body: FinTransaccionCreate):
     if body.tipo not in ("compra", "venta"):
         raise HTTPException(status_code=400, detail="tipo debe ser 'compra' o 'venta'")
-    return fin_crear_transaccion_instrumento(
-        instrumento_id=inst_id,
-        tipo=body.tipo,
-        fecha=body.fecha,
-        cantidad=body.cantidad,
-        precio=body.precio,
-        nota=body.nota,
+    try:
+        return fin_crear_transaccion_instrumento(
+            instrumento_id=inst_id,
+            tipo=body.tipo,
+            fecha=body.fecha,
+            cantidad=body.cantidad,
+            precio=body.precio,
+            nota=body.nota,
+            moneda=body.moneda,
+            tipo_cambio=body.tipo_cambio,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/fin/transacciones")
+def listar_transacciones_global(
+    ticker:    Optional[str] = Query(None),
+    tipo_inst: Optional[str] = Query(None),
+    desde:     Optional[str] = Query(None),
+    hasta:     Optional[str] = Query(None),
+    limit:     int           = Query(200, ge=1, le=2000),
+    offset:    int           = Query(0, ge=0),
+):
+    return fin_obtener_transacciones_global(
+        ticker=ticker,
+        tipo_inst=tipo_inst,
+        desde=desde,
+        hasta=hasta,
+        limit=limit,
+        offset=offset,
     )
+
+
+@app.post("/fin/transacciones")
+def crear_transaccion_unificada(body: FinTransaccionCreateUnified):
+    if body.tipo not in ("compra", "venta"):
+        raise HTTPException(status_code=400, detail="tipo debe ser 'compra' o 'venta'")
+    if body.instrumento_tipo not in ("acciones", "ons", "crypto"):
+        raise HTTPException(
+            status_code=400,
+            detail="instrumento_tipo debe ser 'acciones', 'ons' o 'crypto'",
+        )
+    try:
+        return fin_crear_transaccion_unificada(
+            tipo=body.tipo,
+            instrumento_tipo=body.instrumento_tipo,
+            ticker=body.ticker,
+            nombre=body.nombre,
+            fecha=body.fecha,
+            cantidad=body.cantidad,
+            precio=body.precio,
+            nota=body.nota,
+            moneda=body.moneda,
+            tipo_cambio=body.tipo_cambio,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.patch("/fin/transacciones/{trans_id}")
+def actualizar_transaccion_instrumento(trans_id: int, body: FinTransaccionPatch):
+    campos = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not campos:
+        raise HTTPException(status_code=400, detail="Sin campos a actualizar")
+    if "tipo" in campos and campos["tipo"] not in ("compra", "venta"):
+        raise HTTPException(status_code=400, detail="tipo debe ser 'compra' o 'venta'")
+    result = fin_actualizar_transaccion_instrumento(trans_id, campos)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Transacción no encontrada")
+    return result
 
 
 @app.delete("/fin/transacciones/{trans_id}")

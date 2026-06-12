@@ -88,6 +88,17 @@ export function contribucionFire(mov) {
   return isCategoriaFire(mov) ? contribucionCategoria(mov) : 0
 }
 
+export function contribucionFireUSD(mov, dolar) {
+  if (!isCategoriaFire(mov)) return 0
+  const monto = Math.abs(Number(mov?.amount ?? mov?.monto ?? 0))
+  const tipo  = mov?.type ?? mov?.tipo
+  const signo = tipo === 'income' ? -1 : 1
+  const enUSD = (mov?.moneda ?? 'ARS').toUpperCase() === 'USD'
+    ? monto
+    : monto / (Number(dolar) || 1)
+  return signo * enUSD
+}
+
 export function acumuladoPorCategoriaNombre(movs, nombreCategoria) {
   const key = (nombreCategoria || '').trim().toLowerCase()
   if (!key) return 0

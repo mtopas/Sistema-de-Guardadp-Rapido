@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
-import { fmtARS, fmtUSD, fmtARSShort, contribucionFire, mesMovimiento } from '../../data/finanzas'
+import { fmtUSD, fmtARSShort, contribucionFireUSD, mesMovimiento } from '../../data/finanzas'
 import { mergeFireCfg } from './fireConfigUtils'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -70,7 +70,7 @@ function AhorradoCell({ mes, value, isFuture, lang }) {
   if (isFuture) return <td style={{ ...TD, color: 'var(--subtext)' }}>—</td>
 
   const commit = () => {
-    const parsed = val.trim() === '' ? null : parseFloat(val.replace(/\./g, '').replace(',', '.'))
+    const parsed = val.trim() === '' ? null : parseFloat(val)
     upsert(mes, isNaN(parsed) ? null : parsed)
     setEditing(false)
   }
@@ -89,11 +89,11 @@ function AhorradoCell({ mes, value, isFuture, lang }) {
   return (
     <td
       style={{ ...TD, cursor: 'text', color: value >= 0 ? 'var(--text)' : '#ef4444' }}
-      onClick={() => { setVal(String(Math.round(value))); setEditing(true) }}
+      onClick={() => { setVal(String(value != null ? Number(value.toFixed(2)) : '')); setEditing(true) }}
       title={t(lang, 'fireOverrideHint')}
     >
       <span style={{ borderBottom: '1px dotted var(--subtext)' }}>
-        {value != null ? fmtARS(value) : '—'}
+        {value != null ? fmtUSD(value) : '—'}
       </span>
     </td>
   )
@@ -160,9 +160,9 @@ function ProyeccionRow({ lang, saldoHoy, saldoRealCuentas, aporteHoy, aumentoMen
     <div className="panel-strong p-5 mb-4">
       <div className="label mb-1">{t(lang, 'fireProyeccion')}</div>
       <div className="text-[10px] mono mb-3" style={{ color: 'var(--subtext)' }}>
-        Proyectado desde el plan al mes actual ({fmtARSShort(saldoHoy)} ARS)
-        {saldoRealCuentas > 0 && Math.abs(saldoRealCuentas - saldoHoy) > 1000 && (
-          <> · cuentas: {fmtARSShort(saldoRealCuentas)}</>
+        Proyectado desde el plan al mes actual ({fmtUSD(saldoHoy)})
+        {saldoRealCuentas > 0 && Math.abs(saldoRealCuentas - saldoHoy) > 10 && (
+          <> · cuentas: {fmtUSD(saldoRealCuentas)}</>
         )}
         {' '}· regla del 4% SWR
       </div>
@@ -229,14 +229,14 @@ export default function FireTab() {
   const dolar               = cfg.dolar_mep ?? cfg.dolar_oficial ?? cfg.dolar_default ?? 1245
   const fireMetaEdad        = cfg.fire_meta_edad ? Number(cfg.fire_meta_edad) : null
 
-  // Saldo real total desde fin_cuentas (ARS + USD × dolar)
+  // Saldo real total en USD desde fin_cuentas
   const saldoRealCuentas = useMemo(() => {
     const cuentas = Array.isArray(finCuentas)
       ? (finCuentas[0]?.items ? finCuentas.flatMap(g => g.items) : finCuentas)
       : []
     const totalARS = cuentas.reduce((s, c) => s + (c.ars ?? 0), 0)
     const totalUSD = cuentas.reduce((s, c) => s + (c.usd ?? 0), 0)
-    return totalARS + totalUSD * dolar
+    return totalARS / (dolar || 1) + totalUSD
   }, [finCuentas, dolar])
 
   const currentMes = useMemo(() => {
@@ -251,11 +251,11 @@ export default function FireTab() {
     finMovAll.forEach(m => {
       const mes = mesMovimiento(m)
       if (!mes) return
-      const delta = contribucionFire(m)
+      const delta = contribucionFireUSD(m, dolar)
       if (delta) map[mes] = (map[mes] ?? 0) + delta
     })
     return map
-  }, [finMovAll])
+  }, [finMovAll, dolar])
 
   // Generate all rows — always up to fire_meta_edad (default 50) + 1 mes
   const endMes = useMemo(() => {
@@ -410,13 +410,13 @@ export default function FireTab() {
                       {mesLabel(row.mes)}
                       {isCurrent && <span className="ml-1 text-[9px] uppercase tracking-wide" style={{ color: 'var(--accent)', opacity: 0.8 }}>●</span>}
                     </td>
-                    <td style={{ ...TD, color: isFuture ? 'var(--subtext)' : 'var(--text)' }}>{fmtARS(row.aporte)}</td>
-                    <td style={{ ...TD, color: isFuture ? 'var(--subtext)' : 'var(--text)' }}>{fmtARS(row.inicial)}</td>
-                    <td style={{ ...TD, color: '#22c55e' }}>{fmtARS(row.interes)}</td>
-                    <td style={{ ...TD, fontWeight: 600 }}>{fmtARS(row.saldoFinal)}</td>
+                    <td style={{ ...TD, color: isFuture ? 'var(--subtext)' : 'var(--text)' }}>{fmtUSD(row.aporte)}</td>
+                    <td style={{ ...TD, color: isFuture ? 'var(--subtext)' : 'var(--text)' }}>{fmtUSD(row.inicial)}</td>
+                    <td style={{ ...TD, color: '#22c55e' }}>{fmtUSD(row.interes)}</td>
+                    <td style={{ ...TD, fontWeight: 600 }}>{fmtUSD(row.saldoFinal)}</td>
                     <AhorradoCell mes={row.mes} value={row.ahorrado} isFuture={row.isFuture} lang={lang} />
                     <td style={{ ...TD, color: row.falta > 0 ? '#ef4444' : row.falta === 0 ? '#22c55e' : 'var(--subtext)' }}>
-                      {row.falta != null ? fmtARS(row.falta) : '—'}
+                      {row.falta != null ? fmtUSD(row.falta) : '—'}
                     </td>
                   </tr>
                 )

@@ -974,14 +974,20 @@ def fin_obtener_instrumentos() -> list:
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        """SELECT id, tipo, ticker, sociedad, nombre, cantidad, costo_usd, tipo_cambio,
-                  precio_actual, entidad, capital_ars, tna, fecha_inicio,
-                  fecha_vencimiento, fecha
-           FROM fin_instrumentos ORDER BY tipo, id"""
+        """SELECT i.id, i.tipo, i.ticker, i.sociedad, i.nombre, i.cantidad, i.costo_usd,
+                  i.tipo_cambio, i.precio_actual, i.entidad, i.capital_ars, i.tna,
+                  i.fecha_inicio, i.fecha_vencimiento, i.fecha,
+                  EXISTS(SELECT 1 FROM fin_transacciones_instrumento t WHERE t.instrumento_id = i.id)
+           FROM fin_instrumentos i ORDER BY i.tipo, i.id"""
     )
     rows = cursor.fetchall()
     conn.close()
-    return [_inst_dict(r) for r in rows]
+    result = []
+    for r in rows:
+        d = _inst_dict(r[:15])
+        d["has_transactions"] = bool(r[15])
+        result.append(d)
+    return result
 
 
 def fin_crear_instrumento(
@@ -1031,11 +1037,30 @@ _INST_UPDATABLE = frozenset({
     "entidad", "capital_ars", "tna", "fecha_inicio", "fecha_vencimiento",
 })
 
+# Fields that become read-only once the instrument has ledger transactions
+_INST_LEDGER_LOCKED = frozenset({"cantidad", "costo_usd", "ticker"})
+
+
+def fin_instrumento_tiene_transacciones(inst_id: int) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT 1 FROM fin_transacciones_instrumento WHERE instrumento_id = ? LIMIT 1",
+        (inst_id,),
+    )
+    r = cursor.fetchone()
+    conn.close()
+    return r is not None
+
 
 def fin_actualizar_instrumento(inst_id: int, campos: dict) -> Optional[dict]:
     safe = {k: v for k, v in campos.items() if k in _INST_UPDATABLE}
     if not safe:
         return None
+    # Raise ValueError for locked fields when transactions exist
+    locked_requested = _INST_LEDGER_LOCKED & safe.keys()
+    if locked_requested and fin_instrumento_tiene_transacciones(inst_id):
+        raise ValueError(f"Campo(s) {sorted(locked_requested)} no editables: el instrumento tiene transacciones")
     conn = get_connection()
     cursor = conn.cursor()
     sets = ", ".join(f"{k} = ?" for k in safe)
@@ -1368,22 +1393,122 @@ def _trans_dict(r) -> dict:
         "monto_total":    r[6],
         "nota":           r[7],
         "creado_en":      r[8],
+        "moneda":         r[9] if len(r) > 9 else "ARS",
+        "tipo_cambio":    r[10] if len(r) > 10 else None,
     }
+
+
+_TRANS_SELECT = """
+    SELECT id, instrumento_id, tipo, fecha, cantidad, precio, monto_total, nota, creado_en,
+           moneda, tipo_cambio
+    FROM fin_transacciones_instrumento
+"""
+
+
+def _recalcular_posicion(cursor, instrumento_id: int) -> None:
+    """Recalculate cantidad+costo_usd for an instrument from its full tx history.
+    Must be called inside an open transaction; does NOT commit."""
+    cursor.execute(
+        """SELECT tipo, cantidad, precio, moneda, tipo_cambio
+           FROM fin_transacciones_instrumento
+           WHERE instrumento_id = ?
+           ORDER BY fecha ASC, id ASC""",
+        (instrumento_id,),
+    )
+    rows = cursor.fetchall()
+
+    cantidad = 0.0
+    costo_usd = 0.0
+
+    for tipo, cant, precio, moneda, tc in rows:
+        if tipo == "compra":
+            if moneda == "ARS":
+                if tc and tc > 0:
+                    costo_tx = (cant * precio) / tc
+                else:
+                    cursor.execute("SELECT valor FROM fin_config WHERE clave = 'dolar_mep'")
+                    r = cursor.fetchone()
+                    tc_fallback = float(r[0]) if (r and r[0]) else 1.0
+                    costo_tx = (cant * precio) / tc_fallback
+            else:
+                costo_tx = cant * precio
+            cantidad += cant
+            costo_usd += costo_tx
+        elif tipo == "venta":
+            ppc = costo_usd / cantidad if cantidad > 0 else 0.0
+            vendido = min(cant, cantidad)
+            costo_usd -= vendido * ppc
+            cantidad -= vendido
+            if cantidad <= 0:
+                cantidad = 0.0
+                costo_usd = 0.0
+
+    cursor.execute(
+        "UPDATE fin_instrumentos SET cantidad = ?, costo_usd = ? WHERE id = ?",
+        (round(cantidad, 8), round(costo_usd, 6), instrumento_id),
+    )
+    if DEBUG:
+        print(f"_recalcular_posicion: inst={instrumento_id} cant={cantidad:.4f} costo={costo_usd:.4f}")
 
 
 def fin_obtener_transacciones_instrumento(instrumento_id: int) -> list:
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        """SELECT id, instrumento_id, tipo, fecha, cantidad, precio, monto_total, nota, creado_en
-           FROM fin_transacciones_instrumento
-           WHERE instrumento_id = ?
-           ORDER BY fecha DESC""",
+        _TRANS_SELECT + "WHERE instrumento_id = ? ORDER BY fecha DESC, id DESC",
         (instrumento_id,),
     )
     rows = cursor.fetchall()
     conn.close()
     return [_trans_dict(r) for r in rows]
+
+
+def fin_obtener_transacciones_global(
+    ticker: Optional[str] = None,
+    tipo_inst: Optional[str] = None,
+    desde: Optional[str] = None,
+    hasta: Optional[str] = None,
+    limit: int = 200,
+    offset: int = 0,
+) -> list:
+    conn = get_connection()
+    cursor = conn.cursor()
+    where = []
+    params: list = []
+    if ticker:
+        where.append("UPPER(TRIM(i.ticker)) = UPPER(TRIM(?))")
+        params.append(ticker)
+    if tipo_inst:
+        where.append("i.tipo = ?")
+        params.append(tipo_inst)
+    if desde:
+        where.append("t.fecha >= ?")
+        params.append(desde)
+    if hasta:
+        where.append("t.fecha <= ?")
+        params.append(hasta)
+    clause = ("WHERE " + " AND ".join(where)) if where else ""
+    cursor.execute(
+        f"""SELECT t.id, t.instrumento_id, t.tipo, t.fecha, t.cantidad, t.precio,
+                   t.monto_total, t.nota, t.creado_en, t.moneda, t.tipo_cambio,
+                   i.ticker, i.nombre, i.tipo AS tipo_instrumento
+            FROM fin_transacciones_instrumento t
+            JOIN fin_instrumentos i ON i.id = t.instrumento_id
+            {clause}
+            ORDER BY t.fecha DESC, t.id DESC
+            LIMIT ? OFFSET ?""",
+        params + [limit, offset],
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    result = []
+    for r in rows:
+        d = _trans_dict(r[:11])
+        d["ticker"]            = r[11]
+        d["nombre_instrumento"] = r[12]
+        d["tipo_instrumento"]  = r[13]
+        result.append(d)
+    return result
 
 
 def fin_crear_transaccion_instrumento(
@@ -1393,22 +1518,38 @@ def fin_crear_transaccion_instrumento(
     cantidad: float,
     precio: float,
     nota: Optional[str] = None,
+    moneda: str = "ARS",
+    tipo_cambio: Optional[float] = None,
 ) -> dict:
+    # Validate venta doesn't exceed current position
+    if tipo == "venta":
+        conn_check = get_connection()
+        cur_check = conn_check.cursor()
+        cur_check.execute("SELECT cantidad FROM fin_instrumentos WHERE id = ?", (instrumento_id,))
+        r = cur_check.fetchone()
+        conn_check.close()
+        if r is None:
+            raise ValueError("Instrumento no encontrado")
+        if cantidad > (r[0] or 0):
+            raise ValueError(f"Venta ({cantidad}) supera la posición actual ({r[0] or 0})")
+
     monto_total = round(cantidad * precio, 6)
     creado_en   = datetime.now().isoformat()
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
         """INSERT INTO fin_transacciones_instrumento
-           (instrumento_id, tipo, fecha, cantidad, precio, monto_total, nota, creado_en)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (instrumento_id, tipo, fecha, cantidad, precio, monto_total, nota, creado_en),
+           (instrumento_id, tipo, fecha, cantidad, precio, monto_total, nota, creado_en,
+            moneda, tipo_cambio)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (instrumento_id, tipo, fecha, cantidad, precio, monto_total, nota, creado_en,
+         moneda, tipo_cambio),
     )
     tid = cursor.lastrowid
+    _recalcular_posicion(cursor, instrumento_id)
     conn.commit()
     cursor.execute(
-        """SELECT id, instrumento_id, tipo, fecha, cantidad, precio, monto_total, nota, creado_en
-           FROM fin_transacciones_instrumento WHERE id = ?""",
+        _TRANS_SELECT + "WHERE id = ?",
         (tid,),
     )
     row = cursor.fetchone()
@@ -1418,14 +1559,107 @@ def fin_crear_transaccion_instrumento(
     return _trans_dict(row)
 
 
+def fin_actualizar_transaccion_instrumento(
+    trans_id: int,
+    campos: dict,
+) -> Optional[dict]:
+    _UPDATABLE = frozenset({"tipo", "fecha", "cantidad", "precio", "nota", "moneda", "tipo_cambio"})
+    safe = {k: v for k, v in campos.items() if k in _UPDATABLE}
+    if not safe:
+        return None
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT instrumento_id FROM fin_transacciones_instrumento WHERE id = ?", (trans_id,)
+    )
+    r = cursor.fetchone()
+    if r is None:
+        conn.close()
+        return None
+    instrumento_id = r[0]
+    # Recompute monto_total if cantidad or precio changed
+    if "cantidad" in safe or "precio" in safe:
+        cursor.execute(
+            "SELECT cantidad, precio FROM fin_transacciones_instrumento WHERE id = ?", (trans_id,)
+        )
+        cur_row = cursor.fetchone()
+        cant  = safe.get("cantidad", cur_row[0])
+        prec  = safe.get("precio",   cur_row[1])
+        safe["monto_total"] = round(cant * prec, 6)
+    sets = ", ".join(f"{k} = ?" for k in safe)
+    vals = list(safe.values()) + [trans_id]
+    cursor.execute(f"UPDATE fin_transacciones_instrumento SET {sets} WHERE id = ?", vals)
+    _recalcular_posicion(cursor, instrumento_id)
+    conn.commit()
+    cursor.execute(_TRANS_SELECT + "WHERE id = ?", (trans_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return _trans_dict(row) if row else None
+
+
+def fin_crear_transaccion_unificada(
+    tipo: str,
+    instrumento_tipo: str,
+    ticker: str,
+    nombre: str,
+    fecha: str,
+    cantidad: float,
+    precio: float,
+    nota: Optional[str] = None,
+    moneda: str = "ARS",
+    tipo_cambio: Optional[float] = None,
+) -> dict:
+    """Find-or-create instrument by (tipo, UPPER(ticker)), then record the transaction."""
+    ticker_norm = ticker.upper().strip()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """SELECT id FROM fin_instrumentos
+           WHERE tipo = ? AND UPPER(TRIM(ticker)) = ?""",
+        (instrumento_tipo, ticker_norm),
+    )
+    row = cursor.fetchone()
+    if row:
+        instrumento_id = row[0]
+    else:
+        now_iso = datetime.now().isoformat()
+        cursor.execute(
+            """INSERT INTO fin_instrumentos
+               (tipo, ticker, nombre, cantidad, fecha)
+               VALUES (?, ?, ?, 0, ?)""",
+            (instrumento_tipo, ticker_norm, nombre.strip(), now_iso),
+        )
+        instrumento_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return fin_crear_transaccion_instrumento(
+        instrumento_id=instrumento_id,
+        tipo=tipo,
+        fecha=fecha,
+        cantidad=cantidad,
+        precio=precio,
+        nota=nota,
+        moneda=moneda,
+        tipo_cambio=tipo_cambio,
+    )
+
+
 def fin_eliminar_transaccion_instrumento(trans_id: int) -> bool:
     conn = get_connection()
     cursor = conn.cursor()
+    cursor.execute(
+        "SELECT instrumento_id FROM fin_transacciones_instrumento WHERE id = ?", (trans_id,)
+    )
+    r = cursor.fetchone()
+    if r is None:
+        conn.close()
+        return False
+    instrumento_id = r[0]
     cursor.execute("DELETE FROM fin_transacciones_instrumento WHERE id = ?", (trans_id,))
-    deleted = cursor.rowcount > 0
+    _recalcular_posicion(cursor, instrumento_id)
     conn.commit()
     conn.close()
-    return deleted
+    return True
 
 
 # ---------------------------------------------------------------------------

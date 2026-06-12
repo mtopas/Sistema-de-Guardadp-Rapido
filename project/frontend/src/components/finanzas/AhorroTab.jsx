@@ -449,29 +449,39 @@ function InstReadOnlyCell({ children, tdStyle = {} }) {
 
 function AccionesRows({ items }) {
   return items.map(inst => {
-    const valor  = (inst.cantidad ?? 0) * (inst.precio_actual ?? 0)
-    const pl     = pnl(inst)
+    const valor   = (inst.cantidad ?? 0) * (inst.precio_actual ?? 0)
+    const pl      = pnl(inst)
     const plColor = pl == null ? 'var(--text)' : pl.diff >= 0 ? 'var(--success)' : '#ef4444'
-    const ppp = inst.costo_usd != null && inst.cantidad > 0 ? inst.costo_usd / inst.cantidad : null
+    const ppp     = inst.costo_usd != null && inst.cantidad > 0 ? inst.costo_usd / inst.cantidad : null
+    const locked  = !!inst.has_transactions
     return (
       <tr key={inst.id} style={{ borderBottom: '1px solid var(--border)' }}>
-        <InstTextCell inst={inst} field="ticker" tdStyle={{ fontWeight: 700 }} />
+        {locked
+          ? <InstReadOnlyCell tdStyle={{ fontWeight: 700 }}>{inst.ticker ?? '—'}</InstReadOnlyCell>
+          : <InstTextCell inst={inst} field="ticker" tdStyle={{ fontWeight: 700 }} />
+        }
         <InstTextCell inst={inst} field="nombre" />
-        <InstNumberCell
-          inst={inst}
-          field="cantidad"
-          display={fmtCantidad(inst.cantidad ?? 0)}
-          tdStyle={{ textAlign: 'right' }}
-          inputStyle={{ textAlign: 'right' }}
-        />
-        <InstDerivedNumberCell
-          inst={inst}
-          getValue={i => (i.costo_usd != null && i.cantidad > 0 ? i.costo_usd / i.cantidad : '')}
-          display={ppp != null ? fmtUSD(ppp) : '—'}
-          patchTransform={(n, i) => ({ costo_usd: n * (i.cantidad || 0) })}
-          tdStyle={{ textAlign: 'right' }}
-          inputStyle={{ textAlign: 'right' }}
-        />
+        {locked
+          ? <InstReadOnlyCell tdStyle={{ textAlign: 'right' }}>{fmtCantidad(inst.cantidad ?? 0)}</InstReadOnlyCell>
+          : <InstNumberCell
+              inst={inst}
+              field="cantidad"
+              display={fmtCantidad(inst.cantidad ?? 0)}
+              tdStyle={{ textAlign: 'right' }}
+              inputStyle={{ textAlign: 'right' }}
+            />
+        }
+        {locked
+          ? <InstReadOnlyCell tdStyle={{ textAlign: 'right' }}>{ppp != null ? fmtUSD(ppp) : '—'}</InstReadOnlyCell>
+          : <InstDerivedNumberCell
+              inst={inst}
+              getValue={i => (i.costo_usd != null && i.cantidad > 0 ? i.costo_usd / i.cantidad : '')}
+              display={ppp != null ? fmtUSD(ppp) : '—'}
+              patchTransform={(n, i) => ({ costo_usd: n * (i.cantidad || 0) })}
+              tdStyle={{ textAlign: 'right' }}
+              inputStyle={{ textAlign: 'right' }}
+            />
+        }
         <InstNumberCell
           inst={inst}
           field="precio_actual"
@@ -1017,7 +1027,7 @@ function ColocacionDetail({ inst, lang }) {
   )
 }
 
-function LedgerTradablePanel({ inst, lang, trans, loading, showForm, setShowForm, form, setForm, onAdd, onDelete }) {
+function LedgerTradablePanel({ inst, lang, trans, loading, showForm, setShowForm, form, setForm, onAdd, onDelete, formError }) {
   const TH2 = { ...TH, fontSize: 10 }
   const TD2 = { ...TD, fontSize: 11 }
   const title = ledgerIndividualLabel(inst)
@@ -1054,6 +1064,15 @@ function LedgerTradablePanel({ inst, lang, trans, loading, showForm, setShowForm
             { label: t(lang, 'ledgerTxPrecio'), el: (
               <input type="number" placeholder="0" value={form.precio} onChange={e => setForm(f => ({ ...f, precio: e.target.value }))} style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '3px 6px', fontSize: 11, width: 80, outline: 'none' }} />
             ) },
+            { label: t(lang, 'ledgerTxMoneda'), el: (
+              <select value={form.moneda} onChange={e => setForm(f => ({ ...f, moneda: e.target.value }))} style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '3px 6px', fontSize: 11 }}>
+                <option value="ARS">ARS</option>
+                <option value="USD">USD</option>
+              </select>
+            ) },
+            ...(form.moneda === 'ARS' ? [{ label: t(lang, 'ledgerTxTipoCambio'), el: (
+              <input type="number" placeholder="0" value={form.tipo_cambio} onChange={e => setForm(f => ({ ...f, tipo_cambio: e.target.value }))} style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '3px 6px', fontSize: 11, width: 80, outline: 'none' }} />
+            ) }] : []),
             { label: t(lang, 'ledgerTxNota'), el: (
               <input type="text" placeholder="…" value={form.nota} onChange={e => setForm(f => ({ ...f, nota: e.target.value }))} style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '3px 6px', fontSize: 11, width: 120, outline: 'none' }} />
             ) },
@@ -1067,6 +1086,9 @@ function LedgerTradablePanel({ inst, lang, trans, loading, showForm, setShowForm
             <button type="button" onClick={onAdd} className="px-2.5 py-1 rounded-lg text-[11px] font-medium" style={{ background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer' }}><Check size={11} /></button>
             <button type="button" onClick={() => setShowForm(false)} className="px-2.5 py-1 rounded-lg text-[11px]" style={{ background: 'var(--bg)', color: 'var(--subtext)', border: '1px solid var(--border)', cursor: 'pointer' }}><X size={11} /></button>
           </div>
+          {formError && (
+            <div className="w-full text-[11px] mt-1" style={{ color: '#ef4444' }}>{formError}</div>
+          )}
         </div>
       )}
 
@@ -1117,13 +1139,19 @@ function LedgerSection({ instrumentos, lang }) {
   const [trans, setTrans]         = useState([])
   const [loading, setLoading]     = useState(false)
   const [showForm, setShowForm]   = useState(false)
+  const [formError, setFormError] = useState(null)
   const [form, setForm]           = useState({
     tipo: 'compra',
-    fecha: new Date().toISOString().slice(0, 10),
+    fecha: todayISO(),
     cantidad: '',
     precio: '',
     nota: '',
+    moneda: 'ARS',
+    tipo_cambio: '',
   })
+
+  const addFinTransaccion    = useStore(s => s.addFinTransaccion)
+  const deleteFinTransaccion = useStore(s => s.deleteFinTransaccion)
 
   const { entityGroups, individualChips } = useMemo(() => {
     const groups = new Map()
@@ -1205,27 +1233,28 @@ function LedgerSection({ instrumentos, lang }) {
 
   const handleAdd = async () => {
     if (!selId || !form.cantidad || !form.precio) return
+    setFormError(null)
     try {
-      const res = await fetch(`${API_URL}/fin/instrumentos/${selId}/transacciones`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tipo: form.tipo,
-          fecha: form.fecha,
-          cantidad: parseFloat(form.cantidad),
-          precio: parseFloat(form.precio),
-          nota: form.nota || null,
-        }),
-      })
-      if (res.ok) { await fetchTrans(selId); setShowForm(false) }
-    } catch { /* noop */ }
+      const payload = {
+        tipo:        form.tipo,
+        fecha:       form.fecha,
+        cantidad:    parseFloat(form.cantidad),
+        precio:      parseFloat(form.precio),
+        nota:        form.nota || null,
+        moneda:      form.moneda,
+        tipo_cambio: form.moneda === 'ARS' && form.tipo_cambio ? parseFloat(form.tipo_cambio) : null,
+      }
+      await addFinTransaccion(selId, payload)
+      await fetchTrans(selId)
+      setShowForm(false)
+    } catch (err) {
+      setFormError(err?.message ?? t(lang, 'ledgerVentaExcede'))
+    }
   }
 
   const handleDelete = async (transId) => {
-    try {
-      await fetch(`${API_URL}/fin/transacciones/${transId}`, { method: 'DELETE' })
-      setTrans(prev => prev.filter(x => x.id !== transId))
-    } catch { /* noop */ }
+    await deleteFinTransaccion(transId)
+    setTrans(prev => prev.filter(x => x.id !== transId))
   }
 
   const entityChipActive = (key) => selEntity === key
@@ -1309,6 +1338,7 @@ function LedgerSection({ instrumentos, lang }) {
                   setForm={setForm}
                   onAdd={handleAdd}
                   onDelete={handleDelete}
+                  formError={formError}
                 />
               )}
             </>

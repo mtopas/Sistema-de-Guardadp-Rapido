@@ -113,7 +113,7 @@ Modal Hábitos en `HabitosScreen`: `NuevoHabitoModal` (CTA TopBar `openHabitoMod
 
 **Reglas de negocio compartidas** (`data/finanzas.js`, `data/finCategorias.js`):
 - `isTransferencia(m)` — categoría `transferencia` (case-insensitive) excluida de totales.
-- `contribucionCategoria` / `contribucionFire` / `acumuladoPorCategoriaNombre` — cajones por nombre de categoría.
+- `contribucionCategoria` / `contribucionFire` / `contribucionFireUSD(mov, dolar)` / `acumuladoPorCategoriaNombre` — cajones por nombre de categoría. `contribucionFireUSD` convierte ARS→USD con el MEP; movimientos con `moneda='USD'` se pasan directo.
 - `isFinCategoriaReservada` — sistema (`FIRE`, `Transferencia`, `Ajuste`) + categorías con `objetivo_id`.
 - Helpers `fmtARS` / `fmtUSD`. Sin mock — sin backend la app muestra estado vacío.
 
@@ -168,13 +168,13 @@ Tablas creadas en `app/db/database.py`:
 | `fin_movimientos` | Movimientos del mes e histórico |
 | `fin_config` | Clave-valor (`dolar_oficial`, `fire_*`, `tasa_ahorro_objetivo`, …) |
 | `fin_notas` | Notas del dashboard |
-| `fin_instrumentos` | Posiciones Ahorro (tipo polimórfico: acciones, FCI, plazo fijo, ONs, crypto, otros) |
+| `fin_instrumentos` | Posiciones Ahorro (tipo polimórfico: acciones, FCI, plazo fijo, ONs, crypto, otros); `cantidad` y `costo_usd` son campos derivados recalculados desde el ledger (fuente de verdad); responde `has_transactions` calculado |
 | `fin_objetivos` | Metas de ahorro (nombre único, no renombrable); alta/baja sincroniza categoría homónima |
 | `fin_fire_filas` | Override opcional de `ahorrado` por mes (`YYYY-MM`) |
 | `fin_inflacion` | % inflación mensual (tab Anual, ajuste nominal/real) |
-| `fin_transacciones_instrumento` | Ledger de compras/ventas por instrumento (`tipo`, `fecha`, `cantidad`, `precio`, `monto_total`, `nota`); FK → `fin_instrumentos` ON DELETE CASCADE |
+| `fin_transacciones_instrumento` | **Fuente de verdad** del portafolio — compras/ventas por instrumento (`tipo`, `fecha`, `cantidad`, `precio`, `monto_total`, `moneda`, `tipo_cambio`, `nota`); FK → `fin_instrumentos` ON DELETE CASCADE; cada mutación recalcula posición con PPC ponderado |
 
-API bajo `/fin/*` — cuentas (`POST /fin/recalcular-saldos`), categorías (CRUD; `?include_ocultas=`), movimientos (paginación, bulk, duplicados, CSV), instrumentos + ledger, objetivos (sin PATCH de nombre), fire-filas, inflación, config, notas, `GET /fin/emergencia` (deprecated, saldo vía objetivo Fondo de emergencia).
+API bajo `/fin/*` — cuentas (`POST /fin/recalcular-saldos`), categorías (CRUD; `?include_ocultas=`), movimientos (paginación, bulk, duplicados, CSV), instrumentos + ledger, objetivos (sin PATCH de nombre), fire-filas, inflación, config, notas, `GET /fin/emergencia` (deprecated, saldo vía objetivo Fondo de emergencia). Ledger unificado: `GET /fin/transacciones` (global con JOIN), `POST /fin/transacciones` (merge por ticker), `PATCH /fin/transacciones/{id}`; `PATCH /fin/instrumentos/{id}` devuelve 409 si intenta editar `cantidad`/`costo_usd`/`ticker` con transacciones existentes.
 
 **Dual schema en movimientos:** el mock y partes del front usan `type`/`amount`/`cat`; la API devuelve `tipo`/`monto`/`categoria_nombre`. Normalizar al leer/escribir.
 
@@ -233,7 +233,7 @@ Sin seed — arranca vacío.
 - **Dashboard:** donuts con tooltip hover monto/% por segmento e highlight interactivo; tarjetas movimientos; modal "ver todos" (sort 3-clicks + filtro categoría + **export CSV**); cuotas; notas; panel derecho.
 - **Datos:** histórico completo, edición inline blur con **debounce 300ms**, delete, orden por fecha. `scope="col"` en headers de tabla.
 - **Anual:** agregados por año, gráfico barras nominal/real, tabla meses, inflación mensual editable, panel derecho.
-- **FIRE:** tabla mensual con proyección, overrides ahorrado, panel config.
+- **FIRE:** tabla mensual con proyección, overrides ahorrado, panel config. **Motor en USD** — `fire_aporte_inicial`/`fire_saldo_inicial` en USD; contribuciones ARS se convierten con MEP via `contribucionFireUSD`.
 - **Ahorro:** reparto por categoría (FIRE + objetivos + líquido sin invertir), portafolio ARS/USD, instrumentos colapsables, CRUD, objetivos, P&L, ledger transacciones.
 - **`MovementModal`:** `Ctrl+Enter` guarda; `FinCategoriaPicker` (elegir/crear categoría); chips de plantillas; autocompletar cuenta/categoría desde `localStorage`.
 - **`FinanzasMobileDrawer`:** botón "Ver resumen" en `< md` abre `FinanzasLeftPanel` como drawer deslizante.
@@ -251,7 +251,7 @@ Sin seed — arranca vacío.
 
 - **`MovimientosTableModal`:** edición inline por fila (descripción, monto, fecha); eliminar por fila; focus trap + return focus; `scope="col"`.
 - **`CategoryDonutCard`:** click segmento/leyenda → filtra `MovimientosListCard` del mismo tipo; badge "✕" para limpiar; highlight activo.
-- **FireTab:** botón "Hoy" para volver a mes actual; `ProyeccionRow` usa saldo real de `fin_cuentas` en lugar de `fire_saldo_inicial`; `scope="col"`.
+- **FireTab:** botón "Hoy" para volver a mes actual; `ProyeccionRow` usa saldo real de `fin_cuentas` (en USD) vs saldo del plan; todas las columnas en USD; `scope="col"`.
 - **AhorroTab:** `LedgerSection` — selector instrumento, tabla compra/venta, formulario alta, eliminar. API: `/fin/instrumentos/{id}/transacciones`, `/fin/transacciones/{id}`.
 - **TopBar búsqueda Finanzas:** debounce 200ms, filtra localmente movimientos + notas + objetivos, dropdown con secciones.
 - **Mobile tabs:** chip bar fija `< md` con las 5 tabs; bottom padding en centro.
@@ -259,7 +259,7 @@ Sin seed — arranca vacío.
 - **DatosTab virtualización:** `@tanstack/react-virtual`; solo renderiza filas visibles; tab order fix (`tabIndex={-1}` en selects/botones de filas no en edición).
 - **Ctrl+M atajos Finanzas:** sección dinámica en TweaksPanel; handlers `N`/`1–5`/`←→`/`/` en `FinanzasScreen`.
 - **Focus trap `MovementModal`:** cicla Tab/Shift-Tab; retorna focus al trigger; `role="dialog"`.
-- **Backend — nuevos endpoints:** `PATCH /fin/categorias/{id}`, `GET /fin/movimientos/duplicados`, `GET /fin/export/csv`, `POST /fin/import/csv`, paginación opt-in `?limit=&offset=`, `PATCH/DELETE /fin/movimientos/bulk`, ledger `fin_transacciones_instrumento` + CRUD.
+- **Backend — nuevos endpoints:** `PATCH /fin/categorias/{id}`, `GET /fin/movimientos/duplicados`, `GET /fin/export/csv`, `POST /fin/import/csv`, paginación opt-in `?limit=&offset=`, `PATCH/DELETE /fin/movimientos/bulk`, ledger unificado `fin_transacciones_instrumento` (fuente de verdad: `GET/POST /fin/transacciones`, `PATCH /fin/transacciones/{id}`, merge-por-ticker, recalc PPC, backfill migración, `moneda`/`tipo_cambio` por tx, 409 guardrail en `PATCH /fin/instrumentos/{id}`).
 - **Bot — captura `$:`:** fecha (`ayer`/`anteayer`/`DD/MM`), cuotas (`cuotas:N`).
 - **Bot — resumen semanal:** job lunes 9:00 via `job_queue`.
 - **`GET /fin/emergencia`** marcado `deprecated=True` en FastAPI.

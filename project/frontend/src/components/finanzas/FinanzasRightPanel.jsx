@@ -3,6 +3,7 @@ import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
 import {
   fmtARS,
+  fmtUSD,
   isTransferencia,
   acumuladoPorCategoriaNombre,
   fireAportePlanMes,
@@ -152,11 +153,13 @@ export default function FinanzasRightPanel() {
   const savingsColor = kpis.tasaAhorro >= tasaObjetivo ? 'var(--income)' : 'var(--expense)'
 
   const fireMeta = useMemo(() => {
-    const aporte   = fireAportePlanMes(finConfig, selectedMes)
-    const ahorrado = ahorradoFireEnMes(finMovimientosAll, finFireFilas, selectedMes)
-    const ok       = aporte > 0 && ahorrado >= aporte
-    const color    = ok ? '#22c55e' : 'var(--cta-bg)'
-    return { aporte, ahorrado, ok, color }
+    const dolar       = finConfig?.dolar_mep ?? finConfig?.dolar_oficial ?? finConfig?.dolar_default ?? 1245
+    const aporteUSD   = fireAportePlanMes(finConfig, selectedMes)
+    const ahorradoARS = ahorradoFireEnMes(finMovimientosAll, finFireFilas, selectedMes)
+    const ahorradoUSD = ahorradoARS / (dolar || 1)
+    const ok          = aporteUSD > 0 && ahorradoUSD >= aporteUSD
+    const color       = ok ? '#22c55e' : 'var(--cta-bg)'
+    return { aporteUSD, ahorradoUSD, ok, color }
   }, [finConfig, finMovimientosAll, finFireFilas, selectedMes])
 
   const objetivosMetas = useMemo(() => {
@@ -226,11 +229,11 @@ export default function FinanzasRightPanel() {
               lang={lang}
               label={t(lang, 'metaFIREMes')}
               ok={fireMeta.ok}
-              barValue={fireMeta.ahorrado}
-              barMax={fireMeta.aporte || fireMeta.ahorrado || 1}
+              barValue={fireMeta.ahorradoUSD}
+              barMax={fireMeta.aporteUSD || fireMeta.ahorradoUSD || 1}
               barColor={fireMeta.color}
-              subLeft={fmtARS(fireMeta.ahorrado)}
-              subRight={fireMeta.aporte > 0 ? `/ ${fmtARS(fireMeta.aporte)}` : '—'}
+              subLeft={fmtUSD(fireMeta.ahorradoUSD)}
+              subRight={fireMeta.aporteUSD > 0 ? `/ ${fmtUSD(fireMeta.aporteUSD)}` : '—'}
             />
 
             {objetivosMetas.length === 0 ? (

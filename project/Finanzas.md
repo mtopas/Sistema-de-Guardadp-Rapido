@@ -144,13 +144,16 @@ Colores de categoría en UI: `buildFinCategoriaColorByName` / `getFinCategoriaCo
 
 ### FIRE
 
-- **Ahorrado real del plan:** movimientos con categoría o descripción **`FIRE`** (`contribucionFire` / `movimientoAsignadoACajon` en front).
-- Filas mensuales con proyección (aporte compuesto, interés, saldo).
-- Overrides por mes en `fin_fire_filas` (`ahorrado_override`).
-- Config: `fire_meta_usd`, `fire_meta_edad`, `fire_aumento_aporte`, `fire_rentabilidad_anual`, `fire_fecha_nacimiento`, `fire_aporte_inicial`, `fire_saldo_inicial`, `fire_inicio_mes`.
-- Tabla compacta por defecto (36 meses futuros); botón **"Ver proyección completa"** expande hasta `fire_meta_edad` o 50 años.
+**El motor del plan corre enteramente en USD.** La rentabilidad 6% y el interés compuesto se aplican sobre el saldo en dólares; la meta (`fire_meta_usd`) se compara directamente con el saldo acumulado en USD.
+
+- **Ahorrado real del plan:** movimientos con categoría o descripción **`FIRE`** → `contribucionFireUSD(mov, dolar)` en front: si `moneda='USD'` pasa directo; si `moneda='ARS'` divide por MEP. `contribucionFire` (ARS) sigue disponible para bot y otros consumidores.
+- **Config en USD:** `fire_aporte_inicial` y `fire_saldo_inicial` se ingresan en **USD**; `fire_aumento_aporte` es % mensual sobre aporte USD; `fire_rentabilidad_anual` (default 6%) es retorno sobre saldo USD.
+- Filas mensuales con proyección (aporte compuesto, interés, saldo) — todas las columnas en USD.
+- Overrides por mes en `fin_fire_filas` — ahora en **USD** (overrides previos en ARS quedan desactualizados).
+- Config completa: `fire_meta_usd`, `fire_meta_edad`, `fire_aumento_aporte`, `fire_rentabilidad_anual`, `fire_fecha_nacimiento`, `fire_aporte_inicial`, `fire_saldo_inicial`, `fire_inicio_mes`.
 - Fila marcada con 🎯 cuando `row.edad === fire_meta_edad`.
 - `saveFinConfigBulk`: guarda toda la config FIRE en un solo PUT (evita race condition de PATCHes paralelos).
+- **Widgets derivados** (`FinanzasRightPanel` y `AhorroRightPanel`): "Meta FIRE este mes" en USD — convierten `ahorradoFireEnMes` (ARS) ÷ dolar para comparar con el aporte planificado (USD).
 
 ---
 
@@ -179,7 +182,8 @@ Colores de categoría en UI: `buildFinCategoriaColorByName` / `getFinCategoriaCo
 | `fin_movimientos` | Histórico; FK cuenta y categoría |
 | `fin_config` | KV: `dolar_oficial`, `fire_*`, `tasa_ahorro_objetivo`, … |
 | `fin_notas` | Notas del dashboard |
-| `fin_instrumentos` | Portafolio polimórfico (`tipo`, ticker, TNA, fechas PF, …) |
+| `fin_instrumentos` | Portafolio polimórfico (`tipo`, ticker, TNA, fechas PF, …); `cantidad` y `costo_usd` son campos derivados recalculados por el ledger — **no editar directamente si hay transacciones** |
+| `fin_transacciones_instrumento` | **Fuente de verdad** del portafolio: `tipo` (compra/venta), `fecha`, `cantidad`, `precio`, `monto_total`, `moneda`, `tipo_cambio` (ARS/USD), `nota`; cada mutación recalcula PPC ponderado en `fin_instrumentos` |
 | `fin_objetivos` | Metas de ahorro (nombre único) |
 | `fin_fire_filas` | Override `ahorrado` por `YYYY-MM` |
 | `fin_inflacion` | % mensual para tab Anual |
@@ -200,7 +204,16 @@ Colores de categoría en UI: `buildFinCategoriaColorByName` / `getFinCategoriaCo
 | GET/PUT | `/fin/config` | Dict clave-valor |
 | GET/POST/DELETE | `/fin/notas` | |
 | GET | `/fin/emergencia` | Deprecated; saldo = movimientos cat. objetivo **Fondo de emergencia** |
-| CRUD | `/fin/instrumentos`, `/fin/objetivos` | Objetivo: POST crea categoría; PATCH sin `nombre`; DELETE oculta categoría |
+| GET/POST | `/fin/instrumentos` | POST crea posición; GET incluye `has_transactions` calculado |
+| PATCH | `/fin/instrumentos/{id}` | **409** si intenta editar `cantidad`/`costo_usd`/`ticker` con transacciones existentes |
+| DELETE | `/fin/instrumentos/{id}` | Elimina posición y transacciones (CASCADE) |
+| GET | `/fin/instrumentos/{id}/transacciones` | Transacciones del instrumento, orden fecha DESC |
+| POST | `/fin/instrumentos/{id}/transacciones` | Crea tx + recalcula posición; body: `tipo`, `fecha`, `cantidad`, `precio`, `moneda`, `tipo_cambio`, `nota`; 400 si venta > posición |
+| GET | `/fin/transacciones` | Global con JOIN a instrumento; query: `ticker`, `tipo_inst`, `desde`, `hasta`, `limit`, `offset` |
+| POST | `/fin/transacciones` | Crea tx con merge-por-ticker (find-or-create instrumento); body añade `instrumento_tipo`, `ticker`, `nombre` |
+| PATCH | `/fin/transacciones/{id}` | Edita campos de la tx + recalcula posición |
+| DELETE | `/fin/transacciones/{id}` | Elimina tx + recalcula posición |
+| CRUD | `/fin/objetivos` | POST crea categoría; PATCH sin `nombre`; DELETE oculta categoría |
 | GET/PUT | `/fin/fire-filas/{mes}`, `/fin/inflacion/{mes}` | |
 
 **Al crear movimiento:** si la categoría no existe se **crea automáticamente**. Riesgo de typos ("Comida" vs "comida").
@@ -323,7 +336,8 @@ Parsing: `{tipo?} {monto} {descripción…} {cuenta_hint?}` — el último token
 - **`MovimientosTableModal`:** click en fila → edición inline (descripción, monto, fecha) con confirmación; botón eliminar por fila con confirmación; focus trap + return focus al cerrar; `scope="col"` en headers.
 - **`CategoryDonutCard`:** click en segmento o leyenda → filtra `MovimientosListCard` del mismo tipo; badge "✕ cat" para limpiar filtro; highlight visual del segmento activo; atajos `activeCat` / `onFilterCat` como props.
 - **FireTab:** botón "Hoy — [mes]" sobre la tabla para volver a la fila actual; `ProyeccionRow` usa `saldoRealCuentas` (suma de `fin_cuentas.saldo_ars + saldo_usd × dolar`) como base real en lugar de `fire_saldo_inicial`; `scope="col"` en headers.
-- **AhorroTab:** `LedgerSection` al pie del tab — selector de instrumento, tabla de transacciones (compra/venta) con fecha/cantidad/precio/total/nota, formulario de alta, eliminar por fila. Llama a `/fin/instrumentos/{id}/transacciones` y `/fin/transacciones/{id}`. `scope="col"` en todas las tablas de headers.
+- **AhorroTab:** `LedgerSection` al pie del tab — selector de instrumento, tabla de transacciones (compra/venta) con fecha/cantidad/precio/total/nota/moneda, formulario de alta con campos `moneda` + `tipo_cambio` (TC visible solo si moneda=ARS), eliminar por fila. `handleAdd`/`handleDelete` via store (`addFinTransaccion`/`deleteFinTransaccion`) que recalculan posición automáticamente. `AccionesRows`: `cantidad`, PPC y `ticker` read-only para instrumentos con transacciones (`has_transactions`).
+- **Ledger unificado (backend):** `fin_transacciones_instrumento` es fuente de verdad; cada mutación llama a `_recalcular_posicion` que recalcula `cantidad` y `costo_usd` (PPC ponderado, ORDER BY fecha ASC, id ASC). Backfill automático en migración para posiciones manuales existentes (tx sintética "Saldo inicial"). Store: slice `finTransacciones` con `fetchFinTransacciones`, `addFinTransaccion`, `updateFinTransaccion`, `deleteFinTransaccion`; cada mutación llama `fetchFinInstrumentos()` al terminar.
 - **TopBar búsqueda Finanzas:** debounce 200ms → filtra localmente `finMovimientosAll` + `finNotas` + `finObjetivos`; dropdown con secciones Movimientos/Objetivos/Notas; se cierra al hacer click fuera o al seleccionar resultado. `searchInputRef` prop en TopBar para focus programático.
 - **Mobile tabs:** chip bar fija en `< md` con las 5 tabs (Dash/Anual/FIRE/Ahorro/Datos); accent activo; bottom padding en centro para no tapar contenido.
 - **Panel derecho bottom sheet:** visible en `lg` (entre `md` y `xl`) como panel flotante en esquina inferior derecha; muestra el panel derecho de la tab activa.

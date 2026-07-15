@@ -1,13 +1,15 @@
 import { Check } from 'lucide-react'
 import { useStore } from '../store/useStore'
-import { THEMES, SECTION_NAMES } from '../utils/themes'
+import { THEMES, FONT_PAIRS, SECTION_ORDER, SECTION_NAMES } from '../utils/themes'
 import { t } from '../utils/i18n'
 
-const SECTIONS = ['boveda', 'finanzas', 'agenda', 'habitos']
+const SECTIONS = SECTION_ORDER
 
 export default function SettingsScreen() {
-  const sectionThemes    = useStore(s => s.sectionThemes)
+  const sectionThemes      = useStore(s => s.sectionThemes)
+  const sectionFontPairs   = useStore(s => s.sectionFontPairs)
   const setThemeForSection = useStore(s => s.setThemeForSection)
+  const setFontPairForSection = useStore(s => s.setFontPairForSection)
   const lang             = useStore(s => s.lang)
   const setLang     = useStore(s => s.setLang)
   const userName    = useStore(s => s.userName)
@@ -104,6 +106,48 @@ export default function SettingsScreen() {
                         {th.name}
                       </span>
                       {active && <Check size={13} style={{ color: th['--accent'], flexShrink: 0 }} />}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Typography — per section */}
+      <section>
+        <h3 className="text-[10px] uppercase tracking-widest mb-4" style={{ color: 'var(--subtext)' }}>
+          Tipografía
+        </h3>
+        <div className="flex flex-col gap-6">
+          {SECTIONS.map(section => (
+            <div key={section}>
+              <p className="text-[11px] font-semibold mb-2" style={{ color: 'var(--text-2)' }}>
+                {SECTION_NAMES[section]}
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {Object.entries(FONT_PAIRS).map(([key, fp]) => {
+                  const active = sectionFontPairs[section] === key
+                  return (
+                    <button key={key} onClick={() => setFontPairForSection(section, key)}
+                      className="relative flex flex-col items-start gap-1 p-3 rounded-xl border transition-all duration-150 active:scale-[0.97]"
+                      style={{
+                        background: 'var(--surface)',
+                        borderColor: active ? 'var(--accent)' : 'var(--border)',
+                        boxShadow: active ? '0 0 0 1px var(--accent)' : 'none',
+                      }}
+                    >
+                      <span className="text-sm font-medium truncate w-full text-left" style={{ ...fp.titleStyle, color: 'var(--text)' }}>
+                        {fp.title}
+                      </span>
+                      <span className="text-[11px] truncate w-full text-left" style={{ ...fp.bodyStyle, color: 'var(--subtext)' }}>
+                        {fp.body}
+                      </span>
+                      <span className="text-[10px] truncate w-full text-left" style={{ color: 'var(--mute)' }}>
+                        {fp.name}
+                      </span>
+                      {active && <Check size={13} className="absolute top-2.5 right-2.5" style={{ color: 'var(--accent)' }} />}
                     </button>
                   )
                 })}

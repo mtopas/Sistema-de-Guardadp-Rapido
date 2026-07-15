@@ -26,6 +26,7 @@ export default defineConfig({
         share_target: {
           action: '/capture',
           method: 'GET',
+          enctype: 'application/x-www-form-urlencoded',
           params: { text: 'text', url: 'url', title: 'title' },
         },
       },

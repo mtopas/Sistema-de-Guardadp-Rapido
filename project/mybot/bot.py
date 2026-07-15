@@ -4,7 +4,7 @@ import os
 import re
 import sys
 import time as _time
-from datetime import datetime, time as datetime_time
+from datetime import datetime, time as datetime_time, timezone
 from pathlib import Path
 
 import requests
@@ -15,6 +15,7 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
     MessageHandler,
+    TypeHandler,
     filters,
 )
 from telegram.request import HTTPXRequest
@@ -102,10 +103,102 @@ def _update_rapido_last_cat(cat_id: int, cat_nombre: str):
 
 
 def _clear_boveda_picker(ud: dict) -> None:
-    """Cierra el menú inline de categorías sin borrar pasos de finanzas/agenda."""
+    """Cierra el menú inline activo sin borrar capturas de otros teclados ni finanzas/agenda.
+
+    `boveda_pending` (draft por message_id del teclado) se conserva a propósito:
+    en catch-up pueden quedar varios menús abiertos y cada uno debe seguir
+    pudiendo guardar su propio contenido.
+    """
     if ud.get("step") == STEP_CHOOSE_CATEGORY_INLINE:
         ud.pop("step", None)
     for k in ("draft", "tipo", "categorias_all", "cat_parent_id", "apuntes"):
+        ud.pop(k, None)
+
+
+def _boveda_payload_from_ud(ud: dict) -> dict:
+    return {
+        "draft": ud.get("draft", ""),
+        "tipo": ud.get("tipo", "texto"),
+        "apuntes": ud.get("apuntes"),
+        "lugar": ud.get("lugar"),
+        "latitud": ud.get("latitud"),
+        "longitud": ud.get("longitud"),
+        "link_preview": ud.get("link_preview"),
+    }
+
+
+def _truncate_line(line: str, max_len: int = 100) -> str:
+    line = (line or "").strip()
+    if len(line) <= max_len:
+        return line
+    return line[: max_len - 1] + "…"
+
+
+def _first_two_lines(text: str, max_line: int = 100) -> str:
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    if not lines:
+        return "—"
+    return "\n".join(_truncate_line(ln, max_line) for ln in lines[:2])
+
+
+def _fetch_link_preview(url: str) -> dict | None:
+    try:
+        r = requests.get(f"{API_BASE}/preview", params={"url": url}, timeout=12)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        logger.debug("link preview falló (%s): %s", url, e)
+        return None
+
+
+def _boveda_snippet(payload: dict) -> str:
+    """Resumen visible en el menú de categorías (2 líneas o título del link)."""
+    draft = (payload.get("draft") or "").strip()
+    tipo  = payload.get("tipo", "texto")
+
+    if tipo == "link":
+        url = _extract_url(draft) or draft
+        preview = payload.get("link_preview")
+        if preview is None and url:
+            preview = _fetch_link_preview(url)
+            if preview:
+                payload["link_preview"] = preview
+        title = (preview or {}).get("title") if preview else None
+        if title and str(title).strip():
+            return f"🔗 {_truncate_line(str(title).strip(), 120)}"
+        return f"🔗 {_first_two_lines(url or draft)}"
+
+    if tipo == "foto":
+        return f"📷 {_first_two_lines(draft or 'Foto sin título')}"
+
+    icon = {"texto": "📝"}.get(tipo, "📝")
+    return f"{icon} {_first_two_lines(draft)}"
+
+
+def _category_picker_text(payload: dict, parent_id: int | None) -> str:
+    prompt = "Elegí la subcategoría:" if parent_id is not None else "¿A qué categoría lo guardamos?"
+    return f"{_boveda_snippet(payload)}\n\n{prompt}"
+
+
+def _store_boveda_pending(ud: dict, picker_message_id: int, payload: dict) -> None:
+    ud.setdefault("boveda_pending", {})[picker_message_id] = payload
+
+
+def _get_boveda_pending(ud: dict, picker_message_id: int) -> dict | None:
+    pending = ud.get("boveda_pending") or {}
+    return pending.get(picker_message_id)
+
+
+def _finish_boveda_flow(ud: dict, picker_message_id: int | None = None) -> None:
+    """Limpia el step de Bóveda; no borra otras capturas pendientes ni otros módulos."""
+    if picker_message_id is not None:
+        (ud.get("boveda_pending") or {}).pop(picker_message_id, None)
+    ud.pop("boveda_creating", None)
+    ud.pop("step", None)
+    ud.pop("new_cat_parent_id", None)
+    ud.pop("photo_url", None)
+    for k in ("draft", "tipo", "categorias_all", "cat_parent_id", "apuntes",
+              "lugar", "latitud", "longitud"):
         ud.pop(k, None)
 
 
@@ -261,9 +354,28 @@ def _upload_photo(photo_bytes: bytes, filename: str = "photo.jpg") -> str:
     return r.json()["url"]
 
 
+def _extract_url(texto: str) -> str | None:
+    """Primera URL del texto, sin puntuación colgante típica de Telegram."""
+    m = URL_REGEX.search(texto or "")
+    if not m:
+        return None
+    url = m.group(0).rstrip(".,;:!?)\"'»")
+    return url or None
+
+
 def _detect_tipo(texto: str) -> str:
     """Returns 'link' if texto contains a URL, else 'texto'."""
     return "link" if URL_REGEX.search(texto) else "texto"
+
+
+def _is_bare_link(texto: str) -> bool:
+    """True si el mensaje es solo URL(s) — captura Bóveda, no consulta LLM."""
+    t = (texto or "").strip()
+    if not URL_REGEX.search(t):
+        return False
+    rest = URL_REGEX.sub("", t).strip()
+    rest = re.sub(r"^[\s,.:;!?]+|[\s,.:;!?]+$", "", rest)
+    return not rest
 
 
 # ──────────────────────────────────────────────────────────────
@@ -301,13 +413,27 @@ def _build_category_keyboard(categorias: list, parent_id: int | None = None,
     return InlineKeyboardMarkup(rows)
 
 
-async def _save_draft(ud: dict, bot_data: dict, cat: dict, message) -> bool:
-    draft   = ud.get("draft", "")
-    tipo    = ud.get("tipo", "texto")
-    apuntes = ud.get("apuntes")
-    lugar   = ud.get("lugar")
-    lat     = ud.get("latitud")
-    lon     = ud.get("longitud")
+async def _save_draft(
+    ud: dict,
+    bot_data: dict,
+    cat: dict,
+    message,
+    pending: dict | None = None,
+) -> bool:
+    src     = pending or ud
+    draft   = (src.get("draft") or "").strip()
+    tipo    = src.get("tipo", "texto")
+    apuntes = src.get("apuntes")
+    lugar   = src.get("lugar")
+    lat     = src.get("latitud")
+    lon     = src.get("longitud")
+
+    if not draft:
+        await message.reply_text(
+            "No se pudo guardar: el contenido de esa captura se perdió. "
+            "Reenviá el mensaje."
+        )
+        return False
 
     r = _post_hoja(draft, cat["id"], tipo=tipo, apuntes=apuntes,
                    lugar=lugar, latitud=lat, longitud=lon)
@@ -567,29 +693,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if await fh.handle_fin_quick_capture(update, context, texto):
             return
 
-        # ── LLM routing (texto libre sin prefijos) ─────────────
-        rr = ir.route(texto)
-        if rr.action in ("direct", "confirm"):
-            _clear_boveda_picker(ud)
-            summary = ir.format_summary(rr)
-            kb = InlineKeyboardMarkup([[
-                InlineKeyboardButton("✅ Confirmar", callback_data="llm_ok"),
-                InlineKeyboardButton("✏️ Corregir",  callback_data="llm_edit"),
-                InlineKeyboardButton("❌ Cancelar",  callback_data="llm_cancel"),
-            ]])
-            ud["llm_pending"] = ir.result_to_dict(rr)
-            await msg.reply_text(summary, reply_markup=kb, parse_mode="Markdown")
-            return
-        elif rr.action == "question":
-            thinking_msg = await msg.reply_text("🔍 Consultando…")
-            api = context.bot_data.get("api_base", API_BASE)
-            respuesta = assistant.answer_question(texto, rr.modulo, api)
-            try:
-                await thinking_msg.edit_text(respuesta)
-            except Exception:
-                await msg.reply_text(respuesta)
-            return
-        # "fallback": continúa al flujo Bóveda normal
+        # URL sola → Bóveda (el LLM suele clasificarla mal como consulta)
+        if not _is_bare_link(texto):
+            # ── LLM routing (texto libre sin prefijos) ─────────────
+            rr = ir.route(texto)
+            if rr.action in ("direct", "confirm"):
+                _clear_boveda_picker(ud)
+                summary = ir.format_summary(rr)
+                kb = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("✅ Confirmar", callback_data="llm_ok"),
+                    InlineKeyboardButton("✏️ Corregir",  callback_data="llm_edit"),
+                    InlineKeyboardButton("❌ Cancelar",  callback_data="llm_cancel"),
+                ]])
+                ud["llm_pending"] = ir.result_to_dict(rr)
+                await msg.reply_text(summary, reply_markup=kb, parse_mode="Markdown")
+                return
+            elif rr.action == "question":
+                thinking_msg = await msg.reply_text("🔍 Consultando…")
+                api = context.bot_data.get("api_base", API_BASE)
+                respuesta = assistant.answer_question(texto, rr.modulo, api)
+                try:
+                    await thinking_msg.edit_text(respuesta)
+                except Exception:
+                    await msg.reply_text(respuesta)
+                return
+            # "fallback": continúa al flujo Bóveda normal
 
     # ── Crear categoría nueva ─────────────────────────────────
     if step == STEP_NEW_CATEGORY_NAME:
@@ -608,8 +736,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data = r.json()
         _invalidate_cat_cache(context.bot_data)
         cat = {"id": data["id"], "nombre": data["nombre"]}
-        ok = await _save_draft(ud, context.bot_data, cat, msg)
-        ud.clear()
+        pending = ud.get("boveda_creating") or _boveda_payload_from_ud(ud)
+        await _save_draft(ud, context.bot_data, cat, msg, pending=pending)
+        _finish_boveda_flow(ud)
         return
 
     # ── Photo title ───────────────────────────────────────────
@@ -639,7 +768,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if rapido.get("activo") and rapido.get("cat_id"):
         cat = {"id": rapido["cat_id"], "nombre": rapido["cat_nombre"]}
         await _save_draft(ud, context.bot_data, cat, msg)
-        ud.clear()
+        _finish_boveda_flow(ud)
         return
 
     await _show_category_menu(msg, context, ud)
@@ -659,12 +788,19 @@ async def _show_category_menu(message, context: ContextTypes.DEFAULT_TYPE, ud: d
     ud["cat_parent_id"]  = parent_id
 
     kb = _build_category_keyboard(cats, parent_id=parent_id, back_btn=(parent_id is not None))
-    text = "¿A qué categoría lo guardamos?" if parent_id is None else "Elegí la subcategoría:"
 
     if edit_message:
+        mid = edit_message.message_id
+        # Al navegar subcategorías, conservar el contenido de ESE teclado.
+        payload = _get_boveda_pending(ud, mid) or _boveda_payload_from_ud(ud)
+        text = _category_picker_text(payload, parent_id)
         await edit_message.edit_text(text, reply_markup=kb)
+        _store_boveda_pending(ud, mid, payload)
     else:
-        await message.reply_text(text, reply_markup=kb)
+        payload = _boveda_payload_from_ud(ud)
+        text = _category_picker_text(payload, parent_id)
+        sent = await message.reply_text(text, reply_markup=kb)
+        _store_boveda_pending(ud, sent.message_id, payload)
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -770,7 +906,7 @@ async def handle_forward(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if rapido.get("activo") and rapido.get("cat_id"):
         cat = {"id": rapido["cat_id"], "nombre": rapido["cat_nombre"]}
         await _save_draft(ud, context.bot_data, cat, msg)
-        ud.clear()
+        _finish_boveda_flow(ud)
         return
 
     await _show_category_menu(msg, context, ud)
@@ -788,7 +924,15 @@ async def _handle_boveda_callback(update: Update, context: ContextTypes.DEFAULT_
     query = update.callback_query
     await query.answer()
     ud    = context.user_data
+    mid   = query.message.message_id if query.message else None
     cats  = ud.get("categorias_all") or []
+    if not cats and mid is not None:
+        # Catch-up / varios teclados: categorias_all puede haberse pisado.
+        try:
+            cats = _get_categories(context.bot_data)
+            ud["categorias_all"] = cats
+        except Exception:
+            cats = []
 
     # ── Browse into a root category (has subcategories) ────
     if data.startswith("bov_root:"):
@@ -809,15 +953,29 @@ async def _handle_boveda_callback(update: Update, context: ContextTypes.DEFAULT_
                 pass
         if cat is None:
             await query.edit_message_text("Categoría no encontrada. Intentá de nuevo.")
-            ud.clear()
+            _finish_boveda_flow(ud, picker_message_id=mid)
             return True
+
+        pending = _get_boveda_pending(ud, mid) if mid is not None else None
+        if not pending or not str(pending.get("draft") or "").strip():
+            # Fallback legacy (un solo draft compartido)
+            if str(ud.get("draft") or "").strip():
+                pending = _boveda_payload_from_ud(ud)
+            else:
+                await query.edit_message_text(
+                    "Esa captura ya no tiene contenido asociado "
+                    "(otro mensaje la pisó antes de elegir categoría). "
+                    "Reenviá el texto para guardarla."
+                )
+                _finish_boveda_flow(ud, picker_message_id=mid)
+                return True
 
         try:
             await query.edit_message_text(f"Guardando en [{cat['nombre']}]…")
         except Exception:
             pass
-        ok = await _save_draft(ud, context.bot_data, cat, query.message)
-        ud.clear()
+        await _save_draft(ud, context.bot_data, cat, query.message, pending=pending)
+        _finish_boveda_flow(ud, picker_message_id=mid)
         return True
 
     # ── Go back to root level ──────────────────────────────
@@ -825,12 +983,19 @@ async def _handle_boveda_callback(update: Update, context: ContextTypes.DEFAULT_
         ud["cat_parent_id"] = None
         cats_all = ud.get("categorias_all") or _get_categories(context.bot_data)
         kb   = _build_category_keyboard(cats_all, parent_id=None, back_btn=False)
-        await query.edit_message_text("¿A qué categoría lo guardamos?", reply_markup=kb)
+        pending = _get_boveda_pending(ud, mid) or _boveda_payload_from_ud(ud)
+        text = _category_picker_text(pending, parent_id=None)
+        await query.edit_message_text(text, reply_markup=kb)
+        if mid is not None:
+            _store_boveda_pending(ud, mid, pending)
         return True
 
     # ── Create new category ─────────────────────────────────
     if data == "bov_new_cat":
         parent_id = ud.get("cat_parent_id")
+        if mid is not None:
+            pending = _get_boveda_pending(ud, mid) or _boveda_payload_from_ud(ud)
+            ud["boveda_creating"] = pending
         ud["step"]             = STEP_NEW_CATEGORY_NAME
         ud["new_cat_parent_id"] = parent_id
         hint = " (subcategoría)" if parent_id else ""
@@ -916,8 +1081,112 @@ async def _global_error_handler(update: object, context: ContextTypes.DEFAULT_TY
     await dr.notify_exception(err, where="handler PTB", update_hint=hint)
 
 
+def _msg_date_utc(msg) -> datetime | None:
+    """Fecha del mensaje en UTC (Telegram a veces la manda naive)."""
+    if msg is None or getattr(msg, "date", None) is None:
+        return None
+    d = msg.date
+    if d.tzinfo is None:
+        return d.replace(tzinfo=timezone.utc)
+    return d.astimezone(timezone.utc)
+
+
+def _is_offline_user_message(update: Update, boot_time: datetime | None) -> bool:
+    """True si el update es un mensaje de usuario enviado antes de que el bot arrancara."""
+    if boot_time is None or update.callback_query is not None:
+        return False
+    msg = update.effective_message
+    msg_date = _msg_date_utc(msg)
+    if msg_date is None:
+        return False
+    # Solo mensajes "de usuario" (texto, foto, ubicación, forward, comandos).
+    if not (update.message or update.edited_message or update.channel_post):
+        return False
+    return msg_date < boot_time
+
+
+async def _catchup_after(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Grupo 1: corre después de los handlers normales.
+    - Marca cada mensaje atrasado con «✓ recibido (offline)».
+    - Cuenta updates pendientes y avisa cuando terminó el catch-up.
+    """
+    bd = context.bot_data
+    boot = bd.get("boot_time")
+
+    if _is_offline_user_message(update, boot):
+        msg = update.effective_message
+        try:
+            await msg.reply_text("✓ recibido (offline)")
+        except Exception as e:
+            logger.warning("catchup: no pude marcar mensaje offline (%s)", e)
+
+    if not bd.get("catchup_active"):
+        return
+
+    rem = bd.get("catchup_remaining")
+    if not isinstance(rem, int) or rem <= 0:
+        bd["catchup_active"] = False
+        return
+
+    rem -= 1
+    bd["catchup_remaining"] = rem
+    print(f"[bot] Catch-up: quedan {rem} update(s)…", flush=True)
+
+    if rem > 0:
+        return
+
+    bd["catchup_active"] = False
+    print("[bot] Catch-up terminado.", flush=True)
+    chat_id = bd.get("chat_id")
+    if not chat_id:
+        return
+    try:
+        await context.bot.send_message(chat_id, "Listo. Ya estoy al día.")
+    except Exception as e:
+        logger.warning("catchup: no pude avisar fin de cola (%s)", e)
+
+
 async def _post_init(application) -> None:
     dr.install(application)
+
+    boot = datetime.now(timezone.utc)
+    application.bot_data["boot_time"] = boot
+
+    pending = 0
+    try:
+        info = await application.bot.get_webhook_info()
+        pending = int(info.pending_update_count or 0)
+    except Exception as e:
+        print(f"[bot] Catch-up: no se pudo leer pending_update_count ({e})", flush=True)
+
+    application.bot_data["catchup_remaining"] = pending
+    application.bot_data["catchup_active"] = pending > 0
+
+    if pending <= 0:
+        print("[bot] Catch-up: cola vacía al arrancar (drop_pending_updates=False).", flush=True)
+        return
+
+    print(
+        f"[bot] Catch-up: {pending} update(s) pendientes en cola de Telegram "
+        "(se procesan uno a uno; no se descartan).",
+        flush=True,
+    )
+    chat_id = application.bot_data.get("chat_id")
+    if not chat_id:
+        print(
+            "[bot] Catch-up: hay pendientes pero no hay chat_id guardado; "
+            "no puedo avisar «Volví».",
+            flush=True,
+        )
+        return
+    try:
+        await application.bot.send_message(
+            chat_id,
+            f"Volví. Procesando {pending} mensaje(s) pendiente(s)…",
+        )
+    except Exception as e:
+        print(f"[bot] Catch-up: no pude avisar al chat ({e})", flush=True)
 
 
 async def _dispatch_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1039,6 +1308,9 @@ def main():
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.LOCATION, handle_location))
 
+    # Catch-up: marca mensajes offline y cierra el aviso «Listo» (después de handlers)
+    app.add_handler(TypeHandler(Update, _catchup_after), group=1)
+
     # ── Check-in nocturno (hora configurable) ────────────────
     if app.job_queue:
         _ci_h, _ci_m = ah._load_checkin_time()
@@ -1059,9 +1331,13 @@ def main():
 
     print(
         f"[bot] Iniciando polling (bootstrap_retries={TELEGRAM_BOOTSTRAP_RETRIES}, "
-        f"connect_timeout={TELEGRAM_CONNECT_TIMEOUT}s)…"
+        f"connect_timeout={TELEGRAM_CONNECT_TIMEOUT}s, drop_pending_updates=False)…"
     )
-    app.run_polling(bootstrap_retries=TELEGRAM_BOOTSTRAP_RETRIES)
+    # False explícito: al volver, Telegram entrega la cola (~24h) en orden.
+    app.run_polling(
+        bootstrap_retries=TELEGRAM_BOOTSTRAP_RETRIES,
+        drop_pending_updates=False,
+    )
 
 
 if __name__ == "__main__":

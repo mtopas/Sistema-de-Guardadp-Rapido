@@ -1,0 +1,60 @@
+# FINANZAS
+
+Un cuadro de filtros en Finanzas - Datos.
+
+Agregar un chip de ARS - USD para Finanzas - FIRE.
+Que se pueda ir cambiando para facilitar lectura.
+Debe usar el precio de dolar del sistema.
+
+"Indicadores del mes"en Finanzas - Dashboard no me sirve de nada. Busquemos algo mejor.
+
+# CALENDARIO
+
+Calendario - click derecho en calendarios para borrar o editar. Editar: cambiar nobmre o color.
+No se puede crear nuevo calendario.
+
+Cuadro de horarios de facultad tiene campos que salen de su contenedor: "Aula / descripción" y "Materia".
+
+Debo poder elegir un color para cada materia.
+
+Calendario - si editas un evento y lo cambias de calendario no actualiza el color.
+
+Calendario - en vista mensual que se vean 5 semanas. El mes completo. Ahora se ven 6 y hay una semana entera del mes que le sigue.
+
+Mover la ruedita para desplazar de mes en la vista mensual.
+
+Aparte de elegir calendario me gustaría poder elegirle color. El color deafult es el del calendario pero si quiero puedo elegir otro.
+
+# BOT
+
+/dia 2026-06-29 devuelve "Sin eventos" y "Sin tareas" por más de que hay eventos.
+Quiero cambiar el formato de fecha y que sea "/dia dd" y se busca el dia en el mes actual (ej. "/dia 29") y para el resto de fechas quiero el formato "dd-mm-aaaa".
+
+# BOVEDA
+
+Para borrar una nota aparece un cartel feo.
+No se puede borrar una categoría.
+
+Click derecho en una categoría, expande la categoría y a su vez me habre una hoja asociada a la cateogría.
+
+Ahí aparecen todas las hojas y me gustaría que abajo de cada título (que es un link para la hoja) haya una breve explicación de lo que hay en la hoja.
+
+Darle utilidades al gráfico. No puedo interactuar. Buscar ideas.
+
+Cuando se ingrese un link, me gustaría que al crear la hoja tenga cómo título el título que se extrajo de la metadata del link, y dentro del contenido de la hoja esté el link.
+Si no se obtuvo el título en la metadata, queda el link.
+
+# CALENDARIO
+
+Click derecho en calendario para editar nombre y color, o elimnar. Si se elimina pregunta, si borra todos los eventos o los cambia a otro caledario.
+
+Que se vea más el día de hoy en la vista mensual. Un círculo blanco alrededor del número del día de hoy.
+
+Próximos eventos debe estar ordenado del más cercano al más lejano.
+
+El tick del calendario no está centrado.
+
+# HABITOS
+
+
+

@@ -38,7 +38,7 @@ function RingProgress({ value, size = 24, color }) {
   )
 }
 
-export default function HoyTab({ selectedId, setSelectedId, onEdit, initialDate }) {
+export default function HoyTab({ selectedId, setSelectedId, onEdit, initialDate, onHabitoContextMenu }) {
   const habitos               = useStore(s => s.habitos)
   const habitosRegistros      = useStore(s => s.habitosRegistros)
   const upsertHabitoRegistro  = useStore(s => s.upsertHabitoRegistro)
@@ -310,6 +310,7 @@ export default function HoyTab({ selectedId, setSelectedId, onEdit, initialDate 
                           className="sticky left-0 z-10 shrink-0 flex items-center gap-2.5 px-4 py-2.5 cursor-pointer"
                           style={{ width: COL_NAME, background: nameBg, borderRight: '1px solid var(--border)' }}
                           onClick={() => setSelectedId(isSelected ? null : h.id)}
+                          onContextMenu={onHabitoContextMenu ? e => onHabitoContextMenu(e, h) : undefined}
                         >
                           <span className="w-2 h-2 rounded-full shrink-0" style={{ background: h.color }} />
                           <span

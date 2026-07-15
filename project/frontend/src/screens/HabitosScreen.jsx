@@ -8,6 +8,7 @@ import HabitosLeftPanel from '../components/habitos/HabitosLeftPanel'
 import HoyTab from '../components/habitos/HoyTab'
 import HabitosDrawer from '../components/habitos/HabitosDrawer'
 import NuevoHabitoModal from '../components/habitos/NuevoHabitoModal'
+import { useHabitoContextMenu } from '../components/habitos/useHabitoContextMenu'
 
 // Code-split tabs that are not default
 const ProgresoTab  = lazy(() => import('../components/habitos/ProgresoTab'))
@@ -32,6 +33,8 @@ export default function HabitosScreen() {
   const [localModalOpen, setLocal]  = useState(false)
   const [hoyInitialDate, setHoyInitialDate] = useState(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
+
+  const { openContextMenu, contextMenuLayer } = useHabitoContextMenu({ selectedId, setSelectedId })
 
   function handleHeatmapClick(year, month) {
     setHoyInitialDate(new Date(year, month, 1))
@@ -71,6 +74,7 @@ export default function HabitosScreen() {
           selectedId={selectedId}
           setSelectedId={setSelectedId}
           onNew={handleNew}
+          onHabitoContextMenu={openContextMenu}
         />
 
         <div className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
@@ -81,6 +85,7 @@ export default function HabitosScreen() {
                 setSelectedId={setSelectedId}
                 onEdit={handleEdit}
                 initialDate={hoyInitialDate}
+                onHabitoContextMenu={openContextMenu}
               />
             </div>
           )}
@@ -92,6 +97,7 @@ export default function HabitosScreen() {
                   setSelectedId={setSelectedId}
                   onEdit={handleEdit}
                   onHeatmapClick={handleHeatmapClick}
+                  onHabitoContextMenu={openContextMenu}
                 />
               </Suspense>
             </div>
@@ -103,6 +109,7 @@ export default function HabitosScreen() {
                   selectedId={selectedId}
                   setSelectedId={setSelectedId}
                   onEdit={handleEdit}
+                  onHabitoContextMenu={openContextMenu}
                 />
               </Suspense>
             </div>
@@ -121,6 +128,8 @@ export default function HabitosScreen() {
           onClose={() => setDrawerOpen(false)}
         />
       )}
+
+      {contextMenuLayer}
     </div>
   )
 }

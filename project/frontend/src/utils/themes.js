@@ -62,52 +62,59 @@ export const THEMES = {
     '--font-mono':     FONT_MONO_DEFAULT,
   },
 
-  // ---------- 3. COLORES TIERRA — terracota sobre arcilla ----------
-  'tierra': {
-    name: 'Colores tierra',
+  // ---------- 3. BLANCO Y NEGRO — minimalista monocromo ----------
+  'blanco-negro': {
+    name: 'Blanco y negro',
     dark: true,
-    '--bg':            '#1c1410',
-    '--sidebar':       '#15100c',
-    '--surface':       '#2a1f18',
-    '--panel-bg':      'rgba(36,26,20,0.86)',
-    '--border':        'rgba(156,94,38,0.22)',
-    '--accent':        '#c87f3e',
-    '--accent-light':  '#e0a878',
-    '--accent-deep':   '#9c5e26',
-    '--text':          '#f5ead8',
-    '--text-2':        '#d9c5a8',
-    '--subtext':       '#9a8770',
-    '--mute':          '#6b5d4d',
-    '--cta-bg':        'linear-gradient(130deg, #c87f3e, #e0a878)',
-    '--cta-text':      '#1c1410',
-    '--shadow-accent': '0 6px 18px -6px rgba(200,127,62,0.45)',
-    '--shadow-soft':   '0 4px 16px rgba(156,94,38,0.30)',
-    '--font-serif':    FONT_SERIF_PLAYFAIR,
+    '--bg':            '#0a0a0a',
+    '--sidebar':       '#050505',
+    '--surface':       '#141414',
+    '--panel-bg':      'rgba(18,18,18,0.94)',
+    '--border':        'rgba(255,255,255,0.10)',
+    '--accent':        '#ffffff',
+    '--accent-light':  '#f5f5f5',
+    '--accent-deep':   '#d4d4d4',
+    '--text':          '#fafafa',
+    '--text-2':        '#d4d4d4',
+    '--subtext':       '#a3a3a3',
+    '--mute':          '#737373',
+    '--cta-bg':        '#ffffff',
+    '--cta-text':      '#0a0a0a',
+    '--shadow-accent': '0 6px 18px -8px rgba(255,255,255,0.12)',
+    '--shadow-soft':   '0 4px 14px rgba(0,0,0,0.50)',
+    '--font-serif':    FONT_SANS_SPACE,
     '--font-sans':     FONT_SANS_PLEX,
-    '--font-mono':     FONT_MONO_DEFAULT,
+    '--font-mono':     FONT_MONO_GEIST,
   },
 
-  // ---------- 4. COLORES PASTELES — light lavanda ----------
-  'pasteles': {
-    name: 'Colores pasteles',
+  // ---------- 4. SAKURA — crema rosado, blush y rosa polvo ----------
+  'sakura': {
+    name: 'Sakura',
     dark: false,
-    '--bg':            '#fbf7ff',
-    '--sidebar':       '#f4edff',
-    '--surface':       '#eee5ff',
-    '--panel-bg':      'rgba(255,255,255,0.92)',
-    '--border':        'rgba(124,58,237,0.14)',
-    '--accent':        '#a78bfa',
-    '--accent-light':  '#c4b5fd',
-    '--accent-deep':   '#7c3aed',
-    '--text':          '#2a1f4a',
-    '--text-2':        '#4a3e6e',
-    '--subtext':       '#7c7194',
-    '--mute':          '#a59cba',
-    // CTAs en este theme usan accent-deep porque el accent es muy claro (WCAG)
-    '--cta-bg':        'linear-gradient(130deg, #7c3aed, #a78bfa)',
+    '--bg':            '#faf7f5',
+    '--sidebar':       '#ffffff',
+    '--surface':       '#ffffff',
+    '--panel-bg':      'rgba(255,255,255,0.94)',
+    '--header-bg':     '#edd8dc',
+    '--header-cta-bg': '#9e6369',
+    '--header-avatar-bg': '#8b6f72',
+    '--border':        'rgba(158,99,105,0.20)',
+    '--accent':        '#c4898e',
+    '--accent-light':  '#ddb4b8',
+    '--accent-deep':   '#9e6369',
+    '--accent-alt':    '#8b6f72',
+    '--color-cream':   '#faf7f5',
+    '--color-blush':   '#edd8dc',
+    '--color-rose':    '#c4898e',
+    '--color-mauve':   '#8b6f72',
+    '--text':          '#2d2428',
+    '--text-2':        '#453a3d',
+    '--subtext':       '#7a6569',
+    '--mute':          '#a89598',
+    '--cta-bg':        'linear-gradient(130deg, #9e6369, #c4898e)',
     '--cta-text':      '#ffffff',
-    '--shadow-accent': '0 8px 22px -10px rgba(42,31,74,0.25)',
-    '--shadow-soft':   '0 4px 14px rgba(91,70,145,0.12)',
+    '--shadow-accent': '0 8px 22px -10px rgba(158,99,105,0.28)',
+    '--shadow-soft':   '0 4px 14px rgba(45,36,40,0.07)',
     '--font-serif':    FONT_SERIF_PLAYFAIR,
     '--font-sans':     FONT_SANS_SORA,
     '--font-mono':     FONT_MONO_DEFAULT,
@@ -139,26 +146,35 @@ export const THEMES = {
     '--font-mono':     FONT_MONO_GEIST,
   },
 
-  // ---------- 6. ARENA Y NEGRO — desértico, contraste cálido ----------
-  'arena-negro': {
-    name: 'Arena y negro',
+  // ---------- 6. UNDERWATER — azul profundo + celeste, arena, naranja y bordó ----------
+  'underwater': {
+    name: 'Underwater',
     dark: true,
-    '--bg':            '#0c0a08',
-    '--sidebar':       '#070605',
-    '--surface':       '#1c1814',
-    '--panel-bg':      'rgba(23,20,16,0.85)',
-    '--border':        'rgba(194,168,125,0.20)',
-    '--accent':        '#e8d3b2',
-    '--accent-light':  '#f5e9d2',
-    '--accent-deep':   '#c2a87d',
+    '--bg':            '#0a3842',
+    '--sidebar':       '#082f38',
+    '--surface':       '#0d4552',
+    '--panel-bg':      'rgba(10, 56, 66, 0.92)',
+    '--header-bg':     '#104552',
+    '--header-cta-bg': '#d59039',
+    '--header-avatar-bg': '#217891',
+    '--border':        'rgba(90, 197, 216, 0.22)',
+    '--accent':        '#5ac5d8',
+    '--accent-light':  '#7ed4e8',
+    '--accent-deep':   '#d59039',
+    '--accent-alt':    '#8b3d4f',
+    '--color-sand':    '#e8d3b2',
+    '--color-orange':  '#d59039',
+    '--color-celeste': '#5ac5d8',
+    '--color-blue':    '#217891',
+    '--color-burgundy':'#8b3d4f',
     '--text':          '#e8d3b2',
-    '--text-2':        '#c4b394',
-    '--subtext':       '#8a7d65',
-    '--mute':          '#5a5142',
-    '--cta-bg':        'linear-gradient(130deg, #e8d3b2, #c2a87d)',
-    '--cta-text':      '#0c0a08',
-    '--shadow-accent': '0 6px 18px -8px rgba(232,211,178,0.28)',
-    '--shadow-soft':   '0 4px 14px rgba(0,0,0,0.55)',
+    '--text-2':        '#d4c4a8',
+    '--subtext':       '#9ecbd6',
+    '--mute':          '#6a9aa8',
+    '--cta-bg':        'linear-gradient(130deg, #d59039, #5ac5d8, #8b3d4f)',
+    '--cta-text':      '#ffffff',
+    '--shadow-accent': '0 6px 18px -8px rgba(90, 197, 216, 0.32)',
+    '--shadow-soft':   '0 4px 14px rgba(0, 0, 0, 0.45)',
     '--font-serif':    FONT_SERIF_FRAUNCES,
     '--font-sans':     FONT_SANS_SORA,
     '--font-mono':     FONT_MONO_DEFAULT,
@@ -166,6 +182,28 @@ export const THEMES = {
 }
 
 export const DEFAULT_THEME = 'disco-90s'
+
+// Solo algunos temas definen estas vars; hay que limpiarlas al cambiar de tema
+// para que no queden colgadas en documentElement (p. ej. header celeste en Disco).
+const OPTIONAL_THEME_VARS = [
+  '--header-bg',
+  '--header-cta-bg',
+  '--header-avatar-bg',
+  '--accent-alt',
+  '--color-orange',
+  '--color-celeste',
+  '--color-blue',
+  '--color-burgundy',
+  '--color-sand',
+  '--color-cream',
+  '--color-blush',
+  '--color-rose',
+  '--color-mauve',
+  '--color-violet',
+  '--color-yellow',
+  '--color-green',
+  '--color-red',
+]
 
 // Distinct saturated colors for category branches — independent of theme
 export const BRANCH_COLORS = [
@@ -284,11 +322,58 @@ export const SECTION_NAMES = {
   habitos:  'Hábitos',
 }
 
+/** Orden canónico al ciclar módulos: Bóveda → Finanzas → Agenda → Hábitos → … */
+export const SECTION_ORDER = ['boveda', 'finanzas', 'agenda', 'habitos']
+
+export const APP_MODULES = [
+  {
+    id:       'boveda',
+    match:    (p) => p === '/' || p.startsWith('/hoja') || p === '/capture' || p === '/settings',
+    path:     '/',
+    titleKey: 'brandName',
+    ctaKey:   'capture',
+    ctaStore: 'openCapture',
+  },
+  {
+    id:       'finanzas',
+    match:    (p) => p.startsWith('/finanzas'),
+    path:     '/finanzas',
+    titleKey: 'finanzas',
+    ctaKey:   'addMovement',
+    ctaStore: 'openMovement',
+  },
+  {
+    id:       'agenda',
+    match:    (p) => p.startsWith('/agenda'),
+    path:     '/agenda',
+    titleKey: 'agenda',
+    ctaKey:   'addEvento',
+    ctaStore: 'openAgendaEvento',
+  },
+  {
+    id:       'habitos',
+    match:    (p) => p.startsWith('/habitos'),
+    path:     '/habitos',
+    titleKey: 'habitos',
+    ctaKey:   'addHabito',
+    ctaStore: 'openHabitoModal',
+  },
+]
+
+export function moduleIndexForPath(path) {
+  const i = APP_MODULES.findIndex(m => m.match(path))
+  return i < 0 ? 0 : i
+}
+
+/** delta +1 = siguiente módulo, -1 = anterior (con vuelta circular). */
+export function adjacentModule(path, delta) {
+  const len = APP_MODULES.length
+  const i = moduleIndexForPath(path)
+  return APP_MODULES[(i + delta + len) % len]
+}
+
 export function pathToSection(path) {
-  if (path.startsWith('/finanzas')) return 'finanzas'
-  if (path.startsWith('/agenda'))   return 'agenda'
-  if (path.startsWith('/habitos'))  return 'habitos'
-  return 'boveda'
+  return APP_MODULES.find(m => m.match(path))?.id ?? 'boveda'
 }
 
 export function applyFonts(fontKey) {
@@ -302,6 +387,10 @@ export function applyFonts(fontKey) {
 export function applyTheme(themeKey, toneKey = null, fontKey = null) {
   const theme = THEMES[themeKey] || THEMES[DEFAULT_THEME]
   const root = document.documentElement
+
+  OPTIONAL_THEME_VARS.forEach(key => {
+    if (theme[key] == null) root.style.removeProperty(key)
+  })
 
   // Apply all CSS vars from the theme — but skip --font-* so the user's font
   // pair (chosen independently of theme) wins.

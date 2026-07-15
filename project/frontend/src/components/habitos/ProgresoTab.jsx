@@ -39,7 +39,7 @@ function calcWeekPct(habitos, registrosMap, weeksAgo) {
   return scheduled > 0 ? Math.round((done / scheduled) * 100) : 0
 }
 
-export default function ProgresoTab({ selectedId, setSelectedId, onEdit, onHeatmapClick }) {
+export default function ProgresoTab({ selectedId, setSelectedId, onEdit, onHeatmapClick, onHabitoContextMenu }) {
   const habitos          = useStore(s => s.habitos)
   const habitosRegistros = useStore(s => s.habitosRegistros)
 
@@ -390,6 +390,7 @@ export default function ProgresoTab({ selectedId, setSelectedId, onEdit, onHeatm
                   <tr
                     key={h.id}
                     onClick={() => setSelectedId(selectedId === h.id ? null : h.id)}
+                    onContextMenu={onHabitoContextMenu ? e => onHabitoContextMenu(e, h) : undefined}
                     className="cursor-pointer transition-colors"
                     style={{
                       borderBottom: '1px solid var(--border)',

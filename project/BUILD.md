@@ -17,7 +17,7 @@ python -m pip install -r requirements.txt -r requirements-build.txt; cd frontend
 
 Probar:
 ```bash
-$ErrorActionPreference = 'Stop'; python -m pip install -q -r requirements.txt -r requirements-build.txt; cd frontend; npm ci --loglevel=error; npm run build -- --logLevel warn; cd ..; python -m PyInstaller -y --log-level WARN sgr.spec
+$ErrorActionPreference = 'Stop'; python -m pip install -q -r requirements.txt -r requirements-build.txt; cd frontend; npm ci -****-loglevel=error; npm run build -- --logLevel warn; cd ..; python -m PyInstaller -y --log-level WARN sgr.spec
 ```
 
 El resultado queda en **`dist\SGR\`**. Para distribuir copiá **toda esa carpeta**, no solo `SGR.exe`.
@@ -69,3 +69,19 @@ Tras cambios en `run_sgr.py` o el puerto, volvé a correr PyInstaller (`python -
 El bot de Telegram (`mybot/bot.py`) **no** se incluye en el `.exe`; sigue siendo un proceso aparte apuntando a la misma API.
 
 **Homelab + `.exe` en Windows:** la DB canónica vive en el gabinete; antes de abrir el ejecutable conviene sincronizar. Diseño y scripts previstos: [`SYNC-WINDOWS.md`](SYNC-WINDOWS.md).
+
+## Tabs Finanzas en blanco / 404 en `/assets/FireTab-….js`
+
+Síntoma: al abrir FIRE, Anual o Ahorro en `:8765`, la consola muestra `Failed to fetch dynamically imported module` con hashes viejos (`index-6-qjpu8G.js`, etc.).
+
+**Causa habitual:** el frontend se recompiló pero el navegador (o un service worker viejo) sigue usando bundles de un build anterior. Los archivos con hash nuevo sí están en `frontend/dist/assets/`.
+
+**Una vez (limpiar caché del sitio):**
+
+1. Abrí DevTools (F12) → **Application** → **Service Workers** → **Unregister** en `http://127.0.0.1:8765`.
+2. Misma pestaña → **Storage** → **Clear site data** (solo para `127.0.0.1:8765`).
+3. Recargá con Ctrl+Shift+R.
+
+**Para que no vuelva a pasar:** después de cambios en el frontend, corré `npm run build` en `frontend/` y, si usás el `.exe`, volvé a empaquetar con PyInstaller. El backend sirve `sw.js`, `registerSW.js` e `/index.html` desde `frontend/dist/` para que el PWA pueda precachear sin 404.
+
+**Consola: `bad-precaching-response` … `index.html` 404:** el service worker pide `/index.html` sin header `Accept: text/html`. Reiniciá uvicorn (o recompilá el `.exe`) para tomar el fix en `main.py`; luego unregister del SW + recarga una vez.

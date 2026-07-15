@@ -96,7 +96,7 @@ const PERIODS = [
   { id: 'año',       label: 'Año' },
 ]
 
-export default function HistorialTab({ selectedId, setSelectedId, onEdit }) {
+export default function HistorialTab({ selectedId, setSelectedId, onEdit, onHabitoContextMenu }) {
   const habitos          = useStore(s => s.habitos)
   const habitosRegistros = useStore(s => s.habitosRegistros)
 
@@ -266,6 +266,7 @@ export default function HistorialTab({ selectedId, setSelectedId, onEdit }) {
             <button
               key={h.id}
               onClick={() => setFilterHabitoId(filterHabitoId === h.id ? null : h.id)}
+              onContextMenu={onHabitoContextMenu ? e => onHabitoContextMenu(e, h) : undefined}
               className="text-left px-2.5 py-1.5 rounded-lg text-[12px] flex items-center gap-2 transition-colors"
               style={{ background: filterHabitoId === h.id ? 'var(--surface)' : 'transparent', color: 'var(--text)' }}
             >

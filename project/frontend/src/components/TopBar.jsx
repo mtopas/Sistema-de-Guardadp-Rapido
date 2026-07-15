@@ -4,44 +4,7 @@ import { Search, Bell, Plus, Settings, Target, CheckCircle2, Calendar, CheckSqua
 import { useStore } from '../store/useStore'
 import { t } from '../utils/i18n'
 import { API_URL } from '../config'
-
-// Top-level modules that can be cycled from the title.
-// Each entry: route to navigate to + i18n key for the title.
-const MODULES = [
-  {
-    match:    (p) => p === '/' || p.startsWith('/hoja') || p === '/capture',
-    path:     '/',
-    titleKey: 'brandName',
-    ctaKey:   'capture',
-    ctaStore: 'openCapture',
-  },
-  {
-    match:    (p) => p.startsWith('/finanzas'),
-    path:     '/finanzas',
-    titleKey: 'finanzas',
-    ctaKey:   'addMovement',
-    ctaStore: 'openMovement',
-  },
-  {
-    match:    (p) => p.startsWith('/agenda'),
-    path:     '/agenda',
-    titleKey: 'agenda',
-    ctaKey:   'addEvento',
-    ctaStore: 'openAgendaEvento',
-  },
-  {
-    match:    (p) => p.startsWith('/habitos'),
-    path:     '/habitos',
-    titleKey: 'habitos',
-    ctaKey:   'addHabito',
-    ctaStore: 'openHabitoModal',
-  },
-]
-
-function currentModuleIndex(path) {
-  const i = MODULES.findIndex(m => m.match(path))
-  return i === -1 ? 0 : i
-}
+import { APP_MODULES, adjacentModule, moduleIndexForPath } from '../utils/themes'
 
 const kbdStyle = {
   borderColor: 'var(--border)',
@@ -56,7 +19,7 @@ function IconButton({ children, onClick, ariaLabel, badge = false }) {
       type="button"
       onClick={onClick}
       aria-label={ariaLabel}
-      className="relative inline-flex items-center justify-center rounded-[10px] transition-colors duration-150"
+      className="relative inline-flex items-center justify-center rounded-[10px] transition-colors duration-150 topbar-icon-btn"
       style={{
         width: 32, height: 32, color: 'var(--subtext)',
         background: 'transparent', border: '1px solid transparent',
@@ -77,7 +40,7 @@ function IconButton({ children, onClick, ariaLabel, badge = false }) {
           style={{
             top: 6, right: 6,
             width: 8, height: 8, borderRadius: 999,
-            background: 'var(--accent)',
+            background: 'var(--accent-alt, var(--accent))',
             boxShadow: '0 0 0 2px var(--bg)',
           }}
         />
@@ -211,10 +174,11 @@ export default function TopBar({ searchQuery = '', onSearchChange, searchInputRe
     setBellOpen(true)
   }
 
-  const modIdx      = currentModuleIndex(location.pathname)
-  const currentMod  = MODULES[modIdx]
-  const prevMod     = MODULES[(modIdx - 1 + MODULES.length) % MODULES.length]
-  const nextMod     = MODULES[(modIdx + 1) % MODULES.length]
+  const path        = location.pathname
+  const modIdx      = moduleIndexForPath(path)
+  const currentMod  = APP_MODULES[modIdx]
+  const prevMod     = adjacentModule(path, -1)
+  const nextMod     = adjacentModule(path, 1)
   const title       = (t(lang, currentMod.titleKey) || 'SGR').toUpperCase()
   const cycleNext   = () => navigate(nextMod.path)
   const cyclePrev   = (e) => { e.preventDefault(); navigate(prevMod.path) }
@@ -227,18 +191,18 @@ export default function TopBar({ searchQuery = '', onSearchChange, searchInputRe
     <header
       className="h-[60px] shrink-0 sticky top-0 z-30 flex items-center px-6 gap-6 border-b"
       style={{
-        background: 'var(--panel-bg)',
+        background: 'var(--header-bg, var(--panel-bg))',
         borderColor: 'var(--border)',
         backdropFilter: 'blur(12px)',
         WebkitBackdropFilter: 'blur(12px)',
       }}
     >
-      {/* Module title — left click = prev, right click = next */}
+      {/* Module title — clic = siguiente · clic derecho = anterior */}
       <button
         type="button"
         onClick={cycleNext}
         onContextMenu={cyclePrev}
-        title={`← ${t(lang, prevMod.titleKey)}  /  ${t(lang, nextMod.titleKey)} →`}
+        title={`→ ${t(lang, nextMod.titleKey)}  ·  ← ${t(lang, prevMod.titleKey)}`}
         className="flex items-center rounded-md select-none transition-transform duration-150 hover:scale-[1.03] active:scale-95 focus:outline-none cursor-pointer"
       >
         <span
@@ -521,9 +485,9 @@ export default function TopBar({ searchQuery = '', onSearchChange, searchInputRe
         <button
           type="button"
           onClick={runCta}
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-[10px] text-[13px] font-medium transition-all duration-150 active:scale-[0.985]"
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-[10px] text-[13px] font-medium transition-all duration-150 active:scale-[0.985] topbar-cta"
           style={{
-            background: 'var(--cta-bg)',
+            background: 'var(--header-cta-bg, var(--cta-bg))',
             color: 'var(--cta-text)',
             border: '1px solid transparent',
             boxShadow: 'var(--shadow-accent)',
@@ -539,9 +503,9 @@ export default function TopBar({ searchQuery = '', onSearchChange, searchInputRe
 
         <div className="flex items-center gap-2.5 pl-1">
           <div
-            className="w-9 h-9 rounded-full grid place-items-center shrink-0"
+            className="w-9 h-9 rounded-full grid place-items-center shrink-0 topbar-avatar"
             style={{
-              background: 'var(--cta-bg)',
+              background: 'var(--header-avatar-bg, var(--cta-bg))',
               color: 'var(--cta-text)',
               fontFamily: "var(--font-serif)",
               fontStyle: 'italic',

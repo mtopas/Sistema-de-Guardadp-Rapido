@@ -6,7 +6,7 @@ import {
   buildRegistrosMap, calcStreak, todayStatus, toISODate, isScheduled
 } from './habitosUtils'
 
-export default function HabitosLeftPanel({ selectedId, setSelectedId, onNew }) {
+export default function HabitosLeftPanel({ selectedId, setSelectedId, onNew, onHabitoContextMenu }) {
   const lang             = useStore(s => s.lang)
   const habitos          = useStore(s => s.habitos)
   const habitosRegistros = useStore(s => s.habitosRegistros)
@@ -107,6 +107,11 @@ export default function HabitosLeftPanel({ selectedId, setSelectedId, onNew }) {
 
       {/* Habit list */}
       <div className="flex-1 overflow-y-auto px-2 pb-4">
+        {activos.length > 0 && onHabitoContextMenu && (
+          <p className="px-2 pb-2 text-[10px] leading-snug" style={{ color: 'var(--mute)' }}>
+            {t(lang, 'habitosContextHint')}
+          </p>
+        )}
         {activos.length === 0 ? (
           <div className="flex flex-col items-center gap-3 px-4 py-10 text-center">
             <div
@@ -159,6 +164,7 @@ export default function HabitosLeftPanel({ selectedId, setSelectedId, onNew }) {
                 <div
                   key={h.id}
                   onClick={() => setSelectedId(isSelected ? null : h.id)}
+                  onContextMenu={onHabitoContextMenu ? e => onHabitoContextMenu(e, h) : undefined}
                   className="flex items-center gap-2 pl-2 pr-2 py-2 rounded-xl cursor-pointer transition-colors duration-150"
                   style={{
                     background: isSelected ? 'var(--surface)' : 'transparent',

@@ -16,6 +16,26 @@ export default function HabitosRightPanel({ selectedId, onEdit, forceVisible = f
 
   const habito = habitos.find(h => h.id === selectedId)
 
+  const registrosMap = useMemo(() => buildRegistrosMap(habitosRegistros), [habitosRegistros])
+  const today        = new Date()
+  const year         = today.getFullYear()
+  const month        = today.getMonth()
+
+  // Sparkline: last 30 days (scheduled days only)
+  const sparkDays = useMemo(() => {
+    if (!habito) return []
+    const days = []
+    const t0 = new Date(today); t0.setHours(0,0,0,0)
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(t0); d.setDate(t0.getDate() - i)
+      if (!isScheduled(habito, d)) continue
+      const dateStr = toISODate(d)
+      const reg = registrosMap[`${habito.id}-${dateStr}`]
+      days.push({ dateStr, valor: reg ? reg.valor : 0, isFuture: false })
+    }
+    return days
+  }, [habito, registrosMap])
+
   if (!habito) {
     return (
       <aside
@@ -29,11 +49,6 @@ export default function HabitosRightPanel({ selectedId, onEdit, forceVisible = f
     )
   }
 
-  const registrosMap = useMemo(() => buildRegistrosMap(habitosRegistros), [habitosRegistros])
-  const today        = new Date()
-  const year         = today.getFullYear()
-  const month        = today.getMonth()
-
   const streak    = calcStreak(habito, registrosMap)
   const maxStreak = calcMaxStreak(habito, registrosMap)
   const pctMes    = calcMonthPct(habito, registrosMap, year, month)
@@ -44,20 +59,6 @@ export default function HabitosRightPanel({ selectedId, onEdit, forceVisible = f
     .filter(r => r.habito_id === habito.id)
     .sort((a, b) => b.fecha.localeCompare(a.fecha))
     .slice(0, 10)
-
-  // Sparkline: last 30 days (scheduled days only)
-  const sparkDays = useMemo(() => {
-    const days = []
-    const t0 = new Date(today); t0.setHours(0,0,0,0)
-    for (let i = 29; i >= 0; i--) {
-      const d = new Date(t0); d.setDate(t0.getDate() - i)
-      if (!isScheduled(habito, d)) continue
-      const dateStr = toISODate(d)
-      const reg = registrosMap[`${habito.id}-${dateStr}`]
-      days.push({ dateStr, valor: reg ? reg.valor : 0, isFuture: false })
-    }
-    return days
-  }, [habito, registrosMap])
 
   return (
     <aside

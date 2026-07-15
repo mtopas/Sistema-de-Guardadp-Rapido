@@ -115,6 +115,184 @@ html[data-theme-mode="light"] body::before {
   border-left: 2px solid var(--accent-deep);
 }
 
+/* Underwater — header azul nocturno (misma familia que el fondo) */
+html[data-theme="underwater"] header {
+  color: var(--color-sand);
+  border-color: color-mix(in srgb, var(--color-blue) 28%, #0a3842);
+}
+html[data-theme="underwater"] header .gradient-text {
+  background: none;
+  -webkit-background-clip: unset;
+  background-clip: unset;
+  -webkit-text-fill-color: var(--color-sand);
+  color: var(--color-sand);
+}
+html[data-theme="underwater"] header .topbar-icon-btn:hover {
+  background: rgba(90, 197, 216, 0.12) !important;
+  color: var(--color-celeste) !important;
+}
+html[data-theme="underwater"] header .flex.items-center.gap-2.px-3.h-9 {
+  background: rgba(8, 47, 56, 0.55);
+}
+html[data-theme="underwater"] header .flex.items-center.gap-2.px-3.h-9:focus-within {
+  border-color: var(--color-orange) !important;
+}
+html[data-theme="underwater"] header kbd {
+  background: rgba(8, 47, 56, 0.45);
+  border-color: color-mix(in srgb, var(--color-celeste) 30%, #0a3842);
+  color: var(--color-sand);
+}
+html[data-theme="underwater"] header .w-px {
+  background: color-mix(in srgb, var(--color-orange) 45%, #0a3842);
+}
+html[data-theme="underwater"] .gradient-border-active {
+  border-left-color: var(--color-orange);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-orange) 16%, transparent),
+    color-mix(in srgb, var(--color-celeste) 8%, transparent)
+  );
+}
+html[data-theme="underwater"] .btn-ghost {
+  color: var(--color-celeste);
+}
+html[data-theme="underwater"] .btn-ghost:hover {
+  background: color-mix(in oklch, var(--color-orange) 14%, transparent);
+  color: var(--color-sand);
+}
+html[data-theme="underwater"] .btn-fin:hover {
+  border-color: color-mix(in oklch, var(--color-celeste) 40%, var(--border));
+  color: var(--color-sand);
+}
+html[data-theme="underwater"] .label {
+  color: var(--color-burgundy);
+}
+html[data-theme="underwater"] .chip {
+  color: var(--color-sand);
+  border-color: color-mix(in srgb, var(--color-celeste) 32%, transparent);
+}
+html[data-theme="underwater"] .divider {
+  background: color-mix(in srgb, var(--color-celeste) 24%, transparent);
+}
+html[data-theme="underwater"] ::placeholder {
+  color: var(--color-celeste);
+  opacity: 0.55;
+}
+html[data-theme="underwater"] body::before {
+  background:
+    radial-gradient(60% 50% at 18% 0%,
+      color-mix(in oklch, var(--color-celeste) 14%, transparent) 0%,
+      transparent 60%),
+    radial-gradient(40% 35% at 100% 100%,
+      color-mix(in oklch, var(--color-orange) 10%, transparent) 0%,
+      transparent 70%);
+}
+
+/* Sakura — blush en header, rosa y malva en detalles */
+html[data-theme="sakura"] header {
+  color: var(--accent-deep);
+  border-color: color-mix(in srgb, var(--color-rose) 24%, white);
+}
+html[data-theme="sakura"] header .gradient-text {
+  background: none;
+  -webkit-background-clip: unset;
+  background-clip: unset;
+  -webkit-text-fill-color: var(--accent-deep);
+  color: var(--accent-deep);
+}
+html[data-theme="sakura"] header .topbar-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.48) !important;
+  color: var(--accent-deep) !important;
+}
+html[data-theme="sakura"] header .flex.items-center.gap-2.px-3.h-9 {
+  background: rgba(255, 255, 255, 0.82);
+}
+html[data-theme="sakura"] header .flex.items-center.gap-2.px-3.h-9:focus-within {
+  border-color: var(--color-rose) !important;
+}
+html[data-theme="sakura"] header kbd {
+  background: rgba(255, 255, 255, 0.62);
+  border-color: color-mix(in srgb, var(--color-mauve) 28%, white);
+  color: var(--accent-deep);
+}
+html[data-theme="sakura"] header .w-px {
+  background: color-mix(in srgb, var(--color-rose) 38%, white);
+}
+html[data-theme="sakura"] .gradient-border-active {
+  border-left-color: var(--color-rose);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-rose) 14%, transparent),
+    color-mix(in srgb, var(--color-blush) 30%, transparent)
+  );
+}
+html[data-theme="sakura"] .btn-ghost {
+  color: var(--accent-deep);
+}
+html[data-theme="sakura"] .btn-ghost:hover {
+  background: color-mix(in oklch, var(--color-blush) 55%, transparent);
+  color: var(--accent-deep);
+}
+html[data-theme="sakura"] .btn-fin:hover {
+  border-color: color-mix(in oklch, var(--color-rose) 40%, var(--border));
+  color: var(--accent-deep);
+}
+html[data-theme="sakura"] .label {
+  color: var(--color-mauve);
+}
+html[data-theme="sakura"] .chip {
+  color: var(--accent-deep);
+  border-color: color-mix(in srgb, var(--color-rose) 32%, transparent);
+  background: color-mix(in oklch, var(--color-blush) 40%, white);
+}
+html[data-theme="sakura"] .divider {
+  background: color-mix(in srgb, var(--color-rose) 22%, transparent);
+}
+html[data-theme="sakura"] ::placeholder {
+  color: var(--color-mauve);
+  opacity: 0.65;
+}
+html[data-theme="sakura"] body::before {
+  background:
+    radial-gradient(58% 48% at 14% 0%,
+      color-mix(in oklch, var(--color-rose) 11%, transparent) 0%,
+      transparent 62%),
+    radial-gradient(38% 34% at 96% 92%,
+      color-mix(in oklch, var(--color-blush) 18%, transparent) 0%,
+      transparent 68%);
+}
+
+/* Blanco y negro — sin glow, tipografía y acentos planos */
+html[data-theme="blanco-negro"] body::before {
+  display: none;
+}
+html[data-theme="blanco-negro"] header .gradient-text {
+  background: none;
+  -webkit-background-clip: unset;
+  background-clip: unset;
+  -webkit-text-fill-color: #ffffff;
+  color: #ffffff;
+}
+html[data-theme="blanco-negro"] .gradient-border-active {
+  border-left-color: #ffffff;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.10),
+    transparent
+  );
+}
+html[data-theme="blanco-negro"] .chip {
+  border-color: rgba(255, 255, 255, 0.14);
+  color: var(--subtext);
+}
+html[data-theme="blanco-negro"] .btn-ghost {
+  color: #ffffff;
+}
+html[data-theme="blanco-negro"] .btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
 /* ============================================================
    Finance / dashboard utilities (used by Finanzas screen)
    Mapped to theme CSS vars so they stay theme-aware.

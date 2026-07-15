@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { API_URL, DEBUG } from '../config'
 import { categoriaDescendantIds } from '../utils/categoriaColors'
-import { applyTheme, DEFAULT_THEME, DEFAULT_TONE, DEFAULT_FONT_PAIR, FONT_PAIRS, THEMES, TONES, ARCOIRIS_ACCENTS, pathToSection } from '../utils/themes'
+import { applyTheme, DEFAULT_THEME, DEFAULT_TONE, DEFAULT_FONT_PAIR, FONT_PAIRS, THEMES, TONES, ARCOIRIS_ACCENTS, pathToSection, SECTION_ORDER } from '../utils/themes'
 
 function currentMes() {
   const d = new Date()
@@ -22,21 +22,34 @@ function finPayloadEqual(a, b) {
 
 // Per-section themes — each module has its own independent theme + tone.
 // Migration: if no per-section key exists yet, fall back to the old global key.
+const THEME_ALIASES = { 'arena-negro': 'underwater', 'sunbeach': 'underwater', 'moonbeach': 'underwater', 'pasteles': 'sakura', 'tierra': 'blanco-negro' }
+function _resolveThemeKey(v) {
+  const key = THEME_ALIASES[v] || v
+  return (key && THEMES[key]) ? key : null
+}
+
 const _lgTheme   = localStorage.getItem('sgr-theme')
 const _lgTone    = localStorage.getItem('sgr-tone')
-const legacyTheme = (_lgTheme && THEMES[_lgTheme]) ? _lgTheme : DEFAULT_THEME
+const legacyTheme = _resolveThemeKey(_lgTheme) || DEFAULT_THEME
 const legacyTone  = (_lgTone  && TONES[_lgTone])   ? _lgTone  : DEFAULT_TONE
 
-const SECTION_KEYS = ['boveda', 'finanzas', 'agenda', 'habitos']
-function _readSectionTheme(s) { const v = localStorage.getItem(`sgr-theme-${s}`); return (v && THEMES[v]) ? v : legacyTheme }
+const SECTION_KEYS = SECTION_ORDER
+function _readSectionTheme(s) { return _resolveThemeKey(localStorage.getItem(`sgr-theme-${s}`)) || legacyTheme }
 function _readSectionTone(s)  { const v = localStorage.getItem(`sgr-tone-${s}`);  return (v && TONES[v])  ? v : legacyTone  }
 
 const initialSectionThemes = Object.fromEntries(SECTION_KEYS.map(s => [s, _readSectionTheme(s)]))
 const initialSectionTones  = Object.fromEntries(SECTION_KEYS.map(s => [s, _readSectionTone(s)]))
 
 const rawFontPair = localStorage.getItem('sgr-font-pair')
-const savedFontPair = (rawFontPair && FONT_PAIRS[rawFontPair]) ? rawFontPair : DEFAULT_FONT_PAIR
-if (rawFontPair && !FONT_PAIRS[rawFontPair]) localStorage.setItem('sgr-font-pair', savedFontPair)
+const legacyFontPair = (rawFontPair && FONT_PAIRS[rawFontPair]) ? rawFontPair : DEFAULT_FONT_PAIR
+if (rawFontPair && !FONT_PAIRS[rawFontPair]) localStorage.setItem('sgr-font-pair', legacyFontPair)
+
+function _readSectionFontPair(s) {
+  const v = localStorage.getItem(`sgr-font-pair-${s}`)
+  return (v && FONT_PAIRS[v]) ? v : legacyFontPair
+}
+
+const initialSectionFontPairs = Object.fromEntries(SECTION_KEYS.map(s => [s, _readSectionFontPair(s)]))
 
 // Apply arcoíris accent override inline (used in actions below)
 function _applyArcoirisAccent(theme) {
@@ -54,7 +67,8 @@ function _applyArcoirisAccent(theme) {
 const startSection = pathToSection(window.location.pathname)
 const startTheme   = initialSectionThemes[startSection]
 const startTone    = initialSectionTones[startSection]
-applyTheme(startTheme, startTone, savedFontPair)
+const startFontPair = initialSectionFontPairs[startSection]
+applyTheme(startTheme, startTone, startFontPair)
 _applyArcoirisAccent(startTheme)
 
 const savedLang     = localStorage.getItem('sgr-lang')     || 'es'
@@ -65,9 +79,10 @@ export const useStore = create((set, get) => ({
   categorias: [],
   theme:          startTheme,
   tone:           startTone,
-  fontPair:       savedFontPair,
-  sectionThemes:  initialSectionThemes,
-  sectionTones:   initialSectionTones,
+  fontPair:          startFontPair,
+  sectionThemes:     initialSectionThemes,
+  sectionTones:      initialSectionTones,
+  sectionFontPairs:  initialSectionFontPairs,
   currentSection: startSection,
   lang:       savedLang,
   userName:   savedUserName,
@@ -1093,8 +1108,8 @@ export const useStore = create((set, get) => ({
 
   // --- Theme (per-section) ---
   setTheme: (key) => {
-    const { currentSection, sectionTones, fontPair } = get()
-    applyTheme(key, sectionTones[currentSection], fontPair)
+    const { currentSection, sectionTones, sectionFontPairs } = get()
+    applyTheme(key, sectionTones[currentSection], sectionFontPairs[currentSection])
     _applyArcoirisAccent(key)
     localStorage.setItem(`sgr-theme-${currentSection}`, key)
     set({ theme: key, sectionThemes: { ...get().sectionThemes, [currentSection]: key } })
@@ -1103,48 +1118,66 @@ export const useStore = create((set, get) => ({
 
   // --- Tone (per-section, modificador del theme) ---
   setTone: (key) => {
-    const { currentSection, sectionThemes, fontPair } = get()
+    const { currentSection, sectionThemes, sectionFontPairs } = get()
     const theme = sectionThemes[currentSection]
-    applyTheme(theme, key, fontPair)
+    applyTheme(theme, key, sectionFontPairs[currentSection])
     _applyArcoirisAccent(theme)
     localStorage.setItem(`sgr-tone-${currentSection}`, key)
     set({ tone: key, sectionTones: { ...get().sectionTones, [currentSection]: key } })
     if (DEBUG) console.log('tone set:', key, 'for', currentSection)
   },
 
-  // --- Font pair (global — tipografía independiente de la sección) ---
+  // --- Font pair (per-section) ---
   setFontPair: (key) => {
     const { currentSection, sectionThemes, sectionTones } = get()
     const theme = sectionThemes[currentSection]
     applyTheme(theme, sectionTones[currentSection], key)
     _applyArcoirisAccent(theme)
-    localStorage.setItem('sgr-font-pair', key)
-    set({ fontPair: key })
-    if (DEBUG) console.log('fontPair set:', key)
+    localStorage.setItem(`sgr-font-pair-${currentSection}`, key)
+    set({
+      fontPair: key,
+      sectionFontPairs: { ...get().sectionFontPairs, [currentSection]: key },
+    })
+    if (DEBUG) console.log('fontPair set:', key, 'for', currentSection)
   },
 
   // --- Switch active section (called by Layout on route change) ---
   setCurrentSection: (section) => {
-    const { sectionThemes, sectionTones, fontPair } = get()
+    const { sectionThemes, sectionTones, sectionFontPairs } = get()
     const theme = sectionThemes[section]
     const tone  = sectionTones[section]
+    const fontPair = sectionFontPairs[section]
     applyTheme(theme, tone, fontPair)
     _applyArcoirisAccent(theme)
-    set({ currentSection: section, theme, tone })
+    set({ currentSection: section, theme, tone, fontPair })
   },
 
   // --- Set theme for a specific section (used by SettingsScreen) ---
   setThemeForSection: (section, key) => {
-    const { currentSection, sectionTones, fontPair } = get()
+    const { currentSection, sectionTones, sectionFontPairs } = get()
     localStorage.setItem(`sgr-theme-${section}`, key)
     const newSectionThemes = { ...get().sectionThemes, [section]: key }
     set({ sectionThemes: newSectionThemes })
     if (section === currentSection) {
-      applyTheme(key, sectionTones[section], fontPair)
+      applyTheme(key, sectionTones[section], sectionFontPairs[section])
       _applyArcoirisAccent(key)
       set({ theme: key })
     }
     if (DEBUG) console.log('themeForSection set:', key, 'for', section)
+  },
+
+  // --- Set font pair for a specific section (used by SettingsScreen) ---
+  setFontPairForSection: (section, key) => {
+    const { currentSection, sectionThemes, sectionTones } = get()
+    localStorage.setItem(`sgr-font-pair-${section}`, key)
+    const newSectionFontPairs = { ...get().sectionFontPairs, [section]: key }
+    set({ sectionFontPairs: newSectionFontPairs })
+    if (section === currentSection) {
+      applyTheme(sectionThemes[section], sectionTones[section], key)
+      _applyArcoirisAccent(sectionThemes[section])
+      set({ fontPair: key })
+    }
+    if (DEBUG) console.log('fontPairForSection set:', key, 'for', section)
   },
 
   // --- Toast ---
@@ -1233,6 +1266,25 @@ export const useStore = create((set, get) => ({
     } catch (e) {
       if (DEBUG) console.error('actualizarCategoria:', e)
       get().showToast('Error al actualizar categoría', 'error')
+      return false
+    }
+  },
+
+  eliminarCategoria: async (id) => {
+    try {
+      const res = await fetch(`${API_URL}/categorias/${id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => ({}))).detail || 'Error al eliminar categoría'
+        get().showToast(detail, 'error')
+        return false
+      }
+      set(state => ({ categorias: state.categorias.filter(c => c.id !== id) }))
+      get().showToast('Categoría eliminada', 'success')
+      if (DEBUG) console.log('eliminarCategoria:', id)
+      return true
+    } catch (e) {
+      if (DEBUG) console.error('eliminarCategoria:', e)
+      get().showToast('Error al eliminar categoría', 'error')
       return false
     }
   },

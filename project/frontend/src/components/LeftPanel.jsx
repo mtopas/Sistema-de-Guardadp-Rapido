@@ -9,6 +9,8 @@ import ScrollArea from './ScrollArea'
 import AgendaContextMenu from './agenda/AgendaContextMenu'
 import EditCategoriaModal from './EditCategoriaModal'
 import EditHojaModal from './EditHojaModal'
+import DeleteHojaModal from './DeleteHojaModal'
+import DeleteCategoriaModal from './DeleteCategoriaModal'
 import { getHojaDisplayTitle } from '../utils/hojaUtils'
 
 const LS_TREE_KEY = 'sgr-boveda-tree-open'
@@ -250,8 +252,6 @@ export default function LeftPanel({ onOpenHoja, onHojaDeleted, searchQuery = '' 
   const categorias      = useStore(s => s.categorias)
   const lang            = useStore(s => s.lang)
   const openCaptureWith = useStore(s => s.openCaptureWith)
-  const eliminarHoja    = useStore(s => s.eliminarHoja)
-  const showToast       = useStore(s => s.showToast)
 
   const [expanded, setExpanded] = useState(false)
   const [openState, setOpenState] = useState(() => loadOpenState())
@@ -259,6 +259,8 @@ export default function LeftPanel({ onOpenHoja, onHojaDeleted, searchQuery = '' 
   const [hojaMenu, setHojaMenu] = useState(null)
   const [editCat, setEditCat] = useState(null)
   const [editHoja, setEditHoja] = useState(null)
+  const [deleteHoja, setDeleteHoja] = useState(null)
+  const [deleteCat, setDeleteCat] = useState(null)
   const [subcatFormFor, setSubcatFormFor] = useState(null)
 
   const toggleOpen = useCallback((catId) => {
@@ -302,7 +304,12 @@ export default function LeftPanel({ onOpenHoja, onHojaDeleted, searchQuery = '' 
       label: 'Editar Categoría',
       onClick: () => setEditCat(cat),
     },
-  ], [openCaptureWith])
+    {
+      label: t(lang, 'bovedaDeleteCatMenu'),
+      danger: true,
+      onClick: () => setDeleteCat(cat),
+    },
+  ], [openCaptureWith, lang])
 
   const openHojaContextMenu = useCallback((e, hoja) => {
     e.preventDefault()
@@ -315,14 +322,9 @@ export default function LeftPanel({ onOpenHoja, onHojaDeleted, searchQuery = '' 
     {
       label: 'Eliminar Hoja',
       danger: true,
-      onClick: async () => {
-        if (!window.confirm('¿Eliminar esta hoja?')) return
-        await eliminarHoja(hoja.id)
-        onHojaDeleted?.(hoja.id)
-        showToast('Hoja eliminada', 'success')
-      },
+      onClick: () => setDeleteHoja(hoja),
     },
-  ], [eliminarHoja, onHojaDeleted, showToast])
+  ], [])
 
   const filteredHojas = useMemo(() =>
     searchQuery
@@ -450,6 +452,19 @@ export default function LeftPanel({ onOpenHoja, onHojaDeleted, searchQuery = '' 
       <EditHojaModal
         hoja={editHoja}
         onClose={() => setEditHoja(null)}
+      />
+
+      <DeleteHojaModal
+        hoja={deleteHoja}
+        onClose={() => setDeleteHoja(null)}
+        onDeleted={(id) => onHojaDeleted?.(id)}
+      />
+
+      <DeleteCategoriaModal
+        cat={deleteCat}
+        hojaCount={deleteCat ? hojas.filter(h => h.categoria_id === deleteCat.id).length : 0}
+        subcatCount={deleteCat ? categorias.filter(c => c.padre_id === deleteCat.id).length : 0}
+        onClose={() => setDeleteCat(null)}
       />
     </div>
   )

@@ -872,30 +872,31 @@ function TipoSection({ tipo, items, lang, addInstrumento }) {
         style={{ borderColor: 'var(--border)' }}
       >
         {/* Section header */}
-        <button
-        type="button"
-        onClick={() => setOpen(v => !v)}
-        className="flex items-center justify-between w-full px-4 py-2.5 transition-colors"
-        style={{ background: open ? 'var(--surface)' : 'transparent', cursor: 'pointer', border: 'none' }}
-        onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface)')}
-        onMouseLeave={e => (e.currentTarget.style.background = open ? 'var(--surface)' : 'transparent')}
-      >
-        <div className="flex items-center gap-2">
-          {open ? <ChevronDown size={14} style={{ color: 'var(--subtext)' }} /> : <ChevronRight size={14} style={{ color: 'var(--subtext)' }} />}
-          <span className="text-[13px] font-semibold" style={{ color: 'var(--text)' }}>{t(lang, labelKey)}</span>
-          {hasItems && (
-            <span className="text-[10.5px] mono" style={{ color: 'var(--subtext)' }}>({items.length})</span>
-          )}
-        </div>
-        <button
-          type="button"
-          onClick={e => { e.stopPropagation(); setOpen(true); setAdding(true) }}
-          className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium transition-colors"
-          style={{ background: 'var(--cta-bg)', color: 'var(--cta-text)', border: 'none' }}
+        <div
+          className="flex items-center justify-between w-full px-4 py-2.5 gap-2 transition-colors"
+          style={{ background: open ? 'var(--surface)' : 'transparent' }}
         >
-          <Plus size={11} /> {t(lang, 'addInstrumento')}
-        </button>
-      </button>
+          <button
+            type="button"
+            onClick={() => setOpen(v => !v)}
+            className="flex items-center gap-2 flex-1 min-w-0 text-left transition-colors"
+            style={{ background: 'transparent', cursor: 'pointer', border: 'none', padding: 0, color: 'inherit' }}
+          >
+            {open ? <ChevronDown size={14} style={{ color: 'var(--subtext)', flexShrink: 0 }} /> : <ChevronRight size={14} style={{ color: 'var(--subtext)', flexShrink: 0 }} />}
+            <span className="text-[13px] font-semibold" style={{ color: 'var(--text)' }}>{t(lang, labelKey)}</span>
+            {hasItems && (
+              <span className="text-[10.5px] mono" style={{ color: 'var(--subtext)' }}>({items.length})</span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => { setOpen(true); setAdding(true) }}
+            className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium transition-colors shrink-0"
+            style={{ background: 'var(--cta-bg)', color: 'var(--cta-text)', border: 'none', cursor: 'pointer' }}
+          >
+            <Plus size={11} /> {t(lang, 'addInstrumento')}
+          </button>
+        </div>
 
       {/* Table */}
       {open && (

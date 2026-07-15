@@ -272,14 +272,23 @@ export default function TweaksPanel() {
           </div>
         </div>
 
-        {/* Tipografías */}
+        {/* Tipografías — por sección (igual que temas) */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div style={{
             display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
             fontSize: 11.5, color: 'var(--subtext)',
           }}>
             <span style={{ fontWeight: 500 }}>Tipografía</span>
-            <span style={{ fontSize: 10.5 }}>{FONT_PAIRS[fontPair]?.name}</span>
+            <span style={{ fontSize: 10, fontStyle: 'italic', fontWeight: 400 }}>
+              {SECTION_NAMES[currentSection] ?? 'Bóveda'}
+            </span>
+          </div>
+          <div style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+            fontSize: 10.5, color: 'var(--subtext)', marginTop: -2,
+          }}>
+            <span />
+            <span>{FONT_PAIRS[fontPair]?.name}</span>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
             {Object.entries(FONT_PAIRS).map(([key, p]) => {

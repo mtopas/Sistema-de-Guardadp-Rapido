@@ -328,6 +328,23 @@ class FinImportCSV(BaseModel):
 DIST_DIR    = dist_directory()
 UPLOADS_DIR = uploads_directory()
 
+# index.html must not be cached long-term (Vite hashes change each build).
+_INDEX_NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate"}
+# Hashed bundles under /assets are immutable.
+_ASSET_IMMUTABLE = {"Cache-Control": "public, max-age=31536000, immutable"}
+# SW + manifest: revalidate so deploys can replace them.
+_PWA_REVALIDATE = {"Cache-Control": "no-cache"}
+
+
+def _dist_file(path: Path, media_type: str | None = None, headers: dict | None = None) -> FileResponse:
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Not Found")
+    return FileResponse(str(path), media_type=media_type, headers=headers or {})
+
+
+def _spa_index() -> FileResponse:
+    return _dist_file(DIST_DIR / "index.html", media_type="text/html", headers=_INDEX_NO_CACHE)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -365,10 +382,59 @@ app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 
 @app.get("/", include_in_schema=False)
 def read_root():
-    index = DIST_DIR / "index.html"
-    if index.exists():
-        return FileResponse(str(index))
+    if (DIST_DIR / "index.html").is_file():
+        return _spa_index()
     return {"message": "Run 'npm run build' inside frontend/ to serve the UI here."}
+
+
+@app.get("/index.html", include_in_schema=False)
+def serve_index_html():
+    """Workbox precache pide /index.html con Accept */* — no pasar por spa_fallback."""
+    return _spa_index()
+
+
+@app.get("/sw.js", include_in_schema=False)
+def serve_sw_js():
+    return _dist_file(DIST_DIR / "sw.js", media_type="application/javascript", headers=_PWA_REVALIDATE)
+
+
+@app.get("/registerSW.js", include_in_schema=False)
+def serve_register_sw_js():
+    return _dist_file(
+        DIST_DIR / "registerSW.js",
+        media_type="application/javascript",
+        headers=_PWA_REVALIDATE,
+    )
+
+
+@app.get("/manifest.webmanifest", include_in_schema=False)
+def serve_webmanifest():
+    return _dist_file(
+        DIST_DIR / "manifest.webmanifest",
+        media_type="application/manifest+json",
+        headers=_PWA_REVALIDATE,
+    )
+
+
+@app.get("/workbox-{filename}", include_in_schema=False)
+def serve_workbox_js(filename: str):
+    if ".." in filename or "/" in filename:
+        raise HTTPException(status_code=404, detail="Not Found")
+    return _dist_file(
+        DIST_DIR / f"workbox-{filename}",
+        media_type="application/javascript",
+        headers=_ASSET_IMMUTABLE,
+    )
+
+
+@app.get("/icon-192.png", include_in_schema=False)
+def serve_icon_192():
+    return _dist_file(DIST_DIR / "icon-192.png", media_type="image/png", headers=_ASSET_IMMUTABLE)
+
+
+@app.get("/icon-512.png", include_in_schema=False)
+def serve_icon_512():
+    return _dist_file(DIST_DIR / "icon-512.png", media_type="image/png", headers=_ASSET_IMMUTABLE)
 
 
 @app.get("/meta")
@@ -622,13 +688,19 @@ async def _fetch_link_preview(url: str) -> dict:
         parsed      = httpx.URL(url)
         favicon     = f"{parsed.scheme}://{parsed.host}/favicon.ico"
 
+        result = {"title": title, "description": description, "image": image, "favicon": favicon}
         if DEBUG:
-            print(f"preview: {url} → title={title}")
-
-        return {"title": title, "description": description, "image": image, "favicon": favicon}
+            try:
+                print(f"preview: {url} -> title={title}")
+            except Exception:
+                pass
+        return result
     except Exception as e:
         if DEBUG:
-            print(f"preview error: {e}")
+            try:
+                print(f"preview error: {e}")
+            except Exception:
+                pass
         return {"title": None, "description": None, "image": None, "favicon": None}
 
 
@@ -1643,9 +1715,8 @@ class HabitoRegistroBatch(BaseModel):
 def listar_habitos(request: Request):
     accept = request.headers.get("accept", "")
     if "text/html" in accept and "application/json" not in accept.split(",")[0]:
-        index = DIST_DIR / "index.html"
-        if index.exists():
-            return FileResponse(str(index))
+        if (DIST_DIR / "index.html").is_file():
+            return _spa_index()
     return habitos_obtener()
 
 @app.post("/habitos")
@@ -1849,7 +1920,6 @@ def spa_fallback(full_path: str, request: Request):
         raise HTTPException(status_code=404, detail="Not Found")
     if any(full_path.startswith(p) for p in _SPA_API_PREFIXES):
         raise HTTPException(status_code=404, detail="Not Found")
-    index = DIST_DIR / "index.html"
-    if not index.exists():
+    if not (DIST_DIR / "index.html").is_file():
         raise HTTPException(status_code=404, detail="Frontend no compilado")
-    return FileResponse(str(index))
+    return _spa_index()

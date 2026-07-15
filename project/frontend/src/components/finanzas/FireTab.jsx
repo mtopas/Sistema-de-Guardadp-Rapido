@@ -126,9 +126,11 @@ function ProyeccionRow({ lang, saldoHoy, saldoRealCuentas, aporteHoy, aumentoMen
         const { meses, anio } = monthsUntil(fechaNac, edad)
         if (meses <= 0) return null  // ya pasó esa edad
         const saldoFinal = projectBalance(saldoHoy, aporteHoy, aumentoMensual, rentabilidadMensual, meses)
-        const saldoUSD   = saldoFinal / dolar
+        const saldoUSD   = saldoFinal
+        const saldoARS   = saldoUSD * dolar
         const retiroUSD  = saldoUSD * 0.04 / 12
-        return { edad, anio, meses, saldoUSD, retiroUSD, saldoARS: saldoFinal, retiroARS: retiroUSD * dolar }
+        const retiroARS  = retiroUSD * dolar
+        return { edad, anio, meses, saldoUSD, retiroUSD, saldoARS, retiroARS }
       })
       .filter(Boolean)
   }, [saldoHoy, aporteHoy, aumentoMensual, rentabilidadMensual, dolar, fechaNac])

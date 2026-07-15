@@ -15,6 +15,7 @@ import ScrollArea from './ScrollArea'
 import LinkPreview from './LinkPreview'
 import AgendaContextMenu from './agenda/AgendaContextMenu'
 import EditHojaModal from './EditHojaModal'
+import DeleteHojaModal from './DeleteHojaModal'
 import { getHojaDisplayTitle } from '../utils/hojaUtils'
 
 function relativeDate(dateStr) {
@@ -141,7 +142,6 @@ export default function RightPanel({ openHojaId, onClose }) {
   const updateApuntes = useStore(s => s.updateApuntes)
   const updateIcono   = useStore(s => s.updateIcono)
   const updateHoja    = useStore(s => s.updateHoja)
-  const eliminarHoja  = useStore(s => s.eliminarHoja)
   const showToast     = useStore(s => s.showToast)
   const lang          = useStore(s => s.lang)
   const agendaEventos = useStore(s => s.agendaEventos)
@@ -158,6 +158,7 @@ export default function RightPanel({ openHojaId, onClose }) {
   const [editCategoria,   setEditCategoria]  = useState(false)
   const [hojaMenu,        setHojaMenu]       = useState(null)
   const [editHoja,        setEditHoja]       = useState(null)
+  const [deleteHoja,      setDeleteHoja]     = useState(null)
   const iconPickerRef = useRef(null)
   const saveTimerRef  = useRef(null)
   const pendingRef    = useRef(null)
@@ -211,18 +212,17 @@ export default function RightPanel({ openHojaId, onClose }) {
     {
       label: 'Eliminar Hoja',
       danger: true,
-      onClick: async () => {
-        if (!window.confirm('¿Eliminar esta hoja?')) return
-        await eliminarHoja(hoja.id)
-        if (selHoja?.id === hoja.id) {
-          setSelHoja(null)
-          setView('latest')
-          onClose?.()
-        }
-        showToast('Hoja eliminada', 'success')
-      },
+      onClick: () => setDeleteHoja(hoja),
     },
-  ], [eliminarHoja, selHoja, onClose, showToast])
+  ], [])
+
+  const handleHojaDeleted = useCallback((id) => {
+    if (selHoja?.id === id) {
+      setSelHoja(null)
+      setView('latest')
+      onClose?.()
+    }
+  }, [selHoja?.id, onClose])
 
   const syncSelHojaFromStore = useCallback(() => {
     if (!editHoja) return
@@ -625,6 +625,12 @@ export default function RightPanel({ openHojaId, onClose }) {
         hoja={editHoja}
         onClose={() => setEditHoja(null)}
         onSaved={syncSelHojaFromStore}
+      />
+
+      <DeleteHojaModal
+        hoja={deleteHoja}
+        onClose={() => setDeleteHoja(null)}
+        onDeleted={handleHojaDeleted}
       />
     </div>
   )

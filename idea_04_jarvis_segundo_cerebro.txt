@@ -1,0 +1,1471 @@
+IDEA 4 — JARVIS / SEGUNDO CEREBRO PERSONAL
+==========================================
+
+TÍTULO
+------
+Jarvis — Sistema operativo personal, privado, persistente y agentivo
+
+
+IDEA CENTRAL
+------------
+Tengo desde hace años el sueño de construir mi propio “Jarvis”.
+
+No quiero simplemente un chatbot.
+
+Quiero un segundo cerebro personal capaz de:
+
+- Guardar información importante.
+- Recordar prácticamente todo.
+- Recibir texto.
+- Recibir audios.
+- Recibir links.
+- Recibir archivos.
+- Recibir información desde distintas fuentes.
+- Organizar automáticamente lo que recibe.
+- Limpiar y mantener su propia memoria.
+- Recuperar información de forma clara.
+- Entender contexto.
+- Relacionar ideas.
+- Recordar decisiones.
+- Manejar agenda.
+- Mandar recordatorios.
+- Leer mails.
+- Operar herramientas.
+- Ejecutar código.
+- Ayudar a controlar proyectos.
+- Ayudar a controlar una empresa.
+- Usar Telegram, WhatsApp u otros canales.
+- Tener una interfaz de escritorio.
+- Poder hablarle por voz en el futuro.
+- Generar informes, gráficos y visualizaciones cuando corresponda.
+- Actuar con autonomía progresiva.
+
+La visión final es:
+
+“Un sistema operativo personal privado, persistente y agentivo: una memoria externa que registra automáticamente mi vida digital, se organiza y mantiene sola, me permite recuperar cualquier conocimiento y, progresivamente, puede actuar sobre mis herramientas, proyectos y empresa.”
+
+
+PRINCIPIO FUNDAMENTAL
+---------------------
+Jarvis no debe ser:
+
+“Una base de conocimiento que yo mantengo.”
+
+Debe ser:
+
+“Un sistema que mantiene su propio cerebro.”
+
+Yo debería poder:
+- Vivir.
+- Trabajar.
+- Pensar.
+- Mandarle cosas.
+- Hablarle.
+- Conectarle fuentes.
+
+Y Jarvis debería encargarse de:
+- Capturar.
+- Entender.
+- Clasificar.
+- Relacionar.
+- Consolidar.
+- Actualizar.
+- Detectar contradicciones.
+- Detectar información obsoleta.
+- Mantener orden.
+- Recuperar conocimiento.
+
+
+QUÉ QUIERO QUE SEA JARVIS
+-------------------------
+Definición consolidada:
+
+“Jarvis es un sistema operativo personal y privado construido alrededor de una memoria persistente bajo mi control. Ingiere automáticamente información de mi vida digital, la conserva en formatos durables y humanos, la organiza, relaciona, consolida y limpia de forma autónoma. Me permite recuperar conocimiento mediante lenguaje natural y, progresivamente, utiliza agentes y herramientas para actuar sobre mis sistemas personales y profesionales. Su arquitectura es local-first y preparada para sustituir progresivamente servicios de IA externos por modelos locales. La conversación es su interfaz principal, complementada por interfaces permanentes cuando sean útiles y por interfaces generadas dinámicamente —informes, dashboards, gráficos o documentos— cuando la situación lo requiera.”
+
+
+ES UN PROYECTO PERSONAL
+-----------------------
+Por ahora Jarvis está pensado para mí.
+
+No estoy diseñando:
+- Un SaaS.
+- Un producto multiusuario.
+- Una startup de productividad.
+- Un asistente genérico para vender.
+
+Eso puede evaluarse en el futuro si alguna vez tiene sentido.
+
+Hoy la prioridad es:
+
+“Construir el Jarvis que yo quiero usar.”
+
+Esto permite tomar decisiones arquitectónicas centradas en:
+- Privacidad.
+- Personalización extrema.
+- Integración con mi vida.
+- Automatización.
+- Control total de los datos.
+
+
+QUIERO CONSTRUIRLO YO
+---------------------
+No quiero comprar el producto terminado.
+
+Quiero construirlo.
+
+Sí estoy dispuesto a:
+- Pagar APIs.
+- Usar IA externa.
+- Comprar componentes.
+- Comprar infraestructura.
+- Usar librerías.
+- Usar servicios cuando aceleren el desarrollo.
+
+Pero el sistema, la arquitectura y la experiencia deben ser propios.
+
+Construir Jarvis también forma parte del sueño.
+
+
+PRIVACIDAD
+----------
+La información debe estar bajo mi control.
+
+Principio:
+
+“Los datos son míos.”
+
+Ideal final:
+- IA 100% local.
+- Datos 100% locales.
+- Infraestructura bajo mi control.
+
+Situación realista actual:
+- Los modelos locales todavía pueden no alcanzar el nivel necesario para todas las tareas.
+- Estoy dispuesto a utilizar agentes o modelos externos.
+- Parte del contexto tendrá que salir de mi infraestructura en algunos casos.
+
+Conclusión:
+
+“Local-first, no local-only.”
+
+La memoria completa no debe enviarse indiscriminadamente a proveedores externos.
+
+Los servicios externos deberían recibir únicamente:
+- El contexto necesario.
+- Para una tarea concreta.
+- De forma controlada.
+
+
+PRIVACY GATEWAY
+---------------
+Debe existir progresivamente una capa entre Jarvis y los modelos externos.
+
+Concepto:
+
+                    JARVIS
+                       │
+                PRIVACY GATE
+                  /         \
+             LOCAL         EXTERNAL
+               │               │
+        modelos locales     Claude
+        embeddings          OpenAI
+        RAG                 otros
+        memoria
+
+Funciones futuras:
+- Elegir qué información puede salir.
+- Minimizar contexto.
+- Sanitizar datos.
+- Reemplazar nombres cuando no sean necesarios.
+- Ocultar secretos.
+- Clasificar información por sensibilidad.
+- Registrar qué información se compartió.
+
+Ejemplo:
+
+Si una IA externa necesita ayudar a evaluar una decisión sobre mi empresa,
+Jarvis no debería enviar:
+- Todo el vault.
+- Todos mis mails.
+- Todas mis finanzas.
+- Toda mi agenda.
+
+Debería recuperar únicamente:
+- Decisiones relevantes.
+- Contexto necesario.
+- Restricciones pertinentes.
+
+
+ASPIRACIÓN LOCAL
+----------------
+A medida que:
+- Mejoren los modelos locales.
+- Mejore el hardware disponible.
+- Aumente mi infraestructura.
+
+La intención es mover capacidades desde proveedores externos hacia el sistema local.
+
+Tendencia deseada:
+
+EXTERNAL ↓
+LOCAL    ↑
+
+La arquitectura debe permitir esta transición sin rediseñar Jarvis desde cero.
+
+
+RECORDAR TODO
+-------------
+Quiero que Jarvis recuerde prácticamente todo.
+
+No solamente:
+“Todo lo que le digo explícitamente.”
+
+También quiero ingestión automática progresiva.
+
+Posibles fuentes futuras:
+- Telegram.
+- WhatsApp.
+- Email.
+- Calendario.
+- Documentos.
+- Obsidian.
+- GitHub.
+- Actividad de proyectos.
+- Reuniones.
+- Audios.
+- Links.
+- Archivos.
+- Empresa.
+- Tareas.
+- Sistemas internos.
+- Otras fuentes digitales.
+
+Jarvis debe ser capaz de formar contexto con el paso del tiempo.
+
+
+TIPOS DE MEMORIA
+----------------
+No toda la memoria debe tratarse igual.
+
+Deben diferenciarse al menos:
+
+1. RAW MEMORY
+-------------
+La información original.
+
+Ejemplos:
+- Email recibido.
+- Audio.
+- Mensaje.
+- Documento.
+- Link.
+- Nota original.
+- Transcripción.
+
+Principio:
+“La IA no debe reescribir silenciosamente los hechos originales.”
+
+
+2. EPISODIC MEMORY
+------------------
+Eventos o experiencias.
+
+Ejemplo:
+“El 23/08 hablamos sobre crear una empresa tecnológica.”
+
+
+3. SEMANTIC MEMORY
+------------------
+Conocimiento consolidado.
+
+Ejemplo:
+“Quiero una empresa con identidad independiente de mi nombre.”
+
+
+4. DECISIONS
+------------
+Decisiones tomadas.
+
+Ejemplo:
+“Inicialmente conviene una empresa con varias verticales, no tres empresas separadas.”
+
+
+5. PROJECT MEMORY
+-----------------
+Estado, contexto, decisiones y pendientes de proyectos.
+
+Ejemplos:
+- Jarvis.
+- RAFAM.
+- Bot de CEDEARs.
+- Empresa.
+- Educación.
+
+
+6. PEOPLE / ENTITIES
+--------------------
+Personas, empresas, organismos, tecnologías, instituciones.
+
+
+7. ACTIONS
+----------
+Pendientes y próximas acciones.
+
+
+8. DERIVED MEMORY
+-----------------
+Inferencias generadas por Jarvis.
+
+Ejemplo:
+“La empresa tecnológica y GovTech podrían terminar convergiendo.”
+
+Debe quedar claro que:
+- Es una inferencia.
+- No un hecho.
+
+
+9. SUPERSEDED MEMORY
+--------------------
+Información o decisiones que fueron reemplazadas.
+
+Ejemplo:
+“Antes consideraba crear varias empresas; posteriormente decidí mantener una estructura unificada.”
+
+No se elimina necesariamente la historia.
+Se registra evolución.
+
+
+OBSIDIAN / MARKDOWN COMO MEMORIA HUMANA
+---------------------------------------
+La memoria importante debería vivir en formatos legibles y durables.
+
+Decisión:
+Obsidian / Markdown bidireccional.
+
+Quiero poder:
+- Abrir el vault.
+- Leer cualquier recuerdo.
+- Editarlo manualmente.
+- Corregirlo.
+- Eliminarlo.
+- Agregar información.
+
+Y quiero que Jarvis detecte esos cambios.
+
+Flujo:
+
+Vos editás Obsidian
+→ Jarvis detecta cambios
+→ actualiza índice
+→ actualiza embeddings
+→ actualiza conocimiento
+
+Jarvis aprende algo
+→ actualiza Obsidian
+→ el conocimiento queda legible para mí.
+
+
+PRINCIPIO DE PORTABILIDAD
+-------------------------
+Condición importante:
+
+“Si mañana desaparecen Ollama, ChromaDB, Python o Jarvis entero, mi memoria debe seguir existiendo.”
+
+Por eso:
+
+Markdown / archivos humanos
+= memoria durable.
+
+SQLite
+= estado estructurado / metadata.
+
+Vector DB
+= índice reconstruible.
+
+Embeddings
+= derivados reconstruibles.
+
+Logs
+= historial de acciones.
+
+Object storage
+= archivos pesados / binarios.
+
+La inteligencia puede cambiar.
+La memoria no debe quedar secuestrada por una implementación.
+
+
+ESTRUCTURA CONCEPTUAL DEL VAULT
+-------------------------------
+Ejemplo:
+
+/Jarvis
+    /00 Inbox
+    /10 People
+    /20 Projects
+        /Jarvis
+        /RAFAM
+        /Empresa
+    /30 Areas
+        /GovTech
+        /Educacion
+        /Finanzas
+    /40 Knowledge
+    /50 Decisions
+    /60 Meetings
+    /70 Daily
+    /80 Sources
+    /90 Archive
+
+No es una estructura definitiva.
+Debe evolucionar con el uso.
+
+
+CAPTURA
+-------
+Jarvis debe aceptar información de la manera más natural posible.
+
+Objetivo:
+“No pensar dónde guardar algo.”
+
+Canales:
+- Desktop.
+- Telegram.
+- Audio.
+- Texto.
+- Links.
+- Archivos.
+- Capturas.
+- Eventualmente WhatsApp.
+- Eventualmente voz realtime.
+
+Ejemplo:
+
+“Jarvis, guardame esto porque puede servir para RAFAM.”
+
+Jarvis debería:
+1. Guardar el contenido original.
+2. Entender que está relacionado con RAFAM.
+3. Extraer conceptos.
+4. Relacionarlo con información existente.
+5. Actualizar memoria.
+6. Dejar registro de la fuente.
+
+
+MEMORY CORE
+-----------
+El primer objetivo del proyecto no debe ser:
+- Gmail.
+- Voz.
+- GitHub.
+- WhatsApp.
+- Control de empresa.
+
+Debe ser:
+
+“Construir una memoria excelente.”
+
+Flujo:
+
+INFORMACIÓN
+↓
+RAW INBOX
+↓
+PROCESAMIENTO
+↓
+EXTRACCIÓN
+↓
+CLASIFICACIÓN
+↓
+RELACIONES
+↓
+CONSOLIDACIÓN
+↓
+VAULT
+↓
+ÍNDICES
+↓
+RECUPERACIÓN
+
+
+MEMORY MAINTENANCE
+------------------
+La limpieza automática es una feature central.
+
+Posiblemente sea la feature más importante de Jarvis V1.
+
+Jarvis debe mantener su cerebro.
+
+Procesos:
+- Clasificar inbox.
+- Detectar duplicados.
+- Detectar contradicciones.
+- Detectar notas huérfanas.
+- Detectar información obsoleta.
+- Detectar decisiones superadas.
+- Actualizar resúmenes.
+- Consolidar múltiples notas.
+- Relacionar conocimiento.
+- Archivar.
+- Reindexar.
+- Pedir aclaraciones cuando sea necesario.
+
+Ejemplo:
+
+“Procesé 34 elementos hoy.
+Actualicé 6 proyectos.
+Detecté que una conclusión anterior quedó obsoleta.
+Relacioné esta nota con RAFAM y GovTech.
+Encontré dos elementos duplicados.
+Hay tres cosas que necesito que me aclares.”
+
+
+AUTONOMÍA
+---------
+Me entusiasma mucho que Jarvis actúe automáticamente.
+
+La autonomía debe ser progresiva.
+
+No debe tener permisos ilimitados desde el comienzo.
+
+Modelo conceptual:
+
+NIVEL 0 — LEER
+Puede consultar información.
+
+NIVEL 1 — PROPONER
+Sugiere una acción.
+
+NIVEL 2 — PREPARAR
+Crea draft, PR, evento o resultado preparado.
+
+NIVEL 3 — EJECUTAR CON APROBACIÓN
+Pregunta antes de ejecutar.
+
+NIVEL 4 — AUTONOMÍA RESTRINGIDA
+Puede ejecutar automáticamente acciones permitidas.
+
+Cada herramienta puede tener su propio nivel.
+
+Ejemplos:
+
+Jarvis puede:
+- Reorganizar notas automáticamente.
+- Reindexar memoria.
+- Limpiar duplicados.
+
+Pero no necesariamente:
+- Mandar dinero.
+- Borrar proyectos.
+- Enviar mails sensibles.
+- Ejecutar operaciones irreversibles.
+
+Sin aprobación.
+
+
+TOOL SYSTEM
+-----------
+Jarvis debe evolucionar hacia un sistema de herramientas modular.
+
+Concepto:
+
+                 JARVIS
+                    │
+              TOOL REGISTRY
+        ┌───────────┼────────────┐
+        │           │            │
+      Gmail      Calendar      GitHub
+      Files      Obsidian      Código
+      Empresa    Finanzas      Agenda
+      Hábitos    Web           ...
+
+Cada nueva integración debe ser un módulo.
+
+No conviene crear decenas de conexiones ad-hoc entre funciones.
+
+
+DE ROUTER A AGENTE
+------------------
+Hoy SGR clasifica intenciones por módulo.
+
+Eso funciona en el sistema actual.
+
+Jarvis debe evolucionar de:
+
+INTENT
+→ MÓDULO
+
+a:
+
+OBJETIVO
+→ PLAN
+→ TOOL CALLS
+→ RESULTADOS
+→ VERIFICACIÓN
+→ RESPUESTA / ACCIÓN
+
+Ejemplo:
+
+“Revisá mis mails de RAFAM, fijate qué quedó pendiente, comparalo con mi agenda y bloqueame dos horas mañana.”
+
+Eso requiere:
+- Email.
+- Memoria.
+- Agenda.
+- Planificación.
+- Ejecución.
+
+No pertenece a un único módulo.
+
+
+INTERFACES
+----------
+Interfaz inicial deseada:
+- Aplicación de escritorio.
+- Telegram o similar en teléfono.
+
+No necesito inicialmente:
+- Dispositivo físico propio.
+- App móvil compleja.
+- Voz omnipresente.
+
+A futuro:
+- Desktop.
+- Mobile.
+- Telegram.
+- WhatsApp.
+- Voz realtime.
+- Tal vez smartwatch.
+- Tal vez integraciones adicionales.
+
+
+CONVERSACIÓN COMO INTERFAZ PRINCIPAL
+------------------------------------
+La conversación debería convertirse en la forma principal de expresar intención.
+
+Ejemplos:
+
+“Jarvis, ¿qué decidimos sobre RAFAM?”
+
+“Jarvis, ¿cómo viene mi semana?”
+
+“Jarvis, ¿qué cosas tengo pendientes sobre la empresa?”
+
+“Jarvis, guardá esto.”
+
+“Jarvis, revisá estos mails.”
+
+“Jarvis, preparame un informe de mis finanzas.”
+
+
+NO TODO DEBE SER CHAT
+---------------------
+El chat no siempre es la mejor interfaz.
+
+Una tabla sigue siendo mejor para:
+- Ver muchas filas.
+
+Un calendario sigue siendo mejor para:
+- Ver tiempo.
+
+Un gráfico sigue siendo mejor para:
+- Comparar métricas.
+
+Por eso Jarvis debe tener tres niveles de interfaz.
+
+
+NIVEL 1 — CONVERSACIÓN
+----------------------
+Interfaz predeterminada para intención.
+
+
+NIVEL 2 — ARTEFACTOS / INTERFACES GENERADAS
+-------------------------------------------
+Jarvis puede crear dinámicamente:
+- Informes.
+- Dashboards.
+- HTMLs autocontenidos.
+- Gráficos.
+- Tablas.
+- Grafos.
+- Calendarios.
+- Comparaciones.
+- Visualizaciones.
+
+Ejemplo:
+
+“Jarvis, ¿cómo vienen mis finanzas?”
+
+Respuesta:
+- Resumen textual.
+- Botón / archivo:
+  “Abrir informe.”
+
+El informe puede contener:
+- Gráficos.
+- Anomalías.
+- Comparaciones.
+- Comentarios.
+- Tablas.
+
+
+NIVEL 3 — INTERFACES PERMANENTES
+--------------------------------
+Mantener pantallas permanentes cuando realmente sean útiles.
+
+Ejemplos:
+- Calendario.
+- Editor de memoria.
+- Configuración.
+- Permisos.
+- Logs.
+- Explorador de archivos.
+- Algunas vistas financieras.
+
+Principio:
+
+“No diseñar anticipadamente una pantalla para cada cosa posible.”
+
+Jarvis puede generar algunas interfaces según necesidad.
+
+
+VOZ
+---
+La voz es una etapa posterior.
+
+No debe ser un sistema separado.
+
+Arquitectura:
+
+Audio
+→ Speech-to-Text / modelo realtime
+→ mismo Jarvis
+→ intención / plan / herramientas
+→ respuesta
+→ voz
+
+Ideal:
+
+“Jarvis.”
+
+“Sí.”
+
+“¿Qué tengo mañana?”
+
+“Tenés tres reuniones…”
+
+La voz debe ser simplemente otra interfaz al mismo cerebro.
+
+
+HOMELAB / JARVIS CORE
+---------------------
+Actualmente SGR utiliza:
+- Homelab.
+- Docker.
+- Backend siempre encendido.
+- Telegram conectado al backend.
+
+Esto se puede aprovechar.
+
+Decisión conceptual:
+
+Jarvis debe tener una fuente de verdad canónica siempre encendida.
+
+Por ahora puede ser el homelab.
+
+Arquitectura:
+
+                 JARVIS CORE
+                   HOMELAB
+                      │
+       ┌──────────────┼──────────────┐
+       │              │              │
+    Desktop        Teléfono       Telegram
+       │              │              │
+       └──────────────┼──────────────┘
+                      │
+                    API
+
+La PC no debería tener “otro Jarvis”.
+
+Debería ser un cliente.
+
+
+SINGLE SOURCE OF TRUTH
+----------------------
+El sistema actual tiene dos SQLite potencialmente divergentes:
+- Homelab.
+- Windows.
+
+Actualmente se sincronizan con pull/push.
+
+Eso funcionó como solución práctica.
+
+Pero no debería convertirse en la arquitectura definitiva de Jarvis.
+
+Objetivo futuro:
+- Una fuente de verdad.
+- Clientes remotos.
+- Cache offline cuando sea necesario.
+- Sync a nivel de datos/eventos si se requiere.
+- No intercambio completo de cerebros.
+
+
+SGR ACTUAL
+----------
+El proyecto actual es:
+
+SGR — Sistema de Guardado Rápido.
+
+Es una aplicación local, full-stack y casi completamente offline.
+
+Tiene cuatro módulos:
+1. Bóveda.
+2. Finanzas.
+3. Agenda.
+4. Hábitos.
+
+Stack actual:
+- Python.
+- FastAPI.
+- Pydantic.
+- SQLite.
+- React 18.
+- Vite.
+- Zustand.
+- Tailwind.
+- D3.
+- TipTap.
+- Telegram bot.
+- Ollama.
+- llama3.2:3b.
+- nomic-embed-text.
+- ChromaDB.
+- Docker Compose.
+- PyInstaller.
+
+El bot:
+- Se conecta a la misma API REST.
+- No toca SQLite directamente.
+- Permite captura desde celular.
+- Soporta distintos módulos.
+- Tiene clasificación de intención.
+- Puede hacer consultas con IA.
+- Tiene búsqueda semántica.
+
+La IA actual:
+- Es local.
+- Usa Ollama.
+- Tiene fallback cuando Ollama no está disponible.
+- Usa RAG sobre la Bóveda.
+- Tiene embeddings.
+- Puede reunir contexto real de distintos módulos antes de responder.
+
+Conclusión:
+
+“SGR ya es el comienzo de Jarvis.”
+
+
+SGR NO ES UN INTENTO FALLIDO
+----------------------------
+SGR ya resolvió componentes importantes:
+- Captura remota.
+- API central.
+- Persistencia.
+- IA local.
+- RAG.
+- Embeddings.
+- Telegram.
+- Homelab 24/7.
+- Agenda.
+- Finanzas.
+- Hábitos.
+- Cruces entre módulos.
+- Despliegue local.
+
+No conviene:
+- Tirarlo.
+- Empezar de cero.
+- Crear “Jarvis v4 final ahora sí”.
+
+Conviene:
+
+“SGR → Jarvis”
+
+mediante migraciones deliberadas.
+
+
+CAMBIO DE CENTRO DE GRAVEDAD
+----------------------------
+Hoy:
+
+SGR
+├── Bóveda
+├── Finanzas
+├── Agenda
+└── Hábitos
+
+Jarvis aparece como una capa adicional.
+
+Objetivo:
+
+                    JARVIS
+                      │
+            ┌─────────┴─────────┐
+            │                   │
+         MEMORIA             ACCIONES
+            │                   │
+      ┌─────┼─────┐      ┌─────┼────────┐
+    Datos Contexto IA   Agenda Finanzas GitHub...
+
+Jarvis debe ser el sistema.
+
+Los demás módulos se convierten en:
+- Dominios.
+- Herramientas.
+- Fuentes de contexto.
+
+
+LA BÓVEDA DEBE EVOLUCIONAR
+--------------------------
+La Bóveda actual guarda:
+- Texto.
+- Links.
+- Fotos.
+- Categorías.
+- Notas enriquecidas.
+- Recordatorios.
+- Metadatos.
+
+Además tiene:
+- Búsqueda semántica.
+- RAG.
+
+Eso permite:
+“Encontrame aquella nota.”
+
+Pero Jarvis necesita responder:
+- ¿Qué decidimos?
+- ¿Por qué?
+- ¿Qué cambió?
+- ¿Qué está pendiente?
+- ¿Qué se contradice?
+- ¿Qué está relacionado?
+
+Por eso la Bóveda debe evolucionar hacia:
+
+“Memory Core.”
+
+
+MÓDULOS ACTUALES COMO CONTEXTO
+------------------------------
+Finanzas, Agenda y Hábitos no deben desaparecer.
+
+Deben transformarse progresivamente en fuentes de contexto y herramientas de Jarvis.
+
+Ejemplo:
+
+Hoy:
+Agenda ↔ Hábitos
+Agenda ↔ Finanzas
+Bóveda ↔ Agenda
+
+Futuro:
+
+               JARVIS
+                  │
+          CONTEXTO COMÚN
+                  │
+      ┌───────────┼───────────┐
+   Finanzas     Agenda      Hábitos
+
+Esto evita crear decenas de integraciones cruzadas manuales.
+
+
+REFACORIZACIÓN ARQUITECTÓNICA NECESARIA
+---------------------------------------
+La documentación actual indica:
+- Muchas rutas viven en app/main.py.
+- El SQL está concentrado en crud.py.
+- Existen carpetas de servicio/router no aprovechadas plenamente.
+- El frontend usa un store Zustand único.
+- Las acciones hacen fetch directo.
+
+Eso es manejable para SGR actual.
+
+No es suficiente para:
+- Email.
+- GitHub.
+- Voz.
+- Agentes.
+- Empresa.
+- Permisos.
+- Automatización.
+- Muchas herramientas.
+
+Arquitectura objetivo aproximada:
+
+app/
+    core/
+        config
+        auth
+        events
+        permissions
+
+    memory/
+        router
+        service
+        repository
+        models
+        maintenance
+
+    agenda/
+        router
+        service
+        repository
+
+    finance/
+        ...
+
+    habits/
+        ...
+
+    agents/
+        planner
+        executor
+        context
+        approvals
+
+    tools/
+        registry
+        calendar
+        email
+        github
+        filesystem
+
+    integrations/
+        telegram
+        obsidian
+        ollama
+        external_llm
+
+No por estética.
+
+Sí porque Jarvis necesita:
+- Fronteras.
+- Permisos.
+- Auditabilidad.
+- Modularidad.
+
+
+AUDIT LOG
+---------
+Jarvis debe registrar lo que hace.
+
+Especialmente cuando empiece a actuar.
+
+Ejemplo:
+
+- Qué herramienta utilizó.
+- Qué información leyó.
+- Qué acción propuso.
+- Qué acción ejecutó.
+- Qué modelo usó.
+- Qué contexto salió de la máquina.
+- Qué usuario aprobó.
+- Qué resultado obtuvo.
+- Qué falló.
+
+La confianza requiere trazabilidad.
+
+
+PROACTIVIDAD
+------------
+El ideal no es únicamente que Jarvis responda.
+
+También debe poder detectar cosas.
+
+Ejemplos:
+
+“Tenés esto pendiente.”
+
+“Este proyecto no tuvo actividad en 30 días.”
+
+“Esta decisión contradice una anterior.”
+
+“Tenés un vencimiento mañana.”
+
+“Tus gastos subieron respecto del promedio.”
+
+“Este mail requiere respuesta.”
+
+“Este proyecto tiene tests fallando.”
+
+“Hay tres notas que parecen describir la misma idea.”
+
+La proactividad debe estar controlada para no convertirse en ruido.
+
+
+ROADMAP
+=======
+
+JARVIS 0.1 — MEMORY CORE
+------------------------
+Objetivo:
+Que Jarvis pueda recordar bien.
+
+Incluye:
+- Obsidian bidireccional.
+- Markdown.
+- Inbox.
+- Captura.
+- Texto.
+- Telegram.
+- Embeddings.
+- RAG.
+- Recuperación.
+- Personas.
+- Proyectos.
+- Decisiones.
+- Relaciones.
+- Fuentes.
+
+
+JARVIS 0.2 — MEMORY MAINTENANCE
+-------------------------------
+Objetivo:
+Que Jarvis mantenga su cerebro.
+
+Incluye:
+- Clasificación automática.
+- Consolidación.
+- Duplicados.
+- Contradicciones.
+- Superseded.
+- Notas huérfanas.
+- Resúmenes.
+- Inbox zero asistido.
+- Reindexación.
+- Preguntas de aclaración.
+
+
+JARVIS 0.3 — AUTOMATIC INGESTION
+--------------------------------
+Objetivo:
+Que empiece a recordar automáticamente.
+
+Fuentes:
+- Documentos.
+- Calendario.
+- Email.
+- GitHub.
+- Archivos.
+- Otras fuentes.
+
+
+JARVIS 0.4 — UNIFIED CONTEXT
+----------------------------
+Objetivo:
+Que conecte la memoria con sistemas que ya existen.
+
+Incluye:
+- Agenda.
+- Finanzas.
+- Hábitos.
+- Memoria.
+
+Ejemplos:
+“¿Cómo fue mi semana?”
+“¿Qué tengo pendiente?”
+“¿Cómo vengo financieramente?”
+
+
+JARVIS 0.5 — TOOL SYSTEM
+------------------------
+Objetivo:
+Que pueda actuar de forma modular.
+
+Incluye:
+- Tool registry.
+- Permisos.
+- Privacy Gateway.
+- Audit log.
+- Aprobaciones.
+- Integraciones.
+
+
+JARVIS 0.6 — AGENT
+------------------
+Objetivo:
+Que pueda planificar tareas complejas.
+
+Flujo:
+Objetivo
+→ Plan
+→ Herramientas
+→ Ejecución
+→ Verificación
+→ Resultado
+
+
+JARVIS 0.7 — GENERATED UI
+-------------------------
+Objetivo:
+Que pueda generar interfaces cuando sean necesarias.
+
+Incluye:
+- Informes.
+- Dashboards.
+- Gráficos.
+- HTMLs autocontenidos.
+- Tablas.
+- Grafos.
+- Visualizaciones.
+
+
+JARVIS 0.8 — VOICE
+------------------
+Objetivo:
+Interacción conversacional realtime por voz.
+
+
+JARVIS 0.9 — PROACTIVITY
+------------------------
+Objetivo:
+Que Jarvis pueda detectar y sugerir.
+
+Ejemplos:
+- Recordatorios inteligentes.
+- Pendientes.
+- Cambios.
+- Anomalías.
+- Problemas.
+- Oportunidades.
+
+
+JARVIS 1.0
+----------
+No definirlo prematuramente.
+
+Una posible definición:
+
+“Jarvis 1.0 existe cuando confío suficientemente en él como para delegarle tareas reales sin sentir que debo supervisar cada paso.”
+
+El proyecto puede no tener un final definitivo.
+
+Puede ser un sistema permanente que evoluciona durante años.
+
+
+LO QUE NO HAY QUE HACER AHORA
+-----------------------------
+No agregar inmediatamente:
+- Gmail.
+- WhatsApp.
+- Voz.
+- Control completo de empresa.
+- Agentes de código autónomos.
+- Muchas integraciones nuevas.
+
+Antes:
+
+1. Memory Core.
+2. Memory Maintenance.
+3. Arquitectura canónica.
+4. Tool system.
+5. Permisos.
+
+Principio:
+
+“No intentar construir Jarvis entero al mismo tiempo.”
+
+
+POR QUÉ LOS INTENTOS ANTERIORES GENERABAN FRUSTRACIÓN
+-----------------------------------------------------
+Jarvis combina muchos problemas:
+
+- Memoria.
+- RAG.
+- UI.
+- Voz.
+- Agentes.
+- Automatización.
+- Herramientas.
+- Sincronización.
+- Privacidad.
+- Permisos.
+- Obsidian.
+- Clasificación.
+- Infraestructura.
+
+Intentar resolverlos simultáneamente hace que el proyecto parezca imposible.
+
+Solución:
+
+“Construir Jarvis por capacidades acumulativas.”
+
+Cada versión debe ser útil por sí misma.
+
+
+RELACIÓN CON IDEA 1
+-------------------
+Jarvis puede convertirse en uno de los proyectos públicos más importantes de mi perfil si algún día decido mostrar partes del sistema.
+
+Puede demostrar:
+- Full stack.
+- IA.
+- Arquitectura.
+- Agentes.
+- RAG.
+- Privacidad.
+- Local-first.
+- UX.
+- Infraestructura.
+- Producto.
+
+No necesariamente debe hacerse público completo.
+Puede publicarse:
+- Arquitectura.
+- Librerías.
+- Componentes.
+- Aprendizajes.
+- Versiones sanitizadas.
+
+
+RELACIÓN CON IDEA 2
+-------------------
+Jarvis puede ayudar en GovTech y educación.
+
+Ejemplos:
+- Organizar investigación RAFAM.
+- Mantener entrevistas.
+- Recordar normativa.
+- Resumir proyectos.
+- Generar reportes.
+- Ayudar a gestionar iniciativas sociales.
+
+
+RELACIÓN CON IDEA 3
+-------------------
+Jarvis puede convertirse eventualmente en una capa operativa de la empresa.
+
+Ejemplos:
+- Leer mails.
+- Revisar proyectos.
+- Preparar informes.
+- Controlar pendientes.
+- Revisar GitHub.
+- Ayudar con agenda.
+- Organizar documentación.
+- Coordinar agentes.
+- Preparar dashboards.
+
+Visión:
+
+“No reemplazar la empresa con IA.”
+
+Sí:
+
+“Construir una empresa extremadamente aumentada por Jarvis.”
+
+
+PRINCIPIOS DEFINIDOS
+--------------------
+1. Jarvis es un segundo cerebro, no un chatbot.
+2. Los datos deben permanecer bajo mi control.
+3. La arquitectura es local-first.
+4. Se permiten modelos externos cuando sean necesarios.
+5. El contexto enviado afuera debe minimizarse.
+6. La memoria debe ser portable.
+7. Obsidian / Markdown será bidireccional.
+8. Jarvis debe recordar automáticamente.
+9. Debe distinguir hechos, resúmenes e inferencias.
+10. La memoria original no debe reescribirse silenciosamente.
+11. Jarvis debe mantener y limpiar su propia memoria.
+12. La limpieza es una feature central.
+13. SGR debe evolucionar, no descartarse.
+14. El homelab puede ser inicialmente el hogar canónico.
+15. Debe existir una sola fuente de verdad.
+16. Desktop y teléfono son interfaces.
+17. Telegram es válido inicialmente.
+18. Las interfaces pueden ser dinámicas.
+19. No todo debe resolverse mediante chat.
+20. Finanzas, Agenda y Hábitos se convierten en dominios/herramientas.
+21. Jarvis debe evolucionar de router a agente.
+22. La autonomía debe ser progresiva.
+23. Las acciones deben estar auditadas.
+24. Las herramientas deben ser modulares.
+25. Voz es una interfaz, no un cerebro separado.
+26. No intentar construir todo al mismo tiempo.
+27. Cada versión debe ser útil.
+28. Jarvis puede convertirse en un proyecto de toda la vida.
+
+
+FRASE RESUMEN
+-------------
+“Jarvis no es una app que guarda notas. Es un sistema operativo personal que recuerda, entiende, organiza y eventualmente actúa.”
+
+
+ESTADO
+------
+IDEA 4: CERRADA.
+
+Tema:
+Construir mi propio Jarvis como segundo cerebro privado, local-first y agentivo, evolucionando SGR en lugar de empezar de cero.
+
+Prioridad inicial:
+Memory Core + Memory Maintenance.
+
+Objetivo de largo plazo:
+Un asistente personal capaz de recordar mi vida digital, organizar su memoria, generar interfaces según necesidad y actuar progresivamente sobre mis herramientas, proyectos y empresa.
+
+
+DECISIÓN ARQUITECTÓNICA — DISTRIBUCIÓN
+=======================================
+
+Contexto:
+El homelab como fuente de verdad única es la decisión correcta para uso personal,
+pero encierra supuestos que no se sostienen si en el futuro Jarvis se muestra,
+publica o convierte en producto:
+
+1. El homelab siempre está encendido y accesible.
+2. El hardware es propio.
+3. La red local es suficiente.
+
+Modelos evaluados:
+- Opción 1: Local-first puro (homelab / máquina propia del usuario).
+- Opción 2: Cloud opcional como backend (sync bidireccional, monetización capa cloud).
+- Opción 3: Self-hosted con deploy simple (Docker Compose en VPS del usuario).
+- Opción 4: Multi-tenant SaaS (contradice los principios de privacidad de Jarvis).
+
+DECISIÓN: Opción 1 ahora + Opción 3 después.
+
+Fase actual:
+Construir Jarvis para uso personal, local-first, homelab como fuente de verdad.
+
+Fase futura (si hay madurez y demanda):
+Empaquetar para self-hosted: Docker Compose, documentación clara, setup de un comando.
+El "producto" sería la licencia o el soporte, no el servidor.
+El mercado objetivo son developers y usuarios técnicos que valoran privacidad y control.
+
+La Opción 2 (sync cloud opcional) queda reservada para después,
+si aparece demanda real de usuarios menos técnicos.
+
+
+PRINCIPIO TRANSVERSAL — VARIABLES DE ENTORNO
+--------------------------------------------
+Para no cerrarse puertas hacia ninguna opción futura:
+
+"No acoplar la lógica al homelab específico."
+
+Regla:
+Toda URL, puerto, credencial o parámetro de infraestructura debe vivir
+en variables de entorno, nunca hardcodeado en el código.
+
+SGR ya tiene parte de esto bien hecho (SGR_PORT, API_BASE_URL en .env).
+Jarvis debe mantener y extender ese hábito en todos los módulos nuevos.
+
+Consecuencia:
+Si las variables están bien separadas, Jarvis puede correr sin cambios
+en el homelab, en un VPS, en una PC nueva o en un contenedor,
+y todas las opciones de distribución quedan abiertas.

@@ -1,0 +1,15 @@
+[Unit]
+Description=SGR: poll ICS gateway and restore default route
+Documentation=file:///home/mtopas/project/scripts/homelab/ensure-default-route.sh
+
+[Timer]
+# Tras boot, dar tiempo a que Windows/ICS levante
+OnBootSec=30s
+# Cada minuto mientras el gabinete esté encendido
+OnUnitActiveSec=60s
+AccuracySec=10s
+Persistent=true
+Unit=sgr-default-route.service
+
+[Install]
+WantedBy=timers.target

@@ -274,6 +274,61 @@ ipconfig /flushdns
 shutdown /r /t 0
 ```
 
+### Por qué se rompe tras reboot / corte de luz
+
+Secuencia típica:
+
+1. Windows apaga o ICS cae → el gabinete pierde gateway.
+2. Al volver el enlace, `systemd-networkd` intenta `default via 192.168.137.1` **antes** de que ICS esté listo.
+3. Falla con `Nexthop has invalid gateway` y deja `enp0s7` en **degraded (failed)**.
+4. Aunque después ICS responda, **networkd no reintenta** → sin internet / bot sin Telegram, pero SSH local sigue OK.
+5. Además, tras un corte Windows a veces deja `Ethernet 2` en perfil **Public** → el firewall bloquea el NAT aunque SharedAccess esté Running (síntoma: ping al gateway OK, `ping 8.8.8.8` 100% loss).
+
+Mitigación (una sola vez): watchdogs en ambos lados (abajo). Si hay ruta pero no internet: `Repair-Ics.ps1`. Solución definitiva: switch al router (sin ICS).
+
+### Fijar la config (watchdogs — instalar una vez)
+
+#### Ubuntu (gabinete) — restaura la ruta default cada minuto
+
+Desde Windows (copia scripts + SSH):
+
+```powershell
+scp -r D:\Sistema-de-Guardadp-Rapido\project\scripts\homelab mtopas@192.168.137.10:~/project/scripts/
+ssh mtopas@192.168.137.10
+# en el gabinete:
+cd ~/project && sudo bash scripts/homelab/install-default-route-watchdog.sh
+```
+
+Eso instala:
+
+* `/usr/local/sbin/sgr-ensure-default-route` — si el gateway pingeá y falta `default`, la agrega
+* timer systemd cada 60 s (+ 30 s post-boot)
+* `on-link: true` en netplan (evita el fallo de nexthop)
+
+Verificar: `systemctl status sgr-default-route.timer` · `ip route` · `ping -c2 8.8.8.8`
+
+#### Windows — rearma NAT al arranque
+
+PowerShell **como administrador**:
+
+```powershell
+cd D:\Sistema-de-Guardadp-Rapido\project\scripts
+.\Install-IcsWatchdog.ps1   # tarea SGR-Ensure-ICS al startup (+45s)
+.\Ensure-Ics.ps1            # NetNat + forwarding + 192.168.137.1 + perfil Private
+```
+
+Tras cortes de luz, preferir **NetNat** (`Ensure-Ics.ps1` / `Enable-HomelabNat.ps1`) antes que ICS clásico: ICS suele quedar con `SharingEnabled=True` pero sin NAT real (síntoma: ping al gateway OK, `8.8.8.8` 100% loss; a veces `Ethernet 2` cae a `169.254.x`).
+
+Si el enlace local se rompe (SSH timeout / IP APIPA):
+
+```powershell
+# Admin
+.\Repair-Ics.ps1            # restaura 192.168.137.1 y sharing
+.\Ensure-Ics.ps1            # asegura NetNat
+```
+
+Luego en el gabinete: `ping -c2 8.8.8.8`.
+
 ### IP estática en Ubuntu (netplan)
 
 Archivo: `/etc/netplan/00-installer-config.yaml`
@@ -290,6 +345,7 @@ network:
       routes:
         - to: default
           via: 192.168.137.1
+          on-link: true
       nameservers:
         addresses:
           - 8.8.8.8

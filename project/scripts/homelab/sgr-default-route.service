@@ -1,0 +1,13 @@
+[Unit]
+Description=SGR: ensure default route via ICS gateway (192.168.137.1)
+After=network.target
+Documentation=file:///home/mtopas/project/scripts/homelab/ensure-default-route.sh
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/sgr-ensure-default-route
+# networkd puede quedar en failed; reconfigure intenta reaplicar netplan/networkd
+ExecStartPost=-/bin/bash -c 'networkctl reconfigure enp0s7 >/dev/null 2>&1 || true'
+
+[Install]
+WantedBy=multi-user.target

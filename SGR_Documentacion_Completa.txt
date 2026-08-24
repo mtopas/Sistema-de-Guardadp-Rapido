@@ -1,0 +1,475 @@
+==================================================================
+SGR — Sistema de Guardado Rápido
+Documentación completa: funcionalidad, tecnologías y comunicación
+==================================================================
+Generado: 2026-08-23
+
+
+------------------------------------------------------------------
+1. QUÉ ES SGR
+------------------------------------------------------------------
+
+SGR es una aplicación local, full-stack, en español, pensada para
+correr casi 100% OFFLINE en la máquina del usuario (o en un homelab
+propio). No es un SaaS ni depende de servicios en la nube de
+terceros para funcionar: guarda todo en un archivo SQLite local.
+
+Tiene cuatro módulos principales:
+
+  1. Bóveda    (/)          — captura y organización de conocimiento
+  2. Finanzas  (/finanzas)  — movimientos, presupuesto, FIRE, ahorro
+  3. Agenda    (/agenda)    — calendario, tareas, time blocking
+  4. Hábitos   (/habitos)   — seguimiento de hábitos y rachas
+
+La única pieza pensada para correr "online" (conectada a internet)
+es el BOT DE TELEGRAM, que permite capturar información desde el
+celular en cualquier lugar; llama a la misma API REST que usa la
+interfaz web.
+
+Licencia: MIT + Commons Clause — uso personal y modificación libres;
+uso comercial requiere permiso.
+
+
+------------------------------------------------------------------
+2. STACK TECNOLÓGICO
+------------------------------------------------------------------
+
+BACKEND (API)
+  - Python + FastAPI (framework web)
+  - Pydantic (validación de datos/esquemas)
+  - uvicorn (servidor ASGI)
+  - SQLite como base de datos (archivo único `database/app.db`)
+  - Migraciones caseras ejecutadas en `init_db()` al arrancar
+    (sin Alembic ni herramienta externa)
+
+FRONTEND (interfaz web)
+  - React 18
+  - Vite (bundler / dev server)
+  - React Router (ruteo de pantallas)
+  - Zustand (estado global — UN SOLO store para toda la app)
+  - Tailwind CSS (con tokens de diseño vía variables CSS, no
+    colores hardcodeados — así funciona el sistema de temas)
+  - D3.js — grafo interactivo de fuerza de la Bóveda (NetworkGraph)
+  - TipTap — editor de texto enriquecido (rich text) para las notas
+  - lucide-react — set de iconos
+  - @tanstack/react-virtual — virtualización de tablas largas
+    (ej. histórico de Finanzas)
+
+BOT DE TELEGRAM
+  - python-telegram-bot
+  - Corre en Docker en el homelab (o localmente); llama a la misma
+    API REST del backend (nunca toca SQLite directo)
+
+IA / LLM LOCAL (capa conversacional del bot)
+  - Ollama corriendo en el host (Windows), modelos:
+      - llama3.2:3b        → clasificación de intención + chat
+      - nomic-embed-text   → embeddings para búsqueda semántica
+  - Sin dependencia de OpenAI/Anthropic/ningún servicio de IA en
+    la nube — todo el procesamiento de lenguaje natural es LOCAL
+  - ChromaDB — base vectorial local para RAG (Retrieval-Augmented
+    Generation) sobre las notas de la Bóveda
+
+INFRAESTRUCTURA / DESPLIEGUE
+  - Docker Compose en un homelab (Ubuntu Server) para correr
+    backend + bot de forma continua ("siempre encendido")
+  - PyInstaller para empaquetar la app como ejecutable Windows
+    (.exe) standalone, sin necesidad de instalar Python
+  - ICS (Internet Connection Sharing) de Windows para dar red al
+    homelab sin router dedicado
+
+REFERENCIA DE DISEÑO
+  - `ClaudeDesign/` — maqueta HTML estática usada como referencia
+    visual (no es parte del runtime real)
+
+
+------------------------------------------------------------------
+3. ARQUITECTURA Y CÓMO SE COMUNICAN LAS PARTES
+------------------------------------------------------------------
+
+3.1. Flujo de datos general (dentro de la app web)
+
+    Componente React
+        │
+        ▼
+    useStore.js (acción Zustand)
+        │
+        ▼
+    fetch() → API REST (FastAPI, puerto 8765)
+        │
+        ▼
+    app/main.py (rutas) → app/db/crud.py (SQL)
+        │
+        ▼
+    SQLite (database/app.db)
+        │
+        ▼
+    set() en Zustand → re-render de React
+
+  - Backend "plano": casi todas las rutas viven en un solo archivo
+    `app/main.py`; el SQL vive en `app/db/crud.py`. No hay capas
+    de servicios/routers separados (existen carpetas para eso pero
+    no se usan).
+  - Frontend: NO hay React Query ni capa de servicios; cada acción
+    del store hace un fetch directo.
+  - OFFLINE-FIRST: todas las mutaciones (crear/editar/borrar) se
+    aplican primero de forma OPTIMISTA en el estado local, y si el
+    fetch falla, el catch solo loguea el error — no revierte el
+    estado. Esto significa que la UI sigue siendo usable aunque el
+    backend esté caído, con el riesgo de que esos cambios no
+    persistan hasta que la conexión vuelva.
+
+3.2. Puertos y URLs (todo local, sin nube)
+
+  | Servicio            | URL / Puerto                     |
+  |----------------------|-----------------------------------|
+  | API SGR (uvicorn/exe) | http://127.0.0.1:8765            |
+  | Frontend en dev (Vite)| http://127.0.0.1:5173 → habla con :8765 |
+  | Frontend en prod/.exe | mismo origen que la API (:8765)  |
+  | Bot Telegram           | habla con API_BASE_URL (default :8765) |
+
+  CORS habilitado en dev para http://localhost:5173 y
+  http://127.0.0.1:5173.
+
+3.3. Comunicación del Bot de Telegram
+
+  El bot NUNCA abre SQLite directamente. Todo lo que hace pasa por
+  HTTP contra la misma API REST (`/fin/*`, `/agenda/*`, `/habitos/*`,
+  `/hojas`, `/categorias`, etc.), igual que el frontend web. Esto
+  garantiza que la lógica de negocio vive en un solo lugar (el
+  backend) y no se duplica entre el bot y la UI.
+
+  Flujo de un mensaje de texto en el bot:
+
+    Usuario escribe en Telegram
+        │
+        ├─ ¿Hay un "step" conversacional activo? (Agenda/Finanzas)
+        │      → continúa ese flujo paso a paso
+        │
+        └─ Si no:
+             ├─ ¿Empieza con un prefijo rápido? ($:, t:, e:, /mov...)
+             │      → captura directa
+             │
+             ├─ Si no → Router LLM (Ollama) clasifica el texto
+             │      libre en uno de 8 módulos posibles y decide si
+             │      ejecuta directo, pide confirmación, responde
+             │      una pregunta o cae a fallback
+             │
+             └─ Fallback → flujo por defecto de Bóveda (guarda la
+                    nota, con teclado de categorías inline)
+
+  El bot expone comandos por módulo (~30 comandos): `/mov`, `/saldo`,
+  `/mes`, `/ahorro`, `/dolar`, `/objetivo` (Finanzas); `/hoy`, `/dia`,
+  `/semana`, `/tarea`, `/evento`, `/planificar`, `/bloquear`,
+  `/revision` (Agenda); `/habitos`, `/hecho`, `/ayer`, `/racha`,
+  `/nota` (Hábitos); `/rapido`, `/ultimas`, `/buscar`, `/pregunta`
+  (Bóveda / consulta con RAG).
+
+  Seguridad: `BOT_ALLOWED_CHAT_IDS` en `.env` limita quién puede
+  usar el bot.
+
+3.4. Capa de IA conversacional (Ollama, 100% local)
+
+  - Capa 1 (`llm_client.py`): cliente HTTP puro hacia Ollama
+    (`/api/generate`, `/api/chat`, `/api/embeddings`, `/api/tags`
+    para healthcheck). Si Ollama no está disponible, todas las
+    funciones fallan en silencio y el bot cae al flujo clásico por
+    prefijos/menús — la IA nunca es un punto único de falla.
+  - Capa 2 (`intent_router.py`): clasifica el mensaje libre del
+    usuario en un módulo (finanzas / agenda / hábitos / bóveda /
+    consulta_*) con un nivel de confianza; según el umbral
+    (configurable, default 0.75) ejecuta directo, pide confirmación
+    con botones (✅ Confirmar / ✏️ Corregir / ❌ Cancelar) o cae a
+    fallback.
+  - Capa 3 (`assistant.py`): modo "pregunta" — reúne contexto real
+    desde la API (movimientos del mes, racha de hábitos, eventos
+    próximos, etc.) y se lo pasa a Ollama para que sintetice una
+    respuesta en lenguaje natural, sin inventar datos.
+  - Capa 4 (RAG sobre la Bóveda): las notas se indexan como
+    embeddings (`nomic-embed-text`) en ChromaDB (`database/chroma/`)
+    cada vez que se crea/edita/borra una hoja (hook asíncrono, no
+    bloquea el guardado). El bot y la API pueden buscar
+    semánticamente (`GET /hojas/buscar-semantico?q=`) y no solo por
+    texto exacto.
+  - Capa 5 (memoria conversacional entre preguntas de seguimiento):
+    pendiente de implementar.
+
+3.5. Sincronización Homelab ↔ Windows (.exe)
+
+  Como el bot escribe contra el backend del homelab (Docker) y el
+  .exe de Windows corre su propio backend con su propio SQLite
+  local, existen DOS copias del archivo de datos que pueden
+  divergir. SGR resuelve esto con un esquema de sync manual/asistido
+  (no en tiempo real):
+
+  - El homelab es la fuente de verdad ("canónica").
+  - Al abrir el `.exe` vía el launcher (`sgr-abrir.ps1`): hace PULL
+    (descarga por scp/ssh la DB y los uploads del homelab, para el
+    backend remoto brevemente para copiar seguro, lo reinicia) y
+    muestra "Sincronizando...".
+  - Al cerrar el `.exe`, si hubo cambios, ofrece PUSH (sube la DB
+    local al homelab).
+  - Endpoints de soporte en la API: `GET /sync/export` (backup
+    SQLite online sin frenar el servidor) y `POST /sync/import`
+    (valida integridad, hace backup con timestamp, reemplaza la DB
+    canónica). Token opcional `SGR_SYNC_TOKEN`.
+  - Para desarrollo hay un "sandbox": `dev-start.ps1` copia
+    `app.db` → `app.db.dev`, levanta uvicorn apuntando a esa copia,
+    y `dev-stop.ps1` la destruye al terminar — así nunca se
+    ensucia la base de producción mientras se programa.
+  - Red entre Windows y el homelab: ICS con IP fija
+    192.168.137.1 (Windows) / 192.168.137.10 (Ubuntu del homelab).
+
+
+------------------------------------------------------------------
+4. MÓDULO BÓVEDA (/) — Captura de conocimiento
+------------------------------------------------------------------
+
+Qué se puede hacer:
+  - Guardar notas de texto, links o fotos en una jerarquía de
+    categorías (árbol con padre_id, categorías y subcategorías
+    ilimitadas).
+  - Cada nota ("hoja") tiene: tipo (texto/link/foto), contenido,
+    apuntes en HTML enriquecido (TipTap), geolocalización opcional,
+    recordatorio, ícono.
+  - Captura rápida con modal (Ctrl+Enter) que autodetecta el tipo
+    de contenido (si pegás una URL, la reconoce como link
+    automáticamente).
+  - Visualización como GRAFO interactivo (D3, fuerza), o como lista
+    en mobile. Click en una nota abre el panel de detalle; hover
+    muestra tooltip con título/tipo/categoría.
+  - Panel izquierdo: árbol de categorías con búsqueda, expandir/
+    colapsar, crear subcategoría inline, botón "+ Hoja" por
+    categoría.
+  - Panel derecho: edición de la nota (título editable al click,
+    cambio de categoría vía breadcrumb, editor TipTap con
+    links y placeholders).
+  - Búsqueda semántica (RAG) además de la búsqueda por texto
+    exacto, si Ollama está disponible.
+  - Vía bot de Telegram: captura por texto/foto/ubicación/forward,
+    modo rápido (guarda directo en la última categoría sin
+    preguntar), comando `/ultimas` (últimas 5 con botón eliminar),
+    `/buscar`, `/pregunta` (consulta con IA sobre las notas
+    guardadas).
+  - Sin CRUD de categorías: borrar una categoría con hojas devuelve
+    409 salvo `?forzar=true`.
+
+
+------------------------------------------------------------------
+5. MÓDULO FINANZAS (/finanzas) — Presupuesto y ahorro
+------------------------------------------------------------------
+
+Cinco pestañas: Dashboard | Anual | FIRE | Ahorro | Datos.
+
+Qué se puede hacer:
+  - Registrar movimientos (gasto/ingreso/transferencia) por cuenta
+    y categoría, con cuotas, fecha, moneda (ARS/USD).
+  - Dashboard mensual: donuts de gasto por categoría con tooltip,
+    listado de movimientos, modal "ver todos" con orden/filtro/
+    export CSV, seguimiento de cuotas, notas libres, metas (tasa
+    de ahorro del mes, fondo de emergencia).
+  - Vista Anual: agregados por año, gráfico de barras (nominal vs
+    real), inflación mensual editable para ajustar montos reales,
+    comparación entre años.
+  - FIRE (Financial Independence, Retire Early): tabla de plan
+    mensual editable, proyección de aportes/rentabilidad, motor de
+    cálculo en USD (convierte ARS a USD con el dólar MEP), permite
+    overrides manuales por mes.
+  - Ahorro: reparto entre la categoría FIRE, cada "objetivo" de
+    ahorro (cada objetivo genera automáticamente su propia
+    categoría homónima) y el "líquido sin invertir"; portafolio de
+    instrumentos (acciones, FCI, plazo fijo, obligaciones
+    negociables, cripto, otros) con ledger de compras/ventas y
+    cálculo de precio promedio de compra ponderado (PPC).
+  - Datos: tabla histórica completa editable inline (con debounce),
+    export/import CSV, gestión (CRUD) de categorías con color y
+    tipo, detección de duplicados.
+  - Cuentas: saldos derivados automáticamente de los movimientos
+    (no se editan a mano); ajuste de saldo inicial vía movimiento
+    especial de categoría "Ajuste"; botón recalcular saldos.
+  - Cotización del dólar: se trae de una API externa (dolarapi.com)
+    y se cachea localmente para poder seguir funcionando offline
+    (MEP como fuente principal, oficial de compra como referencia).
+  - Reglas de negocio clave: las transferencias entre cuentas
+    propias se excluyen de los totales de ingresos/gastos; hay
+    categorías del sistema protegidas (FIRE, Transferencia, Ajuste)
+    que no se pueden renombrar/borrar desde la UI.
+  - Vía bot: `/mov` (con parsing de fecha "ayer"/"anteayer" y
+    cuotas), `/saldo`, `/mes`, `/ahorro`, `/objetivo`, `/dolar`,
+    captura ultra-rápida con el prefijo `$:`.
+  - Resumen semanal automático los lunes 9:00 (job programado del
+    bot).
+
+
+------------------------------------------------------------------
+6. MÓDULO AGENDA (/agenda) — Calendario y tareas
+------------------------------------------------------------------
+
+Cuatro pestañas: HOY | Mes | Tareas | Revisión.
+
+Qué se puede hacer:
+  - HOY: grilla horaria de 6 a 23h con eventos y bloques de tiempo
+    (time blocking); tareas pendientes de los próximos 15 días en
+    el panel izquierdo con checkbox; capa opcional de "horario de
+    facultad"; indicador de "ahora" en tiempo real; integración con
+    Hábitos (los hábitos con hora aparecen como bloques en la
+    grilla, los que no tienen hora aparecen en una sección aparte).
+  - Mes: vista de calendario 6×7 + vista semana; chips sólidos para
+    eventos y punteados para tareas; toggle de calendarios activos.
+  - Tareas: listas con color, filtro pendientes/completadas/todas,
+    quick-add inline, "Inbox" para tareas sin fecha.
+  - Revisión semanal: completadas vs. incompletas, tareas vencidas
+    hace más de 7 días, % de tiempo planificado sobre el día,
+    distribución de tiempo por calendario, comparación semana
+    actual vs. anterior, export a PDF (via print) y a Markdown.
+  - Recurrencia de eventos: diario / semanal / mensual, con motor
+    de expansión de recurrencia en el backend.
+  - Exportación estándar iCalendar: `GET /agenda/export.ics`.
+  - Notificaciones: endpoint de eventos próximos + polling del
+    frontend cada 60s + Notification API del navegador.
+  - Búsqueda full-text de eventos/tareas.
+  - Cruce con otros módulos: la Bóveda muestra próximos eventos en
+    su panel derecho; Finanzas detecta tareas con palabras clave
+    financieras (pagar, cuota, vencimiento) y las enlaza.
+  - Vía bot: `/hoy`, `/dia`, `/semana`, `/tarea`, `/evento`,
+    `/planificar` (organiza el día con slots libres), `/asignar`,
+    `/bloquear`, `/pendientes`, `/revision`, `/checkin` (check-in
+    nocturno configurable, default 21:00).
+
+
+------------------------------------------------------------------
+7. MÓDULO HÁBITOS (/habitos) — Seguimiento y rachas
+------------------------------------------------------------------
+
+Tres pestañas: HOY | Progreso | Historial.
+
+Qué se puede hacer:
+  - Crear hábitos con frecuencia diaria o días específicos de la
+    semana, con hora opcional (si tiene hora, aparece también en
+    la grilla de Agenda HOY).
+  - HOY: grilla mensual de un solo scroll, celdas de estado (Total
+    verde / Parcial amarillo / pendiente / no programado), click en
+    celda abre modal para marcar completado (total o parcial) con
+    nota corta opcional.
+  - Progreso: heatmap de 3 meses, sparkline de 6 meses, mensaje de
+    "momentum" (tendencia calculada), tabla de estadísticas por
+    hábito (racha actual/máxima, % del mes), cards de "más
+    consistente" / "más fallas".
+  - Historial: calendario mensual coloreado según % de
+    cumplimiento del día, notas visibles al hover, filtro por
+    hábito, selector de período (mes/trimestre/año).
+  - Cálculo de racha: días consecutivos con valor > 0; los días no
+    programados no rompen la racha; todo el cálculo es client-side
+    (`habitosUtils.js` es la fuente de verdad, compartida por los 3
+    tabs y por la integración con Agenda).
+  - Vía bot: `/habitos` (marcar total/parcial/deshacer con
+    botones), `/hecho <nombre>` (fuzzy match, no hace falta el
+    nombre exacto), `/ayer`, `/racha`, `/nota`; tras marcar, el bot
+    pregunta conversacionalmente si querés agregar una nota.
+
+
+------------------------------------------------------------------
+8. MODELO DE DATOS (SQLite, tablas principales)
+------------------------------------------------------------------
+
+Bóveda:      categorias, hojas
+Finanzas:    fin_cuentas, fin_categorias, fin_movimientos,
+             fin_config, fin_notas, fin_instrumentos, fin_objetivos,
+             fin_fire_filas, fin_inflacion,
+             fin_transacciones_instrumento (ledger, fuente de verdad
+             del portafolio)
+Agenda:      agenda_calendarios, agenda_eventos, agenda_listas,
+             agenda_tareas, agenda_horario_facultad
+Hábitos:     habitos, habitos_registros
+
+Todo vive en un único archivo `database/app.db`. Las migraciones se
+aplican automáticamente al arrancar el backend (`init_db()`), sin
+herramienta externa de migraciones.
+
+
+------------------------------------------------------------------
+9. API REST (resumen de endpoints por módulo)
+------------------------------------------------------------------
+
+Bóveda:
+  GET/POST /categorias, PATCH/DELETE /categorias/{id}
+  GET/POST /hojas, GET /hojas?q=&tipo=&categoria_id=
+  GET /hojas/recientes, GET /hojas/buscar-semantico (RAG)
+  POST /hojas/reindexar
+  GET/PATCH/DELETE /hojas/{id}
+  POST /upload, GET /preview?url=
+
+Finanzas (/fin/*):
+  cuentas, categorías, movimientos, config, notas, instrumentos
+  (+ ledger de transacciones), objetivos, fire-filas, inflación,
+  cotización de dólar, export/import CSV, emergencia (deprecated)
+
+Agenda (/agenda/*):
+  calendarios, eventos, listas, tareas, horario-facultad, buscar,
+  export.ics, notificaciones/pending
+
+Hábitos (/habitos/*):
+  CRUD de hábitos, registros (GET/PUT/DELETE), pendientes-hoy,
+  stats por hábito, registro batch
+
+Sync (/sync/*):
+  GET /sync/export — backup online de la DB
+  POST /sync/import — reemplazo validado de la DB
+
+
+------------------------------------------------------------------
+10. DISTRIBUCIÓN / FORMAS DE CORRER LA APP
+------------------------------------------------------------------
+
+  1. Desarrollo: uvicorn (backend, :8765) + Vite (frontend, :5173)
+     en la misma máquina, comunicándose por HTTP local.
+  2. Ejecutable Windows (.exe): empaquetado con PyInstaller, corre
+     un único proceso que sirve API + frontend estático en
+     http://127.0.0.1:8765, sin necesitar Python instalado.
+  3. Homelab (Docker Compose, Ubuntu Server): backend + bot
+     corriendo 24/7, para que el bot de Telegram siempre esté
+     disponible sin depender de que la PC de Windows esté prendida.
+  4. Bot de Telegram: proceso Python aparte (`mybot/bot.py`), en
+     Docker o local, siempre hablando por HTTP contra el backend
+     (:8765), nunca contra SQLite directo.
+
+En todos los casos, la comunicación entre piezas es HTTP/REST local
+(JSON), y la persistencia es un archivo SQLite. No hay dependencia
+de servicios en la nube salvo dos llamadas externas opcionales:
+la cotización del dólar (dolarapi.com) y, si se activa, los
+modelos de Ollama (que igual corren localmente, no en la nube).
+
+
+------------------------------------------------------------------
+11. THEMING / PERSONALIZACIÓN VISUAL
+------------------------------------------------------------------
+
+  - 6 temas de color + "tonos" (variantes) + 6 pares tipográficos,
+    todo aplicado vía variables CSS en el documento y mapeado a
+    clases Tailwind (`app-*`).
+  - El tema y el tono se guardan por SECCIÓN (Bóveda/Finanzas/
+    Agenda/Hábitos) en localStorage; la tipografía es global.
+  - Tema "Arcoíris": cambia el color de acento según la ruta activa
+    (violeta en Bóveda, ámbar en Finanzas, azul en Agenda, verde en
+    Hábitos).
+  - Panel de ajustes rápido con Ctrl+M (`TweaksPanel`), con
+    atajos de teclado contextuales según el módulo/tab activo.
+  - i18n: español/inglés vía `t(lang, key)`.
+
+
+------------------------------------------------------------------
+12. RESUMEN EN UNA FRASE POR PIEZA
+------------------------------------------------------------------
+
+  - React + Zustand + Tailwind + D3 + TipTap  → interfaz web
+  - FastAPI + Pydantic + SQLite               → API y persistencia
+  - python-telegram-bot                        → captura remota/móvil
+  - Ollama (local) + ChromaDB                  → IA conversacional y
+                                                  búsqueda semántica
+  - Docker Compose (homelab)                   → backend+bot 24/7
+  - PyInstaller                                → app standalone en Windows
+  - scp/ssh + SQLite backup                     → sync homelab ↔ Windows
+
+Todo se comunica por HTTP/REST en JSON sobre la red local; el
+frontend, el bot y (cuando aplica) el modo consulta con IA nunca
+tocan la base de datos directamente — siempre pasan por la misma
+API central, que es la única con acceso a SQLite.

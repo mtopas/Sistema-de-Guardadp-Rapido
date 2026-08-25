@@ -324,3 +324,97 @@ Diferencia con spec: no aplica — corrección de infraestructura de entorno, no
 Impacto: `project/venv` (paquetes `litellm`, `jarvis` instalados); `jarvis/pyproject.toml` (techo de
 versión de `litellm` pendiente de agregar); `project/app/main.py` línea ~141 (logging del ImportError,
 pendiente).
+
+---
+
+## 2026-08-25 — Forzar un AsyncHTTPHandler nuevo antes de cada embedding de Ollama (litellm "Event loop is closed")
+
+Contexto: probando `/jq` dos veces seguidas en el mismo proceso de Telegram (bot corriendo, no un
+proceso nuevo por request), la 2ª consulta devolvió `context: 0/0` como si la memoria estuviera
+vacía, pese a tener una entrada relevante ya embebida. El log del bot mostró la causa real:
+`litellm.APIConnectionError: Event loop is closed`, con traceback en
+`litellm/llms/ollama/completion/handler.py::ollama_aembeddings`.
+
+`litellm==1.60.2` implementa `ollama_embeddings()` (el entrypoint sync que llama
+`jarvis/embeddings/client.py::generate_embedding()` vía `litellm.embedding()`) como
+`asyncio.run(ollama_aembeddings(...))` — crea un event loop nuevo, corre la coroutine, lo cierra.
+Pero `ollama_aembeddings()` usa `litellm.module_level_aclient`, un `httpx.AsyncClient` (en realidad
+un `AsyncHTTPHandler` de litellm) creado **una sola vez** a nivel de módulo cuando se importa
+`litellm` (`litellm/__init__.py:282`). Ese cliente queda atado al primer event loop que lo usa de
+verdad; `asyncio.run()` cierra ese loop al terminar la primera llamada, y la *siguiente* llamada a
+embeddings en el mismo proceso — sea el worker procesando una segunda entrada, o el bot respondiendo
+una segunda consulta — revienta al intentar reusar el cliente contra un loop ya muerto.
+`jarvis/retriever/retriever.py::retrieve()` atrapa la excepción y cae bien al fallback de `LIKE` en
+SQLite (no se cae el proceso), pero eso es mucho más débil que la búsqueda semántica real y no había
+ningún aviso de que el sistema había degradado — el usuario solo veía "sin contexto previo".
+
+Decisión: en `jarvis/embeddings/client.py::generate_embedding()`, antes de cada llamada a
+`litellm.embedding()` para un modelo Ollama, se reemplaza `litellm.module_level_aclient` por un
+`AsyncHTTPHandler` nuevo (mismos args que usa litellm internamente: `timeout` + `client_alias`). Así
+el cliente que `asyncio.run()` va a usar siempre es fresco, atado al loop que está por crearse, nunca
+a uno de una llamada anterior ya cerrada. Verificado con 3 llamadas de embedding consecutivas en el
+mismo proceso (antes fallaba en la 2ª, ahora las 3 andan) y confirmado en vivo por Telegram
+(`context: 3/3` en una consulta que antes hubiera sido la 2ª/3ª del proceso).
+
+Riesgo conocido de este approach: si en el futuro Jarvis empieza a hacer llamadas de embedding
+*concurrentes* (hoy no lo hace — todo es secuencial), pisar `module_level_aclient` desde dos
+llamadas en simultáneo podría causar una condición de carrera. No aplica al diseño actual (worker de
+un solo hilo, bot con `run_in_executor` pero llamadas de Jarvis secuenciales dentro de cada request).
+
+Diferencia con spec: no aplica — es un bug de la librería LiteLLM en Windows/Python 3.10, no de
+diseño de Jarvis.
+
+Impacto: `jarvis/embeddings/client.py`.
+
+---
+
+## 2026-08-25 — Cambiar el modelo local de `ollama/llama3.2:3b` a `ollama_chat/llama3.2:3b` (alucinación de turnos fantasma)
+
+Contexto: en la misma sesión de prueba por Telegram, después de dos consultas exitosas, una tercera
+consulta multi-turno devolvió una respuesta con varios bloques `### Assistant:` seguidos — el modelo
+había alucinado continuaciones de conversación fantasma, una de ellas inventando un ejemplo de código
+Python que nadie pidió. Como `jarvis/query/service.py::query()` persiste la respuesta como mensaje
+`assistant` en el historial de la conversación y ese historial se reinyecta en la siguiente consulta
+(spec §7), la contaminación se retroalimentaba: cada consulta nueva partía de una respuesta previa ya
+rota, y salía peor.
+
+Causa raíz: con el provider `ollama/<modelo>`, LiteLLM arma el prompt con
+`litellm.litellm_core_utils.prompt_templates.factory.py::ollama_pt()`. Para modelos cuyo nombre no
+contiene `"instruct"` (nuestro caso, `"llama3.2:3b"`), esa función concatena los mensajes como texto
+plano `"### {Role}:\n{content}\n\n"` para cada turno, **sin** agregar un `"### Assistant:\n"` final
+que le indique al modelo "ahora te toca responder", y sin pasar ningún `stop` sequence. En una
+conversación de un solo turno el modelo igual tiende a responder y parar solo (por eso `/j`'s
+clasificación — un solo turno — nunca mostró este problema), pero con historial de varios turnos
+concatenado como texto plano sin frontera clara, un modelo chico como `llama3.2:3b` no tiene señal de
+dónde termina su respuesta y sigue generando turnos inventados.
+
+Se evaluó agregar un `stop=["\n### "]` a mano en `jarvis/llm/client.py::call_llm()` — funciona (corta
+la alucinación de turnos extra) pero es un parche sobre un problema más de fondo: seguía sin usarse
+la forma correcta de hacer chat multi-turno con Ollama.
+
+Decisión: usar el provider `ollama_chat/<modelo>` de LiteLLM en vez de `ollama/<modelo>` — ese
+provider llama a `/api/chat` de Ollama (no `/api/generate` con prompt armado a mano), que maneja los
+turnos nativamente vía el chat template propio del modelo. Cambiado en
+`jarvis/config.py::JARVIS_CLASSIFY_MODEL` (default `"ollama_chat/llama3.2:3b"`); como
+`JARVIS_LOCAL_FALLBACK_MODEL` toma su default de `JARVIS_CLASSIFY_MODEL`, el cambio propaga solo.
+`is_ollama_model()` se actualizó para reconocer también el prefijo `"ollama_chat/"` (sigue
+necesitando `api_base`/`timeout` igual que `"ollama/"`). Se descartó el approach del `stop` sequence
+a mano — innecesario con `/api/chat`, y hubiera cortado respuestas legítimas que contuvieran
+`"\n### "` (por ejemplo, headers de Markdown en una respuesta con formato). `JARVIS_EMBED_MODEL` NO
+se tocó — sigue en `"ollama/nomic-embed-text"`, porque `ollama_chat` es solo para chat completions,
+no para embeddings.
+
+Verificado reproduciendo a mano el historial exacto que había roto antes (una respuesta previa +
+pregunta nueva): con `ollama_chat` responde en un solo turno, limpio, sin ningún `"### "`. Re-verificado
+que la clasificación (mismo modelo, ahora mismo provider) sigue devolviendo JSON válido. Confirmado en
+vivo por Telegram con una pregunta que antes había roto el flujo — respuesta limpia, incluso con
+varios guiones bajos en nombres de variable dentro de un bloque de código (lo que de paso probó que la
+sospecha original sobre `parse_mode="Markdown"` roto por `_` sueltos no se reproduce con el modo
+Markdown legacy de Telegram). Se limpió la conversación de Telegram vieja en `jarvis.db` que había
+quedado con la respuesta contaminada, para no reinyectarla en consultas futuras.
+
+Diferencia con spec: no aplica — es una corrección de qué provider de LiteLLM usar para Ollama, no de
+diseño de Jarvis. La spec no especifica `ollama/` vs `ollama_chat/`.
+
+Impacto: `jarvis/config.py` (`JARVIS_CLASSIFY_MODEL`, `is_ollama_model()`); `jarvis.db` (limpieza de
+una conversación de Telegram contaminada, entry_id de conversación `e1aa0e20-...`).

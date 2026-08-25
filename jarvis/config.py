@@ -19,7 +19,14 @@ _OLLAMA_BASE = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
 JARVIS_CLASSIFY_MODEL = os.getenv(
     "JARVIS_CLASSIFY_MODEL",
-    f"ollama/llama3.2:3b",
+    # "ollama_chat/" (no "ollama/") a propósito: usa /api/chat de Ollama, que maneja los
+    # turnos nativamente. El provider "ollama/" arma el prompt a mano como texto plano
+    # ("### System:\n...### User:\n...", litellm ollama_pt()) sin agregar un "### Assistant:"
+    # final ni stop sequence para modelos sin "instruct" en el nombre (como "llama3.2:3b") —
+    # en conversaciones multi-turno el modelo no sabe dónde termina su turno y alucina
+    # "### Assistant:" extra (visto en vivo probando /jq por Telegram, respuesta con 3 turnos
+    # fantasma incluyendo un bloque de código Python inventado).
+    "ollama_chat/llama3.2:3b",
 )
 JARVIS_REASON_MODEL = os.getenv(
     "JARVIS_REASON_MODEL",
@@ -42,7 +49,7 @@ JARVIS_OLLAMA_TIMEOUT = float(os.getenv("JARVIS_OLLAMA_TIMEOUT", "120"))
 
 
 def is_ollama_model(model: str) -> bool:
-    return model.startswith("ollama/")
+    return model.startswith("ollama/") or model.startswith("ollama_chat/")
 
 
 # ── Budget ────────────────────────────────────────────────────────────────────

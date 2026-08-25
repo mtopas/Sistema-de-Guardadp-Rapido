@@ -101,8 +101,36 @@ Con ambos fixes, flujo real de punta a punta (backend + worker, sin mocks):
   desde esta sesión (el DELETE SQL directo fue bloqueado por el permission classifier del harness) —
   borrarla a mano o simplemente ignorarla, no afecta el uso real.
 
-Sigue sin probarse acá (no cambió): `OPENAI_API_KEY` real (§2), frontend en navegador (§3), Telegram real
-(§4), migración real de la Bóveda (§5) — ver `Jarvis_0.1_Pruebas.md`.
+Sigue sin probarse acá (no cambió): `OPENAI_API_KEY` real (§2), frontend en navegador (§3), migración
+real de la Bóveda (§5) — ver `Jarvis_0.1_Pruebas.md`.
+
+## Validación real por Telegram (2026-08-25, misma sesión — ver `Jarvis_0.1_Pruebas.md` §4)
+
+`/j` y `/jq` probados de punta a punta contra un chat real, con el usuario mandando los mensajes.
+Encontrados y corregidos dos bugs reales de infraestructura LiteLLM/Ollama en Windows — detalle
+completo en `Cerebro/decisiones-implementacion.md` (dos entradas del 2026-08-25):
+
+1. **Retrieval se degradaba en silencio a partir de la 2ª consulta de embeddings en el mismo
+   proceso** — `litellm==1.60.2` reusa un `httpx.AsyncClient` global atado al primer event loop que
+   lo usa; `asyncio.run()` lo cierra al terminar, y la llamada siguiente revienta con
+   `RuntimeError: Event loop is closed`. Jarvis caía bien al fallback de `LIKE` en SQLite (no se
+   caía el proceso) pero sin avisar del degradado. Corregido forzando un `AsyncHTTPHandler` nuevo
+   antes de cada embedding (`jarvis/embeddings/client.py`).
+2. **El modelo local alucinaba turnos `### Assistant:` fantasma en conversaciones multi-turno**, y
+   esa respuesta rota se retroalimentaba al guardarse como historial. Causa: el provider
+   `ollama/<modelo>` arma el prompt a mano sin turno final ni stop sequence para modelos sin
+   `"instruct"` en el nombre. Corregido cambiando a `ollama_chat/<modelo>` (usa `/api/chat`, que
+   Ollama maneja nativamente) en `jarvis/config.py`.
+
+Ambos fixes verificados en aislado (reproduciendo el historial exacto que rompía) y confirmados en
+vivo por Telegram después. De paso, la sospecha original sobre `parse_mode="Markdown"` roto por `_`
+sueltos **no se reprodujo**: una respuesta real con varios guiones bajos en código Python se entregó
+sin error — el modo Markdown legacy de Telegram parece tolerarlos.
+
+**Bloqueante operativo encontrado (no es bug de código)**: el bot del homelab (Docker, siempre
+encendido) usa el mismo `TELEGRAM_BOT_TOKEN` que este Windows — dos instancias no pueden convivir
+(409 Conflict). Hay que pausar el bot del homelab para probar acá. Jarvis tampoco está desplegado en
+el homelab todavía, solo en este Windows.
 
 ## Qué está construido
 

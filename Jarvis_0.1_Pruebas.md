@@ -17,21 +17,6 @@ vivo en §1b — esto es solo para probar el camino "con key" que todavía no se
 
 ---
 
-## 4. Bot de Telegram real
-
-No hay `TELEGRAM_BOT_TOKEN` configurado en este entorno (`.env` ni siquiera existe todavía — copiá
-`project/.env.example` a `project/.env` y completá lo necesario). Con el bot corriendo:
-
-- `/j <texto>` y `/jq <pregunta>` contra un chat real.
-- **Posible problema no confirmado**: `cmd_jq` en `jarvis_handlers.py` edita el mensaje de respuesta con
-  `parse_mode="Markdown"` usando el texto que devuelve el LLM tal cual. Si el modelo externo genera
-  texto con `_`, `*` o `` ` `` sueltos (muy común), Telegram puede rechazar el `edit_text` por Markdown
-  mal formado — en ese caso el usuario vería el mensaje de error genérico en vez de la respuesta real.
-  No lo pude reproducir sin un bot real. Si pasa, la solución más simple es sacar `parse_mode` de esa
-  llamada o escapar el texto para MarkdownV2.
-
----
-
 ## 5. Migración real de la Bóveda
 
 El script está verificado en dry-run (dos veces, contra el backup real de tus datos,

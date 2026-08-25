@@ -60,3 +60,21 @@ base perfectamente limpia borrala a mano de `memory_entries` e `inbox_queue`.
 
 ---
 
+## 4. Bot de Telegram real — PROBADO (2026-08-25, esta máquina, con tu TELEGRAM_BOT_TOKEN)
+
+`/j` y `/jq` probados de punta a punta contra un chat real. Los dos andan bien. Detalle completo de
+todo lo que sigue en `Cerebro/decisiones-implementacion.md` (entradas del 2026-08-25).
+
+- El bot del homelab usa el mismo token que este Windows — hay que pausarlo
+  (`sudo docker-compose stop bot`) para probar acá, y reactivarlo después.
+- Corregidos dos bugs reales de LiteLLM+Ollama que aparecían recién a partir de la 2ª consulta en el
+  mismo proceso: el retrieval se degradaba en silencio a búsqueda por palabras (perdía el contexto
+  real) por un cliente HTTP interno de LiteLLM mal reusado entre llamadas, y el modelo local alucinaba
+  turnos de conversación fantasma que se retroalimentaban entre consultas. Ya arreglados y verificados
+  en vivo.
+- La sospecha original (Markdown roto por `_` sueltos en la respuesta) no se reprodujo — Telegram lo
+  toleró bien incluso con código Python lleno de guiones bajos.
+
+  ---
+
+  

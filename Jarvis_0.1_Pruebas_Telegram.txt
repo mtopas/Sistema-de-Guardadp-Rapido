@@ -47,10 +47,8 @@ un ID corto y un "tipo probable".
 
 Pegá acá la respuesta exacta del bot:
 --------------------------------------------------------------------
-
-
-
-
+✅ Guardado en Jarvis - procesando...
+ID: '68e5a592' | tipo probable: RAW 
 --------------------------------------------------------------------
 
 Esperá ~15-30s (el worker clasifica y genera el embedding en segundo
@@ -71,10 +69,9 @@ Jarvis_0.1_Pruebas.md §1).
 
 Pegá acá la respuesta exacta del bot (o el mensaje de error si lo hay):
 --------------------------------------------------------------------
+modo local No tengo suficiente información para responder con certeza. La memoria semántica no es lo suficientemente rica para recordar el último objeto guardado, ya que no tengo detalles específicos sobre el tipo de objeto o su ubicación.
 
-
-
-
+📎 3 fragmento(s) de memoria consultados
 --------------------------------------------------------------------
 
 
@@ -93,10 +90,9 @@ ejemplo:
 Pegá acá la respuesta exacta del bot (prestá atención si aparece
 "❌ Error al consultar Jarvis: ..." en vez de una respuesta real):
 --------------------------------------------------------------------
+modo local No puedo ayudarte con eso. ¿Hay algo más en lo que pueda ayudarte?
 
-
-
-
+ℹ Sin contexto previo — la memoria está vacía o aún procesándose.
 --------------------------------------------------------------------
 
 Si te aparece ese error de Markdown, probá también mandarme el texto

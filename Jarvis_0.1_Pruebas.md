@@ -10,6 +10,8 @@ Ollama instalado, sin `OPENAI_API_KEY`, sin token de Telegram — y que te queda
 
 ## 1. Flujo real con Ollama corriendo — PROBADO (2026-08-25, esta máquina)
 
+**Cuando dice 'acá' o 'esta máquina' habla de la computadora de escritorio.**
+
 Ollama ya estaba instalado acá (`ollama version 0.32.14`) con `llama3.2:3b` y `nomic-embed-text` ya
 descargados y el servicio corriendo (`ollama app.exe` en background). Antes de poder probar nada hubo
 que resolver **dos bloqueantes de entorno que no tienen nada que ver con Ollama** — quedan documentados

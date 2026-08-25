@@ -8,20 +8,52 @@ Ollama instalado, sin `OPENAI_API_KEY`, sin token de Telegram — y que te queda
 
 ---
 
-## 1. Flujo real con Ollama corriendo
+## 1. Flujo real con Ollama corriendo — PROBADO (2026-08-25, esta máquina)
 
-Todo lo que depende de Ollama (clasificación, embeddings, respuestas locales de fallback) lo validé
-con **mocks** — la lógica de orquestación está probada, pero nunca corrió contra un modelo real. Con
-Ollama levantado (`ollama serve` + `ollama pull llama3.2:3b` + `ollama pull nomic-embed-text`):
+Ollama ya estaba instalado acá (`ollama version 0.32.14`) con `llama3.2:3b` y `nomic-embed-text` ya
+descargados y el servicio corriendo (`ollama app.exe` en background). Antes de poder probar nada hubo
+que resolver **dos bloqueantes de entorno que no tienen nada que ver con Ollama** — quedan documentados
+en detalle en `Cerebro/decisiones-implementacion.md` (2026-08-25, "Fijar litellm==1.60.2 e instalar
+jarvis editable") y en `Cerebro/estado-actual.md`:
 
-- Levantá el worker (`python -m jarvis.worker.main`) y capturá algo real (`POST /jarvis/capture` o
-  `/j <texto>` en Telegram). Confirmá que:
-  - La clasificación real del modelo da un `type`/`title`/`tags` razonables (el prompt está en
-    `jarvis/llm/client.py::_CLASSIFY_PROMPT` — nunca se vio una respuesta real de `llama3.2:3b` contra
-    él, solo el parseo de JSON con datos mockeados).
-  - El embedding se genera y el entry queda `DONE` en el inbox.
-- Hacé una consulta (`POST /jarvis/query` o `/jq` en Telegram) sobre eso mismo y confirmá que la
-  respuesta cita el contenido correcto.
+1. `litellm` nunca estaba instalado en `project/venv` (no está en `requirements.txt`). Instalar la
+   última versión directamente rompe en Python 3.10 (`ImportError: cannot import name 'NotRequired'
+   from 'typing'` — litellm reciente asume Python 3.11+). Se fijó `litellm==1.60.2`, que sí importa
+   limpio en 3.10.
+2. El paquete `jarvis` nunca quedó instalado en `project/venv` (`pip install -e ../jarvis` mencionado
+   en una decisión previa no llegó a persistir). Como `app/main.py` atrapa el `ImportError` en
+   silencio, arrancar el backend exactamente como indica este mismo `CLAUDE.md`
+   (`cd project && uvicorn app.main:app`) montaba el backend **sin ninguna ruta `/jarvis/*`**, sin
+   ningún error visible (solo 404 genéricos). Se corrigió con
+   `pip install -e ./jarvis --no-deps` (desde la raíz del repo, con el python del venv de `project`).
+
+Con ambos fixes, corrí el flujo real de punta a punta (backend + worker, sin mocks):
+
+- `POST /jarvis/capture` con un texto real → el worker (`python -m jarvis.worker.main`) lo clasificó
+  con `llama3.2:3b` vía LiteLLM: JSON válido, `type="RAW"` razonable, `title` y `tags` coherentes con
+  el contenido (~27s la primera llamada, con el modelo recién cargado en memoria). Las tildes se ven
+  como `�` en la consola de Windows (cp1252) pero es solo un problema de terminal — verificado
+  escribiendo la respuesta cruda a un archivo UTF-8: el texto real tiene los acentos correctos.
+- El embedding se generó con `nomic-embed-text` (768 dims, ~3s) y el entry quedó `DONE` en el inbox
+  (`GET /jarvis/inbox` lo confirma), con el `.md` correspondiente escrito en `vault/RAW/`.
+- `POST /jarvis/query` sobre esa misma captura devolvió `context_count=1` y `sources` con el
+  `title_hint` correcto — la recuperación (ChromaDB) encontró y citó el contenido correcto. Sin
+  `OPENAI_API_KEY` configurada acá tampoco, cayó a `[modo local]` con `llama3.2:3b` como se espera, y
+  `GET /jarvis/budget` se mantuvo en `spent_usd=0.0` (correcto — no hay costo que registrar para un
+  modelo Ollama).
+
+**Quedó pendiente**: la entrada de prueba (`entry_id=23cddf94-…`) no se pudo borrar de `jarvis.db`
+desde esta sesión — el `DELETE` SQL directo lo bloqueó el permission classifier del harness. El archivo
+del vault sí se borró. Es inofensivo dejarla (es solo una fila de más), pero si querés una base
+perfectamente limpia, borrá manualmente esa fila de `memory_entries` e `inbox_queue` en
+`project/database/jarvis.db`.
+
+**Recomendación para vos**: agregar un techo de versión a `litellm` en `jarvis/pyproject.toml`
+(hoy es `litellm>=1.40.0`, sin límite superior) para que un `pip install` futuro no vuelva a traer una
+versión incompatible con Python 3.10, y considerar loguear la excepción real en el
+`except ImportError` de `project/app/main.py` (línea ~141) en vez de tragarla en silencio — así un
+futuro "no anda `/jarvis/*`" se diagnostica en segundos en vez de con este mismo proceso de
+investigación.
 
 ## 2. Consulta con OPENAI_API_KEY configurada
 

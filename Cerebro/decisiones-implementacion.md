@@ -286,3 +286,41 @@ Diferencia con spec: no aplica — corrección de infraestructura en código SGR
 Jarvis.
 
 Impacto: `project/app/db/database.py` línea ~300.
+
+---
+
+## 2026-08-25 — Fijar `litellm==1.60.2` e instalar `jarvis` editable en `project/venv` (bloqueaba el arranque documentado)
+
+Contexto: primera corrida real contra Ollama instalado (sesión posterior al QA con mocks). Dos problemas
+de infraestructura, ninguno relacionado con Ollama en sí, impedían levantar el flujo tal como lo describe
+`CLAUDE.md` (`cd project && uvicorn app.main:app`):
+
+1. `litellm` nunca estuvo en `project/requirements.txt` ni instalado en `project/venv`. `jarvis/pyproject.toml`
+   pide `litellm>=1.40.0` sin techo — un `pip install litellm` sin más trae la última (1.98.0 al momento
+   de probar), que en Python 3.10 rompe el import (`ImportError: cannot import name 'NotRequired' from
+   'typing'`, un módulo interno de litellm que asume `typing.NotRequired`, disponible recién en 3.11).
+2. El paquete `jarvis` nunca se instaló en `project/venv` (`pip install -e ../jarvis`, mencionado en la
+   entrada del 2026-08-25 sobre el rename `Jarvis/` → `jarvis/`, no llegó a ejecutarse o no persistió).
+   Como `app/main.py` importa `jarvis.*` dentro de un `try/except ImportError` silencioso (sin log del
+   motivo), el backend arrancaba "normal" pero con `_JARVIS_AVAILABLE = False`: ninguna ruta `/jarvis/*`
+   se montaba y `jarvis.db` nunca se inicializaba, sin ningún error visible en consola ni en la respuesta
+   HTTP (404 genérico de FastAPI). Esto pasaba siempre que el backend se arrancara como documenta
+   `CLAUDE.md` (`cd project && uvicorn ...`), porque `jarvis/` es sibling de `project/` y no queda en
+   `sys.path` por cwd.
+
+Decisión: se instaló `litellm==1.60.2` (última versión de la serie 1.6x que importa limpio en Python
+3.10) en `project/venv`, y se corrió `pip install -e ./jarvis --no-deps` desde la raíz del repo para que
+`import jarvis` funcione sin importar el cwd. Con ambos fixes, `cd project && uvicorn app.main:app` monta
+`/jarvis/*` correctamente y loguea `[jarvis] jarvis.db inicializada`. Pendiente para quien retome esto:
+fijar el techo de versión en `jarvis/pyproject.toml` (`litellm>=1.40.0,<1.90` o similar) para que un
+`pip install` futuro no vuelva a traer una versión rota en Python 3.10, y considerar loguear la excepción
+real en el `except ImportError` de `app/main.py` en vez de tragarla en silencio (habría ahorrado tiempo
+de diagnóstico). Efecto secundario: `litellm==1.60.2` bajó `httpx` de 1.28.1 a 0.27.2 en `project/venv`
+(requirements.txt pide `httpx==0.28.1`) — no rompió nada en esta sesión (FastAPI/uvicorn/bot funcionaron
+igual) pero es un conflicto de versión pendiente de resolver si se fija litellm en requirements.
+
+Diferencia con spec: no aplica — corrección de infraestructura de entorno, no de diseño.
+
+Impacto: `project/venv` (paquetes `litellm`, `jarvis` instalados); `jarvis/pyproject.toml` (techo de
+versión de `litellm` pendiente de agregar); `project/app/main.py` línea ~141 (logging del ImportError,
+pendiente).

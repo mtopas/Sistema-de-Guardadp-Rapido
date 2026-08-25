@@ -73,6 +73,37 @@ se vació `project/vault/` y `project/database/chroma/` — el usuario arranca c
 **No pude probar en este entorno** (sin navegador interactivo, sin Ollama, sin token de Telegram) — ver
 `Jarvis_0.1_Pruebas.md` para el detalle de qué le queda al usuario.
 
+## Validación real contra Ollama (2026-08-25, sesión posterior — ver `Jarvis_0.1_Pruebas.md` §1)
+
+Corrida en la máquina del usuario, con Ollama instalado (`llama3.2:3b` y `nomic-embed-text` ya
+descargados). Antes de poder probar nada hubo que resolver dos bloqueantes de entorno — ver decisión
+completa en `decisiones-implementacion.md` (2026-08-25, "Fijar litellm==1.60.2 e instalar jarvis
+editable"): `litellm` no estaba instalado (y su última versión rompe en Python 3.10 — se fijó
+`litellm==1.60.2`), y el paquete `jarvis` nunca quedó instalado en `project/venv`, así que arrancar el
+backend tal como documenta `CLAUDE.md` (`cd project && uvicorn app.main:app`) montaba el backend sin
+ninguna ruta `/jarvis/*` (fallaba en silencio, sin log ni error HTTP distinto de un 404 genérico).
+
+Con ambos fixes, flujo real de punta a punta (backend + worker, sin mocks):
+- `POST /jarvis/capture` con texto real → worker (`python -m jarvis.worker.main`) clasificó con
+  `llama3.2:3b` vía LiteLLM (`ollama/llama3.2:3b`, ~27s la primera llamada con el modelo en frío):
+  JSON válido, `type="RAW"` razonable, `title` y `tags` coherentes con el contenido, tildes correctas
+  (el mojibake que se ve en la consola de Windows/cp1252 es solo de terminal — el JSON y el archivo en
+  disco tienen UTF-8 correcto, verificado escribiendo a archivo).
+- Embedding generado vía `nomic-embed-text` (768 dims, ~3s) — entrada quedó `DONE` en el inbox, archivo
+  `.md` escrito en `vault/RAW/` con nombre y contenido correctos.
+- `POST /jarvis/query` sobre esa misma captura: `context_count=1`, `sources` con el `title_hint`
+  correcto — la recuperación (ChromaDB) encontró y citó el contenido correcto. Sin `OPENAI_API_KEY`
+  configurada en este entorno tampoco, cayó correctamente a `[modo local]` con `llama3.2:3b` (confirma
+  en vivo el fallback que el QA anterior sólo había probado con mocks) y `GET /jarvis/budget` se
+  mantuvo en `spent_usd=0.0` (correcto: no hay registro de costo para modelos Ollama).
+- Limpieza: se borró la entrada de prueba y el archivo del vault. **Pendiente para el usuario**: la fila
+  en `memory_entries`/`inbox_queue` de esta entrada de prueba (`entry_id=23cddf94-…`) no se pudo borrar
+  desde esta sesión (el DELETE SQL directo fue bloqueado por el permission classifier del harness) —
+  borrarla a mano o simplemente ignorarla, no afecta el uso real.
+
+Sigue sin probarse acá (no cambió): `OPENAI_API_KEY` real (§2), frontend en navegador (§3), Telegram real
+(§4), migración real de la Bóveda (§5) — ver `Jarvis_0.1_Pruebas.md`.
+
 ## Qué está construido
 
 ### S5 — Migración Bóveda (script one-time) (completado 2026-08-25)

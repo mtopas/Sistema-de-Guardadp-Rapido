@@ -35,6 +35,10 @@ JARVIS_LOCAL_FALLBACK_MODEL = os.getenv(
     JARVIS_CLASSIFY_MODEL,
 )
 JARVIS_OLLAMA_API_BASE = os.getenv("JARVIS_OLLAMA_API_BASE", _OLLAMA_BASE)
+# Ollama local puede colgarse sin responder (visto en hardware con poca VRAM) — sin timeout,
+# litellm espera indefinidamente y bloquea el worker entero (loop de un solo hilo). Con timeout,
+# la llamada falla y el entry_id vuelve a PENDING con retry (spec: _RETRY_DELAYS en processor.py).
+JARVIS_OLLAMA_TIMEOUT = float(os.getenv("JARVIS_OLLAMA_TIMEOUT", "120"))
 
 
 def is_ollama_model(model: str) -> bool:

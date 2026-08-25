@@ -6,7 +6,12 @@ from typing import Any
 
 import litellm
 
-from jarvis.config import JARVIS_EMBED_MODEL, JARVIS_OLLAMA_API_BASE, is_ollama_model
+from jarvis.config import (
+    JARVIS_EMBED_MODEL,
+    JARVIS_OLLAMA_API_BASE,
+    JARVIS_OLLAMA_TIMEOUT,
+    is_ollama_model,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +24,7 @@ def generate_embedding(text: str, model: str | None = None) -> list[float]:
     call_kwargs: dict[str, Any] = {"model": model, "input": [text]}
     if is_ollama_model(model):
         call_kwargs["api_base"] = JARVIS_OLLAMA_API_BASE
+        call_kwargs["timeout"] = JARVIS_OLLAMA_TIMEOUT
 
     response = litellm.embedding(**call_kwargs)
     return response["data"][0]["embedding"]

@@ -1,0 +1,116 @@
+JARVIS 0.1 — PRUEBA REAL POR TELEGRAM (/j y /jq)
+====================================================
+Generado 2026-08-25. Completá los espacios en blanco pegando lo que te
+devuelva el bot (y el log de la terminal si hay error) y devolvémelo.
+
+
+PASO 0 — IMPORTANTE: el bot del homelab está usando el mismo token
+--------------------------------------------------------------------
+Cuando arranqué el bot acá en Windows para probar, Telegram tiró un error
+409 Conflict: ya hay OTRA instancia del bot corriendo con el mismo
+TELEGRAM_BOT_TOKEN — el bot del homelab (Docker, Ubuntu, "siempre
+encendido" según HOMELAB.md). Dos instancias con el mismo token no pueden
+convivir: se pisan la cola de mensajes.
+
+Además, Jarvis (el paquete `jarvis/`) hoy SOLO está instalado en este
+Windows, no en el homelab — así que aunque no hubiera conflicto, /j y /jq
+en el bot del homelab responderían "⚠ Jarvis no está instalado".
+
+Para probar de verdad necesitamos que, mientras dure la prueba, el bot
+que esté escuchando sea el de ACÁ (Windows), no el del homelab. Elegí una
+opción:
+
+  [ ] Opción A (recomendada): pausar el bot del homelab un rato.
+      Por SSH al gabinete Ubuntu:
+          cd ~/project
+          sudo docker-compose stop bot
+      Cuando terminemos de probar, lo reactivás con:
+          sudo docker-compose start bot
+      (el backend del homelab puede seguir corriendo, solo el bot)
+
+  [ ] Opción B: probamos otro día / lo coordinás vos con el homelab.
+
+Marcá acá cuál elegiste: ____________________
+
+Avisame cuando el bot del homelab esté pausado y arranco el bot local acá
+(ya tengo todo el resto levantado: backend :8765 y el worker de Jarvis).
+
+
+PASO 1 — Captura simple: /j
+--------------------------------------------------------------------
+En el chat de Telegram con el bot, mandá:
+
+    /j Esto es una prueba real desde Telegram, un poroto.
+
+Resultado esperado: un mensaje "✅ Guardado en Jarvis — procesando…" con
+un ID corto y un "tipo probable".
+
+Pegá acá la respuesta exacta del bot:
+--------------------------------------------------------------------
+
+
+
+
+--------------------------------------------------------------------
+
+Esperá ~15-30s (el worker clasifica y genera el embedding en segundo
+plano contra Ollama) y avisame — reviso desde acá si la entrada quedó
+DONE en la base o si quedó en ERROR/PENDING.
+
+
+PASO 2 — Consulta: /jq (caso normal)
+--------------------------------------------------------------------
+Mandá:
+
+    /jq ¿Qué es lo último que guardé?
+
+Resultado esperado: primero "🔍 Buscando en tu memoria…", después se
+edita ese mismo mensaje con la respuesta real (puede tardar hasta ~1-2
+min si Ollama está lento — es un problema conocido de este entorno, ver
+Jarvis_0.1_Pruebas.md §1).
+
+Pegá acá la respuesta exacta del bot (o el mensaje de error si lo hay):
+--------------------------------------------------------------------
+
+
+
+
+--------------------------------------------------------------------
+
+
+PASO 3 — Consulta pensada para romper el Markdown (el bug sospechado)
+--------------------------------------------------------------------
+Este es el caso que nos interesa confirmar: si la respuesta del modelo
+trae guiones bajos, asteriscos o comillas simples sueltas, Telegram puede
+rechazar el mensaje por Markdown mal formado, y en ese caso verías el
+mensaje de error genérico en vez de la respuesta real.
+
+Mandá algo que empuje al modelo a usar ese tipo de caracteres, por
+ejemplo:
+
+    /jq Explicame con un ejemplo de código en Python qué guardé, usando nombres_de_variable con guion bajo.
+
+Pegá acá la respuesta exacta del bot (prestá atención si aparece
+"❌ Error al consultar Jarvis: ..." en vez de una respuesta real):
+--------------------------------------------------------------------
+
+
+
+
+--------------------------------------------------------------------
+
+Si te aparece ese error de Markdown, probá también mandarme el texto
+tal cual del error (a veces Telegram incluye el detalle de qué carácter
+no pudo parsear).
+
+
+PASO 4 — Estado final
+--------------------------------------------------------------------
+Cuando termines los 3 pasos:
+1. Avisame para que revise los logs del backend/worker acá y te confirme
+   qué pasó realmente del lado del servidor en cada caso.
+2. Reactivá el bot del homelab si elegiste la Opción A:
+       sudo docker-compose start bot
+
+Notas mías (no completar):
+--------------------------------------------------------------------

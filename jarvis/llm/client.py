@@ -12,6 +12,7 @@ from jarvis.config import (
     JARVIS_REASON_MODEL,
     JARVIS_LOCAL_FALLBACK_MODEL,
     JARVIS_OLLAMA_API_BASE,
+    JARVIS_OLLAMA_TIMEOUT,
     is_ollama_model,
 )
 
@@ -43,6 +44,7 @@ def call_llm(
 
     if is_ollama_model(model):
         call_kwargs["api_base"] = JARVIS_OLLAMA_API_BASE
+        call_kwargs.setdefault("timeout", JARVIS_OLLAMA_TIMEOUT)
 
     try:
         response = litellm.completion(**call_kwargs)

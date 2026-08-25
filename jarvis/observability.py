@@ -55,7 +55,7 @@ def _setup_otel() -> None:
         provider.add_span_processor(BatchSpanProcessor(exporter))
         trace.set_tracer_provider(provider)
         _otel_ok = True
-        logger.info("[jarvis.obs] OTel activo → %s", OTEL_EXPORTER_ENDPOINT)
+        logger.info("[jarvis.obs] OTel activo -> %s", OTEL_EXPORTER_ENDPOINT)
     except Exception as e:
         logger.warning("[jarvis.obs] OTel no pudo iniciarse: %s", e)
 

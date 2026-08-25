@@ -63,7 +63,7 @@ def main() -> None:
 
     reset_count = _reset_stuck()
     if reset_count:
-        logger.info("[worker] %d entrada(s) en PROCESSING → PENDING (crash recovery)", reset_count)
+        logger.info("[worker] %d entrada(s) en PROCESSING -> PENDING (crash recovery)", reset_count)
 
     logger.info("[worker] Loop activo. Poll cada %ds. Ctrl+C para detener.", JARVIS_WORKER_POLL_INTERVAL)
 

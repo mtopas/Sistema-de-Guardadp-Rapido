@@ -12,3 +12,51 @@ Validated working (via live tests + mocked-LLM pipeline runs): capture → worke
 
 I cleaned all QA test data out of jarvis.db/vault/chroma so it's genuinely empty for first real use, and updated Cerebro/estado-actual.md, Cerebro/decisiones-implementacion.md, and a new Jarvis_0.1_Pruebas.md with everything I couldn't test here (real Ollama, real OpenAI key, an actual browser, and Telegram — plus a flagged-but-unconfirmed Markdown-escaping risk in /jq's Telegram replies).
 
+---
+
+**Recomendación para vos**: agregar un techo de versión a `litellm` en `jarvis/pyproject.toml`
+(hoy es `litellm>=1.40.0`, sin límite superior) para que un `pip install` futuro no vuelva a traer una
+versión incompatible con Python 3.10, y considerar loguear la excepción real en el
+`except ImportError` de `project/app/main.py` (línea ~141) en vez de tragarla en silencio — así un
+futuro "no anda `/jarvis/*`" se diagnostica en segundos en vez de con este mismo proceso de
+investigación.
+
+---
+
+Frontend — polling automático confirmado en vivo; falta interacción manual en el navegador
+
+Con el backend + worker reales corriendo, el panel de `/jarvis` estuvo pegándole solo a
+`/jarvis/inbox` y `/jarvis/budget` cada 15s durante las pruebas del punto 1 — el auto-refresh funciona.
+Los dos bugs de UI que encontré (botón "Capturar" del TopBar sin wiring, fuentes del chat mostrando
+"—" en vez del `title_hint`) están corregidos en código y el dato que faltaba ya se confirmó correcto
+por API, pero ninguno de los dos se verificó todavía haciendo click de verdad en el navegador — junto
+con el resto de la interacción manual (mandar preguntas desde la UI, F5 con historial, ciclar módulos,
+colores de la barra de budget) queda para que lo pruebes vos.
+
+---
+
+Flujo real con Ollama corriendo — PROBADO en vivo, funciona bien (2026-08-25, esta máquina)
+
+Corrido de punta a punta contra Ollama real (`llama3.2:3b` + `nomic-embed-text`), sin mocks:
+captura → clasificación → vault `.md` → embedding en ChromaDB → `DONE` → consulta RAG con historial →
+fallback `[modo local]` cuando falta `OPENAI_API_KEY` (el fix de este QA, confirmado en vivo) →
+`sources` con `title_hint` correcto. Todo funcionó como se esperaba.
+
+Hubo que resolver dos bloqueantes de entorno primero (no relacionados con Jarvis en sí, ver detalle en
+`decisiones-implementacion.md` 2026-08-25 "Fijar litellm==1.60.2 e instalar jarvis editable"):
+`litellm` no estaba instalado (se fijó a `1.60.2` por incompatibilidad de versiones nuevas con Python
+3.10) y el paquete `jarvis` no estaba instalado en `project/venv` (montaba el backend sin rutas
+`/jarvis/*`, en silencio). Recomendación pendiente: poner techo de versión a `litellm` en
+`jarvis/pyproject.toml` y loguear el `except ImportError` de `app/main.py` en vez de tragarlo en
+silencio.
+
+Nota de tooling (no es bug de Jarvis): probando desde PowerShell 5.1, tildes/ñ se corrompen tanto al
+mandar como al recibir JSON por defecto (`Invoke-RestMethod`/`Invoke-WebRequest` no asumen UTF-8) — hay
+que forzar el encoding manualmente en ambas direcciones. El frontend real no tiene este problema.
+
+**Quedó pendiente**: una entrada de prueba (`entry_id=23cddf94-…`) no se pudo borrar de `jarvis.db`
+desde esta sesión (bloqueado por el permission classifier del harness) — inofensiva, pero si querés la
+base perfectamente limpia borrala a mano de `memory_entries` e `inbox_queue`.
+
+---
+

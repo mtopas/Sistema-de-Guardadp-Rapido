@@ -1,3 +1,20 @@
+================================================================================
+ARCHIVO HISTÓRICO — SOLO LECTURA
+================================================================================
+
+Este documento es el registro original de la idea de Jarvis, escrito antes de
+iniciar el proceso de especificación. Tiene valor como contexto conceptual y
+filosófico, pero NO debe usarse como referencia para decisiones de
+implementación.
+
+La especificación activa y todas las decisiones tomadas están en:
+→ Especificación Jarvis 0.1 (artifact publicado en Claude Code)
+
+Si este archivo contradice la especificación en cualquier punto,
+la especificación tiene prioridad.
+
+================================================================================
+
 IDEA 4 — JARVIS / SEGUNDO CEREBRO PERSONAL
 ==========================================
 

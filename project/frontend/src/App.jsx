@@ -11,6 +11,8 @@ import SettingsScreen from './screens/SettingsScreen'
 import FinanzasScreen from './screens/FinanzasScreen'
 import AgendaScreen   from './screens/AgendaScreen'
 import HabitosScreen  from './screens/HabitosScreen'
+import JarvisScreen   from './screens/JarvisScreen'
+import JarvisCaptureModal from './components/jarvis/JarvisCaptureModal'
 
 // Lazy-load screens with heavy deps (D3, TipTap) to keep the initial bundle lean
 const BrowseScreen = lazy(() => import('./screens/BrowseScreen'))
@@ -69,6 +71,7 @@ export default function App() {
             <Route path="/finanzas"  element={<FinanzasScreen />} />
             <Route path="/agenda"    element={<AgendaScreen />}   />
             <Route path="/habitos"   element={<HabitosScreen />}  />
+            <Route path="/jarvis"    element={<JarvisScreen />}   />
             <Route path="/settings"  element={<SettingsScreen />} />
           </Routes>
         </Suspense>
@@ -77,6 +80,7 @@ export default function App() {
       <TweaksPanel />
       <CaptureModal />
       <MovementModal />
+      <JarvisCaptureModal />
     </BrowserRouter>
   )
 }

@@ -58,6 +58,7 @@ export default function TopBar({ searchQuery = '', onSearchChange, searchInputRe
   const openMovement     = useStore(s => s.openMovement)
   const openAgendaEvento = useStore(s => s.openAgendaEvento)
   const openHabitoModal  = useStore(s => s.openHabitoModal)
+  const openJarvisCapture = useStore(s => s.openJarvisCapture)
   const initial      = userName ? userName.trim()[0].toUpperCase() : '?'
 
   const isHabitos  = location.pathname.startsWith('/habitos')
@@ -184,7 +185,7 @@ export default function TopBar({ searchQuery = '', onSearchChange, searchInputRe
   const cyclePrev   = (e) => { e.preventDefault(); navigate(prevMod.path) }
 
   const ctaLabel     = t(lang, currentMod.ctaKey)
-  const ctaActions   = { openCapture, openMovement, openAgendaEvento, openHabitoModal }
+  const ctaActions   = { openCapture, openMovement, openAgendaEvento, openHabitoModal, openJarvisCapture }
   const runCta       = () => ctaActions[currentMod.ctaStore]?.()
 
   return (

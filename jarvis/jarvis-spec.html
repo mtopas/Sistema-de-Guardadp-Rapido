@@ -1,0 +1,1700 @@
+<title>Jarvis 0.1</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&display=swap">
+<style>
+/* ── TOKENS ─────────────────────────────────────────────── */
+:root {
+  --bg:         #F1F4F9;
+  --surface:    #FFFFFF;
+  --surface-2:  #E4EAF5;
+  --border:     #C6D3E8;
+  --accent:     #0066CC;
+  --accent-soft:#E6F0FF;
+  --accent-dim: #004FA3;
+  --text:       #0A1628;
+  --text-2:     #3E5878;
+  --text-3:     #8AA0BA;
+  --green:      #0D7A4E;
+  --green-soft: #E6F5EF;
+  --amber:      #A05800;
+  --amber-soft: #FFF5E6;
+  --red:        #C0001A;
+  --red-soft:   #FDEAED;
+  --purple:     #5B3FA6;
+  --purple-soft:#EFE9FF;
+  --mono:       'IBM Plex Mono', 'Courier New', monospace;
+  --sans:       'DM Sans', system-ui, sans-serif;
+  --sidebar-w:  260px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:         #080D18;
+    --surface:    #0D1626;
+    --surface-2:  #141E32;
+    --border:     #1D3050;
+    --accent:     #27C9FF;
+    --accent-soft:rgba(39,201,255,0.10);
+    --accent-dim: #00A8D8;
+    --text:       #D8E8F8;
+    --text-2:     #7A9AC0;
+    --text-3:     #3E5A80;
+    --green:      #2DDE98;
+    --green-soft: rgba(45,222,152,0.10);
+    --amber:      #F5A623;
+    --amber-soft: rgba(245,166,35,0.10);
+    --red:        #FF5470;
+    --red-soft:   rgba(255,84,112,0.10);
+    --purple:     #A07CF5;
+    --purple-soft:rgba(160,124,245,0.10);
+  }
+}
+:root[data-theme="dark"] {
+  --bg:         #080D18;
+  --surface:    #0D1626;
+  --surface-2:  #141E32;
+  --border:     #1D3050;
+  --accent:     #27C9FF;
+  --accent-soft:rgba(39,201,255,0.10);
+  --accent-dim: #00A8D8;
+  --text:       #D8E8F8;
+  --text-2:     #7A9AC0;
+  --text-3:     #3E5A80;
+  --green:      #2DDE98;
+  --green-soft: rgba(45,222,152,0.10);
+  --amber:      #F5A623;
+  --amber-soft: rgba(245,166,35,0.10);
+  --red:        #FF5470;
+  --red-soft:   rgba(255,84,112,0.10);
+  --purple:     #A07CF5;
+  --purple-soft:rgba(160,124,245,0.10);
+}
+
+/* ── RESET ──────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--text);
+  background: var(--bg);
+  display: flex;
+  min-height: 100vh;
+}
+
+/* ── SIDEBAR ────────────────────────────────────────────── */
+#sidebar {
+  width: var(--sidebar-w);
+  min-width: var(--sidebar-w);
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  flex-shrink: 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.sidebar-header {
+  padding: 20px 20px 12px;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  z-index: 1;
+}
+.sidebar-logo {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.sidebar-sub {
+  font-size: 11px;
+  color: var(--text-3);
+  font-family: var(--mono);
+  margin-top: 2px;
+}
+.sidebar-nav { padding: 12px 0 24px; }
+.nav-group-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  padding: 10px 20px 4px;
+}
+.nav-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 20px;
+  text-decoration: none;
+  color: var(--text-2);
+  font-size: 12.5px;
+  transition: color .15s, background .15s;
+  border-left: 2px solid transparent;
+  line-height: 1.4;
+}
+.nav-item:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-left-color: var(--accent);
+}
+.nav-num {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-3);
+  min-width: 20px;
+  flex-shrink: 0;
+}
+.theme-toggle {
+  margin: 12px 20px 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-3);
+  cursor: pointer;
+  border: 1px solid var(--border);
+  padding: 5px 8px;
+  border-radius: 4px;
+  background: transparent;
+  width: calc(100% - 40px);
+  letter-spacing: .06em;
+}
+.theme-toggle:hover { color: var(--text); border-color: var(--text-3); }
+
+/* ── MAIN ───────────────────────────────────────────────── */
+main {
+  flex: 1;
+  max-width: 820px;
+  padding: 48px 48px 96px;
+  min-width: 0;
+}
+
+/* ── HEADER ─────────────────────────────────────────────── */
+.doc-header {
+  margin-bottom: 56px;
+  padding-bottom: 32px;
+  border-bottom: 1px solid var(--border);
+}
+.doc-eyebrow {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 12px;
+}
+.doc-title {
+  font-family: var(--mono);
+  font-size: clamp(28px, 4vw, 42px);
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -.01em;
+  line-height: 1.1;
+  text-wrap: balance;
+  margin-bottom: 14px;
+}
+.doc-subtitle {
+  font-size: 16px;
+  color: var(--text-2);
+  max-width: 60ch;
+  line-height: 1.6;
+  margin-bottom: 20px;
+}
+.doc-meta {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.meta-badge {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 3px;
+  letter-spacing: .04em;
+}
+.badge-version { background: var(--accent-soft); color: var(--accent); }
+.badge-status  { background: var(--amber-soft);  color: var(--amber); }
+.meta-date { font-family: var(--mono); font-size: 11px; color: var(--text-3); }
+
+/* ── SECTIONS ───────────────────────────────────────────── */
+.spec-section {
+  margin-bottom: 64px;
+  scroll-margin-top: 24px;
+}
+.section-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.section-num {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: 500;
+  min-width: 32px;
+  letter-spacing: .04em;
+}
+.section-title {
+  font-family: var(--mono);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -.01em;
+  text-wrap: balance;
+}
+.section-divider {
+  width: 100%;
+  height: 1px;
+  background: var(--border);
+  margin-bottom: 24px;
+}
+
+/* ── PROSE ──────────────────────────────────────────────── */
+p { color: var(--text-2); margin-bottom: 14px; max-width: 72ch; }
+p:last-child { margin-bottom: 0; }
+strong { color: var(--text); font-weight: 500; }
+
+ul, ol {
+  padding-left: 20px;
+  color: var(--text-2);
+  margin-bottom: 14px;
+}
+li { margin-bottom: 5px; }
+li::marker { color: var(--accent); }
+
+/* ── CALL-OUT BOXES ─────────────────────────────────────── */
+.box {
+  border-radius: 6px;
+  padding: 14px 18px;
+  margin-bottom: 16px;
+  border-left: 3px solid;
+  font-size: 14px;
+}
+.box-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.box.decision  { background: var(--accent-soft); border-color: var(--accent); }
+.box.decision .box-label { color: var(--accent); }
+.box.risk      { background: var(--red-soft);    border-color: var(--red); }
+.box.risk .box-label { color: var(--red); }
+.box.rule      { background: var(--amber-soft);  border-color: var(--amber); }
+.box.rule .box-label { color: var(--amber); }
+.box.edge      { background: var(--purple-soft); border-color: var(--purple); }
+.box.edge .box-label { color: var(--purple); }
+.box.done      { background: var(--green-soft);  border-color: var(--green); }
+.box.done .box-label { color: var(--green); }
+.box p { color: inherit; margin: 0; }
+.box ul { margin: 6px 0 0; }
+
+/* ── TABLES ─────────────────────────────────────────────── */
+.table-wrap { overflow-x: auto; margin-bottom: 20px; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+th {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+  vertical-align: top;
+  line-height: 1.5;
+}
+td:first-child { font-family: var(--mono); font-size: 12px; color: var(--text); font-weight: 500; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: var(--surface-2); }
+
+/* ── CODE ───────────────────────────────────────────────── */
+code {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  background: var(--surface-2);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--accent);
+}
+pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px 20px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--text-2);
+  overflow-x: auto;
+  margin-bottom: 16px;
+}
+pre .c { color: var(--text-3); }
+pre .k { color: var(--accent); }
+pre .s { color: var(--green); }
+
+/* ── FLOW ───────────────────────────────────────────────── */
+.flow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  align-items: center;
+  margin: 16px 0;
+}
+.flow-step {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 8px 14px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+}
+.flow-step.accent { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.flow-arrow {
+  color: var(--text-3);
+  padding: 0 6px;
+  font-size: 14px;
+}
+
+/* ── GRID ───────────────────────────────────────────────── */
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+@media (max-width: 640px) {
+  .grid-2 { grid-template-columns: 1fr; }
+  main { padding: 24px 20px 64px; }
+  #sidebar { display: none; }
+}
+
+/* ── TAGS ───────────────────────────────────────────────── */
+.tag {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 3px;
+  margin: 2px;
+}
+.tag-now    { background: var(--green-soft);  color: var(--green);  }
+.tag-later  { background: var(--amber-soft);  color: var(--amber);  }
+.tag-never  { background: var(--surface-2);   color: var(--text-3); }
+.tag-risk   { background: var(--red-soft);    color: var(--red);    }
+
+/* ── DATA MODEL ─────────────────────────────────────────── */
+.schema-table {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+.schema-table-header {
+  background: var(--surface-2);
+  padding: 10px 16px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  border-bottom: 1px solid var(--border);
+}
+.schema-table table { margin: 0; }
+.schema-table td { padding: 7px 16px; }
+.schema-table tr:last-child td { border-bottom: none; }
+
+/* ── DECISIONS LIST ─────────────────────────────────────── */
+.decision-item {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: start;
+}
+.decision-item:last-child { border-bottom: none; }
+.di-num {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-3);
+  padding-top: 2px;
+}
+.di-body .di-title { font-weight: 500; color: var(--text); font-size: 14px; margin-bottom: 2px; }
+.di-body .di-why { font-size: 13px; color: var(--text-2); }
+.di-rev {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: .08em;
+  padding: 2px 7px;
+  border-radius: 3px;
+  white-space: nowrap;
+  align-self: start;
+  margin-top: 3px;
+}
+.rev-easy   { background: var(--green-soft); color: var(--green); }
+.rev-hard   { background: var(--red-soft);   color: var(--red);   }
+.rev-medium { background: var(--amber-soft); color: var(--amber); }
+
+h3 {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: .02em;
+  margin: 20px 0 8px;
+}
+h3:first-child { margin-top: 0; }
+</style>
+
+<div id="sidebar">
+  <div class="sidebar-header">
+    <div class="sidebar-logo">Jarvis</div>
+    <div class="sidebar-sub">Especificación v0.1 — Agosto 2026</div>
+    <button class="theme-toggle" onclick="toggleTheme()">⬡ Cambiar tema</button>
+  </div>
+  <nav class="sidebar-nav">
+    <div class="nav-group-label">Visión</div>
+    <a href="#s1"  class="nav-item"><span class="nav-num">01</span> Resumen</a>
+    <a href="#s2"  class="nav-item"><span class="nav-num">02</span> Problema</a>
+    <a href="#s3"  class="nav-item"><span class="nav-num">03</span> Objetivos</a>
+    <a href="#s4"  class="nav-item"><span class="nav-num">04</span> No objetivos</a>
+    <div class="nav-group-label">Diseño funcional</div>
+    <a href="#s5"  class="nav-item"><span class="nav-num">05</span> Usuarios y actores</a>
+    <a href="#s6"  class="nav-item"><span class="nav-num">06</span> Casos de uso</a>
+    <a href="#s7"  class="nav-item"><span class="nav-num">07</span> Flujos principales</a>
+    <a href="#s8"  class="nav-item"><span class="nav-num">08</span> Funcionalidades</a>
+    <a href="#s9"  class="nav-item"><span class="nav-num">09</span> Reglas de negocio</a>
+    <div class="nav-group-label">Datos y comportamiento</div>
+    <a href="#s10" class="nav-item"><span class="nav-num">10</span> Modelo de datos</a>
+    <a href="#s11" class="nav-item"><span class="nav-num">11</span> Estados</a>
+    <a href="#s12" class="nav-item"><span class="nav-num">12</span> Casos borde</a>
+    <a href="#s13" class="nav-item"><span class="nav-num">13</span> Manejo de errores</a>
+    <a href="#s14" class="nav-item"><span class="nav-num">14</span> UX esperada</a>
+    <div class="nav-group-label">Sistema</div>
+    <a href="#s15" class="nav-item"><span class="nav-num">15</span> Arquitectura</a>
+    <a href="#s16" class="nav-item"><span class="nav-num">16</span> Integraciones</a>
+    <a href="#s17" class="nav-item"><span class="nav-num">17</span> Seguridad y privacidad</a>
+    <a href="#s18" class="nav-item"><span class="nav-num">18</span> Rendimiento</a>
+    <a href="#s19" class="nav-item"><span class="nav-num">19</span> Operación</a>
+    <a href="#s20" class="nav-item"><span class="nav-num">20</span> Testing</a>
+    <div class="nav-group-label">Control</div>
+    <a href="#s21" class="nav-item"><span class="nav-num">21</span> Métricas de éxito</a>
+    <a href="#s22" class="nav-item"><span class="nav-num">22</span> Riesgos</a>
+    <a href="#s23" class="nav-item"><span class="nav-num">23</span> Restricciones</a>
+    <a href="#s24" class="nav-item"><span class="nav-num">24</span> Supuestos</a>
+    <div class="nav-group-label">Registro de decisiones</div>
+    <a href="#s25" class="nav-item"><span class="nav-num">25</span> Decisiones tomadas</a>
+    <a href="#s26" class="nav-item"><span class="nav-num">26</span> Decisiones pospuestas</a>
+    <a href="#s27" class="nav-item"><span class="nav-num">27</span> Preguntas abiertas</a>
+    <a href="#s28" class="nav-item"><span class="nav-num">28</span> Fuera de alcance</a>
+    <a href="#s29" class="nav-item"><span class="nav-num">29</span> Extensiones futuras</a>
+  </nav>
+</div>
+
+<main>
+  <!-- HEADER -->
+  <header class="doc-header">
+    <div class="doc-eyebrow">Especificación de proyecto</div>
+    <h1 class="doc-title">Jarvis 0.1 — Memory Core</h1>
+    <p class="doc-subtitle">Sistema operativo personal privado y agentivo. Esta versión establece la capa de memoria estructurada: captura, organización, persistencia y recuperación de conocimiento en lenguaje natural.</p>
+    <div class="doc-meta">
+      <span class="meta-badge badge-version">v0.1</span>
+      <span class="meta-badge badge-status">En diseño</span>
+      <span class="meta-date">Agosto 2026</span>
+    </div>
+  </header>
+
+  <!-- 01 RESUMEN -->
+  <section class="spec-section" id="s1">
+    <div class="section-header">
+      <span class="section-num">01</span>
+      <h2 class="section-title">Resumen del proyecto</h2>
+    </div>
+    <div class="section-divider"></div>
+    <p>Jarvis es un segundo cerebro personal construido alrededor de una memoria persistente bajo control propio. Ingiere información desde Telegram y una interfaz de escritorio, la organiza en tipos de memoria estructurada, y permite recuperarla mediante lenguaje natural.</p>
+    <p>Jarvis 0.1 es la primera versión funcional: implementa el <strong>Memory Core</strong>, la capa de memoria que distingue conocimiento en bruto, conocimiento consolidado, decisiones y contexto de proyecto. No es un chatbot, sino el comienzo de un sistema operativo personal.</p>
+    <p>El proyecto evoluciona desde <strong>SGR (Sistema de Guardado Rápido)</strong> mediante el patrón strangler: Jarvis nace dentro de SGR y va absorbiendo sus módulos de forma incremental, sin romper lo que ya funciona.</p>
+    <div class="box decision">
+      <div class="box-label">Principio fundacional</div>
+      <p>Jarvis no es una base de conocimiento que el usuario mantiene. Es un sistema que mantiene su propio cerebro. El usuario vive, trabaja y le manda cosas. Jarvis captura, entiende, organiza y recuerda.</p>
+    </div>
+  </section>
+
+  <!-- 02 PROBLEMA -->
+  <section class="spec-section" id="s2">
+    <div class="section-header">
+      <span class="section-num">02</span>
+      <h2 class="section-title">Problema que resuelve</h2>
+    </div>
+    <div class="section-divider"></div>
+    <p>La Bóveda de SGR almacena y recupera notas, pero no construye memoria estructurada. Cuando el usuario pregunta <em>"¿qué decidimos sobre RAFAM?"</em>, SGR devuelve fragmentos semánticamente similares — no una respuesta que priorice las decisiones tomadas, el contexto del proyecto o la evolución del conocimiento.</p>
+    <p>Las limitaciones concretas del sistema actual:</p>
+    <ul>
+      <li>No distingue tipos de memoria: una decisión y una nota de lectura tienen el mismo peso en la recuperación.</li>
+      <li>No mantiene contexto conversacional persistente entre sesiones.</li>
+      <li>No organiza por proyecto de forma explícita — solo usa categorías planas.</li>
+      <li>No preserva la fuente original separada del conocimiento derivado.</li>
+      <li>No puede responder "¿por qué decidimos X?" porque no hay memoria de decisiones.</li>
+    </ul>
+    <p><strong>La diferencia que Jarvis 0.1 establece:</strong> transforma una captura en conocimiento organizado — identifica qué es, a qué proyectos pertenece, conserva la fuente original, y responde a "¿qué decidimos sobre X?" priorizando decisiones y contexto de proyecto sobre fragmentos genéricos.</p>
+  </section>
+
+  <!-- 03 OBJETIVOS -->
+  <section class="spec-section" id="s3">
+    <div class="section-header">
+      <span class="section-num">03</span>
+      <h2 class="section-title">Objetivos</h2>
+    </div>
+    <div class="section-divider"></div>
+    <div class="box done">
+      <div class="box-label">Criterio de éxito de Jarvis 0.1</div>
+      <p>El usuario puede mandar información por texto o Telegram, cerrar todo y volver después, preguntar <em>"¿qué decidimos sobre X?"</em> o <em>"¿qué sé de Y?"</em> y obtener una respuesta que usa memoria persistente, útil y coherente.</p>
+    </div>
+    <h3>Objetivos funcionales</h3>
+    <ul>
+      <li>Capturar información desde Telegram (mobile) y desde la interfaz <code>/jarvis</code> (desktop).</li>
+      <li>Guardar toda captura como RAW inmediatamente — nunca perder una entrada aunque falle el procesamiento posterior.</li>
+      <li>Clasificar automáticamente cada entrada: tipo de memoria, proyecto(s) relacionados, fuente.</li>
+      <li>Mantener un vault Markdown portable como fuente durable del conocimiento consolidado.</li>
+      <li>Recuperar memoria en lenguaje natural con ranking que prioriza decisiones y contexto de proyecto.</li>
+      <li>Mantener contexto conversacional persistente entre sesiones.</li>
+      <li>Controlar el presupuesto de tokens externos con límite diario configurable.</li>
+      <li>Migrar los datos de la Bóveda de SGR al Memory Core de forma controlada.</li>
+    </ul>
+    <h3>Objetivos arquitectónicos</h3>
+    <ul>
+      <li>Toda la configuración en variables de entorno — nunca hardcodeada.</li>
+      <li>Vault Markdown portable: si desaparece ChromaDB o Python, el conocimiento sigue existiendo.</li>
+      <li>Patrón strangler: la UI y API existentes de SGR siguen funcionando mientras el backend se reemplaza.</li>
+      <li>Arquitectura local-first que permita migrar a self-hosted (Docker Compose) en el futuro sin rediseño.</li>
+    </ul>
+  </section>
+
+  <!-- 04 NO OBJETIVOS -->
+  <section class="spec-section" id="s4">
+    <div class="section-header">
+      <span class="section-num">04</span>
+      <h2 class="section-title">No objetivos</h2>
+    </div>
+    <div class="section-divider"></div>
+    <p>Lo siguiente está explícitamente fuera del alcance de Jarvis 0.1 y no debe diseñarse ni anticiparse en código:</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Funcionalidad</th><th>Cuándo</th><th>Razón para no incluirla ahora</th></tr></thead>
+        <tbody>
+          <tr><td>Obsidian sync bidireccional</td><td>0.2</td><td>Complejidad alta: watcher, conflictos, reindexado incremental</td></tr>
+          <tr><td>Tipos EPISODIC, PEOPLE/ENTITIES, ACTIONS</td><td>0.2</td><td>El MVP es útil sin ellos; agregan complejidad al MVP</td></tr>
+          <tr><td>Tipos DERIVED y SUPERSEDED</td><td>0.2+</td><td>Requieren inferencia y memory maintenance, que es 0.2</td></tr>
+          <tr><td>Detector automático de PII completo</td><td>0.2</td><td>Regex básicos cubren los casos críticos en 0.1</td></tr>
+          <tr><td>Ingestión automática (email, GitHub, archivos)</td><td>0.3</td><td>Primero la memoria manual; después las fuentes automáticas</td></tr>
+          <tr><td>Tool system / permisos granulares</td><td>0.5</td><td>No hay acciones externas todavía</td></tr>
+          <tr><td>Agente planificador (multi-step)</td><td>0.6</td><td>Requiere tool system maduro</td></tr>
+          <tr><td>Interfaces generadas dinámicamente</td><td>0.7</td><td>El chat es la interfaz principal en 0.1</td></tr>
+          <tr><td>Voz</td><td>0.8</td><td>Otra interfaz al mismo cerebro; el cerebro va primero</td></tr>
+          <tr><td>Proactividad / alertas automáticas</td><td>0.9</td><td>Requiere madurez del sistema y trust del usuario</td></tr>
+          <tr><td>Gmail, WhatsApp, GitHub</td><td>0.3+</td><td>Fuentes de ingestión; no son la memoria</td></tr>
+          <tr><td>Multi-usuario / SaaS</td><td>Evaluar después de 0.3</td><td>Contradice los principios de privacidad actuales</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 05 USUARIOS -->
+  <section class="spec-section" id="s5">
+    <div class="section-header">
+      <span class="section-num">05</span>
+      <h2 class="section-title">Usuarios y actores</h2>
+    </div>
+    <div class="section-divider"></div>
+    <p>Jarvis 0.1 tiene un único usuario humano. El sistema no es multi-usuario ni está diseñado para serlo en esta versión.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Actor</th><th>Rol</th><th>Canal de interacción</th></tr></thead>
+        <tbody>
+          <tr><td>Usuario (propietario)</td><td>Único usuario. Captura, consulta y corrige.</td><td>Telegram + interfaz /jarvis en SGR</td></tr>
+          <tr><td>Jarvis (el sistema)</td><td>Ingiere, clasifica, organiza, recupera y responde.</td><td>Interno</td></tr>
+          <tr><td>Worker de background</td><td>Procesa el inbox de forma asíncrona.</td><td>Proceso Python separado</td></tr>
+          <tr><td>Ollama (local)</td><td>Embeddings, clasificación inicial, extracción de entidades.</td><td>API local</td></tr>
+          <tr><td>LiteLLM</td><td>Gateway unificado de modelos. Todo código de Jarvis llama a LiteLLM — nunca directamente a openai.* ni ollama.*</td><td>Capa de abstracción local</td></tr>
+          <tr><td>GPT-5.4 mini (externo)</td><td>Síntesis, razonamiento complejo, respuestas sobre memoria. Accedido vía LiteLLM.</td><td>OpenAI API (vía LiteLLM)</td></tr>
+          <tr><td>Langfuse (self-hosted)</td><td>Observabilidad de trazas LLM: latencia, costo, tool calls. Corre en homelab.</td><td>API homelab</td></tr>
+          <tr><td>OpenTelemetry</td><td>Trazas de infraestructura. Security audit log independiente del sistema LLM.</td><td>Interno</td></tr>
+          <tr><td>Telegram Bot API</td><td>Canal de captura y respuesta móvil.</td><td>API externa</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 06 CASOS DE USO -->
+  <section class="spec-section" id="s6">
+    <div class="section-header">
+      <span class="section-num">06</span>
+      <h2 class="section-title">Casos de uso</h2>
+    </div>
+    <div class="section-divider"></div>
+
+    <h3>CU-01 — Capturar información</h3>
+    <div class="table-wrap"><table>
+      <tr><td>Inicia</td><td>Usuario envía texto, URL o archivo por Telegram o desde /jarvis</td></tr>
+      <tr><td>Precondición</td><td>Jarvis está corriendo; bot conectado</td></tr>
+      <tr><td>Flujo normal</td><td>Jarvis guarda RAW → confirma recepción en &lt;2s → worker procesa en background</td></tr>
+      <tr><td>Resultado</td><td>Entrada en inbox con estado PENDING; confirmación enviada al usuario</td></tr>
+      <tr><td>Fallo</td><td>Si el RAW no puede guardarse, Jarvis notifica error; nunca confirma sin guardar</td></tr>
+      <tr><td>Repetición</td><td>Se crea una nueva entrada; duplicados detectados durante el procesamiento</td></tr>
+    </table></div>
+
+    <h3>CU-02 — Consultar memoria en lenguaje natural</h3>
+    <div class="table-wrap"><table>
+      <tr><td>Inicia</td><td>Usuario hace una pregunta en Telegram o en /jarvis</td></tr>
+      <tr><td>Datos necesarios</td><td>Pregunta del usuario + últimos 8-10 mensajes de conversación + contexto RAG</td></tr>
+      <tr><td>Flujo normal</td><td>Jarvis clasifica como consulta → RAG local recupera fragmentos relevantes → Privacy Gateway filtra → GPT-5.4 mini sintetiza → respuesta al usuario</td></tr>
+      <tr><td>Resultado</td><td>Respuesta en lenguaje natural con fuentes citadas</td></tr>
+      <tr><td>Presupuesto agotado</td><td>Jarvis responde con Ollama en modo local, notifica limitación</td></tr>
+      <tr><td>Sin resultados</td><td>Jarvis informa que no encontró información relevante</td></tr>
+    </table></div>
+
+    <h3>CU-03 — Corregir una clasificación incorrecta</h3>
+    <div class="table-wrap"><table>
+      <tr><td>Inicia</td><td>Usuario responde al mensaje de confirmación o edita desde el panel en /jarvis</td></tr>
+      <tr><td>Flujo Telegram</td><td>"No, esto es de Empresa, no RAFAM" → Jarvis actualiza proyecto, regenera embeddings</td></tr>
+      <tr><td>Flujo desktop</td><td>Panel editor: modifica proyecto, tipo, tags, contenido → guarda</td></tr>
+      <tr><td>Resultado</td><td>Entrada actualizada; vault Markdown actualizado; embeddings regenerados</td></tr>
+    </table></div>
+
+    <h3>CU-04 — Gestionar el inbox</h3>
+    <p>El usuario puede ver en /jarvis todas las entradas con su estado (PENDING / PROCESSING / DONE / ERROR), leer el error de las fallidas y reintentarlas manualmente.</p>
+
+    <h3>CU-05 — Crear y explorar proyectos</h3>
+    <p>El usuario puede crear un proyecto explícitamente o aceptar/rechazar uno propuesto por Jarvis. Puede listar proyectos, ver sus entradas asociadas y marcarlo como <code>local_only</code>.</p>
+  </section>
+
+  <!-- 07 FLUJOS -->
+  <section class="spec-section" id="s7">
+    <div class="section-header">
+      <span class="section-num">07</span>
+      <h2 class="section-title">Flujos principales</h2>
+    </div>
+    <div class="section-divider"></div>
+
+    <h3>Flujo de captura (inbox-first)</h3>
+    <div class="flow">
+      <div class="flow-step accent">Mensaje entra</div><div class="flow-arrow">→</div>
+      <div class="flow-step">Clasifica: captura o consulta</div><div class="flow-arrow">→</div>
+      <div class="flow-step accent">Guarda RAW en DB</div><div class="flow-arrow">→</div>
+      <div class="flow-step">Confirma recepción (&lt;2s)</div><div class="flow-arrow">→</div>
+      <div class="flow-step">Worker procesa en BG</div>
+    </div>
+    <p style="margin-top:8px;font-size:13px;color:var(--text-3)">El RAW se guarda antes de cualquier procesamiento. La captura nunca depende de que la IA termine correctamente.</p>
+
+    <p style="margin-top:16px;font-family:var(--mono);font-size:12px;color:var(--text-3)">→ Worker (background):</p>
+    <div class="flow" style="margin-top:8px">
+      <div class="flow-step">Lee PENDING</div><div class="flow-arrow">→</div>
+      <div class="flow-step">Extrae entidades (Ollama)</div><div class="flow-arrow">→</div>
+      <div class="flow-step">Clasifica tipo</div><div class="flow-arrow">→</div>
+      <div class="flow-step">Infiere proyecto(s)</div><div class="flow-arrow">→</div>
+      <div class="flow-step">Privacy check</div><div class="flow-arrow">→</div>
+      <div class="flow-step">Genera embeddings</div><div class="flow-arrow">→</div>
+      <div class="flow-step">Escribe vault .md</div><div class="flow-arrow">→</div>
+      <div class="flow-step accent">Estado → DONE</div>
+    </div>
+
+    <h3>Flujo de consulta</h3>
+    <div class="flow">
+      <div class="flow-step accent">Pregunta</div><div class="flow-arrow">→</div>
+      <div class="flow-step">RAG local</div><div class="flow-arrow">→</div>
+      <div class="flow-step">Ranking</div><div class="flow-arrow">→</div>
+      <div class="flow-step">Privacy Gateway</div><div class="flow-arrow">→</div>
+      <div class="flow-step">GPT-5.4 mini</div><div class="flow-arrow">→</div>
+      <div class="flow-step accent">Respuesta</div>
+    </div>
+    <p style="font-size:13px;color:var(--text-3);margin-top:8px">Contexto enviado a GPT: fragmentos RAG + últimos 8-10 mensajes + decisiones del proyecto relevante. Nunca el vault completo.</p>
+
+    <h3>Flujo cuando el presupuesto se agota</h3>
+    <div class="flow">
+      <div class="flow-step">Consulta llega</div><div class="flow-arrow">→</div>
+      <div class="flow-step">Budget tracker: EXHAUSTED</div><div class="flow-arrow">→</div>
+      <div class="flow-step">RAG local igual</div><div class="flow-arrow">→</div>
+      <div class="flow-step">Ollama responde</div><div class="flow-arrow">→</div>
+      <div class="flow-step accent">[modo local] prefijo</div>
+    </div>
+    <p style="font-size:13px;color:var(--text-3);margin-top:8px">El usuario puede aprobar gasto adicional explícitamente con un comando. No se acola la consulta para el día siguiente.</p>
+
+    <h3>Clasificación de mensaje en Telegram (prioridad)</h3>
+    <ol>
+      <li>Mensaje empieza con <code>/</code> → comando explícito.</li>
+      <li>Pregunta clara (termina en <code>?</code> o empieza con verbo interrogativo) → consulta.</li>
+      <li>Archivo adjunto → captura.</li>
+      <li>URL sola → captura (link).</li>
+      <li>Mensaje declarativo largo → captura.</li>
+      <li>Clasificador local (Ollama) para el resto.</li>
+      <li>Si sigue siendo ambiguo: Jarvis pregunta <em>"¿Querés que guarde esto o que te responda?"</em></li>
+    </ol>
+    <div class="box rule">
+      <div class="box-label">Regla de oro</div>
+      <p>Nunca arriesgarse a perder una captura por clasificación dudosa. Ante la duda, preguntar o guardar como RAW.</p>
+    </div>
+  </section>
+
+  <!-- 08 FUNCIONALIDADES -->
+  <section class="spec-section" id="s8">
+    <div class="section-header">
+      <span class="section-num">08</span>
+      <h2 class="section-title">Funcionalidades</h2>
+    </div>
+    <div class="section-divider"></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Funcionalidad</th><th>Descripción</th><th>Canal</th></tr></thead>
+        <tbody>
+          <tr><td>Captura RAW</td><td>Guarda texto, URL o archivo inmediatamente, sin procesar.</td><td>Telegram + Desktop</td></tr>
+          <tr><td>Inbox con estado</td><td>Cola de procesamiento con estados PENDING/PROCESSING/DONE/ERROR.</td><td>Sistema + Vista desktop</td></tr>
+          <tr><td>Clasificación automática</td><td>Infiere tipo de memoria y proyectos usando Ollama. Muestra resultado; usuario puede corregir.</td><td>Worker</td></tr>
+          <tr><td>Vault Markdown</td><td>Escribe conocimiento consolidado en archivos .md legibles y portables.</td><td>Worker</td></tr>
+          <tr><td>RAG + ranking</td><td>Búsqueda semántica con ChromaDB, ranking por tipo + proyecto + recencia.</td><td>API</td></tr>
+          <tr><td>Privacy Gateway</td><td>Filtra qué contexto va al modelo externo. Flags + regex + bloqueo por defecto.</td><td>API</td></tr>
+          <tr><td>Budget tracker</td><td>Controla gasto USD/día. Fallback automático a modo local al agotarse.</td><td>Sistema</td></tr>
+          <tr><td>Contexto conversacional</td><td>Historial en SQLite. Cada consulta incluye últimos 8-10 mensajes + memoria RAG.</td><td>API</td></tr>
+          <tr><td>Corrección de clasificación</td><td>Vía Telegram (lenguaje natural) o panel editor en desktop.</td><td>Telegram + Desktop</td></tr>
+          <tr><td>Gestión de proyectos</td><td>Crear, listar, marcar local_only. Jarvis propone; nunca crea silenciosamente.</td><td>Telegram + Desktop</td></tr>
+          <tr><td>Interfaz /jarvis</td><td>Chat principal + historial + panel lateral (inbox, proyecto activo, presupuesto).</td><td>Desktop (SGR)</td></tr>
+          <tr><td>Migración Bóveda</td><td>Script controlado que transforma hojas SGR al nuevo modelo, con backup y validación.</td><td>Script one-time</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 09 REGLAS -->
+  <section class="spec-section" id="s9">
+    <div class="section-header">
+      <span class="section-num">09</span>
+      <h2 class="section-title">Reglas de negocio</h2>
+    </div>
+    <div class="section-divider"></div>
+    <div class="box rule">
+      <div class="box-label">RN-01 — Captura indestructible</div>
+      <p>Una entrada RAW nunca se pierde aunque fallen Ollama, GPT o el procesamiento del vault. Si el guardado RAW falla, Jarvis notifica error. Si el procesamiento posterior falla, la entrada queda en estado ERROR y puede reintentarse.</p>
+    </div>
+    <div class="box rule">
+      <div class="box-label">RN-02 — Finanzas local-only por defecto</div>
+      <p>Toda información del módulo Finanzas de SGR es <code>local_only = true</code> por defecto. No se envía al modelo externo bajo ninguna circunstancia salvo que el usuario lo cambie explícitamente.</p>
+    </div>
+    <div class="box rule">
+      <div class="box-label">RN-03 — Privacy: bloquear ante la duda</div>
+      <p>Si el Privacy Gateway no puede determinar con certeza que un fragmento puede salir al modelo externo, lo bloquea. El sistema no asume permiso.</p>
+    </div>
+    <div class="box rule">
+      <div class="box-label">RN-04 — Proyectos: proponer, no crear silenciosamente</div>
+      <p>Jarvis puede proponer la creación de un proyecto cuando detecta suficiente información relacionada. No puede crear proyectos sin confirmación explícita del usuario. La declaración explícita del usuario siempre prevalece sobre la inferencia de Jarvis.</p>
+    </div>
+    <div class="box rule">
+      <div class="box-label">RN-05 — Presupuesto en USD, no en tokens</div>
+      <p>El límite diario es $1 USD. Jarvis calcula internamente cuántos tokens puede consumir según el modelo activo. Al agotarse, cae automáticamente a modo local y avisa al usuario. El usuario puede aprobar gasto adicional explícitamente; no se acola para el día siguiente.</p>
+    </div>
+    <div class="box rule">
+      <div class="box-label">RN-06 — Configuración en variables de entorno</div>
+      <p>Toda URL, puerto, API key, nombre de modelo y parámetro de infraestructura vive en variables de entorno. Nunca hardcodeado. El sistema debe funcionar sin cambios de código en homelab, VPS o cualquier entorno donde las variables estén correctamente configuradas.</p>
+    </div>
+    <div class="box rule">
+      <div class="box-label">RN-07 — Modelo configurable sin reiniciar</div>
+      <p>El modelo externo (<code>JARVIS_EXTERNAL_MODEL</code>) es configurable y no está atado a GPT-5.4 mini. Cambiar el modelo no requiere desplegar una nueva versión del código.</p>
+    </div>
+  </section>
+
+  <!-- 10 MODELO DE DATOS -->
+  <section class="spec-section" id="s10">
+    <div class="section-header">
+      <span class="section-num">10</span>
+      <h2 class="section-title">Modelo conceptual de datos</h2>
+    </div>
+    <div class="section-divider"></div>
+
+    <h3>Tipos de memoria (Jarvis 0.1)</h3>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Tipo</th><th>Descripción</th><th>Ejemplo</th><th>Almacenamiento</th></tr></thead>
+      <tbody>
+        <tr><td>RAW</td><td>Contenido original sin modificar. La IA no reescribe los hechos originales.</td><td>Email recibido, mensaje de Telegram, nota original</td><td>SQLite + /vault/RAW/</td></tr>
+        <tr><td>SEMANTIC</td><td>Conocimiento consolidado extraído del RAW.</td><td>"Prefiero una empresa con identidad propia, no ligada a mi nombre"</td><td>/vault/SEMANTIC/</td></tr>
+        <tr><td>DECISION</td><td>Decisiones explícitas tomadas, con contexto y justificación.</td><td>"Decidimos usar el patrón strangler para migrar SGR a Jarvis"</td><td>/vault/DECISIONS/</td></tr>
+        <tr><td>PROJECT</td><td>Estado, contexto y pendientes por proyecto.</td><td>Resumen activo del proyecto RAFAM</td><td>/vault/PROJECTS/</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Tablas SQLite</h3>
+
+    <div class="schema-table">
+      <div class="schema-table-header">memory_entries</div>
+      <table>
+        <tr><td>id</td><td>UUID, clave primaria</td></tr>
+        <tr><td>type</td><td>RAW | SEMANTIC | DECISION | PROJECT</td></tr>
+        <tr><td>content_raw</td><td>Contenido original tal como llegó</td></tr>
+        <tr><td>content_processed</td><td>Versión procesada/extraída (puede ser nulo si aún no se procesó)</td></tr>
+        <tr><td>source</td><td>telegram | desktop | migration</td></tr>
+        <tr><td>channel</td><td>Identificador del canal (chat_id de Telegram, etc.)</td></tr>
+        <tr><td>local_only</td><td>boolean — nunca enviar al modelo externo</td></tr>
+        <tr><td>confidential</td><td>boolean — flag de sensibilidad</td></tr>
+        <tr><td>vault_path</td><td>Ruta relativa al archivo .md en el vault (puede ser nulo)</td></tr>
+        <tr><td>created_at</td><td>timestamp UTC</td></tr>
+        <tr><td>processed_at</td><td>timestamp UTC (nulo si aún no procesado)</td></tr>
+        <tr><td>valid_from</td><td>DATETIME — cuándo era cierto en el mundo (bitemporal)</td></tr>
+        <tr><td>recorded_at</td><td>DATETIME — cuándo lo aprendió Jarvis</td></tr>
+        <tr><td>source_id</td><td>TEXT — provenance: referencia al evento de origen (obligatorio)</td></tr>
+        <tr><td>confidence</td><td>REAL — confianza del claim, 0.0–1.0</td></tr>
+        <tr><td>extraction_confidence</td><td>REAL — confianza de la extracción LLM, separada de la authority de la fuente</td></tr>
+        <tr><td>origin_trust</td><td>TEXT — nivel de confianza de la fuente: <code>user.authenticated</code> | <code>web.untrusted</code> | <code>telegram.user</code> | etc. Nunca puede incrementarse en derivados.</td></tr>
+        <tr><td>user_id</td><td>TEXT DEFAULT 'default' — namespace para multiusuario futuro</td></tr>
+      </table>
+    </div>
+
+    <div class="schema-table">
+      <div class="schema-table-header">inbox_queue</div>
+      <table>
+        <tr><td>entry_id</td><td>FK → memory_entries.id</td></tr>
+        <tr><td>status</td><td>PENDING | PROCESSING | DONE | ERROR</td></tr>
+        <tr><td>attempts</td><td>integer, default 0</td></tr>
+        <tr><td>last_error</td><td>texto del último error, nulo si no hay</td></tr>
+        <tr><td>next_retry_at</td><td>timestamp UTC — backoff exponencial</td></tr>
+        <tr><td>updated_at</td><td>timestamp UTC</td></tr>
+      </table>
+    </div>
+
+    <div class="schema-table">
+      <div class="schema-table-header">memory_projects</div>
+      <table>
+        <tr><td>id</td><td>UUID</td></tr>
+        <tr><td>name</td><td>texto — nombre del proyecto (ej: "RAFAM")</td></tr>
+        <tr><td>description</td><td>texto opcional</td></tr>
+        <tr><td>local_only</td><td>boolean — todo el proyecto es local_only</td></tr>
+        <tr><td>created_by</td><td>user | jarvis_proposal_accepted</td></tr>
+        <tr><td>created_at</td><td>timestamp UTC</td></tr>
+      </table>
+    </div>
+
+    <div class="schema-table">
+      <div class="schema-table-header">memory_entry_projects</div>
+      <table>
+        <tr><td>entry_id</td><td>FK → memory_entries.id</td></tr>
+        <tr><td>project_id</td><td>FK → memory_projects.id</td></tr>
+        <tr><td>is_primary</td><td>boolean — proyecto principal de la entrada</td></tr>
+        <tr><td>assigned_by</td><td>user | jarvis</td></tr>
+      </table>
+    </div>
+
+    <div class="schema-table">
+      <div class="schema-table-header">conversations + conversation_messages</div>
+      <table>
+        <tr><td>conversations.id</td><td>UUID — una sesión conversacional</td></tr>
+        <tr><td>conversations.channel</td><td>telegram | desktop</td></tr>
+        <tr><td>conversations.started_at</td><td>timestamp UTC</td></tr>
+        <tr><td>messages.role</td><td>user | assistant</td></tr>
+        <tr><td>messages.content</td><td>texto del mensaje</td></tr>
+        <tr><td>messages.created_at</td><td>timestamp UTC</td></tr>
+      </table>
+    </div>
+
+    <div class="schema-table">
+      <div class="schema-table-header">budget_usage</div>
+      <table>
+        <tr><td>date</td><td>DATE — fecha local (YYYY-MM-DD)</td></tr>
+        <tr><td>model</td><td>identificador del modelo externo</td></tr>
+        <tr><td>tokens_in</td><td>integer — tokens de entrada consumidos</td></tr>
+        <tr><td>tokens_out</td><td>integer — tokens de salida consumidos</td></tr>
+        <tr><td>cost_usd</td><td>REAL — costo calculado del día</td></tr>
+        <tr><td>daily_budget_usd</td><td>REAL — presupuesto del día (leído de env var al inicio)</td></tr>
+      </table>
+    </div>
+
+    <h3>Vault Markdown (estructura de directorios)</h3>
+    <pre>/vault/
+  /RAW/        <span class="c"># Fuentes originales referenciadas</span>
+  /SEMANTIC/   <span class="c"># Conocimiento extraído y consolidado</span>
+  /DECISIONS/  <span class="c"># Una decisión por archivo</span>
+  /PROJECTS/   <span class="c"># Un archivo de resumen por proyecto</span>
+  /00-INBOX/   <span class="c"># Entradas no procesadas aún (transitorias)</span></pre>
+    <p>Si ChromaDB o el sistema de embeddings desaparece, el vault Markdown sigue existiendo y puede leerse directamente. Los embeddings son un índice reconstruible, no la fuente de verdad.</p>
+  </section>
+
+  <!-- 11 ESTADOS -->
+  <section class="spec-section" id="s11">
+    <div class="section-header">
+      <span class="section-num">11</span>
+      <h2 class="section-title">Estados y comportamientos</h2>
+    </div>
+    <div class="section-divider"></div>
+
+    <h3>Estados del inbox (inbox_queue.status)</h3>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Estado</th><th>Significado</th><th>Transiciones posibles</th></tr></thead>
+      <tbody>
+        <tr><td>PENDING</td><td>Guardado, esperando ser procesado.</td><td>→ PROCESSING</td></tr>
+        <tr><td>PROCESSING</td><td>El worker está procesando activamente.</td><td>→ DONE | → ERROR</td></tr>
+        <tr><td>DONE</td><td>Procesado correctamente. Vault actualizado.</td><td>Final (editable por usuario)</td></tr>
+        <tr><td>ERROR</td><td>Falló después de 3 intentos. Visible en inbox view.</td><td>→ PENDING (retry manual)</td></tr>
+      </tbody>
+    </table></div>
+    <div class="box edge">
+      <div class="box-label">Al reiniciar el worker</div>
+      <p>Todo ítem en estado PROCESSING se resetea a PENDING. El worker nunca asume que un PROCESSING del pasado fue completado.</p>
+    </div>
+
+    <h3>Estados del presupuesto diario</h3>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Estado</th><th>Condición</th><th>Comportamiento</th></tr></thead>
+      <tbody>
+        <tr><td>ACTIVE</td><td>Gasto del día &lt; 80% del límite</td><td>Funcionamiento normal con modelo externo</td></tr>
+        <tr><td>LOW</td><td>Gasto entre 80% y 100%</td><td>Notifica al usuario; sigue usando el modelo externo</td></tr>
+        <tr><td>EXHAUSTED</td><td>Gasto &ge; límite diario</td><td>Cae a modo local automáticamente; prefija respuestas con [modo local]</td></tr>
+        <tr><td>OVERRIDE</td><td>Usuario aprobó gasto extra</td><td>Usa modelo externo para esa consulta; vuelve a EXHAUSTED al terminar</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <!-- 12 CASOS BORDE -->
+  <section class="spec-section" id="s12">
+    <div class="section-header">
+      <span class="section-num">12</span>
+      <h2 class="section-title">Casos borde</h2>
+    </div>
+    <div class="section-divider"></div>
+    <div class="box edge">
+      <div class="box-label">Ollama caído durante procesamiento</div>
+      <p>La entrada queda en ERROR. El worker reintenta con backoff exponencial (3 intentos). Si Ollama sigue caído, la entrada queda visible en ERROR en el inbox. El RAW nunca se pierde.</p>
+    </div>
+    <div class="box edge">
+      <div class="box-label">GPT call falla durante consulta</div>
+      <p>Jarvis cae automáticamente a Ollama para esa consulta y notifica al usuario. No se pierde la pregunta. Si Ollama también falla, Jarvis informa que no puede responder en este momento.</p>
+    </div>
+    <div class="box edge">
+      <div class="box-label">Vault no puede escribirse (disco lleno, permisos)</div>
+      <p>La entrada se queda en SQLite como DONE pero con <code>vault_path = null</code>. Se loguea el error. El conocimiento no se pierde (está en SQLite); solo falta el archivo Markdown. El worker puede reintentar la escritura al vault.</p>
+    </div>
+    <div class="box edge">
+      <div class="box-label">Mensaje ambiguo en Telegram</div>
+      <p>Jarvis responde con una sola pregunta: <em>"¿Querés que guarde esto o que te responda?"</em> El usuario responde; Jarvis procede según la respuesta. Si el usuario no responde en X minutos, Jarvis guarda como captura RAW (nunca pierde una captura potencial).</p>
+    </div>
+    <div class="box edge">
+      <div class="box-label">Regex detecta secreto en contexto a enviar</div>
+      <p>El Privacy Gateway bloquea el fragmento que contiene el patrón, no la consulta completa. Jarvis responde sin ese fragmento e informa que omitió un fragmento por razones de privacidad.</p>
+    </div>
+    <div class="box edge">
+      <div class="box-label">Captura menciona proyecto que no existe</div>
+      <p>Jarvis clasifica la entrada con el proyecto inferido como texto y propone crear el proyecto. Si el usuario lo rechaza, la entrada queda sin proyecto asignado hasta corrección manual.</p>
+    </div>
+    <div class="box edge">
+      <div class="box-label">Presupuesto agotado durante una consulta en curso</div>
+      <p>Si el presupuesto se agota mientras GPT está respondiendo, se completa la respuesta en curso. La próxima consulta ya usa modo local.</p>
+    </div>
+    <div class="box edge">
+      <div class="box-label">Duplicados</div>
+      <p>El worker detecta duplicados por hash del contenido durante el procesamiento. Si encuentra uno, lo marca como duplicado y no crea una entrada nueva en el vault. El RAW original se conserva.</p>
+    </div>
+    <div class="box edge">
+      <div class="box-label">Entrada pertenece a varios proyectos</div>
+      <p>Se permite. Una entrada puede tener múltiples proyectos en <code>memory_entry_projects</code>, con uno marcado como <code>is_primary = true</code>. El usuario puede cambiar esto desde el editor.</p>
+    </div>
+  </section>
+
+  <!-- 13 ERRORES -->
+  <section class="spec-section" id="s13">
+    <div class="section-header">
+      <span class="section-num">13</span>
+      <h2 class="section-title">Manejo de errores</h2>
+    </div>
+    <div class="section-divider"></div>
+    <div class="box rule">
+      <div class="box-label">Principio</div>
+      <p>Nunca fallar silenciosamente. Todo error visible para el usuario a través de: estado en inbox, mensaje en Telegram, o indicador en la interfaz desktop.</p>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Tipo de error</th><th>Comportamiento</th><th>Visibilidad</th></tr></thead>
+      <tbody>
+        <tr><td>RAW no guardado</td><td>Notifica inmediatamente al usuario. No confirma recepción.</td><td>Telegram / Desktop</td></tr>
+        <tr><td>Processing fallido (1-2 intentos)</td><td>Reintenta con backoff. No notifica todavía.</td><td>Solo logs internos</td></tr>
+        <tr><td>Processing fallido (3 intentos)</td><td>Estado ERROR. Notifica al usuario que hay una entrada con error.</td><td>Inbox view + notificación</td></tr>
+        <tr><td>GPT falla en consulta</td><td>Cae a Ollama. Responde con [modo degradado].</td><td>Mensaje al usuario</td></tr>
+        <tr><td>Presupuesto agotado</td><td>Modo local automático. Prefija respuestas.</td><td>Mensaje de aviso</td></tr>
+        <tr><td>Secreto detectado por regex</td><td>Bloquea fragmento, no consulta. Responde sin él.</td><td>Nota en respuesta</td></tr>
+        <tr><td>Ollama no disponible</td><td>Informa al usuario; no procesa inbox.</td><td>Mensaje + estado sistema</td></tr>
+      </tbody>
+    </table></div>
+    <h3>Política de reintentos del worker</h3>
+    <p>Backoff exponencial: 1 min → 5 min → 30 min. Después del tercer intento, estado = ERROR permanente hasta retry manual. El worker no bloquea otros ítems por un error individual.</p>
+  </section>
+
+  <!-- 14 UX -->
+  <section class="spec-section" id="s14">
+    <div class="section-header">
+      <span class="section-num">14</span>
+      <h2 class="section-title">UX esperada</h2>
+    </div>
+    <div class="section-divider"></div>
+
+    <h3>Telegram — canal de captura</h3>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Acción</th><th>Respuesta de Jarvis</th><th>Tiempo máximo</th></tr></thead>
+      <tbody>
+        <tr><td>Envía texto</td><td>"Guardado. Proyecto: RAFAM. Tipo: Decisión." (con opción de corregir)</td><td>2s</td></tr>
+        <tr><td>Envía URL</td><td>"Link guardado. Proyecto: General." (con opción de corregir)</td><td>2s</td></tr>
+        <tr><td>Hace una pregunta</td><td>Respuesta en lenguaje natural con fuentes citadas</td><td>10s</td></tr>
+        <tr><td>Mensaje ambiguo</td><td>"¿Querés que guarde esto o que te responda?"</td><td>1s</td></tr>
+        <tr><td>Modo local activo</td><td>"[modo local] " prefijado en la respuesta</td><td>—</td></tr>
+        <tr><td>Error en una entrada</td><td>"Hay una entrada con error de procesamiento. Podés verla en /jarvis."</td><td>—</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Interfaz /jarvis — desktop</h3>
+    <p>Nueva ruta en SGR. Diseño futurista y tecnológico (especificación visual separada). Componentes:</p>
+    <ul>
+      <li><strong>Chat principal</strong> — conversación con historial visible, input de texto, citas de fuentes en las respuestas.</li>
+      <li><strong>Panel lateral izquierdo</strong> — proyecto activo, presupuesto del día (barra de progreso), estado del inbox (chip de color: verde/amarillo/rojo).</li>
+      <li><strong>Vista Inbox</strong> — lista de entradas con chip de estado por cada una, texto del error en las que fallen, botón de retry manual.</li>
+      <li><strong>Editor de entrada</strong> — al hacer clic en cualquier entrada: editar proyecto, tipo, tags, contenido.</li>
+      <li><strong>Lista de proyectos</strong> — crear, renombrar, marcar como local_only, ver entradas por proyecto.</li>
+    </ul>
+    <div class="box decision">
+      <div class="box-label">Nota de diseño</div>
+      <p>La especificación visual detallada (paleta, tipografía, componentes) se define en una etapa separada usando herramientas de diseño. El requerimiento de estética: futurista y tecnológico.</p>
+    </div>
+
+    <h3>Estados vacíos</h3>
+    <ul>
+      <li>Inbox vacío → "No hay entradas pendientes."</li>
+      <li>Sin proyectos → "Creá tu primer proyecto o dejá que Jarvis te proponga uno cuando hayas capturado suficiente información."</li>
+      <li>Consulta sin resultados → "No encontré información relevante sobre eso en tu memoria. ¿Querés capturar algo sobre este tema?"</li>
+    </ul>
+  </section>
+
+  <!-- 15 ARQUITECTURA -->
+  <section class="spec-section" id="s15">
+    <div class="section-header">
+      <span class="section-num">15</span>
+      <h2 class="section-title">Arquitectura conceptual</h2>
+    </div>
+    <div class="section-divider"></div>
+    <pre>
+INTERFACES
+  Telegram Bot          /jarvis (SGR React)
+       │                       │
+       └──────────┬────────────┘
+                  │
+           FastAPI /jarvis/*
+                  │
+    ┌─────────────┼──────────────┐
+    │             │              │
+INBOX API    MEMORY API    BUDGET API
+    │             │
+    │      ┌──────┴──────┐
+    │   RAG + Ranking  Privacy Gateway
+    │      │              │
+    │   ChromaDB       Regex + Flags
+    │      │              │
+    │   Embeddings    LiteLLM Gateway
+    │                    │   │
+    │              Ollama   GPT-5.4 mini
+    │
+WORKER (proceso Python separado)
+    │
+    ├─ Lee inbox_queue (PENDING)
+    ├─ Extrae / clasifica via LiteLLM → Ollama
+    ├─ Escribe vault .md
+    ├─ Genera embeddings → ChromaDB
+    └─ Actualiza estado
+
+OBSERVABILIDAD
+  Langfuse (self-hosted) — trazas LLM: latencia, costo, tool calls
+  OpenTelemetry — trazas infra + security audit log
+
+ALMACENAMIENTO
+  SQLite (metadata, inbox, conversaciones, budget)
+  Markdown Vault (conocimiento durable)
+  ChromaDB (índice de embeddings — reconstruible; migración a pgvector en 0.2)
+  uploads/ (archivos binarios)
+    </pre>
+
+    <h3>Patrón de transición SGR → Jarvis</h3>
+    <p>La UI y API existentes de SGR (Bóveda, Finanzas, Agenda, Hábitos) siguen funcionando durante la transición. Los endpoints existentes funcionan a través de <strong>adaptadores de compatibilidad</strong> que internamente redirigen al Memory Core. Cuando el Memory Core madure, la Bóveda-UI pasa a ser simplemente una vista de la memoria de Jarvis.</p>
+    <div class="flow">
+      <div class="flow-step">SGR endpoints existentes</div><div class="flow-arrow">→</div>
+      <div class="flow-step">Compatibility adapters</div><div class="flow-arrow">→</div>
+      <div class="flow-step accent">Memory Core</div>
+    </div>
+
+    <h3>Worker como proceso separado</h3>
+    <p>El worker corre como un proceso Python independiente que hace polling de <code>inbox_queue</code> buscando entradas PENDING. Al arrancar, resetea cualquier entrada en PROCESSING a PENDING. Sobrevive a reinicios del servidor FastAPI y viceversa.</p>
+  </section>
+
+  <!-- 16 INTEGRACIONES -->
+  <section class="spec-section" id="s16">
+    <div class="section-header">
+      <span class="section-num">16</span>
+      <h2 class="section-title">Integraciones</h2>
+    </div>
+    <div class="section-divider"></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Integración</th><th>Rol en 0.1</th><th>Variable de entorno</th><th>Fallo → comportamiento</th></tr></thead>
+      <tbody>
+        <tr><td>Telegram Bot API</td><td>Canal de captura y respuesta móvil</td><td>TELEGRAM_BOT_TOKEN</td><td>No hay captura móvil; sistema sigue funcionando en desktop</td></tr>
+        <tr><td>LiteLLM</td><td>Gateway unificado de modelos. Todo llamado LLM pasa por aquí; cambiar modelo es cambiar una variable de entorno.</td><td>LITELLM_MODEL, LITELLM_BASE_URL (ver .env.example)</td><td>Ningún llamado LLM funciona; sistema no puede procesar ni responder</td></tr>
+        <tr><td>OpenAI API (GPT-5.4 mini)</td><td>Síntesis y razonamiento complejo, accedido vía LiteLLM</td><td>OPENAI_API_KEY, JARVIS_EXTERNAL_MODEL</td><td>LiteLLM cae a modo local (Ollama)</td></tr>
+        <tr><td>Ollama (local)</td><td>Embeddings, clasificación, extracción (vía LiteLLM)</td><td>OLLAMA_URL, JARVIS_LOCAL_MODEL, JARVIS_EMBED_MODEL</td><td>Worker no puede procesar; inbox se acumula</td></tr>
+        <tr><td>Langfuse (self-hosted)</td><td>Observabilidad de trazas LLM: latencia, costo, tool calls. Corre en homelab.</td><td>LANGFUSE_HOST, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY</td><td>Sin observabilidad LLM; el sistema sigue funcionando</td></tr>
+        <tr><td>OpenTelemetry</td><td>Trazas de infraestructura + security audit log independiente del sistema LLM</td><td>OTEL_EXPORTER_OTLP_ENDPOINT</td><td>Sin audit trail de infra; el sistema sigue funcionando</td></tr>
+        <tr><td>ChromaDB</td><td>Índice de embeddings para RAG (reconstruible; migración a pgvector en 0.2)</td><td>CHROMA_URL o CHROMA_PATH</td><td>RAG no funciona; consultas degradadas a búsqueda textual en SQLite</td></tr>
+        <tr><td>SQLite</td><td>Metadata, inbox, conversaciones, budget</td><td>DATABASE_PATH</td><td>Sistema no puede arrancar</td></tr>
+        <tr><td>Markdown Vault</td><td>Conocimiento durable</td><td>VAULT_PATH</td><td>Worker no escribe .md; conocimiento en SQLite igual</td></tr>
+      </tbody>
+    </table></div>
+    <div class="box risk">
+      <div class="box-label">Dependencia crítica única</div>
+      <p>Si Ollama no está disponible, el worker de background no puede procesar el inbox. Es la única dependencia sin fallback que detiene el procesamiento. Considerar health-check al arrancar el worker.</p>
+    </div>
+  </section>
+
+  <!-- 17 SEGURIDAD -->
+  <section class="spec-section" id="s17">
+    <div class="section-header">
+      <span class="section-num">17</span>
+      <h2 class="section-title">Seguridad y privacidad</h2>
+    </div>
+    <div class="section-divider"></div>
+
+    <h3>Privacy Gateway (Jarvis 0.1)</h3>
+    <p>Antes de enviar cualquier fragmento al modelo externo, el gateway aplica estas verificaciones en orden:</p>
+    <ol>
+      <li>Si <code>memory_entry.local_only = true</code> → bloquear.</li>
+      <li>Si el proyecto asociado tiene <code>local_only = true</code> → bloquear.</li>
+      <li>Si el fragmento coincide con regex de secretos evidentes → bloquear fragmento (no la consulta completa).</li>
+      <li>Si pasa las tres verificaciones → puede salir como contexto RAG.</li>
+    </ol>
+
+    <h3>Regex de secretos (Jarvis 0.1)</h3>
+    <p>Patrones mínimos para detectar secretos evidentes antes del envío:</p>
+    <pre><span class="c"># API keys y tokens comunes</span>
+<span class="k">sk-[A-Za-z0-9]{20,}</span>           <span class="c"># OpenAI</span>
+<span class="k">ghp_[A-Za-z0-9]{36}</span>            <span class="c"># GitHub PAT</span>
+<span class="k">xoxb-[0-9]+-[A-Za-z0-9-]+</span>     <span class="c"># Slack Bot</span>
+<span class="k">Bearer [A-Za-z0-9._~+/-]+=*</span>   <span class="c"># Bearer tokens</span>
+<span class="k">password\s*[:=]\s*\S+</span>          <span class="c"># Contraseñas inline</span>
+<span class="k">api_?key\s*[:=]\s*\S+</span>          <span class="c"># API keys inline</span></pre>
+    <p>El detector completo de PII (DNI, CUIT, números de cuenta, teléfonos, etc.) se implementa en 0.2.</p>
+
+    <h3>Categorías que nunca van al modelo externo</h3>
+    <ul>
+      <li>Entradas o proyectos marcados <code>local_only = true</code>.</li>
+      <li>Todo el módulo Finanzas (local_only por defecto).</li>
+      <li>Credenciales, tokens, contraseñas detectadas por regex.</li>
+      <li>Entradas marcadas <code>confidential = true</code>.</li>
+      <li>Datos de terceros sin autorización explícita.</li>
+    </ul>
+
+    <h3>Audit log mínimo (Jarvis 0.1)</h3>
+    <p>Cada llamada al modelo externo registra: timestamp, modelo usado, cantidad de fragmentos RAG enviados, costo estimado. No registra el contenido enviado (es sensible), sino metadata de qué tipo de información salió. El audit log corre sobre OpenTelemetry — independiente del sistema LLM.</p>
+
+    <h3>Principios de seguridad estructural (incorporados en 0.1)</h3>
+    <div class="box rule">
+      <div class="box-label">Trust propagation sin degradación</div>
+      <p>El campo <code>origin_trust</code> de una fuente se propaga a todos sus derivados sin excepción. Resumir contenido <code>web.untrusted</code> diez veces no lo convierte en <code>user.authenticated</code>. Esta propagación es estructural: el campo viaja con cada claim y nunca puede incrementarse mediante consolidación.</p>
+    </div>
+    <div class="box rule">
+      <div class="box-label">Task Manifest</div>
+      <p>Antes de que el worker procese cualquier contenido externo, define un conjunto cerrado de capacidades permitidas. En 0.1 esto es un objeto Python que declara qué operaciones puede hacer el worker antes de empezar. Contenido encontrado durante la tarea no puede ampliar ese conjunto.</p>
+    </div>
+    <div class="box rule">
+      <div class="box-label">Memoria ≠ Permiso</div>
+      <p>Los permisos viven en un policy store separado que el LLM no puede escribir directamente. Un claim en el memory store que diga "el usuario autorizó X" no tiene poder de autorización. Esta separación es estructural desde 0.1, aunque el policy store de 0.1 sea mínimo.</p>
+    </div>
+    <div class="box rule">
+      <div class="box-label">Blast radius explícito para 0.1</div>
+      <p>El worker de background puede: leer conversaciones, escribir en el memory store. El worker de background no puede: hacer requests externos, leer credenciales, modificar el filesystem del host fuera del vault. Este blast radius es una restricción de diseño, no solo de configuración.</p>
+    </div>
+    <div class="box rule">
+      <div class="box-label">Provenance obligatorio</div>
+      <p>Todo evento escrito al memory store debe incluir <code>source_id</code>. No existe escritura válida sin provenance. Esto garantiza que cualquier claim puede responder "¿por qué Jarvis cree esto?" con una cadena trazar al mensaje o documento original.</p>
+    </div>
+  </section>
+
+  <!-- 18 RENDIMIENTO -->
+  <section class="spec-section" id="s18">
+    <div class="section-header">
+      <span class="section-num">18</span>
+      <h2 class="section-title">Rendimiento y escalabilidad</h2>
+    </div>
+    <div class="section-divider"></div>
+    <p>Jarvis 0.1 es un sistema personal de un único usuario. No se diseña para escalar horizontalmente. Las siguientes métricas son objetivos de rendimiento, no de escalabilidad:</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Operación</th><th>Latencia objetivo</th><th>Notas</th></tr></thead>
+      <tbody>
+        <tr><td>Confirmación de captura (inbox-first)</td><td>&lt; 2s</td><td>Solo guarda RAW y responde; no espera procesamiento</td></tr>
+        <tr><td>Respuesta a consulta (con GPT)</td><td>&lt; 10s</td><td>Incluye RAG local + llamada externa</td></tr>
+        <tr><td>Respuesta a consulta (modo local)</td><td>&lt; 5s</td><td>Solo Ollama + RAG</td></tr>
+        <tr><td>Procesamiento de entrada en worker</td><td>&lt; 30s</td><td>Sin restricción estricta; es asíncrono</td></tr>
+        <tr><td>Carga de la interfaz /jarvis</td><td>&lt; 1s</td><td>Misma API que SGR actual</td></tr>
+      </tbody>
+    </table></div>
+    <div class="box decision">
+      <div class="box-label">Nota sobre escalabilidad</div>
+      <p>Con $1/día de presupuesto y GPT-5.4 mini a $0.75/M tokens de entrada, se estiman entre 100 y 150 consultas diarias antes de agotar el límite. Para uso personal es más que suficiente. Redis, Celery u otras técnicas de escala serían sobreingeniería en esta etapa.</p>
+    </div>
+  </section>
+
+  <!-- 19 OPERACION -->
+  <section class="spec-section" id="s19">
+    <div class="section-header">
+      <span class="section-num">19</span>
+      <h2 class="section-title">Operación y mantenimiento</h2>
+    </div>
+    <div class="section-divider"></div>
+    <h3>Quién administra el sistema</h3>
+    <p>El único usuario es el único administrador. No hay soporte externo ni equipo de operaciones.</p>
+    <h3>Procesos que deben correr continuamente</h3>
+    <ul>
+      <li><strong>FastAPI (uvicorn)</strong> — servidor principal de la API.</li>
+      <li><strong>Worker Python</strong> — procesamiento de inbox en background.</li>
+      <li><strong>Telegram bot</strong> — proceso separado conectado a la misma API.</li>
+      <li><strong>Ollama</strong> — servidor de modelos locales.</li>
+    </ul>
+    <p>Se recomienda gestionar estos procesos con <code>supervisord</code>, <code>systemd</code> o el equivalente en el homelab. Los procesos deben reiniciarse automáticamente si fallan.</p>
+    <h3>Tareas manuales esperadas</h3>
+    <ul>
+      <li>Corregir clasificaciones incorrectas del inbox (periódica, vía Telegram o desktop).</li>
+      <li>Crear proyectos que Jarvis no puede inferir solo.</li>
+      <li>Resolver entradas en estado ERROR en el inbox.</li>
+      <li>Backup manual de <code>database/app.db</code> y <code>vault/</code> (hasta que haya backup automático).</li>
+      <li>Actualizar el modelo externo si cambia la oferta de OpenAI (solo variable de entorno).</li>
+    </ul>
+    <h3>Sin migración de esquema en caliente</h3>
+    <p>Para Jarvis 0.1, los cambios de esquema en SQLite se aplican mediante <code>init_db()</code> al arrancar (mismo patrón que SGR). Las migraciones formales con Alembic se evalúan cuando el esquema esté más estabilizado.</p>
+  </section>
+
+  <!-- 20 TESTING -->
+  <section class="spec-section" id="s20">
+    <div class="section-header">
+      <span class="section-num">20</span>
+      <h2 class="section-title">Testing</h2>
+    </div>
+    <div class="section-divider"></div>
+    <h3>Tests automáticos (unitarios)</h3>
+    <ul>
+      <li>Privacy Gateway: dado un fragmento con/sin flags, devuelve correctly bloqueado/permitido.</li>
+      <li>Regex de secretos: lista de patrones conocidos detectados correctamente; texto limpio no bloqueado.</li>
+      <li>Clasificación captura/consulta: casos representativos del árbol de decisión en Telegram.</li>
+      <li>Ranking de RAG: dado un conjunto de fragmentos, el ranker prioriza DECISION sobre RAW, proyecto explícito sobre general, reciente sobre antiguo.</li>
+      <li>Budget tracker: acumula correctamente, detecta EXHAUSTED, resetea al cambiar de día.</li>
+    </ul>
+    <h3>Tests de integración</h3>
+    <ul>
+      <li>Flujo completo de captura: mensaje entra → RAW guardado → worker procesa → vault escrito → estado DONE.</li>
+      <li>Flujo de consulta: pregunta → RAG → Privacy Gateway → respuesta con fuentes.</li>
+      <li>Resiliencia del worker: ítem PROCESSING al arrancar → resetea a PENDING.</li>
+    </ul>
+    <h3>Testing manual (calidad)</h3>
+    <p>La calidad de las respuestas de Jarvis no puede verificarse automáticamente. El criterio de aceptación subjetivo es: dada una pregunta del tipo "¿qué decidimos sobre X?", la respuesta prioriza correctamente las decisiones del proyecto y no mezcla información no relacionada.</p>
+    <div class="box risk">
+      <div class="box-label">Riesgo de testing</div>
+      <p>El comportamiento del modelo externo puede variar entre versiones de GPT y no es determinista. No confiar en snapshots de respuestas como tests automáticos.</p>
+    </div>
+  </section>
+
+  <!-- 21 METRICAS -->
+  <section class="spec-section" id="s21">
+    <div class="section-header">
+      <span class="section-num">21</span>
+      <h2 class="section-title">Métricas de éxito</h2>
+    </div>
+    <div class="section-divider"></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Métrica</th><th>Objetivo</th><th>Cómo medir</th></tr></thead>
+      <tbody>
+        <tr><td>Utilidad de consulta</td><td>El usuario obtiene una respuesta útil sobre "¿qué decidimos sobre X?" en &lt;10s</td><td>Uso real; feedback implícito (¿sigue preguntando o corrige?)</td></tr>
+        <tr><td>Clasificación automática</td><td>&gt;80% de capturas clasificadas sin corrección posterior</td><td>Ratio de correcciones sobre total de entradas</td></tr>
+        <tr><td>Cero pérdidas de RAW</td><td>0 capturas perdidas por error de procesamiento</td><td>Log de errores de guardado RAW</td></tr>
+        <tr><td>Costo mensual</td><td>&lt;$30 USD/mes (= $1/día)</td><td>Tabla budget_usage</td></tr>
+        <tr><td>Adopción</td><td>El usuario abandona la Bóveda como sistema principal de búsqueda</td><td>Observación subjetiva</td></tr>
+        <tr><td>Tiempo inbox</td><td>Entradas en DONE &lt;60s después de captura en condiciones normales</td><td>Diferencia created_at → processed_at</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <!-- 22 RIESGOS -->
+  <section class="spec-section" id="s22">
+    <div class="section-header">
+      <span class="section-num">22</span>
+      <h2 class="section-title">Riesgos</h2>
+    </div>
+    <div class="section-divider"></div>
+    <div class="box risk">
+      <div class="box-label">RIESGO 1 — Memory maintenance subestimado (Alta probabilidad, Alto impacto)</div>
+      <p>El roadmap pone Memory Maintenance en 0.2, pero detectar duplicados, contradicciones y conocimiento obsoleto de forma automática y confiable es uno de los problemas más difíciles de resolver incluso con modelos avanzados. Mitigación: el MVP solo requiere memoria que funcione bien — no perfecta. No comprometerse con mantenimiento automático antes de tener volumen real de datos.</p>
+    </div>
+    <div class="box risk">
+      <div class="box-label">RIESGO 2 — Migración de la Bóveda rompe datos (Media probabilidad, Alto impacto)</div>
+      <p>La migración de hojas/categorías al nuevo modelo de memoria puede perder información o romper las referencias existentes. Mitigación: backup completo antes del corte, preservar IDs originales, validar cantidades antes de confirmar que el Memory Core es fuente de verdad.</p>
+    </div>
+    <div class="box risk">
+      <div class="box-label">RIESGO 3 — Patrón strangler se prolonga indefinidamente (Media probabilidad, Media impacto)</div>
+      <p>Sin una fecha de corte para cada módulo, la coexistencia de SGR y Jarvis puede prolongarse hasta que ninguno esté completamente a cargo. Mitigación: definir explícitamente qué módulo se migra en cada versión y cuándo se eliminan los adaptadores.</p>
+    </div>
+    <div class="box risk">
+      <div class="box-label">RIESGO 4 — Calidad de clasificación con Ollama insuficiente (Media probabilidad, Media impacto)</div>
+      <p>llama3.2:3b puede no clasificar correctamente el tipo de memoria o el proyecto en casos complejos, requiriendo demasiadas correcciones manuales. Mitigación: evaluar GPT-5.4 nano ($0.20/M tokens) para clasificación como alternativa a llama3.2:3b — mejor calidad a costo muy bajo.</p>
+    </div>
+    <div class="box risk">
+      <div class="box-label">RIESGO 5 — Proyecto fracasa por falta de valor percibido (Media probabilidad, Alto impacto)</div>
+      <p>El usuario construye el Memory Core pero sigue encontrando más rápido buscar en la Bóveda existente porque Jarvis no responde mejor. Mitigación: definir el criterio de éxito subjetivo de 0.1 claramente (la pregunta de RAFAM) y no avanzar a 0.2 hasta que ese criterio esté genuinamente cumplido.</p>
+    </div>
+  </section>
+
+  <!-- 23 RESTRICCIONES -->
+  <section class="spec-section" id="s23">
+    <div class="section-header">
+      <span class="section-num">23</span>
+      <h2 class="section-title">Restricciones</h2>
+    </div>
+    <div class="section-divider"></div>
+    <ul>
+      <li><strong>Stack:</strong> Python, FastAPI, SQLite, React 18, Vite, Zustand, Ollama, ChromaDB, Docker Compose, PyInstaller. No se introducen lenguajes nuevos en 0.1.</li>
+      <li><strong>Infraestructura:</strong> solo homelab local en 0.1. No cloud, no multi-usuario.</li>
+      <li><strong>Configuración:</strong> toda URL, puerto, API key y nombre de modelo en variables de entorno. Sin excepciones.</li>
+      <li><strong>Portabilidad del vault:</strong> el vault Markdown debe ser legible y útil aunque no exista ChromaDB, Python ni Jarvis. Los embeddings son derivados reconstruibles, no la fuente.</li>
+      <li><strong>Finanzas local-only:</strong> no negociable en 0.1. El módulo Finanzas nunca envía datos al modelo externo.</li>
+      <li><strong>Sin agentes autónomos en 0.1:</strong> Jarvis no ejecuta acciones externas (mandar emails, modificar archivos fuera del vault, ejecutar código). Solo lee, organiza y responde.</li>
+      <li><strong>Distribución:</strong> Opción 1 ahora (homelab). La arquitectura debe permitir Opción 3 (self-hosted Docker Compose) en el futuro sin rediseño.</li>
+    </ul>
+  </section>
+
+  <!-- 24 SUPUESTOS -->
+  <section class="spec-section" id="s24">
+    <div class="section-header">
+      <span class="section-num">24</span>
+      <h2 class="section-title">Supuestos</h2>
+    </div>
+    <div class="section-divider"></div>
+    <ul>
+      <li>El homelab está encendido 24/7 y accesible desde el teléfono vía Telegram.</li>
+      <li>Ollama está instalado con <code>llama3.2:3b</code> y <code>nomic-embed-text</code> disponibles.</li>
+      <li>El usuario tiene una cuenta de OpenAI con API key y acceso a GPT-5.4 mini.</li>
+      <li>El usuario usa Telegram activamente y no necesita una app nueva para captura móvil.</li>
+      <li>Los datos de SGR existentes son suficientemente valiosos para migrar al Memory Core.</li>
+      <li>La calidad de GPT-5.4 mini es suficiente para síntesis y razonamiento sobre memoria personal. Si no lo es, se puede cambiar el modelo sin cambiar el código.</li>
+      <li>El vault Markdown en disco es el mecanismo de backup implícito inicial; hasta que se implemente backup automático, el usuario es responsable de resguardar <code>database/app.db</code> y <code>vault/</code>.</li>
+    </ul>
+  </section>
+
+  <!-- 25 DECISIONES TOMADAS -->
+  <section class="spec-section" id="s25">
+    <div class="section-header">
+      <span class="section-num">25</span>
+      <h2 class="section-title">Decisiones tomadas y su justificación</h2>
+    </div>
+    <div class="section-divider"></div>
+
+    <div class="decision-item">
+      <span class="di-num">D-01</span>
+      <div class="di-body">
+        <div class="di-title">Modelo externo: GPT-5.4 mini, configurable</div>
+        <div class="di-why">Mejor relación costo/calidad al momento de la decisión. El modelo no está hardcodeado — se configura con JARVIS_EXTERNAL_MODEL para cambiar sin tocar código.</div>
+      </div>
+      <span class="di-rev rev-easy">Reversible</span>
+    </div>
+    <div class="decision-item">
+      <span class="di-num">D-02</span>
+      <div class="di-body">
+        <div class="di-title">Presupuesto en USD, no en tokens</div>
+        <div class="di-why">Los precios y modelos cambian. Un límite en USD es más estable y entendible que un límite en tokens que varía por modelo.</div>
+      </div>
+      <span class="di-rev rev-easy">Reversible</span>
+    </div>
+    <div class="decision-item">
+      <span class="di-num">D-03</span>
+      <div class="di-body">
+        <div class="di-title">Al agotar el presupuesto: modo local + aviso, sin cola</div>
+        <div class="di-why">Acolar consultas para el día siguiente crea una experiencia confusa. El fallback local con aviso explícito es más predecible.</div>
+      </div>
+      <span class="di-rev rev-easy">Reversible</span>
+    </div>
+    <div class="decision-item">
+      <span class="di-num">D-04</span>
+      <div class="di-body">
+        <div class="di-title">Captura inbox-first: RAW inmediato, procesamiento en background</div>
+        <div class="di-why">La captura nunca debe depender de que la IA termine correctamente. El usuario necesita certeza de que su información fue guardada.</div>
+      </div>
+      <span class="di-rev rev-medium">Costosa</span>
+    </div>
+    <div class="decision-item">
+      <span class="di-num">D-05</span>
+      <div class="di-body">
+        <div class="di-title">Worker como proceso Python separado con polling</div>
+        <div class="di-why">Simple, sobrevive a reinicios del servidor FastAPI, sin dependencias adicionales (no Redis/Celery). Adecuado para volumen personal.</div>
+      </div>
+      <span class="di-rev rev-medium">Costosa</span>
+    </div>
+    <div class="decision-item">
+      <span class="di-num">D-06</span>
+      <div class="di-body">
+        <div class="di-title">Historial conversacional en SQLite; últimos 8-10 mensajes en cada consulta</div>
+        <div class="di-why">La información estructurada (mensajes, timestamps, canal) encaja mejor en SQLite que en Markdown. El límite de 8-10 mensajes balancea contexto y costo de tokens.</div>
+      </div>
+      <span class="di-rev rev-easy">Reversible</span>
+    </div>
+    <div class="decision-item">
+      <span class="di-num">D-07</span>
+      <div class="di-body">
+        <div class="di-title">Contexto al modelo externo: solo fragmentos RAG, nunca el vault completo</div>
+        <div class="di-why">Principio de mínimo contexto necesario. El vault completo nunca sale de la máquina.</div>
+      </div>
+      <span class="di-rev rev-hard">Estructural</span>
+    </div>
+    <div class="decision-item">
+      <span class="di-num">D-08</span>
+      <div class="di-body">
+        <div class="di-title">Patrón strangler para migración SGR → Jarvis</div>
+        <div class="di-why">SGR sigue funcionando mientras el Memory Core crece. Reduce el riesgo de romper lo que ya funciona.</div>
+      </div>
+      <span class="di-rev rev-hard">Estructural</span>
+    </div>
+    <div class="decision-item">
+      <span class="di-num">D-09</span>
+      <div class="di-body">
+        <div class="di-title">Bóveda: refactorización progresiva en el lugar (Opción C)</div>
+        <div class="di-why">Evita dos sistemas de memoria paralelos indefinidamente. La UI/API de Bóveda queda intacta; solo el backend de almacenamiento cambia.</div>
+      </div>
+      <span class="di-rev rev-hard">Estructural</span>
+    </div>
+    <div class="decision-item">
+      <span class="di-num">D-10</span>
+      <div class="di-body">
+        <div class="di-title">Migración de datos: Opción A (única, controlada)</div>
+        <div class="di-why">Backup → script → validación → corte. Más trabajo por adelantado, pero deja el sistema limpio sin lectura dual ni estado inconsistente indefinido.</div>
+      </div>
+      <span class="di-rev rev-hard">Estructural</span>
+    </div>
+    <div class="decision-item">
+      <span class="di-num">D-11</span>
+      <div class="di-body">
+        <div class="di-title">4 tipos de memoria en 0.1: RAW, SEMANTIC, DECISION, PROJECT</div>
+        <div class="di-why">Los 9 tipos del documento original son el objetivo final. En 0.1 estos 4 son suficientes para el criterio de éxito definido sin agregar complejidad innecesaria.</div>
+      </div>
+      <span class="di-rev rev-medium">Costosa</span>
+    </div>
+    <div class="decision-item">
+      <span class="di-num">D-12</span>
+      <div class="di-body">
+        <div class="di-title">Vault Markdown portable como fuente durable</div>
+        <div class="di-why">Principio de portabilidad. Si desaparecen ChromaDB, Python o Jarvis, el conocimiento sigue existiendo en archivos legibles.</div>
+      </div>
+      <span class="di-rev rev-hard">Estructural</span>
+    </div>
+    <div class="decision-item">
+      <span class="di-num">D-13</span>
+      <div class="di-body">
+        <div class="di-title">Obsidian sync diferido a 0.2</div>
+        <div class="di-why">Sincronización bidireccional confiable requiere watcher, resolución de conflictos y reindexado incremental. Para 0.1 alcanza con un vault Markdown interno legible.</div>
+      </div>
+      <span class="di-rev rev-easy">Reversible</span>
+    </div>
+    <div class="decision-item">
+      <span class="di-num">D-14</span>
+      <div class="di-body">
+        <div class="di-title">Proyectos: Jarvis propone, el usuario crea. Nunca silenciosamente.</div>
+        <div class="di-why">Los proyectos son entidades con semántica propia. Crearlos silenciosamente generaría ruido y pérdida de confianza en el sistema.</div>
+      </div>
+      <span class="di-rev rev-easy">Reversible</span>
+    </div>
+    <div class="decision-item">
+      <span class="di-num">D-15</span>
+      <div class="di-body">
+        <div class="di-title">Finanzas: local_only por defecto, no negociable en 0.1</div>
+        <div class="di-why">Información financiera es la categoría de más alta sensibilidad. La configuración por defecto segura es nunca enviarla externamente.</div>
+      </div>
+      <span class="di-rev rev-hard">Estructural</span>
+    </div>
+    <div class="decision-item">
+      <span class="di-num">D-16</span>
+      <div class="di-body">
+        <div class="di-title">PII detector completo diferido a 0.2; regex básicos en 0.1</div>
+        <div class="di-why">Un detector completo de PII es complejo y tiene falsos positivos. Para 0.1, regex para secretos evidentes + flags manuales cubre los casos críticos sin agregar complejidad al flujo de captura.</div>
+      </div>
+      <span class="di-rev rev-easy">Reversible</span>
+    </div>
+    <div class="decision-item">
+      <span class="di-num">D-17</span>
+      <div class="di-body">
+        <div class="di-title">Interfaz desktop: ruta /jarvis en SGR, no app separada</div>
+        <div class="di-why">Mantiene un solo frontend que el usuario ya conoce. Evita la complejidad de dos apps mientras Jarvis está en etapas tempranas.</div>
+      </div>
+      <span class="di-rev rev-easy">Reversible</span>
+    </div>
+    <div class="decision-item">
+      <span class="di-num">D-18</span>
+      <div class="di-body">
+        <div class="di-title">Distribución: homelab ahora, self-hosted Docker Compose después</div>
+        <div class="di-why">Opción 1 para uso personal, Opción 3 si hay demanda de distribución. La arquitectura no debe cambiar entre las dos opciones — solo las variables de entorno.</div>
+      </div>
+      <span class="di-rev rev-hard">Estructural</span>
+    </div>
+    <div class="decision-item">
+      <span class="di-num">D-19</span>
+      <div class="di-body">
+        <div class="di-title">LiteLLM como gateway de modelos desde 0.1</div>
+        <div class="di-why">El código de Jarvis nunca llama directamente a openai.ChatCompletion ni a ollama.chat. Todo llamado LLM pasa por LiteLLM. Cambiar modelo (precio, API, deprecación) pasa a ser una variable de entorno. El overhead es mínimo (wrapper HTTP) y la reversibilidad es alta.</div>
+      </div>
+      <span class="di-rev rev-easy">Reversible</span>
+    </div>
+    <div class="decision-item">
+      <span class="di-num">D-20</span>
+      <div class="di-body">
+        <div class="di-title">ChromaDB aceptable en 0.1; migración a pgvector en 0.2</div>
+        <div class="di-why">ChromaDB es tolerable como índice auxiliar en 0.1 mientras el backend es SQLite. La migración a PostgreSQL + pgvector está planificada para 0.2. Esta decisión se documenta explícitamente para evitar que 0.1 crezca informalmente hasta donde la migración sea costosa. ChromaDB es un índice reconstruible, no la fuente de verdad.</div>
+      </div>
+      <span class="di-rev rev-medium">Costosa</span>
+    </div>
+    <div class="decision-item">
+      <span class="di-num">D-21</span>
+      <div class="di-body">
+        <div class="di-title">Langfuse y OpenTelemetry como observabilidad desde 0.1</div>
+        <div class="di-why">Langfuse (self-hosted) provee trazas LLM necesarias para depurar el Memory Core desde el primer día. OpenTelemetry provee trazas de infraestructura y el security audit log, independiente del sistema LLM. El costo operacional en homelab es mínimo. Agregarlos después implica instrumentar código ya escrito.</div>
+      </div>
+      <span class="di-rev rev-easy">Reversible</span>
+    </div>
+  </section>
+
+  <!-- 26 DECISIONES POSPUESTAS -->
+  <section class="spec-section" id="s26">
+    <div class="section-header">
+      <span class="section-num">26</span>
+      <h2 class="section-title">Decisiones deliberadamente pospuestas</h2>
+    </div>
+    <div class="section-divider"></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Decisión</th><th>Cuándo tomarla</th><th>Por qué esperar</th></tr></thead>
+      <tbody>
+        <tr><td>¿GPT-5.4 nano reemplaza a Ollama para clasificación?</td><td>Al implementar la capa de clasificación en 0.1</td><td>Requiere medir la calidad de llama3.2:3b en clasificación real antes de decidir si nano es necesario.</td></tr>
+        <tr><td>¿Cuánto tiempo de inactividad define el fin de una sesión conversacional?</td><td>Al implementar gestión de sesiones</td><td>Es un parámetro que se puede tunear con uso real; no bloquea el diseño.</td></tr>
+        <tr><td>¿Cuántos fragmentos RAG se recuperan por consulta?</td><td>Al implementar el retriever</td><td>Depende del costo promedio de tokens y la calidad observada.</td></tr>
+        <tr><td>¿El presupuesto se resetea en UTC o en hora local?</td><td>Al implementar budget_usage</td><td>Decisión de detalle; ambas son válidas.</td></tr>
+        <tr><td>Umbral para que Jarvis proponga un nuevo proyecto</td><td>Al implementar la propuesta de proyectos</td><td>Requiere calibración empírica con datos reales.</td></tr>
+        <tr><td>¿Alembic para migraciones de esquema?</td><td>Cuando el esquema se estabilice (post-0.1)</td><td>Overhead injustificado mientras el esquema cambia rápido.</td></tr>
+        <tr><td>Backup automático de vault y SQLite</td><td>Post-0.1</td><td>Manualmente manejable en fase inicial.</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <!-- 27 PREGUNTAS ABIERTAS -->
+  <section class="spec-section" id="s27">
+    <div class="section-header">
+      <span class="section-num">27</span>
+      <h2 class="section-title">Preguntas que permanecen abiertas</h2>
+    </div>
+    <div class="section-divider"></div>
+    <ol>
+      <li><strong>¿GPT-5.4 nano para clasificación?</strong> La clasificación de intención y extracción de entidades está diseñada para Ollama, pero GPT-5.4 nano ($0.20/M tokens) podría ser significativamente mejor. Evaluar en la primera implementación del worker.</li>
+      <li><strong>¿Cómo de tolerante es el límite de 8-10 mensajes?</strong> ¿Es el contexto conversacional correcto para el tipo de conversaciones que el usuario tiene con Jarvis, o se necesita más (o menos)?</li>
+      <li><strong>¿Qué pasa con el módulo Bóveda-UI después de la migración?</strong> La Bóveda pasa a ser una vista del Memory Core, pero ¿cuándo se elimina la UI antigua? ¿En 0.2, 0.3? Esto no está decidido.</li>
+      <li><strong>¿Cómo se gestiona el vault si crece mucho?</strong> A medida que aumenta el número de entradas, ¿el vault necesita indexación adicional más allá de ChromaDB?</li>
+    </ol>
+  </section>
+
+  <!-- 28 FUERA DE ALCANCE -->
+  <section class="spec-section" id="s28">
+    <div class="section-header">
+      <span class="section-num">28</span>
+      <h2 class="section-title">Fuera de alcance</h2>
+    </div>
+    <div class="section-divider"></div>
+    <p>Las siguientes funcionalidades están explícitamente fuera del alcance de Jarvis en su totalidad (no solo en 0.1):</p>
+    <ul>
+      <li><span class="tag tag-never">Excluido</span> Multi-usuario o SaaS. Jarvis es un sistema personal.</li>
+      <li><span class="tag tag-never">Excluido</span> Monetización como producto de consumo masivo.</li>
+      <li><span class="tag tag-never">Excluido</span> App móvil nativa (iOS/Android). Telegram cubre la captura móvil.</li>
+    </ul>
+    <p>Las siguientes están fuera de alcance en 0.1 pero previstas para versiones futuras:</p>
+    <ul>
+      <li><span class="tag tag-later">Futuro</span> Obsidian sync bidireccional (0.2)</li>
+      <li><span class="tag tag-later">Futuro</span> Memory maintenance automático (0.2)</li>
+      <li><span class="tag tag-later">Futuro</span> Ingestión automática desde email, GitHub, calendario (0.3)</li>
+      <li><span class="tag tag-later">Futuro</span> Agenda, Finanzas y Hábitos como herramientas de Jarvis (0.4)</li>
+      <li><span class="tag tag-later">Futuro</span> Tool system con permisos y audit log completo (0.5)</li>
+      <li><span class="tag tag-later">Futuro</span> Agente planificador de tareas complejas (0.6)</li>
+      <li><span class="tag tag-later">Futuro</span> Interfaces generadas dinámicamente (0.7)</li>
+      <li><span class="tag tag-later">Futuro</span> Interacción por voz (0.8)</li>
+      <li><span class="tag tag-later">Futuro</span> Proactividad y alertas automáticas (0.9)</li>
+    </ul>
+  </section>
+
+  <!-- 29 EXTENSIONES -->
+  <section class="spec-section" id="s29">
+    <div class="section-header">
+      <span class="section-num">29</span>
+      <h2 class="section-title">Posibles extensiones futuras</h2>
+    </div>
+    <div class="section-divider"></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Versión</th><th>Objetivo</th><th>Capacidad nueva</th></tr></thead>
+      <tbody>
+        <tr><td>0.2 — Memory Maintenance</td><td>Jarvis mantiene su cerebro</td><td>Clasificación automática mejorada, consolidación, duplicados, contradicciones, superseded, Obsidian sync, PII detector completo</td></tr>
+        <tr><td>0.3 — Automatic Ingestion</td><td>Jarvis recuerda automáticamente</td><td>Email, calendario, GitHub, documentos, archivos locales como fuentes</td></tr>
+        <tr><td>0.4 — Unified Context</td><td>Jarvis conecta la memoria con los módulos existentes</td><td>Agenda, Finanzas y Hábitos como fuentes de contexto y herramientas</td></tr>
+        <tr><td>0.5 — Tool System</td><td>Jarvis puede actuar de forma modular</td><td>Tool registry, permisos por herramienta, Privacy Gateway completo, audit log, aprobaciones</td></tr>
+        <tr><td>0.6 — Agent</td><td>Jarvis puede planificar tareas complejas</td><td>Objetivo → Plan → Tool calls → Verificación → Resultado</td></tr>
+        <tr><td>0.7 — Generated UI</td><td>Jarvis genera interfaces cuando las necesita</td><td>Informes, dashboards, HTMLs autocontenidos, tablas, grafos</td></tr>
+        <tr><td>0.8 — Voice</td><td>Voz como otra interfaz al mismo cerebro</td><td>Audio → Speech-to-Text → Jarvis → respuesta → TTS</td></tr>
+        <tr><td>0.9 — Proactivity</td><td>Jarvis detecta y sugiere sin que el usuario pregunte</td><td>Pendientes, anomalías, cambios, oportunidades — controlado para no ser ruido</td></tr>
+        <tr><td>1.0</td><td>"Confío suficientemente en él como para delegarle tareas reales sin sentir que debo supervisar cada paso"</td><td>Por definir según lo que 0.1–0.9 revelen como verdaderamente necesario</td></tr>
+      </tbody>
+    </table></div>
+    <div class="box decision">
+      <div class="box-label">Principio de evolución</div>
+      <p>Cada versión debe ser útil por sí misma. No avanzar a la siguiente hasta que la actual cumpla genuinamente su criterio de éxito. Jarvis puede no tener un final definitivo — puede ser un sistema permanente que evoluciona durante años.</p>
+    </div>
+  </section>
+
+</main>
+
+<script>
+function toggleTheme() {
+  const root = document.documentElement;
+  const current = root.getAttribute('data-theme');
+  if (!current) {
+    const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    root.setAttribute('data-theme', isDark ? 'light' : 'dark');
+  } else if (current === 'dark') {
+    root.setAttribute('data-theme', 'light');
+  } else {
+    root.setAttribute('data-theme', 'dark');
+  }
+  try { localStorage.setItem('jarvis-spec-theme', root.getAttribute('data-theme')); } catch(e) {}
+}
+try {
+  const saved = localStorage.getItem('jarvis-spec-theme');
+  if (saved) document.documentElement.setAttribute('data-theme', saved);
+} catch(e) {}
+</script>

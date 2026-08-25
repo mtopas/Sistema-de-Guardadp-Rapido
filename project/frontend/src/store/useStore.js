@@ -1413,4 +1413,90 @@ export const useStore = create((set, get) => ({
     } catch { /* noop — autosave will retry */ }
     if (DEBUG) console.log('updateApuntes:', id)
   },
+
+  // ---------------------------------------------------------------------------
+  // Jarvis — S4: chat + inbox + budget
+  // ---------------------------------------------------------------------------
+  jarvisMessages:        JSON.parse(localStorage.getItem('jarvis-messages') || '[]'),
+  jarvisConversationId:  localStorage.getItem('jarvis-conversation-id') || null,
+  jarvisLoading:         false,
+  jarvisInbox:           [],
+  jarvisBudget:          { status: 'ACTIVE', spent_usd: 0, daily_budget_usd: 1.0 },
+  jarvisCaptureOpen:     false,
+
+  openJarvisCapture:  () => set({ jarvisCaptureOpen: true }),
+  closeJarvisCapture: () => set({ jarvisCaptureOpen: false }),
+
+  jarvisQuery: async (question) => {
+    const userMsg = { role: 'user', content: question, ts: Date.now() }
+    const optimistic = [...get().jarvisMessages, userMsg]
+    set({ jarvisMessages: optimistic, jarvisLoading: true })
+    try { localStorage.setItem('jarvis-messages', JSON.stringify(optimistic)) } catch { /* storage full */ }
+    try {
+      const res = await fetch(`${API_URL}/jarvis/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, conversation_id: get().jarvisConversationId }),
+      })
+      if (!res.ok) throw new Error('not ok')
+      const data = await res.json()
+      const assistantMsg = {
+        role: 'assistant',
+        content: data.answer,
+        sources: data.sources || [],
+        context_count: data.context_count,
+        context_sent: data.context_sent,
+        ts: Date.now(),
+      }
+      const updated = [...get().jarvisMessages, assistantMsg]
+      try {
+        localStorage.setItem('jarvis-messages', JSON.stringify(updated))
+        localStorage.setItem('jarvis-conversation-id', data.conversation_id)
+      } catch { /* storage full */ }
+      set({ jarvisMessages: updated, jarvisConversationId: data.conversation_id, jarvisLoading: false })
+    } catch {
+      const errMsg = { role: 'assistant', content: null, error: true, ts: Date.now() }
+      const updated = [...get().jarvisMessages, errMsg]
+      try { localStorage.setItem('jarvis-messages', JSON.stringify(updated)) } catch { /* noop */ }
+      set({ jarvisMessages: updated, jarvisLoading: false })
+    }
+  },
+
+  jarvisCapture: async (content, local_only = false) => {
+    try {
+      const res = await fetch(`${API_URL}/jarvis/capture`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content, local_only }),
+      })
+      if (!res.ok) throw new Error('not ok')
+      return await res.json()
+    } catch {
+      return null
+    }
+  },
+
+  fetchJarvisInbox: async () => {
+    try {
+      const res = await fetch(`${API_URL}/jarvis/inbox?limit=15`)
+      if (!res.ok) throw new Error('not ok')
+      set({ jarvisInbox: await res.json() })
+    } catch { /* noop */ }
+  },
+
+  fetchJarvisBudget: async () => {
+    try {
+      const res = await fetch(`${API_URL}/jarvis/budget`)
+      if (!res.ok) throw new Error('not ok')
+      set({ jarvisBudget: await res.json() })
+    } catch { /* noop */ }
+  },
+
+  jarvisClearHistory: () => {
+    try {
+      localStorage.removeItem('jarvis-messages')
+      localStorage.removeItem('jarvis-conversation-id')
+    } catch { /* noop */ }
+    set({ jarvisMessages: [], jarvisConversationId: null })
+  },
 }))

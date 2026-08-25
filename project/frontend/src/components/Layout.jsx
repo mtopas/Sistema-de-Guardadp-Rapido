@@ -23,8 +23,9 @@ export default function Layout({ children }) {
   const isFinanzas       = path.startsWith('/finanzas')
   const isAgenda         = path.startsWith('/agenda')
   const isHabitos        = path.startsWith('/habitos')
-  const hideSidebar      = isBrowse || isFinanzas || isAgenda || isHabitos
-  const managesOwnLayout = isBrowse || isFinanzas || isAgenda || isHabitos
+  const isJarvis         = path.startsWith('/jarvis')
+  const hideSidebar      = isBrowse || isFinanzas || isAgenda || isHabitos || isJarvis
+  const managesOwnLayout = isBrowse || isFinanzas || isAgenda || isHabitos || isJarvis
 
   return (
     <div className="flex h-screen overflow-hidden text-app-text">

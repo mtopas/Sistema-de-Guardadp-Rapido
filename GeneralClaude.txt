@@ -1,0 +1,14 @@
+Summary
+Blocking bugs fixed:
+
+SGR backend wouldn't start on Windows — a debug print() in app/db/database.py used a Unicode minus sign (U+2212) that crashes on Windows' default console encoding (cp1252), killing FastAPI's lifespan before any route (including /jarvis/*) came up. Not a Jarvis bug, but it blocked testing everything.
+Frontend wouldn't start clean — @tanstack/react-virtual was declared in package.json but missing from node_modules. Fixed with npm install.
+Real Jarvis bugs fixed:
+3. call_reason() only fell back to local mode on budget exhaustion, not on any other external-call failure (missing API key, no network, provider down). Since this environment has no OPENAI_API_KEY, every query 500'd instead of using the local Ollama fallback that's already wired up. Now it falls back to [modo local] on any external failure.
+4. The "Capturar" button did nothing on /jarvis — TopBar.jsx's CTA action map never included openJarvisCapture, so clicking it silently no-op'd.
+5. Chat source citations always showed "—" — the frontend read content_raw/title fields the backend never sends; it actually sends title_hint.
+
+Validated working (via live tests + mocked-LLM pipeline runs): capture → worker processing → vault write → embedding → RAG retrieval → privacy filtering → conversational history → query response; Privacy Gateway secret-blocking; budget EXHAUSTED state; migration dry-run idempotency against your real Bóveda backup.
+
+I cleaned all QA test data out of jarvis.db/vault/chroma so it's genuinely empty for first real use, and updated Cerebro/estado-actual.md, Cerebro/decisiones-implementacion.md, and a new Jarvis_0.1_Pruebas.md with everything I couldn't test here (real Ollama, real OpenAI key, an actual browser, and Telegram — plus a flagged-but-unconfirmed Markdown-escaping risk in /jq's Telegram replies).
+

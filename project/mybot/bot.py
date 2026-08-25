@@ -27,6 +27,7 @@ import assistant
 import dev_reporter as dr
 import finanzas_handlers as fh
 import intent_router as ir
+import jarvis_handlers as jh
 import llm_client
 
 logger = logging.getLogger(__name__)
@@ -1219,6 +1220,8 @@ def main():
     if not TOKEN:
         raise SystemExit("Definí TELEGRAM_BOT_TOKEN en el entorno.")
 
+    jh.jarvis_init()
+
     api_ok, cat_ok = _healthcheck()
     if not cat_ok:
         print("[bot] ⚠ Bóveda: /categorias no responde al arrancar. Verificá el backend.")
@@ -1256,6 +1259,10 @@ def main():
     if saved_chat_id:
         app.bot_data["chat_id"] = saved_chat_id
         print(f"[bot] chat_id cargado: {saved_chat_id}")
+
+    # ── Comandos Jarvis ───────────────────────────────────────
+    app.add_handler(CommandHandler("j",  jh.cmd_j))
+    app.add_handler(CommandHandler("jq", jh.cmd_jq))
 
     # ── Comandos generales ────────────────────────────────────
     app.add_handler(CommandHandler(["start", "help"], cmd_help))

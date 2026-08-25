@@ -10,9 +10,16 @@ project/build/
 # Datos y secretos — nunca commitear
 project/.env
 project/database/app.db
+project/database/jarvis.db
+project/database/jarvis.db-shm
+project/database/jarvis.db-wal
 project/database/chroma/
+project/vault/
 project/uploads/
 project/mybot/rapido.json
 project/mybot/chat_id.json
 project/mybot/checkin_config.json
 project/wheelhouse/*.whl
+
+# Build artifacts de pip install -e
+*.egg-info/

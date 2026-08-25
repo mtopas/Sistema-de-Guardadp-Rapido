@@ -197,10 +197,64 @@ Lógica en `Layout.jsx` (`ARCOIRIS_ACCENTS`).
 
 ---
 
-## Antes de implementar
+## Antes de implementar (SGR)
 
 1. Leer `project/README.md` (arquitectura y estado global).
 2. Si el cambio es Finanzas: `project/Finanzas.md` + pendientes en `project/Finanzas-Roadmap.md`.
 3. No re-explorar el árbol completo si el cambio es acotado a rutas ya documentadas en esos archivos.
 4. Finanzas: respetar `isTransferencia`, cajón FIRE = cat. `FIRE`, objetivo = cat. con mismo nombre; decidir si la tab usa `finMovimientos` (mes) o `finMovimientosAll` (histórico).
+
+---
+
+## Jarvis — Segundo Cerebro AI
+
+Jarvis crece dentro de SGR usando el patrón strangler. Todo su código vive fuera de `project/` excepto
+las extensiones al bot (`project/mybot/`) y la DB (`project/database/jarvis.db`).
+
+El paquete Python (`jarvis/`, sibling de `project/`) y los documentos de diseño conviven en la
+**misma carpeta física** `jarvis/` (minúsculas) — Windows es case-insensitive, así que `Jarvis/` y
+`jarvis/` no pueden coexistir como carpetas separadas. Usar siempre minúscula al referenciar la carpeta
+o al importar (`from jarvis.xxx import yyy`); una carpeta con mayúscula inicial rompe `import jarvis`
+en Windows aunque el explorador de archivos la muestre igual.
+
+### Archivos Jarvis
+
+| Archivo | Contenido |
+|---------|-----------|
+| `jarvis/jarvis-spec.html` | Spec completa de Jarvis 0.1 — diseño, datos, arquitectura, decisiones |
+| `jarvis/Fase-0.md` | Alcance y criterio de completitud de 0.1 (referencia rápida) |
+| `jarvis/Componentes-Evaluados.md` | Decisiones de componentes por fase (qué incorporar, evaluar, diferir) |
+| `Cerebro/estado-actual.md` | Qué está construido hoy — actualizar al final de cada sesión |
+| `Cerebro/decisiones-implementacion.md` | Decisiones que divergen o clarifican la spec |
+| `jarvis/Investigacion/` | Informes de investigación históricos — ya evaluados, no son fuente de verdad |
+
+### Arquitectura Jarvis (resumen)
+
+- Proceso Python separado (worker) hace polling a `jarvis.db`; sin Redis/Celery
+- DB Jarvis: `project/database/jarvis.db` (separada de `app.db` de SGR)
+- Todo llamado LLM va via **LiteLLM** — nunca openai.* ni ollama.* directamente
+- Modelos via LiteLLM: GPT-5.4 mini (razonamiento externo) + llama3.2:3b (extracción local)
+- Embeddings: `nomic-embed-text` via Ollama
+- Vector store: ChromaDB en 0.1 (índice reconstruible); pgvector en 0.2
+- Observabilidad: Langfuse (self-hosted, trazas LLM) + OpenTelemetry (infra + audit log)
+- Interfaz: nueva ruta `/jarvis` en el frontend React de SGR (no app separada)
+- Bot: extender `project/mybot/bot.py`, no reemplazarlo
+- Patrón strangler: SGR sigue funcionando durante toda la construcción
+
+### Invariantes — nunca violar en código Jarvis
+
+- Nunca llamar `openai.*` ni `ollama.*` directamente; siempre vía LiteLLM
+- `origin_trust` nunca aumenta en derivados (trust propagation sin degradación)
+- El worker de background no hace requests externos en 0.1
+- Toda escritura al memory store incluye `source_id` (provenance obligatorio, no nulo)
+- Los permisos viven en un policy store separado que el LLM no puede escribir (Memoria ≠ Permiso)
+- Blast radius 0.1: worker solo puede leer conversaciones y escribir en memory store
+
+### Antes de implementar Jarvis
+
+1. Leer `Cerebro/estado-actual.md` para saber qué está realmente construido.
+   La spec describe el diseño; el Cerebro describe la realidad.
+2. Verificar que `estado-actual.md` no esté desactualizado revisando el git log de la sesión.
+3. Para cambios de arquitectura: revisar `jarvis/jarvis-spec.html` §15 y §25.
+4. Al terminar la sesión: actualizar `Cerebro/estado-actual.md` y agregar entrada en `Cerebro/decisiones-implementacion.md` si hubo decisiones que divergen del spec.
 

@@ -133,6 +133,14 @@ from app import semantic
 from app.models.categoria import CategoriaCreate, CategoriaPatch
 from app.models.hoja import HojaCreate, HojaPatch
 
+# Integración Jarvis — graceful si el paquete no está instalado
+try:
+    from jarvis.api.router import router as _jarvis_router
+    from jarvis.db.database import init_db as _jarvis_init_db
+    _JARVIS_AVAILABLE = True
+except ImportError:
+    _JARVIS_AVAILABLE = False
+
 
 # --- Pydantic models for Finanzas ---
 
@@ -357,6 +365,13 @@ async def lifespan(app: FastAPI):
             print(f"[semantic] {count} hojas indexadas al arrancar")
     except Exception as _exc:
         print(f"[semantic] backfill omitido: {_exc}")
+    # Jarvis — inicializa jarvis.db si el paquete está instalado
+    if _JARVIS_AVAILABLE:
+        try:
+            _jarvis_init_db()
+            print("[jarvis] jarvis.db inicializada")
+        except Exception as _exc:
+            print(f"[jarvis] init_db omitida: {_exc}")
     yield
 
 
@@ -369,6 +384,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Jarvis API — montada si el paquete está disponible
+if _JARVIS_AVAILABLE:
+    app.include_router(_jarvis_router, prefix="/jarvis")
 
 # Serve built frontend (production)
 if DIST_DIR.exists():

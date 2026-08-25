@@ -297,7 +297,7 @@ def _migrate_fin_saldos_signo_v2(cursor):
         "INSERT OR REPLACE INTO fin_config (clave, valor) VALUES ('saldos_signo_income_expense_v2', '1')"
     )
     if DEBUG:
-        print("migration: fin_cuentas saldos recalculados (ingreso +, gasto −)")
+        print("migration: fin_cuentas saldos recalculados (ingreso +, gasto -)")
 
 
 def _migrate_fin_saldos_transfer_v3(cursor):

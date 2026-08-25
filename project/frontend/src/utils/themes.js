@@ -313,6 +313,7 @@ export const ARCOIRIS_ACCENTS = {
   '/finanzas': { accent: '#d97706', light: '#fbbf24', deep: '#b45309' },
   '/agenda':   { accent: '#2563eb', light: '#60a5fa', deep: '#1d4ed8' },
   '/habitos':  { accent: '#059669', light: '#34d399', deep: '#047857' },
+  '/jarvis':   { accent: '#06b6d4', light: '#67e8f9', deep: '#0891b2' },
 }
 
 export const SECTION_NAMES = {
@@ -320,10 +321,11 @@ export const SECTION_NAMES = {
   finanzas: 'Finanzas',
   agenda:   'Agenda',
   habitos:  'Hábitos',
+  jarvis:   'Jarvis',
 }
 
-/** Orden canónico al ciclar módulos: Bóveda → Finanzas → Agenda → Hábitos → … */
-export const SECTION_ORDER = ['boveda', 'finanzas', 'agenda', 'habitos']
+/** Orden canónico al ciclar módulos: Bóveda → Finanzas → Agenda → Hábitos → Jarvis → … */
+export const SECTION_ORDER = ['boveda', 'finanzas', 'agenda', 'habitos', 'jarvis']
 
 export const APP_MODULES = [
   {
@@ -357,6 +359,14 @@ export const APP_MODULES = [
     titleKey: 'habitos',
     ctaKey:   'addHabito',
     ctaStore: 'openHabitoModal',
+  },
+  {
+    id:       'jarvis',
+    match:    (p) => p.startsWith('/jarvis'),
+    path:     '/jarvis',
+    titleKey: 'jarvis',
+    ctaKey:   'jarvisCapturar',
+    ctaStore: 'openJarvisCapture',
   },
 ]
 

@@ -3,6 +3,7 @@
 Nunca importar openai.* ni ollama.* directamente — siempre vía LiteLLM.
 """
 import logging
+import re
 from typing import Any
 
 import litellm
@@ -117,7 +118,7 @@ def call_reason(messages: list[dict]) -> str:
             JARVIS_LOCAL_FALLBACK_MODEL,
         )
         text = call_llm(messages=messages, model=JARVIS_LOCAL_FALLBACK_MODEL)
-        return f"[modo local] {text}"
+        return f"[modo local] {_strip_local_prefix(text)}"
 
     try:
         return call_llm(messages=messages, model=JARVIS_REASON_MODEL)
@@ -127,7 +128,18 @@ def call_reason(messages: list[dict]) -> str:
             JARVIS_REASON_MODEL, exc, JARVIS_LOCAL_FALLBACK_MODEL,
         )
         text = call_llm(messages=messages, model=JARVIS_LOCAL_FALLBACK_MODEL)
-        return f"[modo local] {text}"
+        return f"[modo local] {_strip_local_prefix(text)}"
+
+
+_LOCAL_PREFIX_RE = re.compile(r"^\s*\[?modo local\]?\s*", re.IGNORECASE)
+
+
+def _strip_local_prefix(text: str) -> str:
+    """Evita "[modo local] modo local ...": el propio "[modo local] " que se le agrega
+    a la respuesta anterior queda en el historial de la conversación (spec §7), y un
+    modelo chico como llama3.2:3b a veces lo imita al arrancar su próxima respuesta.
+    """
+    return _LOCAL_PREFIX_RE.sub("", text, count=1)
 
 
 def call_reason_with_context(question: str, context_entries: list[dict]) -> str:

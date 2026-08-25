@@ -101,14 +101,14 @@ Con ambos fixes, flujo real de punta a punta (backend + worker, sin mocks):
   desde esta sesión (el DELETE SQL directo fue bloqueado por el permission classifier del harness) —
   borrarla a mano o simplemente ignorarla, no afecta el uso real.
 
-Sigue sin probarse acá (no cambió): `OPENAI_API_KEY` real (§2), frontend en navegador (§3), migración
-real de la Bóveda (§5) — ver `Jarvis_0.1_Pruebas.md`.
+Sigue sin probarse acá (no cambió): `OPENAI_API_KEY` real (§2), frontend en navegador (§3) — ver
+`Jarvis_0.1_Pruebas.md`.
 
-## Validación real por Telegram (2026-08-25, misma sesión — ver `Jarvis_0.1_Pruebas.md` §4)
+## Validación real por Telegram (2026-08-25, misma sesión)
 
 `/j` y `/jq` probados de punta a punta contra un chat real, con el usuario mandando los mensajes.
-Encontrados y corregidos dos bugs reales de infraestructura LiteLLM/Ollama en Windows — detalle
-completo en `Cerebro/decisiones-implementacion.md` (dos entradas del 2026-08-25):
+Encontrados y corregidos tres bugs reales (detalle completo en `Cerebro/decisiones-implementacion.md`,
+tres entradas del 2026-08-25):
 
 1. **Retrieval se degradaba en silencio a partir de la 2ª consulta de embeddings en el mismo
    proceso** — `litellm==1.60.2` reusa un `httpx.AsyncClient` global atado al primer event loop que
@@ -121,16 +121,38 @@ completo en `Cerebro/decisiones-implementacion.md` (dos entradas del 2026-08-25)
    `ollama/<modelo>` arma el prompt a mano sin turno final ni stop sequence para modelos sin
    `"instruct"` en el nombre. Corregido cambiando a `ollama_chat/<modelo>` (usa `/api/chat`, que
    Ollama maneja nativamente) en `jarvis/config.py`.
+3. **`parse_mode="Markdown"` roto en `/jq` — confirmado en vivo** (la sospecha original de
+   `Jarvis_0.1_Pruebas.md` §4 sí se reprodujo, con contenido real, después de descartarla en un primer
+   intento con un caso armado a mano). Una fuente citada con un username terminado en `_`
+   (`@ryxai_`) sumado a los dos guiones bajos que el footer de `cmd_jq` usa a propósito para cursiva
+   dio un total impar → Telegram no pudo cerrar el último y tiró `Can't parse entities`. Corregido en
+   `project/mybot/jarvis_handlers.py::cmd_jq`: si el `edit_text` con Markdown falla, reintenta en
+   texto plano — nunca se vuelve a perder la respuesta real por un error de formato. De paso se
+   corrigió un bug menor visto en la misma tanda: el modelo a veces imitaba el prefijo
+   `"[modo local]"` de un turno anterior del historial y lo repetía al arrancar su propia respuesta
+   (`"modo local modo local ..."`) — `jarvis/llm/client.py` ahora lo saca antes de anteponer el
+   prefijo real.
 
-Ambos fixes verificados en aislado (reproduciendo el historial exacto que rompía) y confirmados en
-vivo por Telegram después. De paso, la sospecha original sobre `parse_mode="Markdown"` roto por `_`
-sueltos **no se reprodujo**: una respuesta real con varios guiones bajos en código Python se entregó
-sin error — el modo Markdown legacy de Telegram parece tolerarlos.
+Los tres fixes verificados en aislado y confirmados en vivo por Telegram.
 
 **Bloqueante operativo encontrado (no es bug de código)**: el bot del homelab (Docker, siempre
 encendido) usa el mismo `TELEGRAM_BOT_TOKEN` que este Windows — dos instancias no pueden convivir
 (409 Conflict). Hay que pausar el bot del homelab para probar acá. Jarvis tampoco está desplegado en
 el homelab todavía, solo en este Windows.
+
+## Migración real de la Bóveda — HECHA (2026-08-25, misma sesión)
+
+Se borraron los datos de prueba (`jarvis.db`, vault, y solo la colección `jarvis_memory` de ChromaDB —
+esa carpeta la comparte con el buscador semántico propio de la Bóveda de SGR, colección `hojas`, que
+se dejó intacta) y se corrió `python -m jarvis.cli.migrate_boveda` sin `--dry-run`: backup automático
+de `jarvis.db` antes de escribir, **10/10 hojas migradas, 0 omitidas** (mismo resultado que los dos
+dry-run previos). `jarvis.db` ahora tiene tus 10 hojas reales, cada una con su embedding en ChromaDB y
+su `.md` en `vault/SEMANTIC/`.
+
+**Alcance de Jarvis 0.1, confirmado leyendo el código**: solo se conecta con la Bóveda (captura manual
+vía `/j`/API/frontend, más esta migración one-time de `hojas`/`categorias`). No hay ninguna
+integración con Finanzas, Agenda ni Hábitos — no aparece ninguna referencia a esas tablas en todo el
+paquete `jarvis/`.
 
 ## Qué está construido
 

@@ -60,7 +60,7 @@ base perfectamente limpia borrala a mano de `memory_entries` e `inbox_queue`.
 
 ---
 
-## 4. Bot de Telegram real — PROBADO (2026-08-25, esta máquina, con tu TELEGRAM_BOT_TOKEN)
+Bot de Telegram real — PROBADO (2026-08-25, esta máquina, con tu TELEGRAM_BOT_TOKEN)
 
 `/j` y `/jq` probados de punta a punta contra un chat real. Los dos andan bien. Detalle completo de
 todo lo que sigue en `Cerebro/decisiones-implementacion.md` (entradas del 2026-08-25).
@@ -75,6 +75,22 @@ todo lo que sigue en `Cerebro/decisiones-implementacion.md` (entradas del 2026-0
 - La sospecha original (Markdown roto por `_` sueltos en la respuesta) no se reprodujo — Telegram lo
   toleró bien incluso con código Python lleno de guiones bajos.
 
-  ---
+---
 
-  
+Migración real de la Bóveda — HECHA (2026-08-25)
+
+Antes de migrar se borraron todos los datos de prueba: filas de `jarvis.db` (`memory_entries`,
+`inbox_queue`, `conversations`, etc. — se mantuvo el schema), los `.md` del vault, y solo la colección
+`jarvis_memory` de ChromaDB (esa carpeta la comparte con el buscador semántico propio de la Bóveda de
+SGR, colección `hojas` — se dejó intacta a propósito, no se tocó).
+
+Corrida la migración real (`python -m jarvis.cli.migrate_boveda`, sin `--dry-run`): backup automático
+de `jarvis.db` creado antes de escribir (`jarvis.bak-20260825-201528.db`), **10/10 hojas migradas, 0
+omitidas** — mismo resultado que los dos dry-run previos. Cada una quedó con su `memory_entry` tipo
+`SEMANTIC`, su embedding en ChromaDB, y su `.md` en `vault/SEMANTIC/`. Verificado: 10 en SQLite, 10
+embebidas, 10 en Chroma, 10 archivos en el vault.
+
+## 6. Estado de la base de datos
+
+`project/database/jarvis.db` tiene ahora las 10 hojas de tu Bóveda migradas — es tu base real en uso,
+ya no está vacía. A partir de acá, cualquier `/j`/captura nueva se suma a esto.

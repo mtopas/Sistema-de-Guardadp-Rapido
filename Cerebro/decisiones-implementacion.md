@@ -418,3 +418,48 @@ diseño de Jarvis. La spec no especifica `ollama/` vs `ollama_chat/`.
 
 Impacto: `jarvis/config.py` (`JARVIS_CLASSIFY_MODEL`, `is_ollama_model()`); `jarvis.db` (limpieza de
 una conversación de Telegram contaminada, entry_id de conversación `e1aa0e20-...`).
+
+---
+
+## 2026-08-25 — Confirmado en vivo el bug de parse_mode="Markdown" en /jq — nunca perder la respuesta real por un error de formato
+
+Contexto: después de migrar la Bóveda real y probar `/jq` con preguntas reales sobre el contenido
+migrado, una consulta ("¿Tengo guardado algo sobre Inteligencia Artificial?") devolvió
+`❌ Error al consultar Jarvis: Can't parse entities: can't find end of the entity starting at byte
+offset 630` — exactamente el problema que `Jarvis_0.1_Pruebas.md` había marcado como "sospechado, no
+reproducido". Se había probado antes con una pregunta armada a propósito (pidiendo código Python con
+`guion_bajo`) y no rompió; esta vez rompió con una respuesta normal, sin que se le pidiera nada raro.
+
+Causa raíz encontrada leyendo `conversation_messages` en `jarvis.db` (la respuesta ya estaba
+persistida ahí, aunque el `edit_text` a Telegram hubiera fallado — `query/service.py` guarda la
+respuesta antes de que `jarvis_handlers.py` intente mostrarla): el texto de la respuesta citaba
+`@ryxai_` (un username real de una fuente guardada), que termina en un guión bajo suelto. El footer
+de `cmd_jq` en `jarvis_handlers.py` agrega **a propósito** `_📎 ... consultados_` envuelto en guiones
+bajos para ponerlo en cursiva. Sumando el guión bajo de `@ryxai_` a los dos del footer da un total de
+3 (impar) — el parser de Markdown legacy de Telegram empareja el primero con el segundo como cursiva
+(mal, pero sin tirar error) y le queda el tercero sin con qué cerrar → `"can't find end of the entity"`
+justo en el último byte del mensaje. Cualquier fuente citada con un username, hashtag o identificador
+con un número impar de `_`/`*`/`` ` `` puede disparar esto — no es evitable escapando de antemano
+porque el contenido citado no se conoce hasta tener la respuesta del LLM.
+
+Decisión: en vez de escapar el texto (frágil — no se puede distinguir Markdown intencional del LLM de
+guiones bajos literales de una fuente citada) se separó el `try/except` de `cmd_jq` en dos partes: uno
+para la consulta a Jarvis en sí (que sigue mostrando el error real si Jarvis falla), y uno específico
+para el `edit_text` con `parse_mode="Markdown"` — si ese tira `telegram.error.BadRequest`, se reintenta
+el mismo `edit_text` sin `parse_mode` (texto plano). El usuario nunca vuelve a ver el error genérico
+en lugar de la respuesta real; en el peor caso pierde el formato en negrita/cursiva, no el contenido.
+
+De paso se corrigió un bug menor visto en la misma tanda de pruebas: en una respuesta la salida
+empezaba con `"modo local modo local ..."` — el modelo local, viendo turnos previos en el historial
+que arrancaban con `"[modo local] ..."` (ese prefijo queda persistido tal cual en
+`conversation_messages`, spec §7), a veces imita el patrón y arranca su propia respuesta con esas
+mismas palabras, antes de que `call_reason()` le agregue el prefijo real. Se agregó
+`_strip_local_prefix()` en `jarvis/llm/client.py` que saca cualquier `"[modo local]"`/`"modo local"`
+inicial del texto del modelo antes de anteponer el prefijo real, en los dos call sites de
+`call_reason()` (EXHAUSTED y fallback por error).
+
+Diferencia con spec: no aplica — ambos son correcciones de robustez de la integración con Telegram y
+de higiene del historial, no de diseño de Jarvis.
+
+Impacto: `project/mybot/jarvis_handlers.py` (`cmd_jq`); `jarvis/llm/client.py` (`call_reason()`,
+`_strip_local_prefix()`).

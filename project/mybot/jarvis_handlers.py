@@ -11,6 +11,7 @@ import asyncio
 import logging
 
 from telegram import Update
+from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 logger = logging.getLogger(__name__)
@@ -114,32 +115,42 @@ async def cmd_jq(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 channel_id=chat_id,
             ),
         )
-
-        answer = result["answer"]
-        ctx_total = result["context_count"]
-        ctx_sent = result["context_sent"]
-        blocked = ctx_total - ctx_sent
-
-        # Nota de fuentes al pie
-        footer = ""
-        if ctx_sent > 0:
-            footer += f"\n\n_📎 {ctx_sent} fragmento(s) de memoria consultados_"
-        if blocked > 0:
-            footer += f" _⚠ {blocked} omitido(s) por privacidad_"
-        if ctx_total == 0:
-            footer += "\n\n_ℹ Sin contexto previo — la memoria está vacía o aún procesándose._"
-
-        await thinking_msg.edit_text(
-            f"{answer}{footer}",
-            parse_mode="Markdown",
-        )
-        logger.info(
-            "[jq] respondido conv_id=%s context=%d/%d",
-            result["conversation_id"], ctx_sent, ctx_total,
-        )
     except Exception as exc:
         logger.exception("[jq] Error al consultar Jarvis: %s", exc)
         await thinking_msg.edit_text(f"❌ Error al consultar Jarvis: {exc}")
+        return
+
+    answer = result["answer"]
+    ctx_total = result["context_count"]
+    ctx_sent = result["context_sent"]
+    blocked = ctx_total - ctx_sent
+
+    # Nota de fuentes al pie
+    footer = ""
+    if ctx_sent > 0:
+        footer += f"\n\n_📎 {ctx_sent} fragmento(s) de memoria consultados_"
+    if blocked > 0:
+        footer += f" _⚠ {blocked} omitido(s) por privacidad_"
+    if ctx_total == 0:
+        footer += "\n\n_ℹ Sin contexto previo — la memoria está vacía o aún procesándose._"
+
+    final_text = f"{answer}{footer}"
+
+    try:
+        await thinking_msg.edit_text(final_text, parse_mode="Markdown")
+    except BadRequest as exc:
+        # El texto del LLM (o el username/hashtag de una fuente citada) puede traer
+        # un numero impar de "_"/"*"/"`" sueltos que, sumados a los que el footer usa
+        # a proposito para la cursiva, rompen el parser de Markdown legacy de Telegram
+        # ("Can't parse entities..."). Nunca vale la pena perder la respuesta real por
+        # un error de formato — reintentar en texto plano.
+        logger.warning("[jq] Markdown inválido en la respuesta (%s) — reintentando sin formato", exc)
+        await thinking_msg.edit_text(final_text)
+
+    logger.info(
+        "[jq] respondido conv_id=%s context=%d/%d",
+        result["conversation_id"], ctx_sent, ctx_total,
+    )
 
 
 def _infer_type_hint(content: str) -> str:

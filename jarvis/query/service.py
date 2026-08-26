@@ -12,6 +12,7 @@ import logging
 from jarvis.config import JARVIS_DEFAULT_USER
 from jarvis.conversation.service import (
     add_message,
+    ensure_conversation,
     get_or_create_conversation,
     get_recent_messages,
 )
@@ -48,6 +49,11 @@ def query(
             channel_id=channel_id,
             user_id=user_id,
         )
+    else:
+        # conversation_id puede venir del cliente (frontend, localStorage) y quedar
+        # huérfano si jarvis.db se resetea/migra — recrearla evita un FOREIGN KEY
+        # constraint failed en el add_message() de abajo.
+        ensure_conversation(conversation_id, channel=channel, channel_id=channel_id, user_id=user_id)
     add_message(conversation_id, "user", question)
 
     # RAG — recuperar fragmentos candidatos (n_results extra para dejar margen al ranking)

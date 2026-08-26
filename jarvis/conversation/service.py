@@ -46,6 +46,33 @@ def get_or_create_conversation(
         conn.close()
 
 
+def ensure_conversation(
+    conv_id: str,
+    channel: str,
+    channel_id: str,
+    user_id: str = JARVIS_DEFAULT_USER,
+) -> None:
+    """Crea la conversación con este id exacto si todavía no existe (idempotente).
+
+    `conversation_id` puede venir del cliente (frontend, guardado en localStorage —
+    spec §7/§18) en vez de generarse siempre server-side. Si jarvis.db se resetea o
+    migra, ese id queda huérfano y `add_message()` revienta con
+    `FOREIGN KEY constraint failed` en vez de silenciosamente arrancar una conversación
+    nueva. Se recrea la fila con el mismo id para que el cliente no pierda continuidad.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    conn = get_connection()
+    try:
+        with conn:
+            conn.execute(
+                """INSERT OR IGNORE INTO conversations (id, channel, channel_id, started_at, user_id)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (conv_id, channel, channel_id, now, user_id),
+            )
+    finally:
+        conn.close()
+
+
 def add_message(conv_id: str, role: str, content: str) -> str:
     """Agrega un mensaje a la conversación. Devuelve el message_id."""
     msg_id = str(uuid.uuid4())

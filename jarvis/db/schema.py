@@ -2,7 +2,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS memory_entries (
     id                    TEXT PRIMARY KEY,
     type                  TEXT NOT NULL
-                          CHECK (type IN ('RAW','SEMANTIC','DECISION','PROJECT')),
+                          CHECK (type IN ('RAW','SEMANTIC','DECISION','PROJECT','PEOPLE')),
     content_raw           TEXT NOT NULL,
     content_processed     TEXT,
     source                TEXT NOT NULL
@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS memory_entries (
     content_hash          TEXT,
     tags                  TEXT,
     valid_from            DATETIME,
+    valid_to              DATETIME,
     recorded_at           DATETIME NOT NULL
                           DEFAULT (datetime('now','utc')),
     source_id             TEXT NOT NULL,
@@ -35,7 +36,17 @@ CREATE TABLE IF NOT EXISTS memory_entries (
     user_id               TEXT NOT NULL DEFAULT 'default',
     created_at            DATETIME NOT NULL DEFAULT (datetime('now','utc')),
     processed_at          DATETIME,
-    embedded_at           DATETIME
+    embedded_at           DATETIME,
+    -- Gobernanza de captura (0.2 Slice 4, pieza C) -- mismo vocabulario que
+    -- memory_projects.created_by, deliberadamente: distingue "el usuario tipeó
+    -- esto y lo guardó a propósito" de "Jarvis lo infirió de una charla casual
+    -- y el usuario aceptó la propuesta". No es lo mismo que origin_trust (esa
+    -- columna es sobre confiabilidad de la FUENTE del texto -- un mensaje de
+    -- Telegram del usuario es 'telegram.user' se haya capturado explícito o
+    -- vía propuesta pasiva; created_by es sobre CÓMO se decidió guardarlo).
+    -- Ver Cerebro/decisiones-implementacion.md, pieza C.
+    created_by            TEXT NOT NULL DEFAULT 'explicit'
+                          CHECK (created_by IN ('explicit','jarvis_proposal_accepted'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_me_type   ON memory_entries(type);
@@ -82,11 +93,16 @@ CREATE TABLE IF NOT EXISTS memory_entry_projects (
 CREATE INDEX IF NOT EXISTS idx_mep_project ON memory_entry_projects(project_id);
 
 CREATE TABLE IF NOT EXISTS conversations (
-    id         TEXT PRIMARY KEY,
-    channel    TEXT NOT NULL CHECK (channel IN ('telegram','desktop')),
-    channel_id TEXT,
-    started_at DATETIME NOT NULL DEFAULT (datetime('now','utc')),
-    user_id    TEXT NOT NULL DEFAULT 'default'
+    id                     TEXT PRIMARY KEY,
+    channel                TEXT NOT NULL CHECK (channel IN ('telegram','desktop')),
+    channel_id             TEXT,
+    title                  TEXT,
+    started_at             DATETIME NOT NULL DEFAULT (datetime('now','utc')),
+    user_id                TEXT NOT NULL DEFAULT 'default',
+    -- Captura pasiva por inactividad (pieza C): marca hasta qué punto ya se
+    -- evaluó esta conversación para proponer una captura, para no re-escanear
+    -- los mismos mensajes en cada vuelta del worker.
+    last_passive_review_at DATETIME
 );
 
 CREATE TABLE IF NOT EXISTS conversation_messages (
@@ -120,4 +136,119 @@ CREATE TABLE IF NOT EXISTS jarvis_policies (
     value       TEXT NOT NULL,
     created_at  DATETIME NOT NULL DEFAULT (datetime('now','utc'))
 );
+
+-- Entidades (personas/organizaciones/lugares) detectadas en capturas (0.2 Slice 3).
+CREATE TABLE IF NOT EXISTS memory_entities (
+    entity_id    TEXT PRIMARY KEY,
+    name         TEXT NOT NULL,
+    aliases      TEXT,          -- JSON array de nombres alternativos
+    entity_type  TEXT NOT NULL, -- 'person' | 'organization' | 'place'
+    user_id      TEXT NOT NULL DEFAULT 'default',
+    first_seen   DATETIME NOT NULL,
+    last_seen    DATETIME NOT NULL,
+    notes        TEXT           -- resumen libre, actualizable
+);
+
+CREATE INDEX IF NOT EXISTS idx_men_user ON memory_entities(user_id);
+CREATE INDEX IF NOT EXISTS idx_men_name ON memory_entities(name);
+
+CREATE TABLE IF NOT EXISTS memory_entry_entities (
+    entry_id     TEXT NOT NULL REFERENCES memory_entries(id) ON DELETE CASCADE,
+    entity_id    TEXT NOT NULL REFERENCES memory_entities(entity_id) ON DELETE CASCADE,
+    relation     TEXT,          -- 'mentioned' | 'author' | 'subject'
+    PRIMARY KEY (entry_id, entity_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_mee_entity ON memory_entry_entities(entity_id);
+
+-- Log de eventos del worker (0.2, Fase B5) — alimenta el tab Debug del frontend.
+-- entry_id nullable: algunos eventos futuros podrían no estar atados a una entrada
+-- puntual; hoy todos los que escribe processor.py sí lo están.
+CREATE TABLE IF NOT EXISTS jarvis_event_log (
+    id         TEXT PRIMARY KEY,
+    entry_id   TEXT REFERENCES memory_entries(id) ON DELETE SET NULL,
+    level      TEXT NOT NULL,
+    message    TEXT NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT (datetime('now','utc'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_jel_created ON jarvis_event_log(created_at);
+
+-- Catálogo de tags (0.2 Slice 4, pieza A). Mismo patrón que memory_entities:
+-- tabla canónica + tabla puente, dedup case-insensitive en jarvis/tags/service.py
+-- (nunca UNIQUE(name) acá -- el merge conservador vive en código, igual que
+-- _find_or_create_entity()).
+CREATE TABLE IF NOT EXISTS memory_tags (
+    tag_id     TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    user_id    TEXT NOT NULL DEFAULT 'default',
+    first_seen DATETIME NOT NULL,
+    last_seen  DATETIME NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_mt_user ON memory_tags(user_id);
+CREATE INDEX IF NOT EXISTS idx_mt_name ON memory_tags(name);
+
+CREATE TABLE IF NOT EXISTS memory_entry_tags (
+    entry_id TEXT NOT NULL REFERENCES memory_entries(id) ON DELETE CASCADE,
+    tag_id   TEXT NOT NULL REFERENCES memory_tags(tag_id) ON DELETE CASCADE,
+    PRIMARY KEY (entry_id, tag_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_met_tag ON memory_entry_tags(tag_id);
+
+-- Propuestas de captura pasiva por inactividad (0.2 Slice 4, pieza C).
+-- Cola separada de inbox_queue a propósito: inbox_queue es "ya se decidió
+-- guardar, falta procesar"; esta tabla es "todavía no se decidió guardar".
+-- Solo entra a memory_entries/inbox_queue si el usuario acepta (capture_raw
+-- normal, created_by='jarvis_proposal_accepted' -- ver esa columna abajo).
+CREATE TABLE IF NOT EXISTS jarvis_capture_proposals (
+    id              TEXT PRIMARY KEY,
+    conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+    channel         TEXT NOT NULL CHECK (channel IN ('telegram','desktop')),
+    channel_id      TEXT,
+    content         TEXT NOT NULL,
+    question        TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'PENDING'
+                    CHECK (status IN ('PENDING','ACCEPTED','REJECTED','EXPIRED')),
+    entry_id        TEXT REFERENCES memory_entries(id) ON DELETE SET NULL,
+    user_id         TEXT NOT NULL DEFAULT 'default',
+    created_at      DATETIME NOT NULL DEFAULT (datetime('now','utc')),
+    resolved_at     DATETIME
+);
+
+CREATE INDEX IF NOT EXISTS idx_jcp_status ON jarvis_capture_proposals(status);
+CREATE INDEX IF NOT EXISTS idx_jcp_channel ON jarvis_capture_proposals(channel, channel_id);
+
+-- Auditoría proactiva de memoria (0.2 Slice 4 -- extensión de consolidation.py,
+-- ver Cerebro/decisiones-implementacion.md, 2026-08-31). Distinta de
+-- jarvis_capture_proposals a propósito: captura pasiva siempre crea contenido
+-- nuevo a partir de una conversación; audit actúa sobre memory_entries ya
+-- existentes con 8 tipos de acción, algunos con dos entry_ids target.
+-- action_type: create|clarify|flag_contradiction|flag_connection|merge|edit|
+-- delete|retag. payload/target_entry_ids van serializados como JSON (mismo
+-- criterio que memory_entries.tags). Ninguna acción se aplica sin pasar por
+-- este ciclo PENDING -> ACCEPTED/REJECTED/EXPIRED.
+CREATE TABLE IF NOT EXISTS jarvis_audit_proposals (
+    id                TEXT PRIMARY KEY,
+    action_type       TEXT NOT NULL
+                      CHECK (action_type IN (
+                          'create','clarify','flag_contradiction',
+                          'flag_connection','merge','edit','delete','retag'
+                      )),
+    target_entry_ids  TEXT NOT NULL,
+    payload           TEXT,
+    question          TEXT NOT NULL,
+    channel           TEXT NOT NULL CHECK (channel IN ('telegram','desktop')),
+    channel_id        TEXT,
+    status            TEXT NOT NULL DEFAULT 'PENDING'
+                      CHECK (status IN ('PENDING','ACCEPTED','REJECTED','EXPIRED')),
+    entry_id          TEXT REFERENCES memory_entries(id) ON DELETE SET NULL,
+    user_id           TEXT NOT NULL DEFAULT 'default',
+    created_at        DATETIME NOT NULL DEFAULT (datetime('now','utc')),
+    resolved_at       DATETIME
+);
+
+CREATE INDEX IF NOT EXISTS idx_jap_status ON jarvis_audit_proposals(status);
+CREATE INDEX IF NOT EXISTS idx_jap_channel ON jarvis_audit_proposals(channel, channel_id);
 """

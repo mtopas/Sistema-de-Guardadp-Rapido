@@ -8,13 +8,19 @@ Uso:
 """
 import logging
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 
-from jarvis.config import JARVIS_WORKER_POLL_INTERVAL
+from jarvis.audit.service import expire_stale_proposals as expire_stale_audit_proposals
+from jarvis.captures.passive import expire_stale_proposals, scan_and_propose
+from jarvis.config import JARVIS_PASSIVE_CAPTURE_ENABLED, JARVIS_WORKER_POLL_INTERVAL
 from jarvis.db.database import get_connection, init_db
 from jarvis.observability import setup as setup_observability
+from jarvis.worker.consolidation import run_consolidation, should_run as should_run_consolidation
+from jarvis.worker.heartbeat import write_heartbeat
 from jarvis.worker.processor import process_entry
+from jarvis.worker.task_manifest import MANIFEST
 
 logging.basicConfig(
     level=logging.INFO,
@@ -56,6 +62,85 @@ def _fetch_pending() -> list[str]:
         conn.close()
 
 
+_consolidation_thread: threading.Thread | None = None
+
+
+def _maybe_run_consolidation() -> None:
+    """Lanza el job de consolidación diaria en un thread aparte si corresponde.
+
+    Corre en background (no en el hilo del loop) para que nunca bloquee el
+    procesamiento de entradas PENDING del inbox, que es la prioridad del worker.
+    """
+    global _consolidation_thread
+
+    if _consolidation_thread is not None and _consolidation_thread.is_alive():
+        return
+    if not should_run_consolidation():
+        return
+
+    def _run() -> None:
+        try:
+            run_consolidation()
+        except Exception:
+            logger.exception("[worker] Job de consolidación falló")
+
+    _consolidation_thread = threading.Thread(
+        target=_run, name="jarvis-consolidation", daemon=True
+    )
+    _consolidation_thread.start()
+    logger.info("[worker] Job de consolidación diaria lanzado en background")
+
+
+_passive_thread: threading.Thread | None = None
+
+
+def _maybe_run_passive_capture() -> None:
+    """Escanea conversaciones inactivas y expira propuestas vencidas, en un
+    thread aparte (mismo motivo que consolidación: nunca bloquear el
+    procesamiento de inbox_queue, que es la prioridad del worker). A
+    diferencia de consolidación (gate de 24h vía should_run), esto corre en
+    cada vuelta ociosa del loop -- find_idle_conversations() es una query
+    SQL barata; el costo real (llamada al modelo local) solo se paga cuando
+    de verdad hay una conversación inactiva sin revisar.
+    """
+    global _passive_thread
+
+    if not JARVIS_PASSIVE_CAPTURE_ENABLED:
+        return
+    if _passive_thread is not None and _passive_thread.is_alive():
+        return
+
+    def _run() -> None:
+        try:
+            MANIFEST.assert_allowed("read_conversations")
+            MANIFEST.assert_allowed("propose_capture")
+            summary = scan_and_propose()
+            if summary["proposed"] or summary["errors"]:
+                logger.info(
+                    "[worker] Captura pasiva: %d conversación(es) revisadas, %d propuesta(s), %d error(es)",
+                    summary["scanned"], summary["proposed"], len(summary["errors"]),
+                )
+            expired = expire_stale_proposals()
+            if expired:
+                logger.info("[worker] Captura pasiva: %d propuesta(s) expirada(s)", expired)
+        except Exception:
+            logger.exception("[worker] Job de captura pasiva falló")
+
+        # Vencimiento de propuestas de auditoría (jarvis.audit.service) -- mismo
+        # sweep periódico que captura pasiva, reusando esta misma vuelta del
+        # loop en vez de un thread propio (no hay job_queue entre procesos,
+        # ver jarvis/captures/passive.py).
+        try:
+            expired_audit = expire_stale_audit_proposals()
+            if expired_audit:
+                logger.info("[worker] Auditoría: %d propuesta(s) expirada(s)", expired_audit)
+        except Exception:
+            logger.exception("[worker] Sweep de vencimiento de auditoría falló")
+
+    _passive_thread = threading.Thread(target=_run, name="jarvis-passive-capture", daemon=True)
+    _passive_thread.start()
+
+
 def main() -> None:
     logger.info("[worker] Iniciando Jarvis worker…")
     setup_observability()
@@ -67,14 +152,19 @@ def main() -> None:
 
     logger.info("[worker] Loop activo. Poll cada %ds. Ctrl+C para detener.", JARVIS_WORKER_POLL_INTERVAL)
 
+    _maybe_run_consolidation()
+
     try:
         while True:
+            write_heartbeat()
             pending = _fetch_pending()
             if pending:
                 for entry_id in pending:
                     logger.info("[worker] Procesando entry_id=%s", entry_id)
                     process_entry(entry_id)
             else:
+                _maybe_run_consolidation()
+                _maybe_run_passive_capture()
                 time.sleep(JARVIS_WORKER_POLL_INTERVAL)
     except KeyboardInterrupt:
         logger.info("[worker] Detenido por usuario.")

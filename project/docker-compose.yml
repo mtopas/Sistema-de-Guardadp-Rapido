@@ -1,18 +1,30 @@
-# SGR en homelab — backend + bot, DB en ./database
+# SGR en homelab — backend + bot + worker de Jarvis, DB en ./database
 #
 # En ~/project/.env del gabinete:
 #   TELEGRAM_BOT_TOKEN=...
-# NO pongas OLLAMA_BASE_URL=http://localhost:11434 — el bot usa la IP de Windows (ICS).
+#   OPENAI_API_KEY=...            (modelo de razonamiento externo de Jarvis, opcional)
+# NO pongas OLLAMA_BASE_URL=http://localhost:11434 — los tres servicios usan la IP de
+# Windows (ICS), fijada acá abajo como override.
 #
-# El bot usa network_mode: host (DNS/Internet vía ICS de Ubuntu).
-# La API local del bot es 127.0.0.1:8765 (puerto publicado del backend).
+# Build context = root del repo (..), no project/: jarvis/ vive como hermano de project/
+# (ver CLAUDE.md), y el Dockerfile necesita copiar ambos. docker-compose (sin buildx) no
+# aplica --network=host al build -- construir la imagen a mano antes de "up":
+#   cd ~/project
+#   docker build --network=host -t sgr-app:latest -f Dockerfile ..
+#   docker-compose up -d --no-build
 #
-# Levantar: cd ~/project && sudo docker compose up -d --build
+# bot y worker usan network_mode: host (DNS/Internet vía ICS de Ubuntu). La API local del
+# bot y del worker es 127.0.0.1:8765 (puerto publicado del backend).
+#
+# jarvis.db, vault/ y database/chroma/ se acceden directo (SQLite + archivos) desde los
+# tres servicios (backend sirve /jarvis/*, bot maneja /j /jq /jdebug*, worker procesa el
+# inbox) -- mismo patrón que ya usa project/database/app.db entre backend y el resto.
 
 services:
   backend:
     build:
-      context: .
+      context: ..
+      dockerfile: project/Dockerfile
     image: sgr-app:latest
     command: uvicorn app.main:app --host 0.0.0.0 --port 8765
     ports:
@@ -23,12 +35,18 @@ services:
       SGR_DATA_DIR: /app
       SGR_HOST: 0.0.0.0
       SGR_PORT: "8765"
+      # Fijo: ${OLLAMA_BASE_URL} en compose lee el .env del host y reinyecta localhost.
+      OLLAMA_BASE_URL: http://192.168.137.1:11434
+      JARVIS_DB_PATH: /app/database/jarvis.db
+      JARVIS_VAULT_PATH: /app/vault
+      JARVIS_CHROMA_PATH: /app/database/chroma
     dns:
       - 8.8.8.8
       - 1.1.1.1
     volumes:
       - ./database:/app/database
       - ./uploads:/app/uploads
+      - ./vault:/app/vault
     restart: unless-stopped
 
   bot:
@@ -44,9 +62,35 @@ services:
       OLLAMA_BASE_URL: http://192.168.137.1:11434
       OLLAMA_TIMEOUT: "90"
       OLLAMA_WARMUP_TIMEOUT: "180"
+      JARVIS_DB_PATH: /app/database/jarvis.db
+      JARVIS_VAULT_PATH: /app/vault
+      JARVIS_CHROMA_PATH: /app/database/chroma
     volumes:
       # Código del bot en vivo (sin rebuild por cada cambio en mybot/)
       - ./mybot:/app/mybot:ro
+      - ./database:/app/database
+      - ./vault:/app/vault
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  worker:
+    image: sgr-app:latest
+    network_mode: host
+    command: python -u -m jarvis.worker.main
+    env_file:
+      - .env
+    environment:
+      PYTHONUNBUFFERED: "1"
+      # Fijo: ${OLLAMA_BASE_URL} en compose lee el .env del host y reinyecta localhost.
+      OLLAMA_BASE_URL: http://192.168.137.1:11434
+      OLLAMA_TIMEOUT: "90"
+      JARVIS_DB_PATH: /app/database/jarvis.db
+      JARVIS_VAULT_PATH: /app/vault
+      JARVIS_CHROMA_PATH: /app/database/chroma
+    volumes:
+      - ./database:/app/database
+      - ./vault:/app/vault
     depends_on:
       - backend
     restart: unless-stopped

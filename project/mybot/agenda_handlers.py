@@ -39,6 +39,90 @@ def _save_checkin_time(hour: int, minute: int):
     except Exception:
         pass
 
+
+# ──────────────────────────────────────────────────────────────
+# Config de notificaciones periódicas (ON/OFF por notificación)
+# ──────────────────────────────────────────────────────────────
+_NOTIF_CONFIG_FILE = Path(__file__).parent / "notif_config.json"
+_NOTIF_DEFAULTS = {"habitos": True, "finanzas": True}
+
+
+def _load_notif_flags() -> dict:
+    """Returns {"habitos": bool, "finanzas": bool}, default True para ambas."""
+    try:
+        data = json.loads(_NOTIF_CONFIG_FILE.read_text())
+        return {k: bool(data.get(k, v)) for k, v in _NOTIF_DEFAULTS.items()}
+    except Exception:
+        return dict(_NOTIF_DEFAULTS)
+
+
+def _save_notif_flag(key: str, value: bool):
+    flags = _load_notif_flags()
+    flags[key] = value
+    try:
+        _NOTIF_CONFIG_FILE.write_text(json.dumps(flags))
+    except Exception:
+        pass
+
+
+def _is_notif_enabled(key: str) -> bool:
+    return _load_notif_flags().get(key, True)
+
+
+async def cmd_notif_habitos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/notif_habitos [ON|OFF] — gatea el check-in nocturno de hábitos."""
+    args = context.args or []
+    if not args or args[0].upper() not in ("ON", "OFF"):
+        h, m = _load_checkin_time()
+        enabled = _is_notif_enabled("habitos")
+        estado = "activada ✅" if enabled else "desactivada ⛔"
+        await update.message.reply_text(
+            f"🌙 Check-in nocturno de hábitos ({h:02d}:{m:02d}): *{estado}*.\n"
+            f"Cambialo con `/notif_habitos ON` o `/notif_habitos OFF`.",
+            parse_mode="Markdown",
+        )
+        return
+
+    value = args[0].upper() == "ON"
+    _save_notif_flag("habitos", value)
+    estado = "activada ✅" if value else "desactivada ⛔"
+    await update.message.reply_text(f"🌙 Check-in nocturno de hábitos {estado}.")
+
+
+async def cmd_notif_finanzas(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/notif_finanzas [ON|OFF] — gatea el resumen semanal de finanzas."""
+    args = context.args or []
+    if not args or args[0].upper() not in ("ON", "OFF"):
+        enabled = _is_notif_enabled("finanzas")
+        estado = "activada ✅" if enabled else "desactivada ⛔"
+        await update.message.reply_text(
+            f"📊 Resumen semanal de finanzas (lunes 09:00): *{estado}*.\n"
+            f"Cambialo con `/notif_finanzas ON` o `/notif_finanzas OFF`.",
+            parse_mode="Markdown",
+        )
+        return
+
+    value = args[0].upper() == "ON"
+    _save_notif_flag("finanzas", value)
+    estado = "activada ✅" if value else "desactivada ⛔"
+    await update.message.reply_text(f"📊 Resumen semanal de finanzas {estado}.")
+
+
+async def cmd_notif(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/notif — muestra el estado de todas las notificaciones periódicas."""
+    flags = _load_notif_flags()
+    h, m = _load_checkin_time()
+    texto = (
+        "🔔 *Notificaciones periódicas*\n\n"
+        f"🌙 Check-in nocturno de hábitos ({h:02d}:{m:02d}): "
+        f"{'✅ activada' if flags['habitos'] else '⛔ desactivada'}\n"
+        f"📊 Resumen semanal de finanzas (lunes 09:00): "
+        f"{'✅ activada' if flags['finanzas'] else '⛔ desactivada'}\n\n"
+        "Cambiá con `/notif_habitos ON|OFF` o `/notif_finanzas ON|OFF`."
+    )
+    await update.message.reply_text(texto, parse_mode="Markdown")
+
+
 # ──────────────────────────────────────────────────────────────
 # Texto de ayuda
 # ──────────────────────────────────────────────────────────────
@@ -75,6 +159,11 @@ HELP_TEXT = """\
 /racha — rachas de todos los hábitos activos
 /nota <nombre> <texto> — agrega nota al registro de hoy
 
+🔔 *Notificaciones*
+/notif — ver el estado de todas las notificaciones periódicas
+`/notif_habitos ON|OFF` — prender/apagar el check-in nocturno
+`/notif_finanzas ON|OFF` — prender/apagar el resumen semanal de finanzas
+
 📦 *Bóveda*
 Enviá cualquier texto, foto o ubicación y te pide la categoría.
 Prefijos rápidos: `t: comprar leche` (tarea) · `e: dentista 10:30` (evento)
@@ -82,6 +171,13 @@ Prefijos rápidos: `t: comprar leche` (tarea) · `e: dentista 10:30` (evento)
 /buscar <texto> — buscar en la Bóveda (texto exacto)
 /pregunta <texto> — preguntarle al asistente sobre tus notas (búsqueda semántica)
 /rapido on|off — modo rápido (guarda en última categoría sin pedir)
+
+🧠 *Jarvis*
+/j <texto> — capturar en la memoria de Jarvis (pregunta si falta el motivo en una DECISION)
+/jq <texto> — consultar la memoria de Jarvis
+/jdebug — ver estado del sistema (último procesamiento, errores, presupuesto)
+/jdebugon — activar modo debug (logs verbosos por Telegram)
+/jdebugoff — desactivar modo debug
 
 ℹ️ *General*
 /help — esta ayuda
@@ -1521,6 +1617,8 @@ async def cmd_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ──────────────────────────────────────────────────────────────
 
 async def check_in_noche(context: ContextTypes.DEFAULT_TYPE):
+    if not _is_notif_enabled("habitos"):
+        return
     chat_id = context.bot_data.get("chat_id")
     if not chat_id:
         return

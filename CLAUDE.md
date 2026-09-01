@@ -226,6 +226,7 @@ en Windows aunque el explorador de archivos la muestre igual.
 | `jarvis/Componentes-Evaluados.md` | Decisiones de componentes por fase (qué incorporar, evaluar, diferir) |
 | `Cerebro/estado-actual.md` | Qué está construido hoy — actualizar al final de cada sesión |
 | `Cerebro/decisiones-implementacion.md` | Decisiones que divergen o clarifican la spec |
+| `Cerebro/pruebas-manuales-jarvis.md` | Checklist de pruebas manuales pendientes (navegador/Telegram) — actualizar si cambia el dataset de prueba o se cierran items |
 | `jarvis/Investigacion/` | Informes de investigación históricos — ya evaluados, no son fuente de verdad |
 
 ### Arquitectura Jarvis (resumen)

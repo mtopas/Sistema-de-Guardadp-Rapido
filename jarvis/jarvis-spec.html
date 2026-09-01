@@ -1066,6 +1066,7 @@ h3:first-child { margin-top: 0; }
         <tr><td>Envía URL</td><td>"Link guardado. Proyecto: General." (con opción de corregir)</td><td>2s</td></tr>
         <tr><td>Hace una pregunta</td><td>Respuesta en lenguaje natural con fuentes citadas</td><td>10s</td></tr>
         <tr><td>Mensaje ambiguo</td><td>"¿Querés que guarde esto o que te responda?"</td><td>1s</td></tr>
+        <tr><td>Decisión sin razonamiento (ej. "/j decidí usar gemma3")</td><td>"🤔 ¿Por qué tomaste esta decisión?" -- si no responde en 3 min, se guarda igual sin la razón; al terminar de procesar, mensaje nuevo "✅ Listo — guardado como *TIPO*." (implementado y confirmado por Telegram real 2026-08-26, ver <code>jarvis/captures/clarification.py</code> y <code>jarvis/notify/telegram.py</code>)</td><td>3 min (timeout, no bloqueante)</td></tr>
         <tr><td>Modo local activo</td><td>"[modo local] " prefijado en la respuesta</td><td>—</td></tr>
         <tr><td>Error en una entrada</td><td>"Hay una entrada con error de procesamiento. Podés verla en /jarvis."</td><td>—</td></tr>
       </tbody>

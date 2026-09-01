@@ -7,6 +7,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from api_config import API_BASE as DEFAULT_API_BASE
+import agenda_handlers as ah
 
 # ──────────────────────────────────────────────────────────────
 # Seguridad — BOT_ALLOWED_CHAT_IDS
@@ -1105,6 +1106,8 @@ async def handle_finanzas_callback(update: Update, context: ContextTypes.DEFAULT
 async def resumen_semanal_finanzas(context):
     """Enviado automáticamente cada lunes a las 9:00. Solo ejecuta si hoy es lunes."""
     if datetime.today().weekday() != 0:  # 0 = lunes
+        return
+    if not ah._is_notif_enabled("finanzas"):
         return
     chat_id = context.bot_data.get("chat_id")
     if not chat_id:

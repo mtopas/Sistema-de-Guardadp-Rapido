@@ -1,0 +1,30 @@
+Fondo Canvas 2D con ~76 nodos (vos lo subiste a 150) en posiciones normalizadas, con deriva lenta. Cada nodo se conecta a sus 2 vecinos más cercanos si están bajo un umbral de distancia, así las aristas se sienten orgánicas y no una grilla. Las líneas usan gradientes entre los colores de sus dos nodos. Encima corren "pulsos": puntos que viajan por una arista con una cola en degradé, y al llegar saltan a otra arista al azar — eso es la "luz que viaja". Parallax: el puntero desplaza cada nodo proporcional a su z, así hay profundidad real. Sobre todo eso, un vignette radial para que el centro respire y los bordes se hundan.
+
+Colores Un color por tipo de memoria, y ese color es el sistema entero:
+
+RAW #7dd3fc (celeste — crudo, sin digerir)
+SEMANTIC #4ade80 (verde — hecho verificado)
+DECISION #fbbf24 (ámbar — pide atención, tiene peso)
+PROJECT #a78bfa (violeta)
+PEOPLE #f472b6 (rosa)
+Cada color se deriva a tres capas con alpha: fondo al 5-10%, borde al 22-30%, texto/glow al 100%. Así cinco colores fuertes conviven sin gritar. El mismo color aparece en el nodo del grafo, el chip del inbox, la fuente citada, el avatar de entidad y el nivel del log — el usuario aprende el código una vez.
+
+Los grises son azulados (#05060d a #e8ecfb) para que el fondo se lea como espacio, no como negro apagado. Los estados de budget reusan la paleta en lugar de sumar colores: verde activo → ámbar bajo → rosa agotado.
+
+Tipografía Space Grotesk para lo humano (mensajes, nombres, títulos) y JetBrains Mono para todo lo que es máquina: tipos de memoria, estados, timestamps, costos, contadores. Esa división hace que se lea como un sistema y no como una app de notas.
+
+Paneles
+
+Izquierda — el vocabulario. Tipos de memoria con conteos y proyectos activos. Está fijo porque es la taxonomía: si el color significa algo, la leyenda tiene que estar siempre visible. Los proyectos llevan una barra de "calor" para insinuar el futuro de vista de proyectos.
+
+Centro — Cerebro. Captura y consulta en el mismo campo, porque en tu flujo son el mismo gesto: escribís y Jarvis decide. El composer detecta el tipo mientras tipeás (chip en vivo) y distingue pregunta de captura. Tres formas de respuesta distintas, deliberadamente: el pedido de razonamiento es una tarjeta ámbar con punto latiendo (bloquea, no es un mensaje más), el guardado es un recibo compacto de una línea (confirmación, no conversación), y la respuesta es la única burbuja "grande", con sus fuentes citadas como chips coloreados abajo de una divisoria. Las citas son chips y no notas al pie para que se lean como memorias reales, clickeables, con su color.
+
+Derecha — el contexto. En proceso (los 3 primeros del inbox con el countdown de 15s), gasto de hoy con desglose por modelo, y entidades recientes como chips. Va al costado porque es ambiente: querés saber que el worker está vivo y que te queda budget sin cambiar de vista. Se oculta en Debug, donde el foco es otro.
+
+Inbox. La cola completa en filas densas: estado, texto, tipo, edad. Grilla de columnas fijas para que se escanee vertical. PROCESSING y ERROR parpadean; PENDING y DONE están quietos — solo se mueve lo que requiere atención.
+
+Entidades. Grilla de tarjetas. Personas con avatar redondo, organizaciones con avatar cuadrado — la forma diferencia el tipo sin necesitar íconos. Los puntitos de colores abajo muestran de qué tipos de memoria viene lo que Jarvis sabe de esa entidad.
+
+Debug. Cuatro stats arriba (último procesado, cola, errores 24h, modelo activo) y abajo el log del worker en monospace con niveles coloreados por la misma paleta. Incluí un nivel CONFLICT a propósito: es el gancho visual del timeline de validez temporal que mencionaste como futuro.
+
+Detalles con intención El anillo cónico del logo con los cinco colores rotando; el borde del composer con un degradé de los cinco colores barriendo en 14s (el único elemento que insinúa "está pensando" en reposo); el estado de budget agotado cambia el copy, no solo el color — dice qué se degrada. Y el chip de "modo local" arriba se vuelve rosa, como el tuyo ahora en $0.94 está a un centavo de eso.

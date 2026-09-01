@@ -551,3 +551,6 @@ html[data-theme="blanco-negro"] .btn-ghost:hover {
 @media (prefers-reduced-motion: reduce) {
   [style*="drawer-slide-in"] { animation: none; }
 }
+
+/* Jarvis (pantalla /jarvis) tiene su propio stylesheet — project/frontend/src/styles/jarvis.css,
+   importado desde JarvisScreen.jsx. Colores semánticos viven en utils/jarvisPalette.js. */

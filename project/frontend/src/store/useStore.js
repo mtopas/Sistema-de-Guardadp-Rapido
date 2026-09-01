@@ -2,6 +2,15 @@ import { create } from 'zustand'
 import { API_URL, DEBUG } from '../config'
 import { categoriaDescendantIds } from '../utils/categoriaColors'
 import { applyTheme, DEFAULT_THEME, DEFAULT_TONE, DEFAULT_FONT_PAIR, FONT_PAIRS, THEMES, TONES, ARCOIRIS_ACCENTS, pathToSection, SECTION_ORDER } from '../utils/themes'
+import { JARVIS_EVENTS_PAGE_SIZE, JARVIS_EVENTS_MAX_LIMIT } from '../utils/jarvisPalette'
+
+// Multi-chat (Mejoras_Jarvis.md punto 3) reemplazó el modelo viejo de "un solo
+// chat de escritorio guardado en localStorage" por chats reales en el
+// backend -- estas dos claves ya no las lee nadie, se purgan una vez.
+try {
+  localStorage.removeItem('jarvis-messages')
+  localStorage.removeItem('jarvis-conversation-id')
+} catch { /* noop */ }
 
 function currentMes() {
   const d = new Date()
@@ -1417,26 +1426,141 @@ export const useStore = create((set, get) => ({
   // ---------------------------------------------------------------------------
   // Jarvis — S4: chat + inbox + budget
   // ---------------------------------------------------------------------------
-  jarvisMessages:        JSON.parse(localStorage.getItem('jarvis-messages') || '[]'),
-  jarvisConversationId:  localStorage.getItem('jarvis-conversation-id') || null,
+  // Multi-chat (Mejoras_Jarvis.md punto 3): cada chat vive en el backend
+  // (`conversations`/`conversation_messages`, ver jarvis/chats/service.py) —
+  // localStorage solo recuerda CUÁL chat estaba activo, no su contenido. Antes
+  // `jarvis-messages`/`jarvis-conversation-id` eran la fuente de verdad del lado
+  // del cliente y "borrar historial" solo los limpiaba a ellos: el backend
+  // seguía enganchado a la misma conversación (channel_id fijo `"web"` para
+  // TODO el chat de escritorio) y el próximo mensaje volvía a traer todo el
+  // historial viejo — la causa raíz real de "Jarvis recordó a Carolina después
+  // de borrar el historial" (ver Cerebro/decisiones-implementacion.md). Ahora
+  // cada chat nuevo tiene su propio id real desde el backend; "nuevo chat"
+  // apunta a una fila realmente distinta, sin overlap posible.
+  jarvisChats:           [], // [{id, title, started_at, last_message_at, message_count}]
+  jarvisActiveChatId:    localStorage.getItem('jarvis-active-chat-id') || null,
+  jarvisMessages:        [],
   jarvisLoading:         false,
   jarvisInbox:           [],
   jarvisBudget:          { status: 'ACTIVE', spent_usd: 0, daily_budget_usd: 1.0 },
   jarvisCaptureOpen:     false,
+  jarvisTab:             'chat', // 'chat' | 'inbox' | 'entities' | 'debug'
+  jarvisTypeCounts:      {}, // {RAW: n, SEMANTIC: n, ...} — solo tipos presentes (GET /jarvis/stats/types)
+  jarvisEntities:        [],
+  jarvisProjects:        [],
+  jarvisHealth:          { worker_alive: true },
+  jarvisEvents:          [],
+  jarvisEventsLimit:     JARVIS_EVENTS_PAGE_SIZE, // "cargar más" en el tab Debug
+  jarvisProposals:       [], // captura pasiva por inactividad (pieza C) — GET /jarvis/proposals
+  jarvisTags:            [], // catálogo de tags (pieza A) — GET /jarvis/tags
+  jarvisBrowseResults:   { total: 0, items: [] }, // pantalla browse (pieza F) — GET /jarvis/browse
+  jarvisAuditProposals:  [], // auditoría proactiva de memoria — GET /jarvis/audit-proposals (pendientes)
+  jarvisAuditHistory:    [], // historial resuelto para Explorar — GET /jarvis/audit-proposals?status=all
+  jarvisIsolatedEntries: [], // hueco tipo B (sin entidad/proyecto) — GET /jarvis/audit-proposals/isolated
 
   openJarvisCapture:  () => set({ jarvisCaptureOpen: true }),
   closeJarvisCapture: () => set({ jarvisCaptureOpen: false }),
+  setJarvisTab:       (tab) => set({ jarvisTab: tab }),
+
+  // Trae la lista de chats y, si no hay ninguno activo todavía (primera carga
+  // de la sesión, o el chat activo guardado ya no existe), selecciona el más
+  // reciente (list_chats ya viene ordenada por última actividad) o crea uno
+  // nuevo si el usuario todavía no tiene ningún chat.
+  fetchJarvisChats: async () => {
+    try {
+      const res = await fetch(`${API_URL}/jarvis/chats`)
+      if (!res.ok) throw new Error('not ok')
+      const chats = await res.json()
+      set({ jarvisChats: chats })
+      const activeId = get().jarvisActiveChatId
+      const stillExists = activeId && chats.some(c => c.id === activeId)
+      if (stillExists) {
+        if (get().jarvisMessages.length === 0) await get().switchJarvisChat(activeId)
+        return
+      }
+      if (chats.length > 0) {
+        await get().switchJarvisChat(chats[0].id)
+      } else {
+        await get().createJarvisChat()
+      }
+    } catch { /* noop — offline, se reintenta en el próximo poll */ }
+  },
+
+  switchJarvisChat: async (chatId) => {
+    set({ jarvisActiveChatId: chatId, jarvisMessages: [] })
+    try { localStorage.setItem('jarvis-active-chat-id', chatId) } catch { /* noop */ }
+    try {
+      const res = await fetch(`${API_URL}/jarvis/chats/${chatId}/messages`)
+      if (!res.ok) throw new Error('not ok')
+      const history = await res.json()
+      // Historial persistido: sin `sources` (no se guardan por mensaje, solo
+      // se muestran para respuestas recién generadas en esta sesión).
+      set({ jarvisMessages: history.map(m => ({ role: m.role, content: m.content, created_at: m.created_at })) })
+    } catch { /* noop — el chat existe pero no se pudo traer su historial ahora */ }
+  },
+
+  createJarvisChat: async (title = null) => {
+    try {
+      const res = await fetch(`${API_URL}/jarvis/chats`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      })
+      if (!res.ok) throw new Error('not ok')
+      const chat = await res.json()
+      set({ jarvisChats: [chat, ...get().jarvisChats], jarvisActiveChatId: chat.id, jarvisMessages: [] })
+      try { localStorage.setItem('jarvis-active-chat-id', chat.id) } catch { /* noop */ }
+      return chat
+    } catch {
+      return null
+    }
+  },
+
+  renameJarvisChat: async (chatId, title) => {
+    try {
+      const res = await fetch(`${API_URL}/jarvis/chats/${chatId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      })
+      if (!res.ok) throw new Error('not ok')
+      set({ jarvisChats: get().jarvisChats.map(c => c.id === chatId ? { ...c, title: title?.trim() || null } : c) })
+      return true
+    } catch {
+      return false
+    }
+  },
+
+  deleteJarvisChat: async (chatId) => {
+    try {
+      const res = await fetch(`${API_URL}/jarvis/chats/${chatId}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('not ok')
+      const remaining = get().jarvisChats.filter(c => c.id !== chatId)
+      set({ jarvisChats: remaining })
+      if (get().jarvisActiveChatId === chatId) {
+        if (remaining.length > 0) await get().switchJarvisChat(remaining[0].id)
+        else await get().createJarvisChat()
+      }
+      return true
+    } catch {
+      return false
+    }
+  },
 
   jarvisQuery: async (question) => {
-    const userMsg = { role: 'user', content: question, ts: Date.now() }
-    const optimistic = [...get().jarvisMessages, userMsg]
-    set({ jarvisMessages: optimistic, jarvisLoading: true })
-    try { localStorage.setItem('jarvis-messages', JSON.stringify(optimistic)) } catch { /* storage full */ }
+    let chatId = get().jarvisActiveChatId
+    if (!chatId) {
+      const chat = await get().createJarvisChat()
+      if (!chat) { set({ jarvisMessages: [...get().jarvisMessages, { role: 'assistant', content: null, error: true, created_at: new Date().toISOString() }] }); return }
+      chatId = chat.id
+    }
+    const userMsg = { role: 'user', content: question, created_at: new Date().toISOString() }
+    set({ jarvisMessages: [...get().jarvisMessages, userMsg], jarvisLoading: true })
     try {
       const res = await fetch(`${API_URL}/jarvis/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, conversation_id: get().jarvisConversationId }),
+        body: JSON.stringify({ question, conversation_id: chatId }),
       })
       if (!res.ok) throw new Error('not ok')
       const data = await res.json()
@@ -1446,28 +1570,24 @@ export const useStore = create((set, get) => ({
         sources: data.sources || [],
         context_count: data.context_count,
         context_sent: data.context_sent,
-        ts: Date.now(),
+        created_at: new Date().toISOString(),
       }
-      const updated = [...get().jarvisMessages, assistantMsg]
-      try {
-        localStorage.setItem('jarvis-messages', JSON.stringify(updated))
-        localStorage.setItem('jarvis-conversation-id', data.conversation_id)
-      } catch { /* storage full */ }
-      set({ jarvisMessages: updated, jarvisConversationId: data.conversation_id, jarvisLoading: false })
+      set({ jarvisMessages: [...get().jarvisMessages, assistantMsg], jarvisLoading: false })
+      // Refresca la lista (título recién autogenerado en el primer mensaje,
+      // orden por última actividad) sin bloquear la respuesta ya mostrada.
+      get().fetchJarvisChats()
     } catch {
-      const errMsg = { role: 'assistant', content: null, error: true, ts: Date.now() }
-      const updated = [...get().jarvisMessages, errMsg]
-      try { localStorage.setItem('jarvis-messages', JSON.stringify(updated)) } catch { /* noop */ }
-      set({ jarvisMessages: updated, jarvisLoading: false })
+      const errMsg = { role: 'assistant', content: null, error: true, created_at: new Date().toISOString() }
+      set({ jarvisMessages: [...get().jarvisMessages, errMsg], jarvisLoading: false })
     }
   },
 
-  jarvisCapture: async (content, local_only = false) => {
+  jarvisCapture: async (content, local_only = false, extra = {}) => {
     try {
       const res = await fetch(`${API_URL}/jarvis/capture`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content, local_only }),
+        body: JSON.stringify({ content, local_only, ...extra }),
       })
       if (!res.ok) throw new Error('not ok')
       return await res.json()
@@ -1492,11 +1612,204 @@ export const useStore = create((set, get) => ({
     } catch { /* noop */ }
   },
 
-  jarvisClearHistory: () => {
+  fetchJarvisTypeCounts: async () => {
     try {
-      localStorage.removeItem('jarvis-messages')
-      localStorage.removeItem('jarvis-conversation-id')
+      const res = await fetch(`${API_URL}/jarvis/stats/types`)
+      if (!res.ok) throw new Error('not ok')
+      set({ jarvisTypeCounts: await res.json() })
     } catch { /* noop */ }
-    set({ jarvisMessages: [], jarvisConversationId: null })
+  },
+
+  fetchJarvisHealth: async () => {
+    try {
+      const res = await fetch(`${API_URL}/jarvis/health`)
+      if (!res.ok) throw new Error('not ok')
+      set({ jarvisHealth: await res.json() })
+    } catch { /* noop */ }
+  },
+
+  fetchJarvisEvents: async () => {
+    try {
+      const res = await fetch(`${API_URL}/jarvis/events?limit=${get().jarvisEventsLimit}`)
+      if (!res.ok) throw new Error('not ok')
+      set({ jarvisEvents: await res.json() })
+    } catch { /* noop */ }
+  },
+
+  // "El debug se cortó en mensajes viejos" (Mejoras_Jarvis.md) — el fetch usaba
+  // un límite fijo de 20 sin forma de pedir más. Ahora el límite es estado y
+  // "cargar más" lo sube (tope real: JARVIS_EVENTS_MAX_LIMIT, mismo tope que
+  // el backend acepta) y vuelve a pedir.
+  loadMoreJarvisEvents: () => {
+    set({ jarvisEventsLimit: Math.min(get().jarvisEventsLimit + JARVIS_EVENTS_PAGE_SIZE, JARVIS_EVENTS_MAX_LIMIT) })
+    get().fetchJarvisEvents()
+  },
+
+  fetchJarvisEntities: async () => {
+    try {
+      const res = await fetch(`${API_URL}/jarvis/entities`)
+      if (!res.ok) throw new Error('not ok')
+      set({ jarvisEntities: await res.json() })
+    } catch { /* noop */ }
+  },
+
+  fetchJarvisProjects: async () => {
+    try {
+      const res = await fetch(`${API_URL}/jarvis/projects`)
+      if (!res.ok) throw new Error('not ok')
+      set({ jarvisProjects: await res.json() })
+    } catch { /* noop */ }
+  },
+
+  // Detalle de una entrada de memoria — fuentes clickeables del chat
+  // (Mejoras_Jarvis.md punto 2). No guarda estado global: cada modal la pide
+  // y la muestra puntualmente, mismo patrón que jarvisCapture().
+  fetchJarvisEntry: async (entryId) => {
+    try {
+      const res = await fetch(`${API_URL}/jarvis/entries/${entryId}`)
+      if (!res.ok) throw new Error('not ok')
+      return await res.json()
+    } catch {
+      return null
+    }
+  },
+
+  // Corregir una entrada mal guardada (pieza B) -- {content, type, tags},
+  // cualquier subconjunto. Devuelve la entrada actualizada o null si falló.
+  editJarvisEntry: async (entryId, changes) => {
+    try {
+      const res = await fetch(`${API_URL}/jarvis/entries/${entryId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(changes),
+      })
+      if (!res.ok) throw new Error('not ok')
+      return await res.json()
+    } catch {
+      return null
+    }
+  },
+
+  // "Olvidar" una entrada (soft-delete vía valid_to, pieza B) -- true si se marcó.
+  forgetJarvisEntry: async (entryId) => {
+    try {
+      const res = await fetch(`${API_URL}/jarvis/entries/${entryId}`, { method: 'DELETE' })
+      return res.ok
+    } catch {
+      return false
+    }
+  },
+
+  // Captura pasiva por inactividad (pieza C) — Jarvis propone en vez de guardar
+  // directo; el usuario acepta (con o sin aclaración) o rechaza.
+  fetchJarvisProposals: async () => {
+    try {
+      const res = await fetch(`${API_URL}/jarvis/proposals`)
+      if (!res.ok) throw new Error('not ok')
+      set({ jarvisProposals: await res.json() })
+    } catch { /* noop */ }
+  },
+
+  acceptJarvisProposal: async (proposalId, clarification = null) => {
+    try {
+      const res = await fetch(`${API_URL}/jarvis/proposals/${proposalId}/accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clarification }),
+      })
+      if (!res.ok) throw new Error('not ok')
+      set({ jarvisProposals: get().jarvisProposals.filter(p => p.id !== proposalId) })
+      return await res.json()
+    } catch {
+      return null
+    }
+  },
+
+  rejectJarvisProposal: async (proposalId) => {
+    try {
+      const res = await fetch(`${API_URL}/jarvis/proposals/${proposalId}/reject`, { method: 'POST' })
+      if (!res.ok) throw new Error('not ok')
+      set({ jarvisProposals: get().jarvisProposals.filter(p => p.id !== proposalId) })
+      return true
+    } catch {
+      return false
+    }
+  },
+
+  // Pantalla "browse" (pieza F) — navegar/filtrar toda la memoria sin pasar
+  // por el chat, equivalente al árbol de categorías de Bóveda.
+  fetchJarvisTags: async () => {
+    try {
+      const res = await fetch(`${API_URL}/jarvis/tags`)
+      if (!res.ok) throw new Error('not ok')
+      set({ jarvisTags: await res.json() })
+    } catch { /* noop */ }
+  },
+
+  fetchJarvisBrowse: async (filters = {}) => {
+    try {
+      const params = new URLSearchParams()
+      Object.entries(filters).forEach(([k, v]) => { if (v !== null && v !== undefined && v !== '') params.set(k, v) })
+      const res = await fetch(`${API_URL}/jarvis/browse?${params.toString()}`)
+      if (!res.ok) throw new Error('not ok')
+      set({ jarvisBrowseResults: await res.json() })
+    } catch { /* noop */ }
+  },
+
+  // Auditoría proactiva de memoria (jarvis.audit.service, ver Cerebro/
+  // decisiones-implementacion.md 2026-08-31) — mismo patrón de propuestas que
+  // captura pasiva, banner compartido (JarvisProposalBanner.jsx), historial
+  // resuelto consultable desde Explorar.
+  fetchJarvisAuditProposals: async () => {
+    try {
+      const res = await fetch(`${API_URL}/jarvis/audit-proposals`)
+      if (!res.ok) throw new Error('not ok')
+      set({ jarvisAuditProposals: await res.json() })
+    } catch { /* noop */ }
+  },
+
+  // reply solo aplica a action_type='clarify' -- el backend lo ignora para el resto.
+  acceptJarvisAuditProposal: async (proposalId, reply = null) => {
+    try {
+      const res = await fetch(`${API_URL}/jarvis/audit-proposals/${proposalId}/accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reply }),
+      })
+      if (!res.ok) throw new Error('not ok')
+      set({ jarvisAuditProposals: get().jarvisAuditProposals.filter(p => p.id !== proposalId) })
+      return await res.json()
+    } catch {
+      return null
+    }
+  },
+
+  rejectJarvisAuditProposal: async (proposalId) => {
+    try {
+      const res = await fetch(`${API_URL}/jarvis/audit-proposals/${proposalId}/reject`, { method: 'POST' })
+      if (!res.ok) throw new Error('not ok')
+      set({ jarvisAuditProposals: get().jarvisAuditProposals.filter(p => p.id !== proposalId) })
+      return true
+    } catch {
+      return false
+    }
+  },
+
+  fetchJarvisAuditHistory: async () => {
+    try {
+      const res = await fetch(`${API_URL}/jarvis/audit-proposals?status=all`)
+      if (!res.ok) throw new Error('not ok')
+      set({ jarvisAuditHistory: await res.json() })
+    } catch { /* noop */ }
+  },
+
+  // Hueco tipo B (entrada aislada, sin entidad ni proyecto) -- SQL puro, sin
+  // acción asociada, nunca pasa por jarvis_audit_proposals (ver jarvis/audit/service.py).
+  fetchJarvisIsolatedEntries: async () => {
+    try {
+      const res = await fetch(`${API_URL}/jarvis/audit-proposals/isolated`)
+      if (!res.ok) throw new Error('not ok')
+      set({ jarvisIsolatedEntries: await res.json() })
+    } catch { /* noop */ }
   },
 }))

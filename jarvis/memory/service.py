@@ -1,10 +1,15 @@
 import hashlib
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 
 from jarvis.config import JARVIS_DEFAULT_USER
 from jarvis.db.database import get_connection
+
+logger = logging.getLogger(__name__)
+
+_EDIT_ALLOWED_TYPES = {"RAW", "SEMANTIC", "DECISION", "PROJECT", "PEOPLE"}
 
 
 def capture_raw(
@@ -16,11 +21,19 @@ def capture_raw(
     local_only: bool = False,
     confidential: bool = False,
     user_id: str | None = None,
+    created_by: str = "explicit",
 ) -> str:
     """Inserta el contenido en memory_entries (tipo RAW) y encola en inbox_queue.
 
     El RAW se escribe en la DB antes de cualquier procesamiento.
     Si falla, el llamador debe notificar el error — no se confirma recepción sin escritura.
+
+    created_by (pieza C, captura pasiva): 'explicit' (default, el usuario tipeó
+    esto a propósito con /j, el botón Capturar, o la API) o
+    'jarvis_proposal_accepted' (nació de una propuesta pasiva por inactividad
+    que el usuario aceptó -- ver jarvis/captures/passive.py). No afecta
+    origin_trust: esa columna describe la confiabilidad de la FUENTE del
+    texto, no cómo se decidió guardarlo.
 
     Devuelve el entry_id generado.
     """
@@ -46,12 +59,12 @@ def capture_raw(
                     (id, type, content_raw, source, channel,
                      local_only, confidential, content_hash,
                      recorded_at, valid_from, source_id,
-                     origin_trust, user_id, created_at)
+                     origin_trust, user_id, created_at, created_by)
                 VALUES
                     (?, 'RAW', ?, ?, ?,
                      ?, ?, ?,
                      ?, ?, ?,
-                     ?, ?, ?)
+                     ?, ?, ?, ?)
                 """,
                 (
                     entry_id, content, source, channel,
@@ -59,7 +72,7 @@ def capture_raw(
                     1 if confidential else 0,
                     content_hash,
                     now, now, source_id,
-                    origin_trust, uid, now,
+                    origin_trust, uid, now, created_by,
                 ),
             )
             conn.execute(
@@ -92,6 +105,8 @@ def update_entry(
     vault_path: str | None = None,
     processed_at: str | None = None,
     embedded_at: str | None = None,
+    valid_to: str | None = None,
+    confidence: float | None = None,
 ) -> None:
     fields: list[str] = []
     values: list = []
@@ -117,6 +132,12 @@ def update_entry(
     if embedded_at is not None:
         fields.append("embedded_at = ?")
         values.append(embedded_at)
+    if valid_to is not None:
+        fields.append("valid_to = ?")
+        values.append(valid_to)
+    if confidence is not None:
+        fields.append("confidence = ?")
+        values.append(confidence)
 
     if not fields:
         return
@@ -131,3 +152,131 @@ def update_entry(
             )
     finally:
         conn.close()
+
+
+def edit_entry(
+    entry_id: str,
+    content: str | None = None,
+    type: str | None = None,
+    tags: list[str] | None = None,
+) -> dict | None:
+    """Corrige una entrada ya guardada -- pieza B (no hay forma hoy de arreglar
+    algo mal guardado sin tocar la DB a mano).
+
+    Solo toca content_processed, nunca content_raw -- content_raw queda como el
+    original inmutable tal cual se capturó (provenance), content_processed es lo
+    que ya usan vault/embeddings/RAG/UI para mostrar y recuperar (ver
+    `entry.get("content_processed") or entry.get("content_raw")` en todo el
+    código). No se puede corregir origin_trust/created_by/source_id -- esos
+    describen CÓMO llegó la entrada, no algo que un editor deba poder reescribir.
+
+    Si cambia el contenido o el tipo, reescribe el .md del vault (el tipo
+    determina la subcarpeta) y regenera el embedding -- llamada síncrona y
+    bloqueante a propósito: es una acción de administración poco frecuente
+    disparada por el usuario, no algo en el hot path del worker.
+
+    Devuelve la entrada actualizada, o None si no existe o el tipo es inválido.
+    """
+    entry = get_entry(entry_id)
+    if not entry:
+        return None
+    if type is not None and type not in _EDIT_ALLOWED_TYPES:
+        return None
+    if content is None and type is None and tags is None:
+        return entry
+
+    old_vault_path = entry.get("vault_path")
+    content_or_type_changed = content is not None or type is not None
+
+    update_entry(entry_id, type=type, content_processed=content, tags=tags)
+
+    if tags is not None:
+        from jarvis.tags.service import replace_tags_for_entry
+
+        replace_tags_for_entry(entry_id, tags, entry.get("user_id") or JARVIS_DEFAULT_USER)
+
+    updated = get_entry(entry_id)
+
+    if content_or_type_changed:
+        _resync_vault_and_embedding(updated, old_vault_path)
+    elif tags is not None:
+        _resync_vault_only(updated)
+
+    return get_entry(entry_id)
+
+
+def _resync_vault_and_embedding(entry: dict, old_vault_path: str | None) -> None:
+    """Reescribe vault + embedding tras editar contenido/tipo. Best-effort:
+    la corrección en SQLite (fuente de verdad) ya se aplicó antes de llamar
+    esto -- si el vault o Chroma fallan acá, quedan desincronizados hasta el
+    próximo ciclo de consolidación/edición, pero la corrección real no se pierde.
+    """
+    try:
+        from jarvis.vault.writer import delete_entry_file, write_entry
+
+        new_vault_path = write_entry(entry)
+        if old_vault_path and old_vault_path != new_vault_path:
+            delete_entry_file(old_vault_path)
+        update_entry(entry["id"], vault_path=new_vault_path)
+    except Exception as exc:
+        logger.warning("[jarvis.memory] Reescritura de vault falló para entry_id=%s: %s", entry["id"], exc)
+
+    try:
+        from jarvis.embeddings.client import generate_embedding
+        from jarvis.embeddings.store import upsert_embedding
+
+        embed_text = entry.get("content_processed") or entry.get("content_raw") or ""
+        embedding = generate_embedding(embed_text)
+        upsert_embedding(
+            entry["id"],
+            embedding,
+            document=embed_text,
+            metadata={
+                "type": entry.get("type") or "",
+                "source": entry.get("source") or "",
+                "origin_trust": entry.get("origin_trust") or "",
+                "local_only": bool(entry.get("local_only")),
+                "confidential": bool(entry.get("confidential")),
+                "vault_path": entry.get("vault_path") or "",
+            },
+        )
+        update_entry(entry["id"], embedded_at=datetime.now(timezone.utc).isoformat())
+    except Exception as exc:
+        logger.warning("[jarvis.memory] Regeneración de embedding falló para entry_id=%s: %s", entry["id"], exc)
+
+
+def _resync_vault_only(entry: dict) -> None:
+    """Solo tags cambiaron -- el frontmatter del .md los incluye, así que se
+    reescribe el archivo (mismo vault_path, no hay rename), pero no hace falta
+    tocar el embedding (no depende de tags)."""
+    try:
+        from jarvis.vault.writer import write_entry
+
+        write_entry(entry)
+    except Exception as exc:
+        logger.warning("[jarvis.memory] Reescritura de vault (solo tags) falló para entry_id=%s: %s", entry["id"], exc)
+
+
+def forget_entry(entry_id: str) -> bool:
+    """"Olvidar" una entrada -- soft-delete vía valid_to, reusando el mismo
+    mecanismo que jarvis/worker/consolidation.py ya usa para marcar una
+    entrada 'superseded' (nunca un DELETE físico -- preserva auditoría,
+    spec: Memoria != destrucción).
+
+    Con esto desaparece de retrieval/entidades/proyectos/tags sin tocar una
+    sola línea de esos módulos: todos ya filtran `valid_to IS NULL` (retriever,
+    jarvis.entities.service, jarvis.projects.service, jarvis.tags.service). El
+    embedding en Chroma y el .md del vault se dejan intactos a propósito
+    (mismo criterio que una entrada superseded): el embedding puede seguir en
+    el índice, pero _load_entries() lo descarta por el filtro de valid_to
+    antes de rankear, así que nunca puede reaparecer en una respuesta -- borrar
+    el vector físicamente no cambia el comportamiento observable, solo
+    complica revertir un "olvidar" hecho por error.
+
+    Devuelve False si la entrada no existe o ya estaba olvidada/superseded.
+    """
+    entry = get_entry(entry_id)
+    if not entry or entry.get("valid_to"):
+        return False
+    update_entry(entry_id, valid_to=datetime.now(timezone.utc).isoformat())
+    return True

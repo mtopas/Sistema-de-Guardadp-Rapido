@@ -92,15 +92,20 @@ def add_message(conv_id: str, role: str, content: str) -> str:
 
 
 def get_recent_messages(conv_id: str, limit: int = 10) -> list[dict]:
-    """Devuelve los últimos N mensajes en orden cronológico (más viejo primero)."""
+    """Devuelve los últimos N mensajes en orden cronológico (más viejo primero),
+    con `created_at` (Mejoras_Jarvis.md punto 4 — fecha/hora por mensaje).
+    """
     conn = get_connection()
     try:
         rows = conn.execute(
-            """SELECT role, content FROM conversation_messages
+            """SELECT role, content, created_at FROM conversation_messages
                WHERE conversation_id = ?
                ORDER BY created_at DESC LIMIT ?""",
             (conv_id, limit),
         ).fetchall()
-        return [{"role": r["role"], "content": r["content"]} for r in reversed(rows)]
+        return [
+            {"role": r["role"], "content": r["content"], "created_at": r["created_at"]}
+            for r in reversed(rows)
+        ]
     finally:
         conn.close()

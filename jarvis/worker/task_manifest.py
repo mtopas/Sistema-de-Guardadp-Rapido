@@ -17,6 +17,16 @@ class TaskManifest:
             "update_entry_status",
             "generate_embedding",
             "store_embedding",
+            "consolidate_memory",
+            "extract_entities",
+            "link_entities",
+            "link_project",
+            "link_tags",
+            "notify_telegram",
+            "read_conversations",
+            "propose_capture",
+            "audit_memory",
+            "propose_audit_action",
         })
     )
 

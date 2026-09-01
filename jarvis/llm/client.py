@@ -9,7 +9,7 @@ from typing import Any
 import litellm
 
 from jarvis.config import (
-    JARVIS_CLASSIFY_MODEL,
+    JARVIS_LOCAL_MODEL,
     JARVIS_REASON_MODEL,
     JARVIS_LOCAL_FALLBACK_MODEL,
     JARVIS_OLLAMA_API_BASE,
@@ -34,7 +34,7 @@ def call_llm(
     Registra el gasto real en el budget tracker para modelos externos (no-Ollama).
     """
     if model is None:
-        model = JARVIS_CLASSIFY_MODEL
+        model = JARVIS_LOCAL_MODEL
 
     call_kwargs: dict[str, Any] = {
         "model": model,
@@ -79,8 +79,24 @@ def _record_cost(model: str, response: Any, usage: Any) -> None:
     record_usage(model, tokens_in, tokens_out, cost)
 
 
-def call_classify(content: str) -> str:
-    """Clasifica contenido usando el modelo local de clasificación."""
+def call_classify(content: str, tag_catalog: list[str] | None = None) -> str:
+    """Clasifica contenido usando el modelo local de clasificación.
+
+    tag_catalog (pieza A, catálogo de tags): lista de nombres de tags ya
+    existentes para este usuario (jarvis.tags.service.list_tag_catalog).
+    Si se pasa, el prompt le pide al modelo elegir tags de ahí -- mismo
+    criterio conservador que _find_or_create_entity() para fusionar alias:
+    solo inventa un tag nuevo si ninguno del catálogo encaja razonablemente.
+    Sin catálogo (None o []), el prompt no menciona el bloque y el modelo
+    inventa libremente, igual que antes de esta pieza.
+    """
+    catalog_block = ""
+    if tag_catalog:
+        catalog_block = (
+            "\nCatálogo de tags ya existentes (preferí elegir de acá si "
+            "alguno encaja razonablemente; creá uno nuevo SOLO si ninguno "
+            "aplica): " + ", ".join(tag_catalog) + "\n"
+        )
     return call_llm(
         messages=[
             {
@@ -92,10 +108,10 @@ def call_classify(content: str) -> str:
             },
             {
                 "role": "user",
-                "content": _CLASSIFY_PROMPT.format(content=content),
+                "content": _CLASSIFY_PROMPT.format(content=content, catalog_block=catalog_block),
             },
         ],
-        model=JARVIS_CLASSIFY_MODEL,
+        model=JARVIS_LOCAL_MODEL,
         temperature=0.0,
     )
 
@@ -172,16 +188,18 @@ def call_reason_with_context(question: str, context_entries: list[dict]) -> str:
 
 _CLASSIFY_PROMPT = """\
 Clasifica el siguiente texto y extrae metadatos. Responde SOLO con JSON válido con estos campos:
-- "type": uno de "RAW", "SEMANTIC", "DECISION", "PROJECT"
+- "type": uno de "RAW", "SEMANTIC", "DECISION", "PROJECT", "PEOPLE"
 - "title": título descriptivo corto (máx 60 caracteres)
 - "tags": array de 1-5 keywords en minúsculas
 - "project": null o nombre del proyecto si el texto claramente pertenece a uno
-
+{catalog_block}
 Reglas para type:
 - RAW: apuntes, cosas para recordar, links, hechos sueltos, frases
 - SEMANTIC: conocimiento extraído, explicaciones, conceptos definidos
 - DECISION: decisiones tomadas con razonamiento ("decidí que...", "acordamos...")
 - PROJECT: estado de proyectos, contexto, avances
+- PEOPLE: información específica sobre una persona (quién es, cómo la conociste,
+  preferencias, datos de la relación, algo que dijo o hizo)
 
 Texto: {content}
 

@@ -1,3 +1,4 @@
+import logging
 import re
 import uuid
 from datetime import datetime, timezone
@@ -5,11 +6,14 @@ from pathlib import Path
 
 from jarvis.config import JARVIS_VAULT_PATH
 
+logger = logging.getLogger(__name__)
+
 _TYPE_TO_SUBDIR = {
     "RAW": "RAW",
     "SEMANTIC": "SEMANTIC",
     "DECISION": "DECISIONS",
     "PROJECT": "PROJECTS",
+    "PEOPLE": "PEOPLE",
 }
 
 
@@ -63,6 +67,23 @@ def write_entry(entry: dict, title: str | None = None) -> str:
 
     # Ruta relativa al vault root (e.g. "RAW/12345678-titulo.md")
     return f"{subdir}/{filename}"
+
+
+def delete_entry_file(vault_rel_path: str | None) -> None:
+    """Borra el .md de un vault_rel_path si existe -- usado al editar una
+    entrada (pieza B): write_entry() siempre deriva un filename nuevo del
+    contenido/tipo actuales, así que un vault_path viejo puede quedar
+    huérfano tras la edición. Nunca lanza -- best-effort, igual que el resto
+    de las operaciones del vault.
+    """
+    if not vault_rel_path:
+        return
+    try:
+        abs_path = JARVIS_VAULT_PATH / vault_rel_path
+        if abs_path.exists():
+            abs_path.unlink()
+    except Exception as exc:
+        logger.warning("[jarvis.vault] No se pudo borrar %s: %s", vault_rel_path, exc)
 
 
 def _derive_title(content: str) -> str:

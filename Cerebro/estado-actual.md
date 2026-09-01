@@ -1,5 +1,1497 @@
 # Estado Actual de Jarvis
-Última actualización: 2026-08-25
+Última actualización: 2026-08-31
+
+## Auditoría proactiva de memoria — implementada (2026-08-31)
+
+Implementación de la propuesta aprobada ese mismo día en
+`Cerebro/decisiones-implementacion.md` ("PROPUESTA (sin implementar,
+pendiente de aprobación): auditoría proactiva de memoria en
+consolidation.py", con las decisiones abiertas resueltas post-aprobación).
+Extiende `consolidation.py` con un cuarto paso: en vez de solo comparar
+PARES de alta similitud de embedding, corre auditorías sobre bloques de
+memoria (uno por tag, uno genuinamente random sobre toda la memoria vigente)
+buscando huecos, contradicciones, duplicados, conexiones entre temas
+distintos y tags mal puestos — con 8 acciones posibles
+(crear/aclarar/marcar contradicción/marcar conexión/fusionar/editar/
+eliminar/retagear), todas gateadas por confirmación vía Telegram o desktop
+(nunca se aplica nada solo), reusando el patrón de propuestas
+(`jarvis_proposal_accepted`) ya establecido por captura pasiva.
+
+**Archivos nuevos**: `jarvis/audit/service.py` (módulo completo — selección
+de bloques, detección de huecos, revisión por LLM, dedup, aplicación de las
+8 acciones, flujo de mensaje agrupado por Telegram).
+
+**Archivos tocados**: `jarvis/db/schema.py` (tabla `jarvis_audit_proposals`),
+`jarvis/db/database.py` (migración `memory_entries.last_audited_at`),
+`jarvis/config.py` (`JARVIS_AUDIT_BLOCK_SIZE`,
+`JARVIS_AUDIT_RANDOM_COOLDOWN_DAYS`, `JARVIS_AUDIT_PROPOSAL_TIMEOUT_MINUTES`),
+`jarvis/worker/task_manifest.py` (`audit_memory`, `propose_audit_action`),
+`jarvis/worker/consolidation.py` (cuarto paso, mismo gating de 24h),
+`jarvis/worker/main.py` (sweep de vencimiento de propuestas de auditoría,
+mismo patrón que captura pasiva), `jarvis/api/router.py`
+(`GET /jarvis/audit-proposals[?status=all|<status>]`,
+`GET /jarvis/audit-proposals/isolated`,
+`POST /jarvis/audit-proposals/{id}/accept|reject`),
+`project/mybot/jarvis_handlers.py` (`handle_pending_audit_proposal()`,
+resuelve tanto propuestas individuales como el mensaje agrupado numerado),
+`project/mybot/bot.py` (wireado en `handle_message`, después de captura
+pasiva). Frontend: `useStore.js` (+6 acciones nuevas), `JarvisProposalBanner.jsx`
+(unificado — captura pasiva y auditoría comparten el mismo banner, decisión
+ya resuelta), `JarvisScreen.jsx` (polling), `JarvisBrowsePanel.jsx` (tab
+"Auditoría" dentro de Explorar: historial de propuestas + hueco tipo B).
+
+**5 decisiones que el documento dejó abiertas o inconsistentes, resueltas
+acá con criterio propio (reportadas explícitamente, no en silencio — ver el
+docstring completo de `jarvis/audit/service.py` para el detalle de cada
+una)**:
+1. El prompt de bloque ya no ofrece `gap_needs_entry` como tipo de hallazgo
+   -- se solapaba con la detección SQL del hueco tipo A (punto 3 del doc),
+   habría generado propuestas "create" duplicadas por dos caminos distintos.
+2. La acción `delete` (una de las 8 aprobadas) no tenía disparador propio en
+   el documento -- se implementó exclusivamente para el único caso
+   objetivamente determinable sin LLM: contenido vacío/en blanco.
+3. El costo de los llamados de síntesis de `create` (uno por hueco de
+   entidad) no estaba presupuestado en el punto 5 del doc -- capado a
+   `_ENTITY_CREATE_LIMIT=3`/corrida.
+4. El "mínimo" `origin_trust` para una entrada `create` requiere un orden
+   total entre los 5 valores del CHECK que el schema nunca definió -- se
+   construyó uno (`_TRUST_RANK`) con `web.untrusted` estrictamente el más
+   bajo.
+5. Cuando hay varias propuestas individuales (no agrupadas) PENDING para el
+   mismo chat a la vez (el documento asumía como máximo una, igual que
+   captura pasiva), una respuesta de texto libre en Telegram resuelve la más
+   VIEJA primero (FIFO) — `get_pending_individual_proposal_for_channel()`.
+   La tabla `jarvis_audit_findings` de la primera versión del documento
+   también se eliminó del diseño final (ver la entrada de PROPUESTA, ya
+   actualizada) — `jarvis_audit_proposals` sola cubre el registro completo.
+
+**Verificado con Ollama real (`gemma3:12b` vía `JARVIS_REASON_MODEL` externo
+con fallback ya incorporado, `nomic-embed-text` para embeddings) contra una
+DB de scratch** (nunca `jarvis.db` real durante las pruebas): dataset de
+`jarvis/cli/seed_test.py` + 2 entradas nuevas de una persona ("José")
+mencionada 2 veces sin entrada PEOPLE propia + una entrada vacía a mano.
+Una corrida real de `run_audit()` generó correctamente: `create` (José, con
+contenido sintetizado solo de lo ya escrito), `flag_contradiction` (el par
+madrid/baires — el mismo par que la sesión anterior determinó que es
+`same_fact`, no contradicción; el audit lo marcó como contradicción de
+todos modos, confirmando en vivo el riesgo de falso positivo ya documentado
+y la razón por la que el audit nunca aplica nada solo), `flag_connection` y
+`edit` (duplicado con combinación) entre un par de Martín Suárez, y
+`delete` para la entrada vacía. Segunda corrida confirmó dedup (no
+duplicó ningún hallazgo ya resuelto). Los 8 `accept_proposal()` (incluidas
+las 3 ramas que el LLM no generó naturalmente esa corrida — `merge`,
+`retag`, `clarify` con y sin respuesta — probadas con propuestas armadas a
+mano) mutaron la DB correctamente: `create`/`clarify` con
+`created_by='jarvis_proposal_accepted'`, `merge`/`edit` marcando `valid_to`
+en la entrada vieja, `delete` soft-deleting, `retag` removiendo solo el tag
+señalado, `flag_contradiction`/`flag_connection` sin tocar `confidence` ni
+ninguna otra columna. Mensaje agrupado de Telegram (`build_grouped_message`/
+`resolve_grouped_reply`) probado con "sí 1,3", "no 2", "no" (todo), "todas"
+(bare) y el caso sin nada pendiente. `expire_stale_proposals()` confirmado:
+nunca aplica nada al vencer. `run_consolidation()` completo (los 4 pasos
+juntos) corrido una vez sin errores. Los 4 endpoints nuevos probados con
+`TestClient` de FastAPI, incluyendo los 404 esperados y el dedup vía API.
+`npm run build` del frontend limpio.
+
+**Desplegado en vivo**: migración aplicada a `project/database/jarvis.db`
+real (aditiva, sin tocar datos — la migración solo agrega la columna y la
+tabla nuevas); backend, worker y bot reiniciados con el código nuevo. El
+audit no corrió todavía contra la memoria real (el gating de 24h de
+`should_run()` ya tiene la corrida de hoy registrada de la sesión anterior)
+— la próxima corrida diaria lo va a ejercer por primera vez contra datos
+reales, no simulados.
+
+**No probado en este entorno**: la UI en navegador real (`claude-in-chrome`
+no conecta, mismo motivo de siempre — SSH remoto) ni el flujo de Telegram de
+punta a punta con un chat real (el bot está corriendo y el handler está
+wireado, pero no se disparó ninguna propuesta real todavía por el gating de
+24h mencionado arriba).
+
+---
+
+## Referencias (no específicas de Jarvis)
+
+- **Acceso al homelab** (SSH, IPs, deploy, troubleshooting de red) → `HOMELAB.md` (raíz del
+  repo). No duplicado acá a propósito, para no tener dos fuentes de verdad — ese archivo es la
+  única fuente real.
+
+## Contradicción real calibrada con datos + channel_id hardcodeado sacado de raíz (2026-08-31)
+
+Cierre de las dos sugerencias que quedaron abiertas de la sesión del 28/08. Detalle
+completo de diagnóstico en `Cerebro/decisiones-implementacion.md` (misma fecha).
+
+- **Camino `contradiction` de consolidación, probado por primera vez con datos
+  reales**: agregado al dataset de prueba (`jarvis/cli/seed_test.py`) un par de
+  afirmaciones simultáneas e incompatibles, sin ningún lenguaje de cambio en el
+  tiempo y con el mismo `recorded_at` a propósito ("Soy 100% remoto..." / "Soy
+  100% presencial..."). Coseno real: **0.871** (dato de calibración nuevo, mismo
+  formato que el 0.898/0.748/0.54–0.59 de la sesión anterior). Confirmado con
+  Ollama real: ambas entradas bajan `confidence` a la mitad (1.0→0.5) y el
+  conflicto queda logueado en `jarvis_policies` (`policy_type=
+  'consolidation_conflict'`).
+- **Bug real encontrado y arreglado**: a diferencia de `same_fact` (que marca
+  `valid_to` — estado terminal), `contradiction` no cambia nada en ninguna de las
+  dos entradas, así que el MISMO par sin resolver se re-detectaba en cada corrida
+  siguiente y se re-penalizaba cada vez — confirmado en vivo: 2 corridas seguidas
+  bajaron confidence de 1.0 a 0.5 y de 0.5 a 0.25, con el log de conflictos
+  acumulando un duplicado idéntico por corrida. Fix: `_pair_already_conflicted()`
+  nuevo en `consolidation.py` — si el par ya fue logueado antes, se omite (no
+  re-penaliza, no re-loguea). Verificado: tercera corrida sobre el mismo par
+  dio `conflicts: 0`, confidence se mantuvo en 0.25, sin fila nueva en el log.
+- **`channel_id="web"` hardcodeado en `query_endpoint`** (mismo patrón del bug
+  de "borrar historial" ya cerrado) sacado de raíz: ahora genera un
+  `channel_id` único por llamada (`web-implicit:{uuid}`) cuando no llega
+  `conversation_id` — nunca más un string compartido que pueda reenganchar con
+  la conversación de otro caller. El frontend real nunca lo ejercita (siempre
+  crea el chat primero), así que es cambio de robustez de la API, no un fix
+  visible en la UI. Verificado contra el backend real: `channel_id` guardado en
+  la DB confirma el formato nuevo.
+- **Bug adicional no planeado, encontrado reiniciando el worker al final de la
+  sesión**: `/jarvis/health` volvió a dar `worker_alive: false` con el worker
+  realmente corriendo (confirmado con `py-spy dump` sobre el proceso real —
+  estaba dormido en el `time.sleep()` normal del loop, nunca colgado). Causa:
+  el `write_heartbeat()` arreglado el 28/08 (poda de heartbeats viejos)
+  insertaba sin pasar `created_at` explícito — la única escritura a
+  `jarvis_policies` en todo el código que no lo hace — así que quedaba en
+  manos del `DEFAULT (datetime('now','utc'))` del schema, que genera un
+  formato de texto distinto ("2026-08-31 20:22:33", con espacio) al que usa
+  el resto del sistema ("...T17:22:33+00:00", con "T"), y encima un valor de
+  reloj distinto (~3h de diferencia en este entorno). El `DELETE` de poda que
+  agregué el 28/08 compara ese `created_at` contra un cutoff en formato
+  Python — con la misma fecha calendario, la comparación de strings da
+  "menor" siempre (el espacio ordena antes que "T"), sin importar la hora
+  real, así que cada heartbeat se borraba a sí mismo en la misma transacción,
+  todos los días. Fix: `created_at` explícito en el mismo formato que el
+  resto del sistema. Verificado: heartbeat sobrevive la escritura,
+  `worker_alive` vuelve a `true`, y una fila genuinamente vieja (insertada a
+  mano con 2h de antigüedad) sigue podándose correctamente.
+  la DB confirma el formato nuevo, único por llamada.
+
+Backup del dataset de prueba (previo a estos cambios) en
+`project/database/backup-testseed-20260831-140324/` — **no restaurado**, Telegram
+y web siguen sirviendo el dataset de prueba a propósito. Backend, worker y bot
+quedaron corriendo de nuevo con el código nuevo.
+
+---
+
+## Fix del bug de ranking del retriever + 4 mejoras chicas (2026-08-28)
+
+Sesión de testing con dataset sembrado (embeddings reales, `jarvis/cli/seed_test.py`)
+encontró un bug real de ranking en la búsqueda híbrida y varios puntos de mejora
+menores. Detalle completo de diagnóstico y decisiones en
+`Cerebro/decisiones-implementacion.md` (misma fecha). Resumen de qué cambió:
+
+- **`jarvis/retriever/retriever.py`** — el filtro coarse de tipo (`where={"type":...}`
+  en la query de ChromaDB) podía excluir de raíz una entrada del tipo correcto de la
+  respuesta; el rescate léxico (`_merge_lexical_only`, pieza E) que debía compensar
+  eso siempre la agregaba al final de la lista sin importar cuán fuerte fuera su
+  score léxico. Fix: el rescate ahora calcula una similitud real (`_fetch_similarities`)
+  y compite por `_rank_score` real contra el resto, mezclado y reordenado, no
+  apendiceado ciegamente. De paso se encontró y arregló un segundo bug menor:
+  `_fts_query_terms()` no filtraba conectores comunes ("qué", "actualmente", "con"...),
+  así que una palabra funcional podía "ganar" el ranking léxico por casualidad —
+  ahora hay una lista de stopwords en español.
+- **`jarvis/config.py`** — ahora llama `load_dotenv()` al importarse. El worker
+  standalone (`python -m jarvis.worker.main`) nunca cargaba `project/.env` (a
+  diferencia de `app/config.py`/`mybot/api_config.py`, que sí lo hacían) — esto
+  hacía que `OPENAI_API_KEY`/`JARVIS_REASON_MODEL` no llegaran nunca al proceso del
+  worker, y en silencio degradaban siempre a modo local tres cosas: el razonamiento
+  de consolidación (`call_reason` en `consolidation.py`), el aviso "✅ Listo" de
+  Telegram tras procesar una captura, y el push de `/jdebugon` cuando lo dispara el
+  worker.
+- **`JARVIS_CONSOLIDATION_SIMILARITY_THRESHOLD`** bajado de 0.92 a 0.70 (config.py),
+  con datos reales que lo justifican — ver decisiones-implementacion.md.
+- **`jarvis/browse/service.py`** — `date_to` pelado ("2026-08-28", sin hora) excluía
+  todas las entradas de ese mismo día por comparación de strings; ahora se normaliza
+  a fin de día si no trae hora. (El frontend ya lo esquivaba enviando la hora, pero
+  la API en sí estaba rota para cualquier otro consumidor.)
+- **`jarvis/worker/heartbeat.py`** — poda heartbeats de más de 1h en cada escritura;
+  `jarvis_policies` había acumulado >11.000 filas de heartbeat sin ningún consumidor
+  que necesitara el historial (`get_worker_alive()` solo lee la última fila).
+- **`jarvis/captures/passive.py`** — prompt de evaluación (`_EVAL_PROMPT`) ahora
+  aclara que solo ve los mensajes del USUARIO (no la respuesta de Jarvis) y agrega
+  regla + ejemplo explícito para que un bloque de puras preguntas del usuario no
+  dispare una propuesta de captura (antes generaba una "memoria" resumiendo qué se
+  preguntó, que no tiene valor real).
+
+Todos los fixes verificados con Ollama real (`gemma3:12b`/`nomic-embed-text`) contra
+el dataset de prueba sembrado en la sesión anterior (no `jarvis.db` de producción —
+sigue en estado de prueba, ver el backup de esa sesión). `python -m py_compile`
+limpio en los 6 archivos tocados.
+
+## Paquete de mejoras — Fases D (mantenimiento de memoria), E (búsqueda híbrida) y F (pantalla Explorar) — CIERRE del paquete de 6 piezas (2026-08-27)
+
+Cuarta, quinta y sexta piezas del paquete (ver entradas de las Fases A/B/C, abajo)
+— con esto las 6 quedan **completas e implementadas**. Resumen de las 3 últimas y
+cierre general al final de esta entrada.
+
+### Fase D — mantenimiento de memoria (extensión de `consolidation.py`)
+
+Sin job nuevo en paralelo — se extendió el job diario existente con dos pasos más.
+
+**Duplicados cross-type**: `_find_similar_pairs()` agrupaba pares candidatos por
+`(type, user_id)` antes de comparar similitud — dos entradas casi idénticas pero
+clasificadas con tipos distintos (el clasificador no es determinista entre
+capturas) nunca llegaban a compararse. Se refactorizó a un helper compartido
+`_find_pairs_by_group(entries, group_key)` (evita duplicar la lógica de leer
+embeddings + comparar coseno) y se agregó `_find_cross_type_similar_pairs()`
+(agrupa solo por `user_id`, excluye explícitamente los pares de mismo tipo — esos
+ya los cubre la función original, para no procesarlos dos veces). Mismo umbral
+0.92, mismo `_resolve_pair()` — conecta directamente con el hallazgo ya
+documentado (2026-08-26, "el umbral 0.92 probablemente nunca agrupa un
+same_fact/contradiction real, solo casi-duplicados textuales") — terminar con
+tipos distintos es una causa concreta de que un casi-duplicado real quedara
+fuera del agrupamiento original.
+
+**Backfill de tags del catálogo**: `_backfill_catalog_tags()`, capado a 20
+entradas por corrida (mismo criterio de costo acotado que el resto del job,
+volumen real ~20 capturas/día). Usa `jarvis.tags.service.entry_ids_without_
+catalog_tags()` (pieza A) para encontrar entradas vigentes sin ninguna fila en
+`memory_entry_tags`, y reusa `call_classify()` con el catálogo (mismo prompt que
+la captura normal) — solo lee el campo `"tags"` del resultado, no re-clasifica
+`type`/`project` de la entrada vieja.
+
+`run_consolidation()` ahora corre: similares mismo-tipo → similares cross-type →
+stale por edad → backfill de tags, todo en la misma corrida diaria. `summary`
+gana el campo `"tagged"`.
+
+### Fase E — búsqueda híbrida (léxica + densa) en el retriever
+
+**Índice**: `memory_entries_fts` (FTS5, `tokenize='unicode61'`) + triggers
+`AFTER INSERT/UPDATE OF content_raw,content_processed/DELETE` que lo mantienen
+sincronizado, más un backfill idempotente de entradas preexistentes —
+`jarvis/db/database.py::_init_fts()`, deliberadamente **fuera** de `SCHEMA`
+(`executescript()` aborta todo el batch si una sentencia falla, y `CREATE
+VIRTUAL TABLE...USING fts5` puede fallar en un SQLite sin el módulo compilado).
+Confirmado que el SQLite de este entorno (3.39.4) sí trae FTS5; si no lo
+tuviera, `_init_fts()` lo loguea y la señal léxica cae sola a un fallback LIKE
+puro (`_lexical_candidates_like()`) — nunca bloquea nada más.
+
+**Integración en `jarvis/retriever/retriever.py`**: `_lexical_candidates()`
+(bm25 de FTS5, normalizado a 0..1) se suma como término **adicional** en
+`_rank_score()` (`_LEXICAL_WEIGHT=0.15`, sobre la fórmula ya existente de
+similitud+tipo+recencia — no se renormalizan los pesos existentes, tal como
+pedía la tarea: "no reemplazar el ranking actual, sumar como señal adicional").
+`_merge_lexical_only()` cierra el caso donde la búsqueda densa no trajo un match
+léxico fuerte: si la lista quedó incompleta, rellena huecos; si ya está llena
+de matches débiles, un match léxico fuerte (por encima de
+`_LEXICAL_MERGE_THRESHOLD=0.4`) reemplaza la cola (peor-rankeada) de la lista.
+
+**Bug real encontrado probando esta pieza y corregido en el momento**: con
+exactamente UN resultado léxico, la normalización `(worst-rank)/(worst-best)`
+colapsaba a `span=0 → score=0.0` (el peor score posible) para el ÚNICO match —
+exactamente al revés de lo que debería pasar (ser el único resultado es la
+señal más fuerte posible, no la más débil). Es el caso más común que esta
+pieza está pensada para resolver (una palabra rara que solo matchea una
+entrada), así que el bug habría vuelto la señal léxica inútil en la práctica
+para su caso de uso principal. Fix: si `len(rows) == 1`, se le asigna score
+`1.0` directo, sin pasar por la normalización de rango.
+
+### Fase F — pantalla "Explorar" en /jarvis
+
+Nuevo tab "Explorar" (dot violeta, mismo color que `PROJECT` — el único de los 5
+colores de tipo que ningún tab usaba todavía) junto a Cerebro/Inbox/Entidades/Debug.
+
+**Backend** — `jarvis/browse/service.py::browse_entries()`: filtra
+`memory_entries` vigentes por `type`/`tag`/`project_id`/rango de fecha/texto
+libre (`q`, reusa `_fts_query_terms()` del retriever en vez de duplicar la
+lógica de armar la expresión MATCH), paginado (`limit`/`offset`). Devuelve
+`{"total", "items"}` — el total sin paginar, para que el frontend pueda armar
+"mostrando X de Y" y paginación real. `GET /jarvis/browse`.
+
+**Frontend** — `JarvisBrowsePanel.jsx`: barra de filtros (texto, tipo, tag,
+proyecto, rango de fechas) + lista paginada (25 por página) + click en una
+entrada abre `JarvisSourceModal.jsx` (reuso directo — ya tenía el detalle
+completo + las acciones de editar/olvidar de la pieza B, así que "Explorar"
+hereda esas acciones gratis sin duplicar nada). `useStore.js` gana
+`jarvisTags`/`fetchJarvisTags` (el catálogo de la pieza A nunca había tenido
+consumidor en el frontend hasta ahora) y `jarvisBrowseResults`/
+`fetchJarvisBrowse`.
+
+---
+
+## Cierre del paquete de 6 piezas (búsqueda/captura/organización/recuperación)
+
+Las 6 piezas del paquete (A: catálogo de tags, B: editar/olvidar, C: captura
+pasiva por inactividad, D: mantenimiento de memoria, E: búsqueda híbrida, F:
+pantalla Explorar) quedan **completas** — código + verificación funcional con
+Ollama real contra DBs de scratch para cada una (detalle en las entradas de
+arriba y en `Cerebro/decisiones-implementacion.md`).
+
+**Qué NO se hizo, a propósito** (explícitamente fuera de alcance, instrucción
+de la tarea): Graphiti y ActivityWatch — ninguno de los dos se tocó ni se
+evaluó de nuevo; sus criterios de entrada documentados en
+`jarvis/Componentes-Evaluados.md` siguen sin cumplirse, no se encontró
+evidencia real en el camino de que hicieran falta.
+
+**Verificado en este entorno** (sin `claude-in-chrome`, mismo motivo ya
+documentado repetidamente — SSH remoto): cada pieza probada individualmente
+contra una DB de scratch aislada (nunca `jarvis.db` real) con **Ollama real**
+(`gemma3:12b` para clasificación/evaluación, `nomic-embed-text` para
+embeddings) — sin mocks del LLM en ningún test. Un ciclo completo del worker
+(`_reset_stuck` → `_fetch_pending` → `process_entry` → `_maybe_run_
+consolidation` → `_maybe_run_passive_capture`, los 4 jobs de fondo juntos en
+una sola corrida) confirmado sin excepciones. Los ~20 endpoints nuevos/
+modificados probados con `TestClient` de FastAPI, incluyendo los 400/404/409
+esperados. `npm run build` del frontend limpio en cada pieza que tocó UI.
+`python -m py_compile` sobre todos los archivos Python tocados.
+
+**No probado en este entorno** (mismo patrón que toda sesión anterior sin
+acceso a Chrome): la UI real en navegador (los 2 tabs nuevos — Explorar y el
+banner de propuestas — y las acciones de editar/olvidar en `JarvisSourceModal`)
+y el flujo de Telegram de punta a punta (propuesta pasiva empujada al chat +
+respuesta del usuario interpretada). Backend y worker no se dejaron corriendo
+en background al cierre de esta sesión (a diferencia de sesiones anteriores) —
+el usuario debe levantarlos (`uvicorn`, `python -m jarvis.worker.main`) para
+confirmar visualmente.
+
+**Decisiones de diseño registradas en `Cerebro/decisiones-implementacion.md`**:
+schema del catálogo de tags (pieza A), mecanismo de soft-delete vía `valid_to`
+(pieza B), y la marca de origen `created_by` para captura pasiva vs. explícita
+(pieza C) — con el razonamiento completo de por qué cada una se resolvió así.
+
+---
+
+## Paquete de mejoras — Fases B (editar/olvidar) y C (captura pasiva por inactividad) (2026-08-27)
+
+Segunda y tercera piezas del mismo paquete de 6 (ver entrada de la Fase A, abajo).
+
+### Fase B — corregir/olvidar una memoria mal guardada
+
+**Problema**: el router tenía `GET /entries/{id}` pero ningún PATCH/DELETE — no había
+forma de arreglar o eliminar algo mal guardado sin tocar la DB a mano.
+
+**`jarvis/memory/service.py::edit_entry()`**: corrige contenido/tipo/tags de una
+entrada ya guardada. Solo toca `content_processed`, nunca `content_raw` — el
+original capturado queda inmutable como provenance; `content_processed` es lo que
+ya usan vault/embeddings/RAG/UI para mostrar y recuperar. No permite tocar
+`origin_trust`/`created_by`/`source_id` (describen CÓMO llegó la entrada, no algo
+corregible a mano). Si cambia contenido o tipo, reescribe el `.md` del vault (el
+tipo determina la subcarpeta — se borra el archivo viejo si el path cambió, vía
+`vault/writer.py::delete_entry_file()` nuevo) y regenera+reupsertea el embedding —
+llamada síncrona bloqueante a propósito (acción de administración poco frecuente,
+no hot path del worker). El filename del `.md` sigue derivándose de
+`content_raw` (título original) aunque el contenido mostrado ya sea el corregido —
+quirk cosmético menor, aceptado (ver decisiones-implementacion.md).
+
+**"Olvidar" — decisión de diseño**: soft-delete vía `valid_to` (mismo mecanismo
+que `consolidation.py` ya usa para marcar `superseded`), nunca `DELETE` físico.
+Con esto desaparece de retrieval/entidades/proyectos/tags **sin tocar una sola
+línea de esos módulos** — todos ya filtran `valid_to IS NULL`. El embedding en
+Chroma y el `.md` del vault quedan intactos a propósito (mismo criterio que
+superseded): el vector puede seguir en el índice pero `_load_entries()` lo
+descarta antes de rankear, así que nunca puede reaparecer. `jarvis/memory/
+service.py::forget_entry()`.
+
+**API**: `PATCH /jarvis/entries/{id}` (400 si el tipo es inválido o el contenido
+queda vacío, 404 si no existe), `DELETE /jarvis/entries/{id}` (409 si ya estaba
+olvidada/superseded, 404 si no existe).
+
+**Frontend**: `JarvisSourceModal.jsx` (ya mostraba el detalle de una entrada — el
+lugar natural) gana botones Corregir (lápiz) y Olvidar (tacho, con confirmación
+inline antes de ejecutar) en el header, más un chip de tags en la vista de
+lectura. `useStore.js`: `editJarvisEntry()`/`forgetJarvisEntry()`.
+
+### Fase C — captura pasiva por inactividad
+
+**Diseño**: job de fondo en el worker (`jarvis/captures/passive.py` +
+`_maybe_run_passive_capture()` en `jarvis/worker/main.py`) que revisa
+conversaciones inactivas (sin mensajes nuevos, de ningún rol, hace
+`JARVIS_PASSIVE_CAPTURE_INACTIVITY_MINUTES` — default 20 min) con mensajes de
+usuario sin revisar todavía, y le pide al modelo local (nunca el externo — misma
+regla que `extract_entities()`/`needs_clarification()`, es clasificación barata)
+evaluar si algo amerita guardarse. Si sí, crea una **propuesta** (`jarvis_capture_
+proposals`, tabla nueva) en vez de guardar directo — el usuario la acepta (con o
+sin aclaración) o la rechaza. La conversación se marca revisada siempre (haya o no
+propuesta) para no re-evaluar el mismo texto en cada vuelta del scan.
+
+**Decisión de diseño — marca de origen (`created_by`)**: columna nueva
+`memory_entries.created_by` (`'explicit'` default | `'jarvis_proposal_accepted'`),
+mismo vocabulario que `memory_projects.created_by` a propósito — generaliza un
+patrón que ya existía en el código a una segunda tabla en vez de inventar uno
+nuevo. **No se tocó `origin_trust`** para esto: esa columna describe la
+confiabilidad de la FUENTE del texto (un mensaje de Telegram del usuario es
+`telegram.user` se haya capturado con `/j` o vía propuesta aceptada); `created_by`
+describe CÓMO se decidió guardarlo (un hecho que el usuario confirmó a propósito
+vs. uno que Jarvis infirió de una charla casual). Son ejes ortogonales — mezclarlos
+en una sola columna hubiera perdido la distinción real que pedía la tarea.
+
+**Canal de "pregunta"**: reusa el mismo patrón de aclaración pre-enqueue
+(`jarvis/captures/clarification.py`) pero generalizado — la pregunta de una
+propuesta va desde un simple "¿Guardo esto en tu memoria?" (confirmación) hasta
+una pregunta real cuando el contenido detectado es ambiguo (ej. "¿guardo esto?
+¿sobre qué exactamente tiene que confirmar Martín?"). Telegram recibe un push
+activo (mensaje del worker); desktop/web es pull, mismo patrón que el inbox
+(`GET /jarvis/proposals`, polling).
+
+**Decisión de diseño — vencimiento sin `job_queue`**: a diferencia de la
+aclaración de DECISION (que usa `context.job_queue.run_once()` de
+python-telegram-bot para su timeout de 3 min), acá el vencimiento se resuelve con
+un **sweep periódico del propio worker** (`expire_stale_proposals()`, default 30
+min) en vez de un timer de PTB. Motivo: el worker y el bot de Telegram son
+procesos separados — un `job_queue` vive en el proceso del bot, y la propuesta la
+crea el worker, así que no hay forma de programar ese timer desde donde nace la
+propuesta sin coordinación entre procesos. Un sweep reusa el mismo patrón que ya
+usa todo el resto del sistema (retry de `inbox_queue`, consolidación diaria) sin
+necesitar esa coordinación. Default al vencer: **se descarta**, no se guarda — al
+revés de la aclaración de DECISION (que sí guarda sin razón al vencer) porque acá
+lo opcional es el guardado en sí, no solo el razonamiento.
+
+**Telegram** (`project/mybot/jarvis_handlers.py::handle_pending_passive_proposal()`,
+wireado en `bot.py::handle_message` justo después de `handle_pending_clarification`):
+"no"/variantes → rechaza; "sí"/variantes cortas → acepta tal cual; cualquier otro
+texto → se toma como aclaración y se concatena antes de guardar (mismo criterio
+que la aclaración de DECISION: una respuesta de texto libre a una pregunta
+pendiente ES la respuesta). Consulta la propuesta pendiente por `chat_id` en la
+DB (no en `context.user_data` — la creó el worker, otro proceso).
+
+**API**: `GET /jarvis/proposals` (pendientes de `channel='desktop'`, para
+polling), `POST /jarvis/proposals/{id}/accept` (body opcional `clarification`),
+`POST /jarvis/proposals/{id}/reject`.
+
+**Frontend**: `JarvisProposalBanner.jsx` nuevo — banner visible en cualquier tab
+de `/jarvis` (no solo el chat, porque la propuesta puede venir de una conversación
+vieja), con Guardar / Aclarar (abre un input) / Descartar. Polling cada
+`JARVIS_POLL_MS` junto con el resto de los fetchers de `JarvisScreen.jsx`.
+
+**`TaskManifest`** gana `read_conversations` y `propose_capture` — operaciones
+que el diseño original ya autorizaba conceptualmente ("el worker puede leer
+conversaciones y escribir en memory store") pero que hasta esta pieza nunca se
+ejercían en código.
+
+**Verificado con Ollama real (`gemma3:12b`) contra DBs de scratch** (no
+`jarvis.db` real): Fase B — edición de contenido+tipo+tags con reescritura de
+vault (viejo archivo borrado, nuevo con frontmatter correcto) y embedding
+regenerado (`retrieve()` devuelve el contenido corregido), tipo inválido rechazado,
+`forget_entry()` excluye la entrada de `retrieve()`/tags y rechaza un segundo
+"olvidar" sobre la misma entrada. Fase C — conversación con contenido sustancioso
+("decidimos migrar a Postgres...") generó una propuesta real, aceptada con
+`created_by='jarvis_proposal_accepted'`; conversación de chit-chat puro ("dale,
+gracias") correctamente **no** generó ninguna propuesta (el modelo la descartó);
+conversación reciente (no inactiva) excluida del scan; segunda vuelta del scan no
+re-propone lo ya revisado; reject y expire probados aparte. Los 8 endpoints nuevos
+(`PATCH`/`DELETE /entries/{id}`, `GET /tags`, `GET /tags/{name}`, `GET /proposals`,
+`POST /proposals/{id}/accept|reject`) probados con `TestClient` de FastAPI contra
+una DB de scratch, incluyendo los 400/404/409 esperados. `npm run build` del
+frontend limpio. **No probado en este entorno**: flujo real por Telegram de
+punta a punta (push de la propuesta + respuesta del usuario) ni la UI en
+navegador real (`claude-in-chrome` no conecta, mismo motivo ya documentado) — el
+usuario puede confirmarlos contra `:5173`/el bot real.
+
+---
+
+## Paquete de mejoras búsqueda/captura/organización/recuperación — Fase A: catálogo de tags (2026-08-27)
+
+Primera de 6 piezas de un paquete grande (A–F, en orden de dependencia) surgido de una
+sesión de brainstorming: A) catálogo de tags, B) editar/olvidar una memoria, C) captura
+pasiva por inactividad, D) mantenimiento de memoria (extensión de consolidation.py),
+E) búsqueda híbrida (léxica + densa) en el retriever, F) pantalla "browse" en /jarvis.
+Detalle de diseño completo de las 6 en `Cerebro/decisiones-implementacion.md`.
+
+**Problema que resuelve**: `memory_entries.tags` se llenaba en cada captura desde S1
+(prompt del clasificador, `jarvis/llm/client.py`) pero nunca se leía de vuelta —
+cada entrada inventaba sus propios tags sueltos sin canonizar, así que "tags" nunca
+sirvió como eje de navegación ni de filtro.
+
+**Schema** (`jarvis/db/schema.py`): `memory_tags` (tabla canónica) +
+`memory_entry_tags` (tabla puente) — mismo patrón que `memory_entities`/
+`memory_entry_entities` de Slice 3, sin `UNIQUE(name)` a propósito (dedup
+case-insensitive en código, igual que `_find_or_create_entity()`). Migran solo por
+`CREATE TABLE IF NOT EXISTS` (tablas nuevas, sin necesidad de rebuild).
+
+**Servicio nuevo `jarvis/tags/service.py`**: `list_tag_catalog(user_id, limit=60)` —
+catálogo ordenado por uso (más usados primero) para interpolar en el prompt del
+clasificador; `link_tags_for_entry()` — dedup exacto case-insensitive, crea el tag
+si no existe (sin la fusión difusa por prefijo de tokens que usa el merge de
+entidades — un tag es una keyword suelta, no un nombre propio con variantes; la
+elección semántica del catálogo ya la hace el propio clasificador viendo el prompt,
+no hace falta adivinar sinónimos a nivel DB); `list_tags_with_counts()` y
+`get_entries_for_tag()` para la API; `entry_ids_without_catalog_tags()` para el
+backfill de la Fase D.
+
+**Clasificador catálogo-aware** (`jarvis/llm/client.py::call_classify()`): gana un
+parámetro opcional `tag_catalog: list[str]`; si se pasa, el prompt agrega un bloque
+"Catálogo de tags ya existentes (preferí elegir de acá...)" — mismo criterio
+conservador que `_find_or_create_entity()`: solo inventa un tag nuevo si ninguno del
+catálogo encaja razonablemente. Sin catálogo (`None`/`[]`), comportamiento idéntico
+al de antes.
+
+**Worker** (`jarvis/worker/processor.py`): antes de clasificar, trae
+`list_tag_catalog(user_id)` y se lo pasa a `call_classify()`; después de
+`update_entry(tags=...)`, llama `link_tags_for_entry()` en su propio try/except
+(mismo patrón best-effort que entidades/proyecto — no puede fallar el procesamiento
+normal). `TaskManifest` gana la operación `link_tags` (+ `read_conversations` y
+`propose_capture`, preparadas para la Fase C).
+
+**API**: `GET /jarvis/tags` (catálogo con conteo), `GET /jarvis/tags/{name}`
+(entradas vinculadas, 404 si no existe) — mismo patrón que `/jarvis/entities`.
+
+**Columnas nuevas preparadas para la Fase C** (agregadas en esta misma pasada de
+schema porque tocaban los mismos archivos): `memory_entries.created_by` (`'explicit'`
+| `'jarvis_proposal_accepted'`, mismo vocabulario que `memory_projects.created_by` a
+propósito) y `conversations.last_passive_review_at`. Migración vía
+`ALTER TABLE ... ADD COLUMN ... CHECK (...)` — confirmado que la versión de SQLite de
+este entorno sí soporta `CHECK` en `ADD COLUMN` (con fallback sin `CHECK` si
+`OperationalError`, para SQLite viejo). Aún sin usar por ningún flujo — la lógica de
+captura pasiva es la Fase C.
+
+**Verificado con Ollama real (`gemma3:12b`, `nomic-embed-text`) contra una DB de
+scratch** (no `jarvis.db` real): dos capturas relacionadas ("SQLite vs Postgres para
+Jarvis" y "seguimos con SQLite para Jarvis") — la segunda reusó exactamente
+`jarvis`/`sqlite`/`homelab` del catálogo creado por la primera, sin inventar
+sinónimos nuevos para el mismo concepto. Migración probada por separado contra una
+DB con el shape viejo (sin `created_by`/`last_passive_review_at`/tablas de tags)
+construida a mano: `init_db()` no lanza, las columnas y tablas nuevas aparecen, la
+fila preexistente conserva `created_by='explicit'` por default, y el `CHECK` nuevo
+rechaza un valor inválido (confirma que el `ALTER ... CHECK` realmente tomó efecto,
+no que se ignoró en silencio).
+
+---
+
+## Mejoras_Jarvis.md — multi-chat web + causa raíz del "recuerdo fantasma" + markdown/lenguaje natural/fuentes/debug (2026-08-26)
+
+Los 9 puntos de `Mejoras_Jarvis.md` (raíz del repo), investigados uno por uno
+antes de tocar código (nunca se asumió la causa que proponía el usuario) e
+implementados. Detalle completo de la investigación y las decisiones de
+schema en `Cerebro/decisiones-implementacion.md` ("Mejoras_Jarvis.md:
+multi-chat web + causa raíz del 'recuerdo fantasma' + ..."). Resumen de cómo
+quedó clasificado cada punto:
+
+**Resueltos como features de UI/UX:**
+- **Multi-chat web** (crear/renombrar/eliminar, contexto propio por chat,
+  Telegram sin tocar) — la pieza más grande, con schema nuevo: columna
+  `title` en `conversations` (ya existía la tabla, se le agregó en vez de
+  crear una `chats` en paralelo) + `jarvis/chats/service.py` +7 endpoints en
+  `jarvis/api/router.py`. `JarvisChatTabs.jsx` nuevo (tira de chats arriba de
+  los mensajes, con crear/renombrar inline/eliminar).
+- **Fecha/hora por mensaje** — `conversation_messages.created_at` ya existía
+  pero no se exponía; ahora viaja al frontend y se hornea como marca relativa
+  ("[hace 2 días]") dentro del historial que recibe el modelo, para que pueda
+  referirse a cuándo dijo algo el usuario.
+- **Markdown renderizado** — `react-markdown` nuevo (dependencia agregada a
+  propósito, se evaluó y descartó parsear a mano), con componentes
+  restyleados al tema oscuro de Jarvis. Antes se veía `**texto**` literal.
+- **Fuentes clickeables** — `GET /jarvis/entries/{id}` nuevo +
+  `JarvisSourceModal.jsx` (mismo patrón visual que `JarvisCaptureModal.jsx`):
+  clickear un chip de fuente en el chat abre el contenido completo de esa
+  entrada de memoria.
+- **Lenguaje natural, no citas textuales** — prompt del sistema en
+  `jarvis/query/service.py` tocado para pedir síntesis conversacional en vez
+  de listar/citar en negrita. Mejora de prompting, no un bug — el modelo
+  puede seguir variando en cuánto la respeta (ver limitación abajo).
+
+**Bug real confirmado y arreglado:**
+- **Debug se cortaba en mensajes viejos** — el frontend pedía
+  `GET /jarvis/events?limit=20` fijo sin forma de pedir más (el backend ya
+  soportaba hasta 200). Fix: botón "cargar más" + límite como estado,
+  centralizado en `jarvisPalette.js`.
+
+**Bug real confirmado y arreglado — causa raíz, no un parche puntual:**
+- **"El chat ignora instrucciones recientes / arrastra contexto viejo tras
+  borrar historial" + "Jarvis recordó a Carolina sin que quedara guardada
+  como PEOPLE" + "el Inbox parece no actualizarse"** — investigados como tres
+  reportes separados, resultaron ser **la misma causa**: todo el chat de
+  escritorio compartía un único `channel_id` constante (`"web"`) en el
+  backend, así que "borrar historial" (que solo limpiaba `localStorage` del
+  lado del cliente) nunca desconectaba de verdad de la conversación real —
+  el próximo mensaje volvía a reengancharse a la misma fila de siempre, con
+  todo su historial. El texto de Carolina nunca se guardó como memoria (se
+  escribió en el chat de **consulta**, no en captura — nunca pasó por
+  `extract_entities()`); que Jarvis lo "recordara" venía de ese historial de
+  conversación filtrado, no de una entidad fantasma. El Inbox nunca tuvo bug
+  real (probado end-to-end): parecía estático porque no hubo ninguna captura
+  real que procesar en ese momento. El multi-chat cierra esto en el schema —
+  cada chat nuevo tiene un `channel_id` propio y único, nunca el string
+  compartido — verificado con una prueba directa (un chat nuevo nunca trae
+  historial de otro).
+
+**Limitación de comportamiento del modelo, documentada para no prometer un
+"arreglo" que no existe:** incluso con el contexto ya aislado
+correctamente, un LLM (sobre todo el de fallback local) puede seguir sin
+respetar con precisión una instrucción reciente dentro de una misma
+conversación activa — es una limitación inherente de cómo pesan las
+instrucciones en un prompt largo, no algo que un fix de código elimine del
+todo.
+
+**Verificado en este entorno** (sin `claude-in-chrome` — mismo motivo ya
+documentado, SSH remoto): `npm run build` limpio; smoke tests contra DB de
+scratch (aislamiento entre chats, los 7 endpoints nuevos vía `TestClient`,
+`query()` completo con `call_reason` mockeado confirmando mensajes limpios
+`{role,content}` sin fugas de key); **contra la DB real**
+(`project/database/jarvis.db`, backend+worker reiniciados a propósito porque
+`jarvis/` vive fuera de `project/` y `--reload` no lo vigila) — migración de
+`title` corrida limpia sobre 24 mensajes reales preexistentes, creación/
+rename/delete de un chat de prueba con limpieza al final, `GET
+/jarvis/entries/{id}` contra una entrada `DECISION` real. **No probado en
+este entorno**: una consulta real de punta a punta con el modelo
+externo/local respondiendo, para confirmar en la práctica el tono
+conversacional y el render de markdown — backend y worker quedaron
+corriendo con el código nuevo para que el usuario lo confirme en su
+navegador.
+
+---
+
+## Rediseño visual de /jarvis — confirmado visualmente, COMPLETO (2026-08-26)
+
+Cierra el único punto pendiente de la re-implementación (entrada siguiente, más abajo): el
+punto 2 de la "Regla de cada fase" (`PLAN-IMPLEMENTACION.md` línea 60, verificación visual en
+navegador) nunca se pudo cumplir vía `claude-in-chrome` — la extensión no conectó en ninguna
+sesión. Investigado el motivo con el usuario: no es un bug de la extensión, es una limitación de
+arquitectura — *native messaging* de Chrome es estrictamente local (mismo SO/proceso), y el
+usuario trabaja desde una laptop conectada por VS Code Remote-SSH a esta PC, con Chrome corriendo
+en la laptop, no en la PC donde corre Claude Code. No hay forma soportada de sortear esto sin
+abrir Chrome directamente en la PC (remoto/VNC) o correr Claude Code local en la laptop.
+
+En su lugar, el usuario abrió `http://127.0.0.1:5173/jarvis` directamente en su navegador y
+confirmó el resultado ("está lindo, dejémoslo así") sin señalar ningún defecto puntual — no se
+hizo la pasada exhaustiva fase por fase con capturas que pedía el plan (cambio de tema x6, memory
+leak del canvas al salir/entrar de `/jarvis`, responsive en viewports angostos), pero sí una
+confirmación visual real y explícita del usuario, que es el criterio que importa.
+
+**Rediseño visual de Jarvis: COMPLETO.** Queda pendiente, sin bloquear nada (ya documentado antes,
+sin cambios): `jarvis_policies` acumulando heartbeats de B6 sin rotación; composer de captura y
+consulta sin unificar (decisión de producto diferida a propósito). No se repite acá el detalle de
+QA fina de Fase 7 (contraste por tema, memory leak) — si en el futuro se nota algo raro
+navegando `/jarvis` largo rato, revisar eso primero.
+
+---
+
+## Re-implementación completa contra PLAN-IMPLEMENTACION.md + PLAN-IMPLEMENTACION-BACKEND.md (2026-08-26)
+
+La sesión del rediseño visual (entrada siguiente, más abajo) se hizo **sin conocer** los dos
+planes formales que ya existían en `ClaudeDesign - Jarvis/` (`PLAN-IMPLEMENTACION.md`, frontend
+fases 0–7; `PLAN-IMPLEMENTACION-BACKEND.md`, backend fases B0–B7) — nunca se buscaron porque solo
+se hizo `Glob` de `.html`, no de `.md`. Auditado fase por fase a pedido del usuario, se encontraron
+divergencias reales de arquitectura y de decisiones ya cerradas (no solo cosméticas). Esta entrada
+documenta la re-implementación completa hecha para cerrar ambos planes tal cual están escritos,
+con dos decisiones tomadas con el usuario antes de empezar: **Fase B5 con tabla nueva
+`jarvis_event_log`** (no tail de archivo), y **Fase B6 incluida** (heartbeat real del worker).
+
+### Backend
+
+- **B0 — Centralización de config** (sin cambiar ningún default, verificado): umbrales de
+  consolidación (`_SIMILARITY_THRESHOLD`/`_STALE_DAYS`/`_STALE_CONFIDENCE`), delays de reintento
+  del worker, ratio LOW del budget, y los pesos de la fórmula de ranking del retriever
+  (`_SIMILARITY_WEIGHT`/`_TYPE_WEIGHT_FACTOR` para el caso normal, `_TIEBREAK_*` aparte para el
+  desempate de `recency_first` — no se fusionaron pese a compartir valores 0.5, distinta
+  intención) pasan a vivir en `jarvis/config.py` vía env vars, documentadas en `.env.example`.
+- **B1 — `GET /jarvis/stats/types`** (nuevo `jarvis/stats/service.py`): reemplaza al `/jarvis/stats`
+  agregado en la sesión anterior (que mezclaba counts+cola+errores+último-procesado, forma que
+  ningún plan pedía) — ahora es solo `{tipo: count}`, tal como pide B1, para el panel izquierdo.
+- **B2 — `GET /jarvis/projects`** (`jarvis/projects/service.py::list_projects_with_activity()`):
+  devuelve `memory_count`/`last_activity` crudos — **ya no calcula `heat`** en el backend (antes sí,
+  divergencia real encontrada en la auditoría); el heat se normaliza del lado del frontend.
+- **B3 — Entidades enriquecidas** (`jarvis/entities/service.py::list_entities()`): ahora incluye
+  `notes`, `memory_count` y `types` (lista de tipos distintos vinculados) — cierra el gap que la
+  sesión anterior había documentado como "limitación aceptada".
+- **B4 — Budget por modelo** (`jarvis/budget/tracker.py::spent_today_by_model()`): desglose real
+  por modelo con un campo `role` (`reason`/`local`/`other`) resuelto comparando contra
+  `JARVIS_REASON_MODEL`/`JARVIS_LOCAL_MODEL`/`JARVIS_LOCAL_FALLBACK_MODEL` — única comparación de
+  ese tipo en todo el sistema, el frontend solo mapea `role` a la etiqueta visible.
+- **B5 — Log real del worker** (retomada, decisión: tabla nueva): `jarvis_event_log` (schema +
+  índice por `created_at`), `jarvis/events/service.py` (`log_event()` best-effort — nunca lanza,
+  probado con un `entry_id` inexistente para confirmar que el `FOREIGN KEY` fallido se traga sin
+  romper nada — y `list_recent_events()`), y 5 puntos de instrumentación reales en
+  `jarvis/worker/processor.py::process_entry()` (`CLASSIFY`, `ENTITY` si hubo extracción, `LINK`
+  si hubo proyecto, `EMBED`, `ERROR` en el except general). `GET /jarvis/events` nuevo.
+- **B6 — Heartbeat real** (`jarvis/worker/heartbeat.py`, módulo separado de `worker/main.py` a
+  propósito porque ese archivo configura logging global al importarse): `write_heartbeat()` llamada
+  al tope de cada vuelta del loop del worker; `GET /jarvis/health` → `{"worker_alive": bool}`. El
+  health indicator del sub-header ya no deriva de `jarvisBudget.status` (simplificación de la
+  sesión anterior, nunca documentada como tal pese a que el plan lo pedía) — ahora es señal real.
+- **B7 — QA + `.env.example`**: `.env.example` documenta las 6 variables nuevas (B0+B6). QA de
+  regresión: los endpoints existentes (`/jarvis/query`, `/jarvis/capture`, `/jarvis/inbox`,
+  `/jarvis/entities/{name}`) no cambiaron de forma ni comportamiento — confirmado por curl.
+
+**Verificado con datos reales** (worker + backend corriendo, sin mocks): captura real de prueba
+procesada de punta a punta → `jarvis_event_log` recibió las 3 filas esperadas (`CLASSIFY`,
+`ENTITY`, `EMBED` — `LINK` no aplicó porque esta captura no tenía proyecto asociado, comportamiento
+correcto) con timestamps y mensajes reales; `GET /jarvis/health` pasó de `false` (worker apagado) a
+`true` en cuanto se arrancó `python -m jarvis.worker.main`, confirmando el heartbeat real.
+`GET /jarvis/query` sobre "¿Qué sé sobre React?" siguió citando correctamente
+`useCallback - React` (mismo resultado que el QA de Slice 2 documentado más abajo) — confirma que
+el refactor de pesos de ranking (B0) no cambió el comportamiento del retriever. La entrada de
+prueba se borró al final (DB — `memory_entries`/`inbox_queue`/`jarvis_event_log`/
+`memory_entry_entities` — + vault + embedding de Chroma), sin dejar rastro en la memoria real.
+
+### Frontend
+
+- **Fase 0**: `utils/jarvisPalette.js` nuevo — única fuente de los 5 colores de tipo, 4 de estado
+  de inbox, 3 de nivel de budget, anchos de layout, cantidad de barras de budget, duraciones de
+  animación, defaults del canvas, y el intervalo de polling. `styles/jarvis.css` nuevo — los 5
+  `@keyframes` y `.jv-root` movidos fuera de `index.css` (confirmado con `grep` que ningún
+  componente fuera de `jarvis/` los usaba). `NeuralCanvas.jsx` renombrado a
+  `JarvisNeuralBackground.jsx`, ahora con props `density`/`pulseSpeed` configurables (antes
+  constante fija).
+- **Fase 1**: `JarvisSubBar.jsx` nuevo, extraído del sub-header que antes vivía inline en
+  `JarvisScreen.jsx` — tabs, budget widget (12 barras, no 14 — se siguió el número literal del
+  plan), health indicator ahora leyendo `jarvisHealth.worker_alive` real (B6). Store:
+  `jarvisStats`→`jarvisTypeCounts`, nuevo `jarvisHealth`/`jarvisEvents` + sus fetchers.
+- **Fase 2**: `JarvisChat.jsx` — el pill del composer es **fijo** ("PREGUNTA · va a retrieval"),
+  sin la heurística `guessType()` que tenía la sesión anterior (esa heurística venía del prompt
+  original de esa sesión, no de este plan, y el plan cierra explícitamente que el composer es
+  solo-consulta sin heurística). Se **restauró el toggle colapsable de fuentes** (`SourcesToggle`
+  con `open`/chevron) que la sesión anterior había reemplazado por fuentes siempre expandidas —
+  el plan pedía mantener esa estructura intacta, solo restylearla.
+- **Fase 3** (0% en la sesión anterior): `JarvisCaptureModal.jsx` restyleado por primera vez —
+  paleta oscura de Jarvis en vez del tema SGR activo, burbuja de aclaración con el estilo "ask"
+  (amber, dot parpadeante, "FALTA RAZONAMIENTO"). Lógica de captura/aclaración sin tocar.
+  Fue posible confirmar que el modal nunca se abre fuera de `/jarvis` (la CTA que lo dispara solo
+  está wireada en ese módulo), así que hardcodear la paleta oscura ahí es seguro.
+- **Fase 4**: `utils/formatAge.js` nuevo — reemplaza 3 implementaciones distintas e inconsistentes
+  de "edad relativa" que había antes (una mostraba HH:MM crudo sin relativizar). `JarvisRightPanel`
+  renombrado a `JarvisContextPanel.jsx`, agrega la sub-sección de costo por modelo (B4) con
+  mini-cards "GRANDE"/"CHICO" mapeadas desde `role`.
+- **Fase 5**: `JarvisEntitiesTab` renombrado a `JarvisEntitiesPanel.jsx` — las cards ahora muestran
+  nota, conteo real de memorias y dots por tipo (B3), cerrando el gap documentado antes como
+  limitación aceptada.
+- **Fase 6**: `JarvisDebugTab` renombrado a `JarvisDebugPanel.jsx` — "cola"/"errores"/"último
+  procesado" se calculan del lado del cliente desde `jarvisInbox` (tal como pide la fase, sin
+  backend nuevo para eso); el log ya no es el sustituto de `jarvisInbox` de la sesión anterior —
+  ahora es el log real de B5 vía `GET /jarvis/events`.
+- **Fase 7** (0% en la sesión anterior): responsive agregado a `JarvisScreen.jsx` con el mismo
+  patrón ya usado en `FinanzasScreen.jsx` (`hidden md:block`/`hidden xl:block`, confirmado
+  leyendo ese archivo) — grid de 1 columna en mobile, 2 desde `md` (agrega panel izquierdo), 3
+  desde `xl` (agrega panel derecho). Anchos de columna vía CSS custom properties inline
+  (`--jv-left-w`/`--jv-right-w`) leídas de `jarvisPalette.js`, con clases Tailwind de grid
+  arbitrarias — confirmado que Tailwind las generó de verdad inspeccionando el CSS compilado.
+
+**Verificado en este entorno**: `npm run build` sin errores; `grep` completo confirmando cero
+referencias colgantes a los nombres viejos (`jarvisStats`, `JarvisRightPanel`, `JarvisEntitiesTab`,
+`JarvisDebugTab`, `NeuralCanvas`) en todo `frontend/src`. **No verificado visualmente en
+navegador**: la extensión `claude-in-chrome` no se conectó en ningún intento de esta sesión
+(se reintentó varias veces a pedido del usuario) — backend y frontend quedaron corriendo en
+background para que el usuario confirme visualmente el resultado.
+
+**Auditoría posterior a pedido del usuario** (fase por fase contra ambos planes, ver
+`decisiones-implementacion.md` para el detalle completo): encontradas y corregidas en el momento
+3 inconsistencias de centralización que quedaron colgando de la re-implementación (un color
+duplicado en vez de importado de `jarvisPalette.js`, y dos límites numéricos sin nombrar). También
+quedó documentado que B0-B4 se probaron con `curl` contra la DB real en vez de una copia de
+scratch (son `SELECT`, sin riesgo, pero diverge del método que pide el plan de backend), y que la
+confirmación end-to-end de B6 dejó heartbeats reales acumulándose en `jarvis_policies` (esperado,
+mismo patrón append-only que `consolidation_last_run`, sin rotación — no es un bug).
+
+---
+
+## Rediseño visual completo de /jarvis — tema oscuro, tabs, stats reales (2026-08-26)
+
+El prompt de la sesión ("ClaudeDesign Implementacion") asumía que ya existían varios componentes
+del rediseño visual de `/jarvis` (canvas neuronal, paneles izq/der, tabs Inbox/Entidades/Debug,
+animaciones `jv-*`, campos nuevos del store) — al arrancar la sesión, ninguno de esos archivos
+existía en el repo real (solo `JarvisChat.jsx`, `JarvisInboxPanel.jsx` y `JarvisCaptureModal.jsx`
+con el estilo claro compartido de SGR). Se construyó todo desde cero siguiendo el mockup de
+referencia `ClaudeDesign - Jarvis/Jarvis.dc.html` (encontrado en el repo, no en la ruta de
+Downloads que mencionaba el prompt).
+
+**Pantalla nueva** (`JarvisScreen.jsx`, reescrita): `<TopBar/>` compartido de SGR (sin cambios,
+mismo tema activo del usuario) + un sub-header nuevo oscuro (tabs Cerebro/Inbox/Entidades/Debug
+con dot de color y badge de pendientes, indicador de presupuesto con 14 barras, dot de salud con
+`jv-breathe`) + layout de 3 columnas (246px / flex / 322px) siempre visible. Fondo: `<NeuralCanvas
+/>` (red de nodos en canvas 2D, reactiva al mouse, colores por tipo de memoria) + overlay de
+gradiente oscuro. Todo el tema (`--jv-*`, `jv-breathe/jv-rise/jv-sweep/jv-spin/jv-blink`) vive
+scoped bajo `.jv-root` en `index.css`, sin tocar los 6 temas de SGR.
+
+**Componentes nuevos**: `NeuralCanvas.jsx`, `JarvisLeftPanel.jsx` (tipos de memoria con conteos
+reales + proyectos activos con barra de "heat"), `JarvisRightPanel.jsx` (en-proceso + presupuesto
++ entidades recientes), `JarvisInboxTab.jsx` (tabla completa del inbox), `JarvisEntitiesTab.jsx`
+(grid de entidades, click dispara una consulta RAG real "¿Qué sé sobre X?"), `JarvisDebugTab.jsx`
+(stats reales, sin log fabricado — ver limitación abajo). `JarvisChat.jsx` reescrito con el
+mismo diseño (burbujas con gradiente, fuentes con dots de color, composer con borde rainbow
+animado y badge de tipo detectado por heurística `guessType()`), lógica sin cambios.
+
+**Backend** (`jarvis/api/router.py`): dos endpoints de solo lectura nuevos, `GET /jarvis/stats`
+(conteos por tipo, cola, errores 24h, última entrada procesada) y `GET /jarvis/projects`
+(proyectos con cantidad de entradas vigentes vinculadas) — ninguno existía antes, necesarios para
+alimentar los paneles nuevos. `useStore.js` gana `jarvisTab`+`setJarvisTab` y
+`jarvisStats`/`jarvisEntities`/`jarvisProjects` + sus `fetchJarvis*`.
+
+**Limitaciones conocidas, aceptadas a propósito** (documentadas en detalle en
+`Cerebro/decisiones-implementacion.md`): el tab Debug muestra actividad real del inbox en vez del
+log de eventos inventado del mockup (no hay audit log expuesto por API); las tarjetas de
+entidades no muestran cantidad de memorias (`GET /jarvis/entities` no expone ese dato); el
+widget de presupuesto no desglosa costo por modelo grande/chico (el endpoint solo da el total).
+
+**Verificado en este entorno**: `npm run build` del frontend sin errores; los cuatro endpoints
+(`/jarvis/stats`, `/jarvis/projects`, `/jarvis/entities`, `/jarvis/budget`) probados con `curl`
+contra `project/database/jarvis.db` real (no scratch) — devuelven datos coherentes con las
+entradas reales ya guardadas (conteos por tipo, presupuesto `$0.010112/$1.00`, 5 entidades
+reales). La extensión `claude-in-chrome` no se conectó en ningún momento de la sesión, así que
+la verificación visual quedó en manos del usuario contra el `npm run dev` (`:5173`) dejado
+corriendo en background.
+
+**Bug real encontrado por el usuario y corregido en el momento**: a medida que el chat de
+Jarvis acumulaba respuestas, la página entera se estiraba verticalmente sin ninguna barra de
+scroll disponible para volver arriba — el layout completo quedaba inutilizable después de unos
+pocos mensajes. Causa: en `JarvisScreen.jsx`, el div central que envuelve el contenido de la tab
+activa (chat/inbox/entidades/debug) era el único de los tres hijos de la grilla de 3 columnas sin
+`overflow` seteado. Sin eso, su "automatic minimum size" (la regla CSS por la que un item de
+grid/flex con `overflow:visible` no puede encogerse por debajo del tamaño de su contenido) queda
+atada al contenido — y como el contenido del chat crece sin límite, ese item fuerza a crecer a la
+fila entera de la grilla, y con ella a la página. Los otros hijos de esa misma grilla
+(`JarvisLeftPanel`, `JarvisRightPanel`) y las tabs internas (`JarvisInboxTab`, `JarvisEntitiesTab`,
+`JarvisDebugTab`) ya tenían `overflowY:'auto'` propio, por eso solo se manifestaba con el chat.
+Fix: agregado `overflow:'hidden'` + `minHeight:0` a ese div central — mismo patrón ya usado en el
+resto de los paneles, ahora aplicado de forma consistente en los tres hijos de la grilla.
+Verificado con `npm run build` sin errores; pendiente de confirmación visual del usuario tras el
+hot-reload de Vite.
+
+---
+
+## Deploy al homelab — worker corriendo en Docker, primera vez (2026-08-26)
+
+Jarvis corría hasta ahora solo en la PC Windows (venv local, tres procesos: uvicorn, bot,
+worker). El usuario pidió matar todo lo local y mover todo al homelab (gabinete Ubuntu,
+`docker-compose.yml`, ver `HOMELAB.md`). Antes de este deploy, `jarvis/` **nunca** había
+sido copiado al homelab ni al build de Docker — la imagen (`project/Dockerfile`) solo
+copiaba `project/app` y `project/mybot`; el backend del gabinete corría hacía 4 semanas
+sin ninguna integración de Jarvis, y el `bot` estaba parado (Exited hacía 19h).
+
+**Procesos locales matados**: los tres PIDs reales (uvicorn, `jarvis.worker.main`,
+`bot.py`), cada uno con su par de PIDs documentado en la sesión anterior (stub del venv +
+intérprete real hijo).
+
+**Cambios de infraestructura (no de lógica de Jarvis):**
+- `project/Dockerfile` + `project/docker-compose.yml`: build context cambiado de
+  `project/` al **root del repo** (`context: ..`, `dockerfile: project/Dockerfile`) —
+  necesario porque `jarvis/` vive como hermano de `project/` (ver CLAUDE.md), y Docker no
+  puede `COPY` desde fuera del build context. `Dockerfile` ahora copia `jarvis/` e
+  instala editable (`pip install -e ./jarvis`, resuelve sus deps desde
+  `jarvis/pyproject.toml`: litellm, chromadb, langfuse, opentelemetry) **antes** de
+  `COPY project/app`/`COPY project/mybot` a propósito (esas cambian mucho más seguido;
+  ponerlas después evita reinstalar las deps pesadas de Jarvis en cada rebuild de solo
+  código SGR).
+- `docker-compose.yml`: servicio **`worker`** nuevo (`python -m jarvis.worker.main`,
+  `network_mode: host` como `bot`, mismas env vars de Ollama). `JARVIS_DB_PATH` /
+  `JARVIS_VAULT_PATH` / `JARVIS_CHROMA_PATH` fijados explícitamente en los tres servicios
+  (`backend`, `bot`, `worker`) a rutas bajo `/app/database` y `/app/vault` — evita
+  depender del cálculo de path por defecto de `jarvis/config.py`
+  (`Path(__file__).parent.parent / "project"`), que asume el layout del repo real y no
+  tiene sentido dentro del contenedor. `backend` y `bot` ganan volume `./vault:/app/vault`
+  nuevo; los tres comparten `jarvis.db` (SQLite + WAL, ya soporta esto) igual que ya
+  comparten `app.db`.
+- `.dockerignore` movido de `project/.dockerignore` a la raíz del repo (mismo motivo:
+  `.dockerignore` tiene que vivir en la raíz del build context).
+
+**Bug real encontrado y arreglado — CPU del gabinete no soporta numpy/onnxruntime
+modernos**: tras el primer build, `backend` y `worker` quedaban en crash-loop
+(`docker logs` sin ningún traceback — consistente con una señal, no una excepción
+Python). `docker inspect` mostró `ExitCode=132` (`SIGILL`). Aislado importando cada
+paquete uno por uno dentro de la imagen ya construida: `numpy` (2.4.6, pulled
+transitivamente por `chromadb`/`onnxruntime`) crashea solo con importarlo — el gabinete es
+un **AMD Athlon II X2 245 (2009)**, sin SSSE3/SSE4.1/SSE4.2/AVX (`/proc/cpuinfo` sin
+ninguno de esos flags), y los wheels de PyPI de `numpy>=2` asumen un baseline de CPU que
+esta máquina no tiene. `numpy==1.26.4` probado en el mismo host: importa y el flujo real
+de ChromaDB (`PersistentClient` + `upsert`/`get`/`query`) funciona sin problema.
+**Fix:** `numpy<2` agregado como dependencia explícita en `jarvis/pyproject.toml`
+(comentario ahí con el detalle) — sin esto, Jarvis es literalmente imposible de correr en
+este hardware, sea en Docker o en un venv nativo del gabinete. Detalle operativo completo
+(incluyendo cómo diagnosticar si vuelve a pasar) en `HOMELAB.md`.
+
+**Segundo bug del deploy (de proceso, no de código)**: el primer build usó el `app/` que
+ya estaba en el homelab desde hacía 4 semanas (nunca se había sincronizado `project/app/`
+en esta sesión, solo `project/mybot/`) — sin la integración de Jarvis en `app/main.py` en
+absoluto (`_JARVIS_AVAILABLE` no existía como atributo, `/jarvis/*` daba 404). Corregido
+sincronizando `project/app/` completo y reconstruyendo.
+
+**Migrado al homelab** (antes no existía nada ahí): `project/database/jarvis.db`,
+`project/vault/`, `project/database/chroma/` — las 6 entradas reales (incluyendo las
+DECISION de gemma3, la mudanza a Buenos Aires, etc.) documentadas en las secciones de
+abajo. `.env` del homelab actualizado con `OPENAI_API_KEY` / `JARVIS_REASON_MODEL` /
+`JARVIS_LOCAL_MODEL` (backup del `.env` viejo del homelab guardado antes de pisarlo,
+`.env.bak-<timestamp>`) — confirmado que el `.env` local es superset del que ya tenía el
+homelab (mismas claves + las nuevas de Jarvis), sin ninguna variable exclusiva del
+homelab que se fuera a perder.
+
+**Verificado en producción real (no mocks, no scratch DB) tras el fix**:
+- Los tres contenedores (`backend`, `bot`, `worker`) estables, sin reinicios, varios
+  minutos corriendo.
+- `GET /jarvis/*` registradas (`/jarvis/budget`, `/jarvis/capture`, `/jarvis/query`,
+  `/jarvis/entities`, `/jarvis/inbox`).
+- `POST /jarvis/query` real: respuesta **sin** prefijo `[modo local]` (usó
+  `gpt-5.4-mini` externo de verdad), citó las fuentes correctas (las DECISION de
+  gemma3), y `GET /jarvis/budget` subió de `$0.010112` a `$0.011106` — confirma que la
+  `OPENAI_API_KEY` conecta y se factura de verdad.
+- `POST /jarvis/capture` real → el worker la levantó (`Procesando entry_id=...`),
+  clasificó con `gemma3:12b` vía Ollama en Windows (`192.168.137.1:11434`, alcanzable
+  desde el gabinete con `network_mode: host`), escribió el `.md` en `vault/PROJECTS/` y
+  generó+guardó el embedding en ChromaDB (`embedded=1`) — confirma que el fix de numpy
+  sostiene el pipeline completo, no solo el import. Entrada de prueba borrada al final
+  (DB + vault + embedding), sin dejar rastro en la memoria real.
+
+Ver decisión completa en `Cerebro/decisiones-implementacion.md` (2026-08-26, "Deploy de
+Jarvis al homelab").
+
+---
+
+## /help actualizado + debug por Telegram (/jdebug, /jdebugon, /jdebugoff) (2026-08-26)
+
+Dos cambios chicos sobre el bot de Telegram, pedidos aparte de las features de arriba.
+
+**`/help`** (`project/mybot/agenda_handlers.py::HELP_TEXT`): agrega una sección "🧠 Jarvis"
+con los cinco comandos (`/j`, `/jq`, `/jdebug`, `/jdebugon`, `/jdebugoff`) — antes el texto
+de ayuda no mencionaba Jarvis para nada. No se tocó ningún registro de comandos en BotFather
+porque el bot no llama `set_my_commands()` en ningún lado (se verificó con grep antes de
+implementar) — no había nada que actualizar ahí.
+
+**Debug por Telegram** — módulo nuevo `jarvis/debug/service.py` (mismo patrón ya documentado:
+lógica compartida vive en `jarvis/`, nunca duplicada en el handler):
+- `/jdebug` — snapshot de estado, funciona aunque `debug_mode` esté OFF: última entrada
+  procesada (id/tipo/fecha/status, join `memory_entries`+`inbox_queue`), pendientes en
+  `inbox_queue`, últimas 3 entradas `ERROR` con su `last_error`, presupuesto de hoy
+  (`jarvis.budget.tracker.spent_today()` vs `JARVIS_DAILY_BUDGET_USD`), si `OPENAI_API_KEY`
+  está seteada, y el valor de `JARVIS_LOCAL_MODEL`.
+- `/jdebugon` / `/jdebugoff` — togglean `debug_mode`, persistido en `jarvis_policies`
+  (`policy_type='debug_mode'`) con el mismo patrón de `jarvis/worker/consolidation.py`
+  (INSERT de una fila nueva por cambio, se lee la más reciente por `created_at` — nunca
+  UPDATE in place). Sobrevive reinicios del bot y del worker (proceso separado, misma DB).
+- Con `debug_mode` ON, `jarvis/worker/processor.py::process_entry()` manda un mensaje de
+  Telegram por cada entrada procesada (tipo detectado, confianza, entidades extraídas, si
+  pidió aclaración, modelo usado) al chat_id de `JARVIS_TELEGRAM_CHAT_ID` (nuevo en
+  `jarvis/config.py`) o, si no está seteada, al chat_id derivado del primer `/j` recibido
+  (`remember_chat_id()`, guardado también en `jarvis_policies`
+  `policy_type='debug_chat_id'`, no pisa un valor ya guardado). Si no hay ningún chat_id
+  disponible, solo loguea en consola — no falla. El call site en `processor.py` está
+  envuelto en `try/except` (además de que `notify_debug_processed()` ya atrapa sus propias
+  excepciones) para cumplir literal "los mensajes de debug no interrumpen el flujo normal
+  del worker" sin depender solo de la disciplina interna del módulo nuevo — mismo patrón
+  "belt and suspenders" que ya usa la extracción de entidades ahí mismo.
+- **Heurística conocida, documentada a propósito**: "¿pidió aclaración?" se infiere
+  buscando `"\nRazón:"` en `content_raw` (así es como `jarvis_handlers.py` concatena la
+  respuesta del usuario). Esto distingue bien "se preguntó y el usuario respondió" de "nunca
+  se preguntó", pero **no** distingue "nunca se preguntó" de "se preguntó pero el usuario no
+  respondió a tiempo (timeout de 3 min)" — en ambos casos el contenido queda igual al
+  original, sin ninguna marca. No se agregó una columna nueva a `memory_entries` solo para
+  esta distinción cosmética de un campo de debug; si en el futuro hace falta separar los tres
+  casos, hay que persistir el flag explícitamente en el momento de la aclaración (en
+  `jarvis_handlers.py` o en el propio `capture_raw()`).
+- **"Modelo usado" siempre es el local** (`JARVIS_LOCAL_MODEL`): la clasificación en
+  `process_entry()` llama `call_classify()`, que fuerza el modelo local sin fallback a
+  externo (ver `jarvis/llm/client.py`) — no hay ninguna rama donde la clasificación use el
+  modelo externo hoy. El campo queda igual por honestidad con lo que el pipeline realmente
+  hace, no porque esté hardcodeado sin sentido.
+- Se agregó `send_telegram_message(chat_id, text)` genérico a `jarvis/notify/telegram.py`
+  (antes solo tenía `notify_telegram_done`, ahora un wrapper delgado sobre la función nueva)
+  — reusado por el aviso de "listo" y por el modo debug, mismo boundary best-effort
+  (nunca lanza, solo loguea si falla).
+
+**Verificado en este entorno** (sin Telegram real, DB de scratch aislada — `python -m
+py_compile` sobre todos los archivos tocados + smoke test directo de
+`jarvis/debug/service.py`): toggle de `debug_mode` (ON→OFF→estado correcto en cada lectura),
+`remember_chat_id()` no pisa un valor ya guardado, `get_snapshot()`/`format_snapshot_text()`
+devuelven el texto esperado sobre una DB vacía, y `notify_debug_processed()` no lanza ni con
+`debug_mode` OFF ni con ON sin token de Telegram configurado (falla soft, como debe). **No
+probado en este entorno**: flujo real por Telegram (`/jdebug`, `/jdebugon` con el worker
+procesando una entrada real y mandando el mensaje) — queda pendiente de que el usuario lo
+confirme, mismo patrón que el resto de las features de Telegram en este documento.
+
+---
+
+## Aclaración pre-enqueue + aviso de listo — confirmado de punta a punta por Telegram real (2026-08-26)
+
+La feature de aclaración pre-enqueue (sección siguiente) quedó verificada con datos reales, no
+solo con mocks/scratch DB: `/j Decidí usar gemma3.` por Telegram → Jarvis preguntó
+`🤔 ¿Por qué tomaste esta decisión?` → el usuario respondió → `handle_pending_clarification()`
+canceló el timeout y encoló `"Decidí usar gemma3.\nRazón: Respondió todos los test bien. Le ganó
+al mistral de 24B."` → el worker clasificó `DECISION`, generó embedding y escribió
+`DECISIONS/f95748a2-elección-de-gemma3.md` → notificación `✅ Listo — guardado como *DECISION*.`
+recibida en Telegram. Las tres piezas nuevas de esta sesión (gate de aclaración, timeout de 3
+min, aviso de "listo") funcionan juntas en producción.
+
+**Aviso de "listo" — feature nueva agregada durante el mismo ciclo de pruebas**: el usuario notó
+que el ACK de `/j` ("procesando…") nunca se actualiza — es un mensaje de una sola vez, el worker
+no tiene ningún canal de vuelta hacia ese mensaje puntual. Se agregó `jarvis/notify/telegram.py`
+(`notify_telegram_done()`) — pega directo a la HTTP API de Telegram con `urllib.request` de la
+librería estándar (sin agregar `requests` como dependencia nueva a `jarvis/`, y sin que el worker
+necesite la instancia `Application` de python-telegram-bot, que vive en un proceso separado).
+`jarvis/worker/processor.py` la llama al final de `process_entry()`, solo si
+`entry["source"] == "telegram"` y hay `channel` (chat_id) — capturas de API/frontend (`source`
+`desktop`) no reciben este aviso, no tienen a dónde mandarlo. Gateado por una operación nueva en
+`TaskManifest` (`"notify_telegram"`). Best-effort: si falla (sin `TELEGRAM_BOT_TOKEN`, sin red),
+solo loguea, nunca tumba el procesamiento ya terminado de la entrada.
+
+**Bloqueante operativo encontrado en el camino**: el timeout de 3 minutos depende de
+`context.job_queue` de python-telegram-bot, que requiere el extra `[job-queue]`
+(`pip install "python-telegram-bot[job-queue]"`) — sin él, PTB loguea un
+`PTBUserWarning` y `context.job_queue` es `None` en tiempo de ejecución (el código ya lo
+detecta y solo loguea un warning, no rompe, pero el timeout queda inactivo). `requirements.txt`
+ya tenía el extra pineado (`python-telegram-bot[job-queue]==22.7`) pero el venv real estaba
+desincronizado (instalado antes sin el extra). Se instaló en el venv del usuario.
+
+**Bug real de infraestructura encontrado y corregido en el camino — corrupción de foreign keys
+en producción**: al reiniciar bot/API/worker para levantar el código nuevo, la migración
+`_migrate_people_type()` (que agrega el tipo `PEOPLE`, ya documentada como "resuelta" en 0.2
+Slice 3) corrió por primera vez contra la DB real (`project/database/jarvis.db`) — hasta ahora
+solo se había probado contra DBs de scratch. Esa migración hacía
+`ALTER TABLE memory_entries RENAME TO memory_entries_old` con `PRAGMA foreign_keys = OFF`. Por
+la semántica documentada de SQLite (`ALTER TABLE RENAME` solo reescribe las cláusulas
+`FOREIGN KEY` de *otras* tablas que apuntan a la tabla renombrada cuando `foreign_keys` está ON
+en ese momento), `inbox_queue`, `memory_entry_entities` y `memory_entry_projects` quedaron con
+`REFERENCES "memory_entries_old"(id)` grabado **permanentemente** en su SQL de creación — no es
+un problema transitorio ni una carrera entre procesos (esa fue la hipótesis inicial, descartada
+al confirmar que el error persistía tras reiniciar todo limpio). Cualquier `INSERT` posterior en
+esas tres tablas (que sí corre con `foreign_keys=ON`, como usa `get_connection()`) fallaba con
+`no such table: main.memory_entries_old` en cuanto esa tabla dejaba de existir — exactamente el
+error que vio el usuario al responder la aclaración.
+
+Corregido en `jarvis/db/database.py::_migrate_people_type()`: ya no renombra `memory_entries` en
+ningún momento — construye la tabla nueva bajo un nombre temporal
+(`memory_entries_new`, extraído del `CREATE TABLE` real de `jarvis/db/schema.py` vía regex para
+no duplicar la definición), copia los datos, borra la vieja, y recién ahí renombra la nueva a
+`memory_entries`. Como ninguna otra tabla referencia `memory_entries_new` por nombre, no hay nada
+que SQLite necesite reescribir — el bug queda estructuralmente imposible, no solo mitigado.
+Verificado simulando una DB pre-migración real (con las 3 tablas hijas ya creadas con su FK
+correcta, como estaba `jarvis.db` de antes de hoy): tras migrar, las tres siguen apuntando a
+`memory_entries` (no a `_old` ni a `_new`), los datos viejos se preservan, y la FK realmente
+funciona (`INSERT` con `entry_id` inexistente rechazado). La DB real ya corrompida se reparó
+aparte (backup automático a `database/jarvis.bak-repair-{timestamp}.db`, después reconstruyendo
+las 3 tablas rotas con la misma técnica) sin perder ninguna fila (mismos conteos antes/después:
+12 `memory_entries`, 2 `inbox_queue`, 1 `memory_entities`, 1 `memory_projects`).
+
+**Lección operativa para sesiones futuras**: Python no hace hot-reload — reiniciar bot.py/uvicorn
+después de cambiar código Jarvis es obligatorio para que el código nuevo se cargue (esto costó
+tiempo de diagnóstico en esta sesión: un `/j` de prueba pasó de largo sin preguntar porque el bot
+corriendo era de antes del cambio). El venv de este proyecto usa un `python.exe` stub que
+spawnea el intérprete real como proceso hijo — cada proceso lanzado aparece como **dos** PIDs en
+`Get-CimInstance Win32_Process` (mismo `CommandLine`, mismo `CreationDate`); no es una instancia
+duplicada real, hay que matar ambos PIDs del par al reiniciar.
+
+Ver decisión completa en `Cerebro/decisiones-implementacion.md` (2026-08-26, "Aviso de listo +
+corrección de corrupción de foreign keys en `_migrate_people_type`").
+
+---
+
+## Aclaración pre-enqueue para capturas DECISION (2026-08-26)
+
+Nueva feature: una captura clasificada como `DECISION` sin razonamiento explícito ("decidí usar
+gemma3", sin ningún "porque...") antes se guardaba igual y el porqué se perdía para siempre —
+el worker es fire-and-forget (polling a `inbox_queue`, sin canal de vuelta al usuario), así que
+cualquier pregunta de aclaración tiene que resolverse **antes** de encolar, como responsabilidad
+del cliente, no del worker.
+
+**Divergencia con el pedido original, encontrada leyendo el código (no bloqueante, documentada
+al momento)**: la tarea pedía tocar `JarvisChat.jsx` como cliente frontend de captura, pero ese
+componente es el chat de **consulta RAG** (`jarvisQuery` → `POST /jarvis/query`), sin ningún
+vínculo con captura. La captura real desde el frontend pasa por `JarvisCaptureModal.jsx` (botón
+"Capturar" del TopBar) → `jarvisCapture()` → `POST /jarvis/capture`. Se implementó ahí en su
+lugar — es la única lectura consistente con lo que el código hace hoy.
+
+**Módulo nuevo compartido `jarvis/captures/clarification.py`** (mismo patrón ya documentado:
+lógica multi-cliente vive en `jarvis/`, nunca duplicada por handler):
+- `infer_type_hint(content) -> str` — heurística sin LLM (RAW|DECISION|PROJECT), migrada desde
+  el `_infer_type_hint` que antes vivía solo en `jarvis_handlers.py` (ahora también la usa la
+  API para el modo `check_clarification`).
+- `needs_clarification(text, detected_type) -> (bool, str|None)` — pura salvo la llamada
+  best-effort al modelo local (`JARVIS_LOCAL_MODEL`, sin especificar, nunca el externo) cuando
+  las keywords de razonamiento ("porque", "ya que", "debido a", "razón", ...) no alcanzan.
+  Cualquier excepción del modelo → `(False, None)`, nunca bloquea la captura.
+- **Hallazgo real probando el caso de ejemplo de la propia tarea**: con un prompt simple
+  ("¿este texto incluye el razonamiento?") `gemma3:12b` respondió "sí" para
+  `"decidí usar gemma3"` (sin ninguna razón) — falso positivo que habría hecho fallar
+  exactamente el caso de verificación pedido. Con un prompt de few-shot (4 ejemplos: 2 con
+  razón, 2 sin razón) acierta los 4 casos de control probados. Ver decisión completa en
+  `Cerebro/decisiones-implementacion.md`.
+
+**Telegram** (`project/mybot/jarvis_handlers.py` + `bot.py`): `/j` calcula
+`needs_clarification` antes de `capture_raw()`. Si hace falta, guarda el pendiente en
+`context.user_data["jarvis_clarification"]` y programa un timeout de 3 min vía
+`context.job_queue.run_once()` — el job de timeout no depende de `context.user_data` (un job
+solo lo tiene poblado si se le pasó `user_id=` al programarlo; acá viaja todo en `job.data` para
+evitar ese problema de scoping de PTB). Si el usuario responde a tiempo, `bot.py::handle_message`
+llama `jh.handle_pending_clarification()` **antes** de cualquier otro routing de texto libre
+(si no, la respuesta a "¿Por qué...?" se interpretaría como una hoja nueva de la Bóveda) —
+cancela el job de timeout y encola con `"\nRazón: {respuesta}"` concatenado. Si no responde,
+el job de timeout captura el texto original tal cual, sin razón: la captura nunca se pierde.
+
+**API** (`jarvis/api/router.py`): `POST /jarvis/capture` gana dos campos opcionales del body
+(no query param — el endpoint ya es JSON-body-only): `check_clarification: bool` (si hace
+falta, responde `{"clarification_needed": true, "question": ...}` sin encolar) y
+`clarification: str` (concatena la razón y encola, sin volver a chequear). Sin ninguno de los
+dos, comportamiento idéntico al de antes — opt-in real, verificado con tests contra una DB de
+scratch.
+
+**Frontend** (`JarvisCaptureModal.jsx` + `useStore.js::jarvisCapture`): el submit ahora manda
+`check_clarification: true`; si la API responde con la pregunta, la modal pasa a un segundo
+paso (pregunta + textarea de razón) con tres acciones explícitas: "Guardar con esta razón",
+"Guardar sin razón", "Descartar" (este último SÍ pierde la captura a propósito — es una
+decisión explícita del usuario en un modal, no un timeout no supervisado como en Telegram, así
+que no viola la garantía de "nunca se pierde una captura" de ese canal).
+
+Verificado en este entorno (Ollama real, `gemma3:12b`, DB de scratch, sin tocar `jarvis.db`
+real): `needs_clarification` con los 4 casos de control (2 DECISION sin razón, 1 con razón vía
+keyword, 1 no-DECISION) + el flujo completo de `POST /jarvis/capture` (check → pregunta sin
+encolar → reintento con `clarification` → entrada en DB con ambas partes concatenadas) + build
+de producción del frontend (`vite build`) sin errores. **No probado en este entorno**: flujo
+real por Telegram de punta a punta (sin token de Telegram disponible acá) ni el timeout de 3
+min en vivo — queda pendiente de que el usuario lo confirme (ver
+`Cerebro/decisiones-implementacion.md` para el detalle completo).
+
+Ver decisión completa en `Cerebro/decisiones-implementacion.md` (2026-08-26, "Aclaración
+pre-enqueue para capturas DECISION").
+
+---
+
+## Fix: auto-linking de proyectos + merge conservador de alias de entidades (2026-08-26)
+
+Dos gaps encontrados escribiendo `Cerebro/como-explotar-jarvis.md` (leyendo el código, no la
+spec) y resueltos en la misma sesión:
+
+- **`memory_projects`/`memory_entry_projects` quedaban siempre vacías** — el campo `"project"`
+  que el clasificador ya devolvía desde S1 nunca se usaba. Módulo nuevo
+  `jarvis/projects/service.py::link_project_for_entry()`, llamado desde `processor.py` después
+  de clasificar (best-effort, no bloquea el procesamiento si falla). El boost de retrieval por
+  proyecto de 0.2-S2 (`_match_project_entry_ids`) ahora sí se activa en uso normal.
+- **Entidades con nombres distintos para la misma persona quedaban siempre separadas** —
+  `_find_or_create_entity()` (`jarvis/entities/service.py`) solo matcheaba nombre exacto contra
+  `name`, nunca contra `aliases` (que además nunca se poblaba). Ahora hace match exacto contra
+  nombre o alias, y si no hay match exacto intenta fusión conservadora por prefijo de tokens
+  ("Martín" + "Martín López" → misma entidad) **solo cuando hay un único candidato posible** —
+  con dos "Martín *" ya existentes, o con menciones descriptivas tipo "el Martín del trabajo",
+  no fusiona (evita adivinar entre personas distintas).
+
+Verificado con mocks (sin Ollama disponible en este entorno) contra los tres casos de la guía:
+merge inequívoco, no-merge por ambigüedad, no-merge por calificador descriptivo. Detalle completo
+en `Cerebro/decisiones-implementacion.md` (2026-08-26, "Fix: auto-linking de proyectos + merge
+conservador de alias de entidades"). **Pendiente**: confirmar en una sesión con Ollama real
+corriendo el worker de punta a punta — no se pudo correr el pipeline completo en este entorno.
+
+---
+
+## Jarvis 0.2 — Slice 3: memoria de tipo PEOPLE (COMPLETO 2026-08-26)
+
+Tercer slice de 0.2. Hasta ahora Jarvis no distinguía *sobre quién* trata una entrada —
+"hablé con Martín sobre X" y "hablé con Ana sobre X" son dos `SEMANTIC`/`PROJECT` sueltas sin
+ningún vínculo entre sí ni forma de preguntar "¿qué sé sobre Martín?" salvo que su nombre
+apareciera literal en la búsqueda semántica de esa consulta puntual. Slice 3 agrega un tipo de
+entrada `PEOPLE` y una capa liviana de extracción/vinculación de entidades (personas y
+organizaciones) sobre las entradas existentes.
+
+**Schema** (`jarvis/db/schema.py`):
+- `CHECK (type IN (...))` de `memory_entries` ahora incluye `'PEOPLE'`.
+- Tablas nuevas: `memory_entities` (`entity_id`, `name`, `aliases` JSON, `entity_type`
+  `person`|`organization`, `user_id`, `first_seen`, `last_seen`, `notes`) y
+  `memory_entry_entities` (`entry_id`, `entity_id`, `relation` `mentioned`|`author`|`subject`,
+  PK compuesta). Índices `idx_men_user`, `idx_men_name`, `idx_mee_entity`.
+- **Migración del CHECK constraint** (`jarvis/db/database.py::_migrate_people_type()`): SQLite
+  no soporta `ALTER TABLE` sobre un `CHECK` existente — se resolvió con rebuild completo de la
+  tabla (`RENAME` → recrear `memory_entries` desde `SCHEMA` → `INSERT...SELECT` de las columnas
+  → `DROP` de la vieja), gateado por si `'PEOPLE'` ya aparece en `sqlite_master.sql` para no
+  correr dos veces. Mismo patrón de idempotencia que las migraciones livianas anteriores
+  (`ADD COLUMN`), pero con el rebuild completo que exige un cambio de `CHECK`.
+- `_VAULT_SUBDIRS` (`database.py`) y `_TYPE_TO_SUBDIR` (`jarvis/vault/writer.py`) con entrada
+  `PEOPLE` — mismo patrón que los otros tres tipos, vault en `vault/PEOPLE/`.
+
+**Extracción de entidades — módulo nuevo `jarvis/entities/service.py`:**
+- `extract_entities(content)` — llama al modelo **local** (`JARVIS_LOCAL_MODEL`, nunca el
+  externo — es extracción barata) pidiendo JSON `[{"name", "type": "person"|"organization"}]`.
+  Nunca lanza: JSON inválido, lista vacía, o cualquier excepción → `[]` y logueo de warning.
+- `link_entities_for_entry(entry_id, entities, entry_type, user_id)` — por cada entidad,
+  `_find_or_create_entity()` busca por `name` case-insensitive; si existe actualiza
+  `last_seen`, si no crea la fila. Luego `_link_entry_entity()` hace upsert en
+  `memory_entry_entities` (`ON CONFLICT (entry_id, entity_id) DO UPDATE`). Si la entrada es
+  `PEOPLE` y la primera persona detectada coincide con el sujeto de la nota, la relación es
+  `subject`; el resto (y todas las de entradas no-`PEOPLE`) quedan `mentioned`. Nunca lanza.
+- `match_entities_in_text()` / `get_entity_entry_ids()` / `list_entities()` /
+  `get_entries_for_entity()` — lectura para retriever/query/API, todas con `valid_to IS NULL`
+  donde corresponde (una entrada superseded por consolidación no debe reaparecer tampoco vía
+  entidades).
+
+**Integración en el worker** (`jarvis/worker/processor.py`): después de clasificar y actualizar
+la entrada (`update_entry`), un bloque `try/except` propio llama `extract_entities()` →
+`link_entities_for_entry()`, gateado por `MANIFEST.assert_allowed("extract_entities"/
+"link_entities")` (nuevas operaciones agregadas a `jarvis/worker/task_manifest.py`). El
+`try/except` está **duplicado a propósito**: además de que `extract_entities`/
+`link_entities_for_entry` nunca lanzan internamente, el call site en `processor.py` los envuelve
+de nuevo — cumple literal el requisito de la tarea ("la extracción no puede fallar el
+procesamiento normal") sin depender únicamente de la disciplina interna del módulo nuevo.
+
+**Retrieval con boost de entidades** (`jarvis/retriever/retriever.py`): `_TYPE_WEIGHT` ahora
+tiene `PEOPLE: 0.75` (entre `PROJECT` 0.7 y `SEMANTIC` 0.8 — juicio de valor: una nota "sobre
+alguien" es más específica que una nota semántica genérica pero no tan explícitamente accionable
+como una `DECISION`). `_coarse_filter()` suma una tercera señal, `entity_entry_ids`, vía
+`_match_entity_entry_ids()` (substring case-insensitive contra `name`/`aliases` de
+`memory_entities`). `retrieve()` carga esas entradas por separado y las antepone al resultado
+normal con `_merge_entity_first()` (dedup, resto de los `n_results` slots relleno con la
+búsqueda semántica de siempre). **Interfaz de `retrieve()` sin cambios** — mismo enfoque que
+Slice 2: la señal nueva se computa aparte y se mezcla al final, en vez de threadearla por toda
+la cadena de llamadas internas.
+
+**Prompt del modelo externo** (`jarvis/query/service.py`): `_build_entity_sections(question,
+user_id)` detecta entidades conocidas mencionadas en la pregunta (`match_entities_in_text`),
+busca sus entradas vinculadas (`get_entries_for_entity`), las pasa por el Privacy Gateway
+(`filter_context` — mismo boundary que el contexto RAG normal, ninguna entidad se salta el
+filtro de privacidad) y arma bloques `"Lo que sé sobre [nombre]:\n- hecho1\n- hecho2"` que se
+agregan al **system prompt** (no al contexto RAG del mensaje de usuario, para diferenciar
+claramente "memoria general recuperada" de "lo que ya sé de esta persona puntual"). Nunca lanza
+— `""` si falla cualquier paso. **Interfaz de `query()` sin cambios.**
+
+**API** (`jarvis/api/router.py`): `GET /jarvis/entities` (lista `name`/`entity_type`/`last_seen`,
+`user_id` por query param) y `GET /jarvis/entities/{name}` (entradas vinculadas; `404` si el
+nombre no matchea ninguna entidad — nota: también devuelve `404` si la entidad existe pero sin
+ninguna entrada vigente vinculada, ej. todas superseded por consolidación; no se distinguen los
+dos casos porque para el uso real de la API esa distinción no aporta, y separar ambos requeriría
+una query extra solo para el mensaje de error).
+
+**Verificado con datos reales** (Ollama real, `gemma3:12b` + `nomic-embed-text`, sin mocks,
+contra una DB/vault/chroma de scratch aislada de `project/database/jarvis.db`, borrada al
+terminar):
+- Captura `"Tuve una reunión con Martín Rodríguez sobre el roadmap de Jarvis..."` →
+  `process_entry()` clasificó `PROJECT` (razonable, la nota es sobre el roadmap más que "sobre"
+  la persona en sí — no se forzó un caso `PEOPLE` puro para no manipular el test) y extrajo dos
+  entidades reales: `Martín Rodríguez` (person) y `Jarvis` (organization).
+- `memory_entities` tiene ambas filas; `list_entities()` (backing de `GET /jarvis/entities`) las
+  devuelve.
+- `get_entries_for_entity("Martín Rodríguez")` (backing de `GET /jarvis/entities/{name}`)
+  devuelve la entrada capturada.
+- `query("¿Qué sé sobre Martín Rodríguez?")` respondió correctamente citando la reunión y el
+  roadmap (modo local, sin `OPENAI_API_KEY` real configurada en este entorno — mismo fallback ya
+  validado en slices anteriores).
+- Tildes verificadas en UTF-8 real leyendo la DB directamente (el mojibake visto en la consola
+  de Windows/cp1252 al imprimir es solo de terminal, mismo hallazgo ya documentado en S1/S3).
+
+Ver decisión completa en `Cerebro/decisiones-implementacion.md` (2026-08-26, "Jarvis 0.2, Slice
+3: memoria de tipo PEOPLE").
+
+---
+
+## Bake-off de modelo local + fix `valid_to` en retrieval (2026-08-26)
+
+**Modelo local ganador: `gemma3:12b`** (reemplaza a `llama3.2:3b`). Bake-off contra 4
+candidatos ya instalados en Ollama (`llama3.2:3b`, `deepseek-r1:7b`, `gemma3:12b`,
+`mistral-small:22b`), corridos vía LiteLLM (`ollama_chat/<modelo>`, igual que en producción)
+con 3 prompts representativos de las 3 tareas reales del modelo local:
+
+| Modelo | A: consolidación (`same_fact`) | B: clasificación captura (`DECISION`) | C: filtro coarse (`DECISION`) | Score | Tiempo total |
+|---|---|---|---|---|---|
+| llama3.2:3b (baseline) | ✗ `different` | ✓ | ✗ `SEMANTIC` | 1/3 | 29.6s |
+| deepseek-r1:7b | ✗ `different` | ✓ | ✗ `SEMANTIC` | 1/3 | 183.9s |
+| **gemma3:12b** | **✓** | **✓** | **✓** | **3/3** | 131.9s |
+| mistral-small:22b | ✗ `contradiction` | ✓ | ✓ | 2/3 | 205.7s |
+
+`gemma3:12b` es el único candidato con 3/3 y, de paso, más chico y más rápido que
+`mistral-small:22b` (el otro candidato "grande"). Confirma en datos reales lo que S1 ya había
+detectado empíricamente sobre `llama3.2:3b` en la tarea de consolidación.
+
+**Configuración ahora vía env var** — `JARVIS_CLASSIFY_MODEL` (nombre viejo, describía solo
+uno de sus usos) se renombró a **`JARVIS_LOCAL_MODEL`** en `jarvis/config.py`, mismo patrón
+que `JARVIS_REASON_MODEL`. Default: `ollama_chat/gemma3:12b`. Seteado explícito en
+`project/.env`; documentado (comentado, con default en código) en `project/.env.example`.
+
+División de tareas por modelo (sin cambios de diseño, ahora documentada en `.env.example`):
+- **Local** (`JARVIS_LOCAL_MODEL`): clasificación de capturas (`jarvis/worker/processor.py`),
+  filtro coarse del retriever (`jarvis/retriever/retriever.py`).
+- **Externo** (`JARVIS_REASON_MODEL`, con fallback automático a local si falla o el
+  presupuesto está agotado): respuesta conversacional (`jarvis/query/service.py`),
+  consolidación (`jarvis/worker/consolidation.py`).
+
+**Fix — gap de S2 cerrado**: `retrieve()` ahora filtra `valid_to IS NULL` en
+`_load_entries()`, `_fallback_rows()` y `_match_project_entry_ids()`
+(`jarvis/retriever/retriever.py`) — una entrada marcada `superseded` por el job de
+consolidación ya no puede volver a aparecer en el contexto RAG. Filtro aplicado en SQLite
+(fuente de verdad), no vía metadata de ChromaDB (los embeddings ya existentes no tienen ese
+campo; agregar el filtro ahí exigiría backfillear metadata). El multiplicador de `fetch` en
+`_retrieve_chromadb()` subió de `n_results * 2` a `n_results * 3` para compensar candidatos
+del top-K descartados por obsoletos.
+
+Verificado con datos reales (`project/database/jarvis.db`, 10 entradas migradas de la
+Bóveda, ninguna con `valid_to` seteado todavía): `retrieve()` sobre "¿Qué tengo guardado
+sobre React?" siguió devolviendo 5 resultados correctos (mismo comportamiento que antes,
+sin regresión) usando el nuevo `JARVIS_LOCAL_MODEL` para el filtro coarse.
+
+Ver decisión completa en `Cerebro/decisiones-implementacion.md` (2026-08-26, "Bake-off de
+modelo local" y "Fix: retrieve() ahora filtra valid_to IS NULL").
+
+---
+
+## Jarvis 0.2 — Slice 2: Retrieval coarse-to-fine (COMPLETO 2026-08-25)
+
+Segundo slice de 0.2. `retrieve()` (`jarvis/retriever/retriever.py`) hacía búsqueda plana
+(embedding de la pregunta → ChromaDB → top-K → rankeo por tipo+similitud+recencia); con las
+10 entradas reales actuales funciona bien, pero mezclaba tipos y proyectos sin distinción —
+con cientos de entradas eso se traduce en ruido. Ahora reduce el espacio de búsqueda en dos
+pasos antes de rankear.
+
+**Interfaz sin cambios**: `retrieve(question, n_results=5, user_id="default")` sigue
+devolviendo la misma lista de dicts que antes — `jarvis/query/service.py` y la API `/jarvis/*`
+no se tocaron, verificado con un smoke test de punta a punta (ver detalle abajo).
+
+**Paso 0 — filtro coarse en SQLite, sin embeddings** (`_coarse_filter()`): calcula tres
+señales independientes a partir de la pregunta:
+- `type` — `DECISION` si hay keywords de decisión ("decidimos", "elegí", ...), `SEMANTIC` si
+  hay keywords de pregunta factual general ("qué es", "cómo funciona", ...). Si ninguna
+  keyword matchea y tampoco hay señal de proyecto ni de recencia, se consulta una vez al
+  modelo local (`JARVIS_CLASSIFY_MODEL`, nunca el externo) para intentar clasificar; si el
+  modelo no puede o falla, no se filtra por tipo (mismo comportamiento que antes).
+- `project_entry_ids` — si la pregunta menciona el nombre de un proyecto existente en
+  `memory_projects` (substring case-insensitive), el set de `entry_id`s asociados vía
+  `memory_entry_projects`.
+- `recency_first` — si hay keywords de recencia ("último", "reciente", "hoy", ...).
+
+**Paso 1-2 — búsqueda semántica dentro del subconjunto filtrado**:
+- Si se identificó un proyecto: similitud coseno calculada en Python contra solo los
+  embeddings de ese proyecto (`collection.get(ids=...)`, mismo patrón que
+  `consolidation.py::_find_similar_pairs()`), en vez de una ANN sobre toda la colección.
+- Si no (o el proyecto no tuvo resultados útiles): ANN de ChromaDB con
+  `where={"type": ...}` cuando hay un `type` del filtro coarse. Si ese tipo no tiene ningún
+  candidato en Chroma, se reintenta sin `where=` — el filtro coarse nunca puede devolver
+  vacío por elegir mal un tipo.
+- El fallback de LIKE en SQLite (`_retrieve_sqlite_fallback()`, cuando ChromaDB falla o está
+  vacío) recibe el mismo filtro coarse, con el mismo degrade a sin filtro.
+
+**Ranking**: igual que antes (tipo 40% + similitud 50% + recencia 10%, bonus binario de 7
+días) salvo cuando `recency_first=True`: ahí el orden pasa a ser literalmente por
+`recorded_at` DESC (epoch como término dominante del score, similitud+tipo solo desempatan
+entradas con el mismo `recorded_at` exacto) — se probó primero una decadencia continua
+mezclada con similitud y no discriminaba lo suficiente entre entradas de pocos días de
+diferencia.
+
+**No se filtra por `user_id` vía `where=` de ChromaDB** (aunque la tarea lo sugería): los
+metadatos que `processor.py` guarda por embedding no incluyen `user_id` (mismo hallazgo que
+Slice 1 de 0.2 sobre por qué agrupa por SQLite y no por metadata de Chroma) — filtrar por una
+clave que las 10 entradas reales no tienen las habría excluido a todas. El filtrado por
+`user_id` se mantiene donde ya estaba, post-ChromaDB, sobre SQLite (`_load_entries()`).
+
+**Limitación conocida y aceptada** (mismo patrón que la de consolidación en Slice 1): el
+modelo local (`llama3.2:3b`) puede clasificar mal preguntas muy cortas o ambiguas — probado
+con la pregunta de una sola palabra "mouse", clasificada como `SEMANTIC` en vez de ambigua,
+lo que dejó afuera una entrada `RAW` relevante. Con preguntas completas en lenguaje natural
+(el uso real esperado) el modelo devolvió correctamente "ambiguo" en los casos probados. El
+filtro coarse está diseñado para degradar a "sin filtro" solo cuando el tipo elegido no tiene
+ningún candidato — no cuando tiene candidatos pero son los equivocados; eso es una limitación
+de calidad del modelo 3B, no un bug de la lógica de filtrado (misma distinción que ya se hizo
+para consolidation.py).
+
+**Brecha preexistente notada en esta sesión, arreglada en sesión posterior (2026-08-26)**:
+`retrieve()` nunca filtró por `valid_to IS NULL` — una entrada marcada `superseded` por el job
+de consolidación (Slice 1) todavía podía aparecer en el contexto RAG. Ver sección "Bake-off de
+modelo local + fix `valid_to` en retrieval" al principio de este documento.
+
+**Verificado con datos reales** (`project/database/jarvis.db`): 4 entradas de prueba
+(`DECISION`/`SEMANTIC`/`RAW`/`PROJECT`, `user_id` dedicado, embeddings reales vía Ollama) +
+un proyecto de prueba, insertados temporalmente y borrados al final junto con sus embeddings
+de Chroma:
+- Pregunta de decisión → devolvió solo la entrada `DECISION`.
+- Pregunta factual general ("¿Qué es ChromaDB?") → devolvió solo la `SEMANTIC`.
+- Pregunta mencionando el proyecto de prueba → devolvió solo la entrada vinculada a ese
+  proyecto (búsqueda scoped, sin ANN sobre toda la colección).
+- Pregunta de recencia ("¿Qué fue lo último que guardé?") → devolvió las 4 entradas en orden
+  cronológico exacto (la de hoy primero, la de hace 40 días última).
+- Pregunta ambigua en lenguaje natural → sin filtro de tipo, comportamiento normal.
+
+Además, smoke test de punta a punta contra `jarvis/query/service.py` real (sin tocarlo, sin
+mocks) con una pregunta sobre las 10 entradas reales migradas de la Bóveda ("¿Qué tengo
+guardado sobre React?", `user_id=default`): `context_count=8`, citó correctamente la entrada
+`useCallback - React`, respuesta coherente — confirma que el resto del pipeline (Privacy
+Gateway, historial, `call_reason()`, API) sigue funcionando igual con la nueva implementación
+de `retrieve()`.
+
+Ver decisión completa en `Cerebro/decisiones-implementacion.md` (2026-08-25, "Jarvis 0.2,
+Slice 2: Retrieval coarse-to-fine").
+
+---
+
+## Fix — Consolidación usa el modelo de razonamiento externo, no solo el local (2026-08-25)
+
+La limitación de `llama3.2:3b` documentada en Slice 1 (clasificó mal el caso de ejemplo
+"vivo en Madrid" → "me mudé a Buenos Aires") se resolvió: `_resolve_pair()`
+(`jarvis/worker/consolidation.py`) ahora llama `call_reason()` (modelo externo
+`gpt-5.4-mini`, con el fallback a local ya incorporado en esa función si el externo falla o
+el budget está agotado) en vez de forzar `JARVIS_CLASSIFY_MODEL`. El volumen del job es bajo
+(~20 entradas/día) así que el costo es despreciable frente a la mejora de calidad. Verificado
+con los tres casos de la comparación de control (mudanza, contradicción, temas distintos) a
+través de `call_reason()` real: los tres clasificaron correctamente esta vez.
+
+Ver decisión completa en `Cerebro/decisiones-implementacion.md` (2026-08-25, "Fix:
+consolidación usa el modelo de razonamiento externo").
+
+---
+
+## Jarvis 0.2 — Slice 1: Job de consolidación diaria de memoria (COMPLETO 2026-08-25)
+
+Primer slice de 0.2 (Memory Maintenance, spec §25). Resuelve que hechos viejos y hechos
+nuevos sobre lo mismo (ej. "vivo en Madrid" en enero, "me mudé a Buenos Aires" en agosto)
+coexistían en `memory_entries` sin que nada le dijera al sistema cuál es vigente,
+contaminando el RAG con conocimiento obsoleto.
+
+**Archivo nuevo:** `jarvis/worker/consolidation.py` — `run_consolidation()`, `should_run()`.
+
+**Qué hace, en orden, sobre entradas "vigentes" (`valid_to IS NULL`):**
+1. Agrupa `memory_entries` activas por `(type, user_id)` y, si hay 2+ en un grupo, lee sus
+   embeddings de ChromaDB (`collection.get(ids=..., include=["embeddings"])`) y calcula
+   similitud coseno en Python puro (sin numpy) para todos los pares del grupo. Pares con
+   coseno > 0.92 son candidatos.
+2. Para cada candidato, llama al modelo local (`JARVIS_CLASSIFY_MODEL`, nunca al externo)
+   con un prompt que pide `{"relation": "same_fact"|"contradiction"|"different", "newer_id": ...}`.
+   - `same_fact` → el más viejo recibe `valid_to = recorded_at` del más nuevo (nunca se borra).
+     Si el modelo no identifica cuál es más nuevo, desempata por `recorded_at`.
+   - `contradiction` → ambos bajan `confidence` a la mitad y se loguea el conflicto en
+     `jarvis_policies` (`policy_type='consolidation_conflict'`) para revisión manual.
+   - `different` (o JSON no parseable) → se ignora, ninguna mutación.
+3. Marca stale por edad: `valid_from` > 90 días y `confidence` < 0.4 → `valid_to = now`
+   (UPDATE directo en SQL, sin pasar por el modelo).
+4. Registra la corrida en `jarvis_policies` (`policy_type='consolidation_last_run'` con el
+   timestamp, y `'consolidation_run'` con el resumen JSON `{analyzed, obsolete, conflicts, errors}`)
+   y lo loguea.
+
+**Gating de "una vez por día"**: sin tabla nueva — se reutiliza `jarvis_policies` (ya pensada
+como "policy store separado, el LLM no puede escribir ahí directamente" — acá escribe código
+confiable, no el LLM). `should_run()` lee el `consolidation_last_run` más reciente; si no hay
+ninguno o pasaron ≥24h, corre. Se llama desde `jarvis/worker/main.py`: una vez al arrancar el
+worker (después del crash recovery) y en cada tick ocioso del loop (cuando no hay `PENDING`).
+
+**No bloquea el loop de polling**: `_maybe_run_consolidation()` en `main.py` lanza el job en un
+`threading.Thread(daemon=True)` aparte; el loop principal sigue procesando `inbox_queue` sin
+esperarlo. Se guarda la referencia al thread para no lanzar dos corridas en paralelo mientras
+una sigue viva.
+
+**Si ChromaDB no está disponible**: `_find_similar_pairs()` atrapa la excepción, loguea un
+warning y devuelve `[]` — el job sigue con el paso 3 (stale por edad) sin abortar.
+
+**Schema**: se agregó columna `valid_to DATETIME` a `memory_entries` (`jarvis/db/schema.py` +
+migración `ALTER TABLE` en `jarvis/db/database.py::_migrate()`, mismo patrón que `embedded_at`
+en S2). `update_entry()` (`jarvis/memory/service.py`) ahora acepta `valid_to` y `confidence`.
+
+**Verificado con datos reales** (`project/database/jarvis.db`, las 10 entradas SEMANTIC
+migradas de la Bóveda, Ollama real con `llama3.2:3b`/`nomic-embed-text`, ChromaDB real):
+- Corrida completa sin mocks: 10 analizadas, 0 obsoletas, 0 conflictos, sin errores. Se
+  verificó aparte que el cálculo de similitud efectivamente corrió sobre embeddings reales
+  (similitud máxima real entre las 10 entradas: 0.76, por debajo del umbral 0.92 — cero falsos
+  positivos, coherente con que son 10 links/notas de temas distintos).
+- La lógica de mutación (`_resolve_pair`, `_mark_stale_by_age`) se probó por separado con datos
+  sintéticos y el LLM real mockeado por verdicts controlados (`same_fact`, `contradiction`,
+  `different`) para aislar la corrección del código de la calidad de juicio del modelo 3B:
+  las tres rutas mutan la DB exactamente como se espera (`valid_to` en el viejo, `confidence`
+  a la mitad en ambos + fila en `jarvis_policies`, sin mutación).
+- El fallback sin ChromaDB se probó mockeando `get_collection()` para que lance excepción:
+  el job igual corre sin errores y solo ejecuta el paso de stale por edad.
+- El gating de thread en `worker/main.py` se probó con `run_consolidation` mockeado (sleep
+  simulado): una segunda llamada a `_maybe_run_consolidation()` mientras el thread sigue vivo
+  no lanza un segundo thread; con `should_run()` en `False` tampoco lanza ninguno.
+
+**Resuelto en sesión posterior (2026-08-25)**: la limitación de abajo se corrigió cambiando
+`_resolve_pair()` para usar `call_reason()` (modelo externo con fallback local ya
+incorporado) en vez de forzar el modelo local — ver sección "Fix — Consolidación usa el
+modelo de razonamiento externo" más arriba. El párrafo original queda como registro histórico
+de por qué se tomó esa decisión.
+
+**Limitación real encontrada (no es bug, es la calidad del modelo 3B)**: probando el caso de
+ejemplo de la propia tarea ("vivo en Madrid" → "me mudé a Buenos Aires") con `llama3.2:3b` real
+(sin mock), el modelo respondió `"different"` en vez de `"same_fact"`, incluso con un prompt de
+few-shot que incluía ese mismo ejemplo resuelto textualmente. No es una falla del código — la
+lógica de aplicación de veredictos es correcta y se verificó por separado con el LLM mockeado
+(ver arriba). Es una limitación de razonamiento esperable en un modelo de 3B para esta tarea,
+coherente con el propio riesgo que la spec señala en §25 ("detectar duplicados, contradicciones
+y conocimiento obsoleto de forma automática y confiable es uno de los problemas más difíciles de
+resolver incluso con modelos avanzados... el MVP solo requiere memoria que funcione bien, no
+perfecta"). No se cambió de modelo — la tarea pide explícitamente usar solo el local para este
+job. Con volumen real de datos y casos más obvios (mismo wording, mismo tema exacto) es probable
+que acierte más; vale la pena revisar la calidad de clasificación una vez que haya más entradas
+reales para observar en producción, y considerar ajustar el prompt o el umbral de similitud si
+se ve que sistemáticamente subclasifica `same_fact` como `different`.
+
+Ver decisión completa en `Cerebro/decisiones-implementacion.md` (2026-08-25, Slice 1 de 0.2).
+
+---
 
 ## Jarvis 0.1 — COMPLETO (S1 a S5), QA de punta a punta hecho
 
@@ -139,6 +1631,28 @@ Los tres fixes verificados en aislado y confirmados en vivo por Telegram.
 encendido) usa el mismo `TELEGRAM_BOT_TOKEN` que este Windows — dos instancias no pueden convivir
 (409 Conflict). Hay que pausar el bot del homelab para probar acá. Jarvis tampoco está desplegado en
 el homelab todavía, solo en este Windows.
+
+## Modelo externo (OpenAI) — configurado y validado (2026-08-25, sesión posterior)
+
+`OPENAI_API_KEY` real cargada en `project/.env` (plan de API propio del usuario, separado de
+ChatGPT Plus) y `JARVIS_REASON_MODEL=openai/gpt-5.4-mini` explícito en `project/.env` (antes
+quedaba en el default `openai/gpt-4o-mini` de `jarvis/config.py`, nunca seteado). Verificado en
+vivo, backend + bot corriendo juntos (sin conflicto con el homelab en esta corrida):
+
+- `/jq` real por Telegram → respuesta coherente **sin** prefijo `[modo local]`, categorizó 8
+  notas de la Bóveda correctamente. `GET /jarvis/budget` pasó de `spent_usd=0.0` a
+  `spent_usd=0.005014` tras esa única consulta — confirma que `gpt-5.4-mini` cuesta bien por
+  debajo de 1 centavo por consulta típica, dejando margen amplio dentro de
+  `JARVIS_DAILY_BUDGET_USD=1.0`.
+- Fallback a modo local re-verificado en este entorno (antes solo probado con mocks/budget
+  sintético en la corrida de QA end-to-end): con una `OPENAI_API_KEY` inválida,
+  `call_reason()` cae a `[modo local]` (`litellm.AuthenticationError` capturado por el
+  `except Exception` genérico). Con el budget forzado a `EXHAUSTED` (`record_usage` manual en
+  una DB de scratch aislada), `call_reason()` ni intenta el modelo externo y va directo a
+  `[modo local]`. Ambos casos probados contra `jarvis/llm/client.py` real, no mockeado.
+
+No hicieron falta cambios de código — `jarvis/config.py` y `jarvis/llm/client.py` ya leían y
+manejaban todo correctamente; solo faltaba la key y el modelo en `project/.env`.
 
 ## Migración real de la Bóveda — HECHA (2026-08-25, misma sesión)
 
@@ -410,10 +1924,10 @@ Worker poll → process_entry() → call_classify() (llama3.2:3b via LiteLLM)
 JARVIS_DB_PATH=         # default: project/database/jarvis.db
 JARVIS_VAULT_PATH=      # default: project/vault/
 JARVIS_CHROMA_PATH=     # default: project/database/chroma/
-JARVIS_CLASSIFY_MODEL=ollama/llama3.2:3b
+JARVIS_LOCAL_MODEL=ollama_chat/gemma3:12b   # default actualizado 2026-08-26, ver bake-off arriba
 JARVIS_REASON_MODEL=openai/gpt-4o-mini
 JARVIS_EMBED_MODEL=ollama/nomic-embed-text
-JARVIS_LOCAL_FALLBACK_MODEL=  # default: mismo que JARVIS_CLASSIFY_MODEL
+JARVIS_LOCAL_FALLBACK_MODEL=  # default: mismo que JARVIS_LOCAL_MODEL
 JARVIS_OLLAMA_API_BASE= # default: OLLAMA_BASE_URL
 JARVIS_DAILY_BUDGET_USD=1.0
 JARVIS_WORKER_POLL_INTERVAL=5
@@ -429,14 +1943,18 @@ OTEL_EXPORTER_OTLP_ENDPOINT=
 
 ## Próximos slices
 
-Ninguno planificado para 0.1 — Jarvis 0.1 está completo. Ver checklist de completitud al final de
-este documento para el alcance de 0.2+.
+Jarvis 0.1 completo. De 0.2, el Slice 1 (consolidación diaria de memoria), el Slice 2
+(retrieval coarse-to-fine) y el Slice 3 (memoria de tipo PEOPLE) ya están hechos — ver secciones
+al principio de este documento. Sin más slices de 0.2 planificados explícitamente todavía
+(duplicados/contradicciones cubiertos por S1, ranking coarse-to-fine cubierto por S2, entidades
+person/organization cubiertas por S3; falta Obsidian sync y PII detector completo, ver checklist
+de completitud para el alcance original de 0.1).
 
 ## Qué NO está todavía
 
-- **Migración Bóveda ejecutada**: el script de S5 existe y está verificado, pero la migración real
-  sobre `project/database/jarvis.db` del usuario no se corrió — la ejecuta el usuario cuando decida
-  (`python -m jarvis.cli.migrate_boveda`, sin `--dry-run`).
+- **Migración Bóveda ejecutada**: **YA SE CORRIÓ** (ver "Migración real de la Bóveda — HECHA"
+  más abajo) — las 10 hojas de la Bóveda están en `project/database/jarvis.db`. Este punto queda
+  como referencia histórica, no como pendiente.
 - Estado `OVERRIDE` del budget tracker (requiere UI adicional; no bloqueante para 0.1)
 - Detector completo de PII (0.2, explícito en la spec)
 - Clasificación automática de texto libre en Telegram (requiere UI de corrección; diferido)

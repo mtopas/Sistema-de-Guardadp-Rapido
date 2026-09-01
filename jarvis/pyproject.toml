@@ -14,6 +14,13 @@ dependencies = [
     "opentelemetry-exporter-otlp>=1.20.0",
     "python-dotenv>=1.0.0",
     "chromadb>=0.5.0",
+    # numpy>=2 (pulled transitively by chromadb/onnxruntime) crashes with SIGILL on
+    # arranque en CPUs viejas sin SSSE3/SSE4/AVX (visto en vivo en el homelab: AMD
+    # Athlon II X2 245, 2009 -- ver Cerebro/estado-actual.md, deploy 2026-08-26).
+    # numpy 1.26.4 confirmado funcional (import + chromadb upsert/get/query reales)
+    # en ese mismo host; <2 alcanza para evitar el wheel roto sin fijar una versión
+    # exacta que quede vieja innecesariamente en hardware moderno.
+    "numpy<2",
 ]
 
 [tool.setuptools.packages.find]

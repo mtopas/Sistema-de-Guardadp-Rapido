@@ -149,6 +149,14 @@ scp -r ./project mtopas@192.168.137.10:~/
 ```
 
 ```powershell
+# jarvis/ también hace falta -- vive como hermano de project/, fuera del build context
+# viejo (antes de 2026-08-26 no se copiaba nunca). __pycache__ e Investigacion/ no hacen
+# falta en el server:
+tar czf - --exclude='__pycache__' --exclude='Investigacion' -C D:\Sistema-de-Guardadp-Rapido jarvis `
+  | ssh mtopas@192.168.137.10 "mkdir -p ~/jarvis && tar xzf - -C ~/jarvis --strip-components=1"
+```
+
+```powershell
 # Solo un archivo (ej. fix del bot)
 scp "D:\Sistema-de-Guardadp-Rapido\project\mybot\finanzas_handlers.py" mtopas@192.168.137.10:~/project/mybot/finanzas_handlers.py
 ```
@@ -160,31 +168,43 @@ scp project/database/app.db mtopas@192.168.137.10:~/project/database/
 
 **2. Rebuild y levantar (SSH en el gabinete):**
 
+`mtopas` está en el grupo `docker` — **no hace falta `sudo`** para nada de esto.
+
+Desde 2026-08-26 (deploy del worker de Jarvis) el build context de `docker-compose.yml`
+es el root del repo (`..`), no `project/` — y `docker-compose` (sin plugin buildx) **no
+aplica `--network=host` al build** aunque esté en el compose, así que hay que construir
+la imagen a mano antes de `up` (el gabinete sí tiene salida real a Internet, confirmado):
+
 ```bash
 ssh mtopas@192.168.137.10
 ```
 
 ```bash
 cd ~/project
-sudo docker-compose up -d --build
+docker build --network=host -t sgr-app:latest -f Dockerfile ..
+docker-compose up -d --no-build
 ```
 
-`./database` es volumen: un `scp -r ./project` **no** pisa `app.db` salvo que copies `database/app.db` explícitamente.
+`./database` es volumen: un `scp -r ./project` **no** pisa `app.db`/`jarvis.db` salvo que
+copies `database/` explícitamente.
 
 ---
 
 ### Docker — gestión diaria (en el gabinete)
 
+Sin `sudo` (grupo `docker`):
+
 | Acción | Comando |
 | :--- | :--- |
-| Levantar stack | `cd ~/project && sudo docker-compose up -d` |
-| Actualizar y reiniciar | `sudo docker-compose up -d --build` |
-| Ver contenedores | `sudo docker-compose ps` |
-| Logs en vivo (todos) | `sudo docker-compose logs -f` |
-| Logs del bot | `sudo docker-compose logs -f bot` |
-| Logs del backend | `sudo docker-compose logs -f backend` |
-| Apagar stack | `sudo docker-compose down` |
-| Limpiar imágenes viejas | `sudo-docker image prune -f` |
+| Levantar stack | `cd ~/project && docker-compose up -d` |
+| Rebuild + reiniciar (código SGR o Jarvis) | `docker build --network=host -t sgr-app:latest -f Dockerfile .. && docker-compose up -d --no-build` |
+| Ver contenedores | `docker-compose ps` |
+| Logs en vivo (todos) | `docker-compose logs -f` |
+| Logs del bot | `docker-compose logs -f bot` |
+| Logs del backend | `docker-compose logs -f backend` |
+| Logs del worker de Jarvis | `docker-compose logs -f worker` |
+| Apagar stack | `docker-compose down` |
+| Limpiar imágenes viejas | `docker image prune -f` |
 | Apagar el gabinete | `sudo shutdown now` |
 
 ---
@@ -372,27 +392,41 @@ En lugar de instalar dependencias en el sistema host, usamos **Docker** (`projec
 
 | Servicio | Comando | Puerto |
 | :--- | :--- | :--- |
-| `backend` | `uvicorn app.main:app --host 0.0.0.0 --port 8765` | `8765` |
+| `backend` | `uvicorn app.main:app --host 0.0.0.0 --port 8765` | `8765` (sirve también `/jarvis/*`) |
 | `bot` | `python mybot/bot.py` | `network_mode: host` (Telegram/Ollama vía red Ubuntu) |
+| `worker` | `python -m jarvis.worker.main` | `network_mode: host` (Jarvis — procesa `inbox_queue`, sin puerto) |
 
 ### Arquitectura
 
-Bot + API en Docker (`docker-compose.yml`). DB canónica en `~/project/database/`. El `.exe` en Windows mantiene una réplica local y sincroniza con `sgr-abrir.ps1` (pull al abrir, push opcional al cerrar). Ver [`project/SYNC-WINDOWS.md`](project/SYNC-WINDOWS.md).
+Backend + bot + worker en Docker (`docker-compose.yml`), desplegados 2026-08-26. DB canónica en `~/project/database/`. El `.exe` en Windows mantiene una réplica local y sincroniza con `sgr-abrir.ps1` (pull al abrir, push opcional al cerrar). Ver [`project/SYNC-WINDOWS.md`](project/SYNC-WINDOWS.md).
+
+**Jarvis vive fuera de `project/`, en `~/jarvis` (hermano de `~/project`, mismo layout que el repo — ver CLAUDE.md).** El build context de `docker-compose.yml` es por eso el **root del repo** (`context: ..` desde `project/docker-compose.yml`, `dockerfile: project/Dockerfile`), no `project/` como antes de que Jarvis existiera — el `Dockerfile` copia `project/app`, `project/mybot` **y** `jarvis` en la misma imagen. Los tres servicios comparten `jarvis.db` + `vault/` + `database/chroma/` vía volumes (`JARVIS_DB_PATH`/`JARVIS_VAULT_PATH`/`JARVIS_CHROMA_PATH` fijados en el compose a rutas dentro de `/app/database` y `/app/vault`) — mismo patrón que ya usaba `app.db` entre backend y el resto.
 
 ### Conceptos clave
 
-* **Dockerfile:** imagen (Python 3.11, `requirements.txt`, código).
+* **Dockerfile:** imagen (Python 3.11, `requirements.txt` + `jarvis/pyproject.toml` vía `pip install -e`, código).
 * **Backend:** red bridge Docker, puerto `8765` publicado en el host.
-* **Bot:** `network_mode: host` — usa DNS e Internet del Ubuntu (ICS), no el bridge Docker (suele fallar DNS). Llama a la API en `http://127.0.0.1:8765`.
-* **Ollama:** en Windows → `OLLAMA_BASE_URL=http://192.168.137.1:11434` en `.env`.
+* **Bot y worker:** `network_mode: host` — usan DNS e Internet del Ubuntu (ICS), no el bridge Docker (suele fallar DNS). Llaman a la API/Ollama en `http://127.0.0.1:8765` / `http://192.168.137.1:11434`.
+* **Ollama:** en Windows → `OLLAMA_BASE_URL=http://192.168.137.1:11434` en `.env` (y como override explícito en `environment:` de los tres servicios en compose, porque `${OLLAMA_BASE_URL}` del `.env` del host suele traer `localhost`).
 * **No copiar `venv`:** rutas de Windows; el entorno se construye en Linux al hacer `build`.
+
+### CPU del gabinete no soporta numpy/onnxruntime modernos — `numpy<2` fijado (2026-08-26)
+
+El gabinete es un **AMD Athlon II X2 245 (2009)** — sin SSSE3, SSE4.1/4.2 ni AVX (`cat /proc/cpuinfo | grep flags` lo confirma). Los wheels de PyPI de `numpy>=2` (pulled transitivamente por `chromadb` y `onnxruntime`, dependencias de Jarvis) crashean con `SIGILL` (exit code 132) apenas se importan — el backend quedaba en crash-loop reiniciándose sin ningún traceback visible en `docker logs` (una falla de hardware mata el proceso, no lanza una excepción Python capturable).
+
+Diagnóstico: `docker run --rm sgr-app:latest python -c "import numpy"` → exit 132, aislado probando cada import de la cadena (`onnxruntime`, `chromadb.api`, etc.) uno por uno. `numpy==1.26.4` sí importa y funciona (probado con el flujo real de ChromaDB: `PersistentClient` + `upsert`/`get`/`query`).
+
+**Fix:** `numpy<2` fijado como dependencia en `jarvis/pyproject.toml` (comentario ahí con el detalle). Si en algún momento se corre Jarvis en hardware moderno (con AVX2), este pin sigue siendo válido — solo evita el wheel roto, no fuerza una versión vieja innecesariamente restrictiva más allá de la major.
+
+**Si esto vuelve a pasar** (backend/worker reiniciando en loop sin logs claros): `docker inspect <container> --format '{{.State.ExitCode}}'` — `132` = `SIGILL`, casi siempre una wheel compilada para un baseline de CPU que el hardware no soporta. Aislar con `docker run --rm sgr-app:latest python -c "import <paquete>"` uno por uno.
 
 ### Persistencia (volumes)
 
 Los contenedores son volátiles; los datos viven en el host:
 
-* `~/project/database/` → SQLite `app.db`
+* `~/project/database/` → SQLite `app.db` + `jarvis.db` + `chroma/` (ChromaDB)
 * `~/project/uploads/` → archivos subidos
+* `~/project/vault/` → notas Markdown de Jarvis (`RAW/`, `SEMANTIC/`, `DECISIONS/`, `PROJECTS/`, `PEOPLE/`)
 
 Sobreviven reinicios y `docker compose up --build`.
 

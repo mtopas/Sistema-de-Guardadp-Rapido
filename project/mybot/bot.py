@@ -657,6 +657,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     _register_chat_id(context.bot_data, msg.chat.id)
 
+    # Jarvis: aclaración pendiente tiene prioridad absoluta -- si no, la
+    # respuesta a "¿Por qué...?" se interpretaría como una hoja nueva de
+    # la Bóveda.
+    if await jh.handle_pending_clarification(update, context):
+        return
+    if await jh.handle_pending_passive_proposal(update, context):
+        return
+    if await jh.handle_pending_audit_proposal(update, context):
+        return
+
     # Extraer texto del forward si es un forward
     texto = None
     if msg.forward_origin and not msg.text:
@@ -1263,6 +1273,9 @@ def main():
     # ── Comandos Jarvis ───────────────────────────────────────
     app.add_handler(CommandHandler("j",  jh.cmd_j))
     app.add_handler(CommandHandler("jq", jh.cmd_jq))
+    app.add_handler(CommandHandler("jdebug",    jh.cmd_jdebug))
+    app.add_handler(CommandHandler("jdebugon",  jh.cmd_jdebugon))
+    app.add_handler(CommandHandler("jdebugoff", jh.cmd_jdebugoff))
 
     # ── Comandos generales ────────────────────────────────────
     app.add_handler(CommandHandler(["start", "help"], cmd_help))
@@ -1301,6 +1314,11 @@ def main():
     app.add_handler(CommandHandler("ayer",     ah.cmd_ayer))
     app.add_handler(CommandHandler("racha",    ah.cmd_racha))
     app.add_handler(CommandHandler("nota",     ah.cmd_nota))
+
+    # ── Comandos Notificaciones ───────────────────────────────
+    app.add_handler(CommandHandler("notif",          ah.cmd_notif))
+    app.add_handler(CommandHandler("notif_habitos",  ah.cmd_notif_habitos))
+    app.add_handler(CommandHandler("notif_finanzas", ah.cmd_notif_finanzas))
 
     # ── Callbacks de botones inline ───────────────────────────
     app.add_handler(CallbackQueryHandler(_dispatch_callback))

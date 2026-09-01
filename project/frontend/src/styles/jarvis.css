@@ -1,0 +1,32 @@
+/* ============================================================
+   Jarvis — tema oscuro propio (pantalla /jarvis), independiente
+   de los 6 temas de SGR. Importado una sola vez desde JarvisScreen.jsx.
+   Los colores semánticos (5 tipos de memoria, 4 estados de inbox, 3 niveles de
+   budget) NO viven acá como CSS vars — son fuente única en utils/jarvisPalette.js.
+   Acá solo quedan los tokens genéricos de UI (fondo/texto/bordes) y las
+   animaciones, que sí son legítimamente CSS.
+   ============================================================ */
+@keyframes jv-breathe { 0%,100% { opacity:.55; transform:scale(1);} 50% { opacity:1; transform:scale(1.18);} }
+@keyframes jv-rise    { from { opacity:0; transform:translateY(10px);} to { opacity:1; transform:translateY(0);} }
+@keyframes jv-sweep   { from { background-position:0% 50%; } to { background-position:200% 50%; } }
+@keyframes jv-spin    { to { transform:rotate(360deg); } }
+@keyframes jv-blink   { 0%,100%{opacity:1} 50%{opacity:.2} }
+
+.jv-root {
+  --jv-bg:      #05060d;
+  --jv-text:     #e8ecfb;
+  --jv-text-2:   #eef2ff;
+  --jv-subtext:  rgba(200,214,255,0.5);
+  --jv-mute:     rgba(200,214,255,0.36);
+  --jv-border:   rgba(150,170,255,0.14);
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  background: var(--jv-bg);
+  color: var(--jv-text);
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+}
+.jv-root .jv-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+.jv-root textarea::placeholder { color: rgba(200,214,255,0.34); }
+.jv-root textarea:focus, .jv-root input:focus { outline: none; }
+.jv-root ::-webkit-scrollbar-thumb { background: rgba(160,180,255,0.18); }

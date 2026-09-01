@@ -11,6 +11,285 @@ Formato de cada entrada:
 
 ---
 
+## 2026-08-31 — IMPLEMENTADO: respuestas de texto libre con información nueva en jarvis_audit_proposals
+
+Contexto: la entrada de arriba ("IMPLEMENTADO: auditoría proactiva...",
+mismo día, ver §4 "Bot Telegram") dejó una regla de alcance explícita: para
+las 7 acciones que no son `clarify`, "cualquier otra respuesta de texto
+libre se trata como rechazo-con-motivo (se loguea el texto para contexto
+futuro, no se reintenta parsear como instrucción)". En la práctica, ese
+"se loguea" nunca se materializó en nada persistente ni recuperable — el
+texto pasaba por `logger.info()` y la propuesta quedaba `REJECTED`, punto.
+Caso real que expuso el problema: el audit propone `flag_contradiction`
+sobre el par `contradiccion_remoto`/`contradiccion_oficina` del dataset de
+prueba (`jarvis/cli/seed_test.py`: "100% remoto" vs. "100% presencial") con
+la pregunta "¿cuál prevalece?", y el usuario contesta "Ninguna, ahora me
+mudé a Francia" — información real, nueva, que hoy se pierde sin dejar
+rastro. Se pidió generalizar el criterio que ya usa `clarify` (texto libre
+a una pregunta pendiente ES la respuesta, no una captura nueva sin
+relación) a las otras 7 acciones, sin forzar el mismo comportamiento en
+las 8 si no tiene sentido.
+
+### 1) Qué cuenta como "trae información nueva" — no solo "no empieza con no"
+
+La regla vieja distinguía sí/no por si el mensaje entero es un afirmativo
+corto (`_AFFIRMATIVE_PREFIXES`) o empieza literalmente con `"no "`/es
+`"no"`/`"n"` — cualquier otra cosa caía en el bucket "rechazo con motivo".
+Ese diseño tiene un problema más amplio que el caso de arriba: una
+respuesta como "no, es sobre mi sueldo de freelance" (ejemplo real
+discutido para `retag` — el usuario **rechaza** que el tag `finanzas`
+esté mal, pero de paso da contexto real sobre la entrada) también arranca
+con "no" y hoy se descarta entera, motivo incluido. La reescritura
+(`jarvis/audit/service.py::resolve_individual_reply()`) usa un criterio
+más chico y más correcto: **negativo limpio** es el mensaje completo
+(sin puntuación final) matcheando literal contra un set chico y explícito
+(`"no"`, `"n"`, `"nel"`, `"nop"`, `"no gracias"`, `"no, gracias"`,
+`"no por ahora"`) — todo lo demás, **incluida una respuesta que empieza
+con "no" pero sigue con contenido real**, se trata como portadora de
+información nueva. Esto es deliberadamente más laxo que antes: prefiere
+capturar de más (peor caso: una entrada nueva/edición de más, nunca
+destructivo, ver más abajo) a seguir perdiendo información real como
+pasaba hoy.
+
+### 2) Caso por caso — no todas las 8 acciones se resuelven igual
+
+**`clarify`** — sin cambios de comportamiento (ya era el patrón correcto).
+Único cambio real: ahora también vincula la entrada nueva explícitamente a
+las entidades del hallazgo (punto 4) en vez de depender de que el texto de
+la respuesta repita el nombre.
+
+**`create`** — el hallazgo ya viene con un contenido sintetizado por LLM
+para crear. Una respuesta con información nueva se trata como una
+**corrección/ampliación de ese borrador**, no como una entrada aparte:
+`payload["content"]` se le concatena `"\nAclaración: {texto}"` (mismo
+patrón de sufijo que ya usa `accept_proposal(extra_text=...)` de captura
+pasiva) y se aplica `create` normalmente con el contenido enriquecido.
+Resultado: `ACCEPTED` (la mutación "crear" sigue siendo la que se aplica,
+solo que con mejor contenido), un solo `entry_id`.
+
+**`edit`** — mismo criterio que `create`: el contenido combinado que
+propuso el hallazgo (`payload["content"]`) se amplía con
+`"\nAclaración: {texto}"` y se aplica `edit` tal cual (edita
+`keep_entry_id`, supersede `supersede_entry_id`). `ACCEPTED`, sin
+`entry_id` nuevo (mismo comportamiento que `edit` ya tenía: nunca
+seteaba `entry_id`, edita en el lugar).
+
+**`flag_contradiction` / `flag_connection` / `merge`** — las tres
+comparten el mismo problema: su "aceptar" normal **no crea ni corrige
+contenido**, solo marca (`flag_*`) o supersede una entrada existente
+asumiendo que el LLM ya identificó bien cuál es la vieja y cuál la nueva
+(`merge`). Una respuesta con información nueva no encaja en ninguna de
+esas dos formas: no es "marcar para revisión" (ya sabemos la respuesta,
+no hace falta revisión manual) y tampoco es seguro asumir automáticamente
+qué entrada vieja quedó obsoleta (ver el ejemplo real: "Ninguna, ahora
+Francia" invalida a Buenos Aires Y a Madrid; pero una respuesta como
+"Buenos Aires es la correcta, Madrid está mal" solo invalidaría una de
+las dos — sin LLM de por medio en esta resolución, no hay forma
+determinística de saber cuál). Se resuelve creando una **entrada nueva
+independiente** con el texto tal cual (mismo mecanismo que `clarify`),
+vinculada a las entidades de ambas entradas objetivo (punto 4) — **sin
+tocar `valid_to` de ninguna de las entradas viejas**. Las viejas quedan
+como estaban, la nueva queda como la información más reciente y
+confiable; si con el tiempo eso deja una redundancia real, el propio
+audit la va a volver a encontrar en una corrida futura (ahora con 3
+candidatos en vez de 2) y proponer un `merge`/`edit` de nuevo — esta vez
+con contenido inequívoco. Es la misma filosofía conservadora que ya
+tenía `flag_contradiction` en el documento de arriba ("a propósito nunca
+llama `_reduce_confidence()`... aplicar el riesgo de falso positivo que
+el usuario pidió mitigar explícitamente") — acá se extiende a "tampoco
+adivinar automáticamente cuál entrada vieja invalidar", por la misma
+razón. Status: `RESOLVED_WITH_NEW_INFO` (punto 3).
+
+**`retag`** — el ejemplo real ("no, es sobre mi sueldo de freelance") es
+justo el caso donde el usuario **contradice el hallazgo** (el tag no está
+mal) pero de paso aporta contexto real sobre la entrada. Acá "crear una
+entrada nueva" no tiene sentido — el contexto nuevo describe la ENTRADA
+ya flaggeada, no un hecho independiente del mundo. Se aplica
+`edit_entry()` sobre esa misma entrada, concatenando
+`"\nAclaración: {texto}"` a su `content_processed` actual — y el tag
+señalado **no se saca** (aplicar igual la remoción sería ignorar
+literalmente lo que el usuario acaba de decir). Deliberadamente no se
+intenta además "agregar" un tag mejor a partir del texto nuevo — mismo
+límite de alcance que ya fijó el documento de arriba para `retag`
+("agregar un tag que falta ya lo cubre `_backfill_catalog_tags()`,
+autónomo y en producción — esta propuesta no lo toca"); con el contenido
+ya enriquecido, ese mecanismo autónomo tiene mejor material para
+proponer un tag mejor por su cuenta en una corrida futura, sin que esta
+pieza tenga que reimplementarlo. Status: `RESOLVED_WITH_NEW_INFO`,
+`entry_id` = la misma entrada editada (no una nueva).
+
+**`delete`** — el único disparador de `delete` es contenido vacío/en
+blanco (ver documento de arriba, decisión abierta #2). Una respuesta con
+texto real a "¿la borro, está vacía?" significa literalmente "no está
+vacía, dice esto" — el caso más simple de los 8: `edit_entry()` sobre esa
+misma entrada con `content=texto` (sin prefijo "Aclaración:" — no hay
+nada previo a lo que amueblar, el texto ES el contenido que faltaba).
+`delete` no se aplica. Status: `RESOLVED_WITH_NEW_INFO`, `entry_id` = la
+misma entrada.
+
+### 3) Status nuevo `RESOLVED_WITH_NEW_INFO`, no `REJECTED` ni `ACCEPTED`
+
+Se agrega un quinto valor al `CHECK` de `jarvis_audit_proposals.status`:
+`PENDING → ACCEPTED | REJECTED | EXPIRED | RESOLVED_WITH_NEW_INFO`.
+Alternativas consideradas:
+- **Reusar `REJECTED`** (con la entrada nueva vinculada por `finding_id`,
+  como sugería la pregunta original): descartado por dos razones. Primero,
+  `finding_id` nunca se implementó (el documento de arriba lo mencionaba
+  en la lista de columnas del punto 4, pero la tabla real en
+  `jarvis/db/schema.py` no lo tiene — el dedup terminó viviendo en
+  `action_type + target_entry_ids`, ver Cerebro/estado-actual.md, punto 5
+  de las decisiones resueltas ese día). Reintroducirlo solo para este caso
+  sería una columna nueva con un único consumidor. Segundo, y más
+  importante: `REJECTED` en este sistema significa "no pasó nada, se
+  descartó" — usarlo para un caso donde SÍ pasó algo (se creó o editó una
+  entrada real) sería engañoso para cualquiera que lea el historial
+  después (Explorar, `GET /jarvis/audit-proposals?status=all`) y asuma que
+  `REJECTED` es sinónimo de "sin efecto".
+- **Reusar `ACCEPTED`**: descartado para los casos donde la mutación
+  *propuesta* (marcar para revisión, fusionar, sacar el tag) explícitamente
+  **no** se aplica (`flag_*`/`merge`/`retag`/`delete` con info nueva) — decir
+  `ACCEPTED` ahí sería afirmar que se hizo lo que la pregunta original
+  proponía, cuando se hizo otra cosa distinta y mejor informada. Sí se
+  usa `ACCEPTED` para `create`/`edit` con texto nuevo (punto 2) porque en
+  esos dos casos la mutación propuesta **sí** se aplica, solo que con
+  contenido enriquecido — ahí `ACCEPTED` sigue siendo honesto.
+- **Status nuevo `RESOLVED_WITH_NEW_INFO`** (elegido): distingue con
+  precisión "se descartó" de "se aplicó lo propuesto" de "se resolvió con
+  información distinta a la propuesta", sin overloadear ningún significado
+  existente. El `entry_id` ya existente en la tabla (columna que ya usan
+  `create`/`clarify`) alcanza para enlazar la propuesta con lo que se creó
+  o editó — no hace falta `finding_id` ni ninguna columna nueva. Costo:
+  cualquier código que hoy filtre por `status IN ('ACCEPTED','REJECTED')`
+  asumiendo que son los únicos dos terminales "reales" necesita saber del
+  tercero — se revisó `jarvis/api/router.py` y `JarvisBrowsePanel.jsx`
+  (frontend, Explorar): ninguno de los dos tiene ese filtro cerrado, ambos
+  pasan `status` como string opaco (el frontend ya tiene un fallback de
+  color `|| '#888'` para status desconocidos), así que no hay ningún lugar
+  que se rompa — se le agrega igual una entrada de color dedicada en
+  `AUDIT_STATUS_COLORS` (`JarvisBrowsePanel.jsx`) para que no dependa del
+  fallback.
+
+Migración de schema: mismo patrón ya establecido por
+`_migrate_people_type()` en `jarvis/db/database.py` (SQLite no permite
+`ALTER` sobre un `CHECK` existente — hay que reconstruir la tabla). Se
+agrega `_migrate_audit_proposals_status()` calcada de esa función
+(detecta si ya migró leyendo `sqlite_master.sql`, reconstruye bajo nombre
+temporal, dropea la vieja, renombra — nunca deja `jarvis_audit_proposals`
+sin existir bajo su nombre canónico salvo el instante entre el DROP y el
+RENAME, mismo cuidado que ya documentó el bug real de la migración de
+`'PEOPLE'`). No hace falta el manejo de FKs entrantes que sí necesitaba
+`memory_entries` (ninguna otra tabla referencia `jarvis_audit_proposals`
+por FK), así que es más simple.
+
+### 4) Vinculación — `link_entities_for_entry()` aplicado a las entidades del hallazgo, no del texto de la respuesta
+
+El documento de arriba decía que `clarify` vincula la entrada nueva "vía
+`link_entities_for_entry()` (ya existe)" — cierto en el sentido de que la
+función existe, pero en los hechos **`_apply_clarify()` nunca la llama
+directamente**: la entrada nueva pasa por el pipeline normal del worker
+(`jarvis/worker/processor.py`), que corre `extract_entities()` sobre el
+texto de la respuesta y solo la vincula a la entidad ambigua **si el
+texto de la respuesta repite su nombre** (ej. "¿Quién es José?" → "José es
+mi primo" sí vincula porque dice "José"; "es mi primo" sin repetir el
+nombre, no). Funciona la mayoría de las veces porque una respuesta a
+"¿quién es X?" casi siempre repite X, pero es implícito y frágil — y para
+los casos nuevos de este documento (`flag_contradiction`/`flag_connection`/
+`merge` con dos entradas objetivo, potencialmente sobre personas/temas que
+la respuesta del usuario no tiene por qué nombrar otra vez) esa
+dependencia habría fallado seguido.
+
+Se agrega `_link_new_entry_to_targets(new_entry_id, target_entry_ids,
+user_id)` en `jarvis/audit/service.py`: lee las entidades ya vinculadas
+(`memory_entry_entities` JOIN `memory_entities`) a **las entradas objetivo
+del hallazgo** (no del texto nuevo) y llama `link_entities_for_entry()}`
+directamente con esa lista — determinístico, no depende de que la
+respuesta repita ningún nombre. Se usa `entry_type="RAW"` en esa llamada
+(la entrada recién creada todavía no pasó por clasificación async del
+worker en el momento en que se resuelve la propuesta) — esto hace que la
+relación siempre quede `'mentioned'` nunca `'subject'`
+(`link_entities_for_entry()` solo asigna `'subject'` cuando
+`entry_type == 'PEOPLE'`), que es lo correcto acá: estas entradas son
+correcciones/contexto sobre una entidad ya conocida, no una ficha
+biográfica nueva dedicada a esa persona. El pipeline normal del worker
+sigue corriendo igual sobre la entrada nueva (vía `inbox_queue`) y puede
+sumar entidades adicionales que el texto sí mencione explícitamente — las
+dos vías no chocan (`_link_entry_entity()` ya usa
+`ON CONFLICT DO UPDATE`, confirmado leyendo `jarvis/entities/service.py`).
+
+**Aplicado también a `create` y `clarify` en su camino normal** (no solo a
+los casos nuevos de este documento): se agrega la misma llamada explícita
+después de crear la entrada en `accept_proposal()`, en vez de dejar que
+siga dependiendo solo de la extracción implícita. Es una mejora chica,
+de bajo riesgo (la llamada es aditiva, `ON CONFLICT DO UPDATE`), que
+surgió directamente de investigar este punto — se documenta acá en vez de
+aplicarse en silencio.
+
+`create`/`merge`/`flag_*` con dos entradas objetivo: se juntan (con
+`DISTINCT`) las entidades de ambas antes de vincular, no una por
+separado.
+
+### 5) `origin_trust`/`source`/`created_by` de la entrada nueva
+
+Confirmado, no asumido: se usa el mismo criterio que el documento de
+arriba ya fijó para `clarify` — `origin_trust` normal de una captura por
+el canal que contestó (`telegram.user` si `channel == "telegram"`,
+`user.authenticated` si no), **no** el criterio de "mínimo entre las
+fuentes" que usa `create` para su contenido sintetizado (`_min_origin_trust()`,
+usado solo para el contenido *original* de `create`, sin tocar). Aplica
+sin excepción a los 5 casos de este documento, incluidos `create`/`edit`
+con texto nuevo, aunque ahí el contenido resultante es una mezcla de
+lo sintetizado por LLM + lo que el usuario tipeó: una vez que el usuario
+elige mandar esa respuesta, la está confirmando/asumiendo como propia —
+mismo razonamiento que ya aplica `accept_proposal(extra_text=...)` de
+captura pasiva (que tampoco separa "parte original" de "parte aclarada"
+a la hora de asignar `origin_trust`, es toda la entrada un solo bloque).
+`created_by='jarvis_proposal_accepted'` y `source=proposal['channel']` sin
+cambios respecto al resto del sistema.
+
+### Riesgos y trade-offs
+
+- **Falso positivo de "información nueva"**: una respuesta larga que en
+  realidad es solo una negativa elaborada ("no, dejalo así, total no
+  importa mucho igual") no matchea el set chico de negativos limpios y
+  cae en el bucket de información nueva — para `flag_*`/`merge` termina
+  creando una entrada nueva de bajo valor con ese texto. Aceptado a
+  propósito (ver punto 1: preferir capturar de más, nunca destructivo) —
+  si en la práctica genera ruido real, la mitigación es ampliar el set de
+  negativos limpios con frases así, no volver a la heurística vieja de
+  "empieza con no".
+- **`retag`/`delete` mutan la entrada objetivo directamente** (vía
+  `edit_entry()`) en vez de crear una entrada aparte — a diferencia de
+  `flag_*`/`merge`. Es la excepción deliberada del punto 2: para esas dos
+  acciones el texto nuevo describe la entrada ya flaggeada, no un hecho
+  del mundo aparte. Si en algún caso real la respuesta a un `retag`/
+  `delete` sí trae información que amerita ser su propia entrada (no solo
+  contexto de la entrada existente), hoy queda igual concatenada a la
+  entrada objetivo — riesgo aceptado por simplicidad, sin LLM de por medio
+  para decidir caso a caso.
+- **Ninguna de las 8 resoluciones nuevas re-evalúa el hallazgo original**:
+  si el usuario contesta con información nueva a un `flag_contradiction`
+  que en realidad era un falso positivo del audit (las dos entradas nunca
+  contradecían nada), igual se crea una entrada nueva con lo que haya
+  contestado. No se considera un problema real — el usuario controla qué
+  manda como respuesta, y el peor caso es una entrada de más, nunca una
+  pérdida de información ni una mutación destructiva.
+
+Impacto: `jarvis/audit/service.py` (`resolve_individual_reply()` nueva y
+las funciones `_resolve_*` que llama, `_link_new_entry_to_targets()`,
+llamada agregada en `accept_proposal()`), `jarvis/db/schema.py` (quinto
+valor de status), `jarvis/db/database.py`
+(`_migrate_audit_proposals_status()`), `project/mybot/jarvis_handlers.py`
+(`_resolve_individual_audit_proposal()` reescrita para delegar en
+`resolve_individual_reply()` en vez de reimplementar la interpretación de
+texto libre), `project/frontend/src/components/jarvis/JarvisBrowsePanel.jsx`
+(color nuevo en `AUDIT_STATUS_COLORS`). No toca `jarvis/captures/passive.py`
+ni `jarvis/captures/clarification.py` (fuera de alcance, ver el pedido
+original) — el patrón podría generalizarse ahí también algún día, pero es
+una decisión aparte que hay que pedir explícitamente (ver sugerencia al
+cierre en `Cerebro/estado-actual.md`).
+
+---
+
 ## 2026-08-31 — IMPLEMENTADO: auditoría proactiva de memoria en consolidation.py
 
 **Actualización post-implementación**: esta propuesta fue aprobada e

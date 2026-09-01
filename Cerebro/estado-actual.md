@@ -1,6 +1,109 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-08-31
 
+## Respuestas de texto libre con información nueva en jarvis_audit_proposals — implementada (2026-08-31)
+
+Generaliza a las 7 acciones que no son `clarify` (ver sección de abajo,
+"Auditoría proactiva de memoria") el criterio que `clarify` ya usaba: una
+respuesta de texto libre a una propuesta individual PENDING que no es un
+"no" limpio ni un "sí" limpio trae información real, que antes se perdía
+(se trataba como "rechazo con motivo", el motivo se logueaba y nada más).
+Detalle completo caso por caso, trade-offs y alternativas descartadas en
+`Cerebro/decisiones-implementacion.md`, entrada del mismo día
+("IMPLEMENTADO: respuestas de texto libre con información nueva en
+jarvis_audit_proposals").
+
+**Resumen de la resolución por acción** (no las 8 se resuelven igual):
+`clarify` sin cambios; `create`/`edit` incorporan el texto nuevo al
+contenido que ya iban a aplicar (`ACCEPTED` con contenido enriquecido);
+`flag_contradiction`/`flag_connection`/`merge` crean una entrada
+independiente nueva sin tocar las entradas objetivo (`RESOLVED_WITH_NEW_INFO`
+— nunca se adivina automáticamente cuál entrada vieja invalidar);
+`retag`/`delete` amplían/rellenan la entrada objetivo misma vía
+`edit_entry()` en vez de aplicar la mutación propuesta (`retag` no saca el
+tag señalado; `delete` no borra).
+
+**Status nuevo**: `RESOLVED_WITH_NEW_INFO` agregado al `CHECK` de
+`jarvis_audit_proposals.status` (antes: `PENDING/ACCEPTED/REJECTED/EXPIRED`)
+— distingue "se descartó" de "se aplicó lo propuesto" de "se resolvió con
+información distinta a la propuesta". Migración de schema vía
+`_migrate_audit_proposals_status()` (mismo patrón de reconstrucción de
+tabla que ya usaba `_migrate_people_type()` para `memory_entries.type`,
+`jarvis/db/database.py`).
+
+**Vinculación determinística**: `_link_new_entry_to_targets()` nueva
+(`jarvis/audit/service.py`) vincula la entrada nueva a las entidades ya
+conocidas de las entradas OBJETIVO del hallazgo (no del texto de la
+respuesta) vía `link_entities_for_entry()` — reemplaza la dependencia
+implícita de que el texto repita el nombre. Aplicada también al camino
+normal de `create`/`clarify` (mejora chica, documentada, no solo a los
+casos nuevos).
+
+**Archivos tocados**: `jarvis/audit/service.py` (`resolve_individual_reply()`
+nueva — punto de entrada único que reemplaza la interpretación que antes
+vivía repartida en el bot; funciones `_resolve_*` por acción;
+`_link_new_entry_to_targets()`/`_target_entities()`), `jarvis/db/schema.py`
+(quinto valor de status), `jarvis/db/database.py`
+(`_migrate_audit_proposals_status()`), `project/mybot/jarvis_handlers.py`
+(`_resolve_individual_audit_proposal()` reescrita para delegar en el
+servicio en vez de reimplementar sí/no/motivo), `project/frontend/src/
+components/jarvis/JarvisBrowsePanel.jsx` (color nuevo en
+`AUDIT_STATUS_COLORS`). No toca `jarvis/captures/passive.py` ni
+`jarvis/captures/clarification.py` (fuera de alcance explícito).
+
+**Verificado con Ollama real** (`gemma3:12b` local, mismo dataset de
+`jarvis/cli/seed_test.py`, DB de scratch — nunca `jarvis.db` real):
+21 checks contra propuestas armadas a mano (mismo patrón que la sesión
+anterior para las ramas que el LLM no genera solo), cubriendo las 8
+acciones:
+- `flag_contradiction` con el caso motivador exacto (par
+  `contradiccion_remoto`/`contradiccion_oficina` del dataset — "100%
+  remoto" vs. "100% presencial" — respuesta "Ninguna, ahora trabajo
+  freelance sin oficina fija"): entrada nueva creada con el texto tal
+  cual, `origin_trust=telegram.user`, `created_by=jarvis_proposal_accepted`,
+  proposal `RESOLVED_WITH_NEW_INFO` con `entry_id` seteado, **las dos
+  entradas viejas no se tocan** (`valid_to` sigue `NULL`).
+- `flag_contradiction` con "no" limpio → `REJECTED` normal (regresión).
+- `flag_connection` con información nueva sobre el par de Martín Suárez →
+  entrada nueva vinculada correctamente a la entidad "Martín Suárez" (vía
+  `_link_new_entry_to_targets()`, no por repetición de nombre en el
+  texto).
+- `merge` con información nueva → entrada nueva creada, entrada vieja
+  **no** superseded.
+- `create` con información nueva → `ACCEPTED`, contenido = borrador +
+  "Aclaración: …", `origin_trust=telegram.user` (no el `system`/mínimo del
+  borrador original), entidad vinculada.
+- `edit` con información nueva → `ACCEPTED`, `entry_id=None` (igual que
+  `edit` normal), contenido de `keep_entry_id` actualizado, `supersede_
+  entry_id` con `valid_to` seteado.
+- `retag` con el ejemplo real ("no, es sobre el homelab, pasa siempre que
+  reiniciamos el servidor de golpe") → `RESOLVED_WITH_NEW_INFO`,
+  `entry_id` = la misma entrada, contenido ampliado, **el tag señalado
+  sigue** (no se sacó).
+- `delete` con texto real → `RESOLVED_WITH_NEW_INFO`, entrada rellenada
+  con el texto (no se borró).
+- `clarify` sin cambios de comportamiento: "no sé" sigue rechazando
+  (criterio legacy preservado), texto real sigue creando la entrada y
+  ahora además queda vinculada a la entidad de la entrada objetivo.
+- Dedup y reintento sobre propuesta ya resuelta (`not_found`) verificados.
+
+`run_audit()` completo corrido una vez de punta a punta contra el mismo
+scratch DB (6 propuestas nuevas generadas, 0 errores) — confirma que la
+detección existente no se rompió con los cambios de este día.
+
+**Sugerencia abierta, no implementada** (pedido explícito del usuario: alcance
+acotado a `jarvis_audit_proposals`, esto queda como nota, no como cambio):
+el mismo patrón ("una respuesta que no es sí/no limpio trae información
+real") aplica en espíritu a `jarvis_capture_proposals` (captura pasiva,
+`jarvis/captures/passive.py`) y al flujo de aclaración de `DECISION`
+(`jarvis/captures/clarification.py`) — ambos hoy ya capturan CUALQUIER
+texto libre como aclaración/contenido (no tienen el bug de "rechazo con
+motivo" que sí tenía audit), así que no están rotos, pero tampoco
+distinguen "sí" limpio de "trae información nueva que debería ir aparte"
+como ahora sí hace audit para `flag_contradiction`/`flag_connection`/
+`merge`. Si en el futuro se quiere ese mismo nivel de distinción ahí
+también, es una decisión aparte que hay que pedir explícitamente.
+
 ## Auditoría proactiva de memoria — implementada (2026-08-31)
 
 Implementación de la propuesta aprobada ese mismo día en

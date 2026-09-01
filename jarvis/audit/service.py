@@ -58,6 +58,17 @@ en silencio"):
      resuelve la más VIEJA primero (FIFO) -- el documento asumía una sola
      pendiente a la vez (mismo supuesto que ya tenía captura pasiva), sin
      contemplar que un solo audit run puede generar varias de golpe.
+
+Extensión 2026-08-31 ("respuestas de texto libre con información nueva",
+ver Cerebro/decisiones-implementacion.md): generaliza a las 7 acciones que
+no son `clarify` el criterio de que una respuesta de texto libre a una
+propuesta individual PENDING que no es un "no" limpio ni un "sí" limpio
+trae información real, en vez de tratarla como rechazo-con-motivo (lo que
+hacía antes, perdiendo esa información). `resolve_individual_reply()` es
+el punto de entrada único (reemplaza la interpretación que antes vivía
+repartida en project/mybot/jarvis_handlers.py); no las 8 acciones se
+resuelven igual -- ver el docstring de esa función y el documento de
+decisiones para el detalle caso por caso y los trade-offs.
 """
 import json
 import logging
@@ -849,6 +860,14 @@ def accept_proposal(proposal_id: str, reply_text: str | None = None) -> dict | N
     elif action_type == "retag":
         _apply_retag(target_ids, payload, proposal["user_id"])
 
+    # Vinculación determinística a las entidades del hallazgo (no solo a las
+    # que el texto de la entrada nueva mencione) -- ver Cerebro/decisiones-
+    # implementacion.md, 2026-08-31 ("Vinculación", punto 4). Antes de esto,
+    # create/clarify dependían solo de que extract_entities() (pipeline
+    # normal del worker) volviera a detectar el mismo nombre en el contenido.
+    if entry_id and action_type in ("create", "clarify"):
+        _link_new_entry_to_targets(entry_id, target_ids, proposal["user_id"])
+
     _resolve_proposal(proposal_id, "ACCEPTED", entry_id)
     return {"entry_id": entry_id}
 
@@ -920,6 +939,223 @@ def _apply_retag(target_ids: list[str], payload: dict, user_id: str) -> None:
     remove = (payload.get("remove_tag") or "").strip().lower()
     remaining = [t for t in _current_tag_names(entry_id) if t.lower() != remove]
     replace_tags_for_entry(entry_id, remaining, user_id)
+
+
+# ── Vinculación determinística a las entidades del hallazgo ─────────────────
+# Ver Cerebro/decisiones-implementacion.md, 2026-08-31, punto 4.
+
+def _target_entities(target_entry_ids: list[str]) -> list[dict]:
+    """Entidades ya vinculadas a las entradas objetivo de un hallazgo
+    (dedupeadas), en la forma que espera link_entities_for_entry()."""
+    if not target_entry_ids:
+        return []
+    conn = get_connection()
+    try:
+        placeholders = ",".join("?" * len(target_entry_ids))
+        rows = conn.execute(
+            f"""SELECT DISTINCT me.name, me.entity_type FROM memory_entry_entities mee
+                JOIN memory_entities me ON me.entity_id = mee.entity_id
+                WHERE mee.entry_id IN ({placeholders})""",
+            target_entry_ids,
+        ).fetchall()
+        return [{"name": r["name"], "type": r["entity_type"]} for r in rows]
+    finally:
+        conn.close()
+
+
+def _link_new_entry_to_targets(new_entry_id: str, target_entry_ids: list[str], user_id: str) -> None:
+    """Vincula una entrada nueva a las mismas entidades que ya tenían las
+    entradas objetivo del hallazgo que la originó -- determinístico, no
+    depende de que el texto de la entrada nueva repita ningún nombre (a
+    diferencia de la extracción automática que igual corre sola cuando el
+    worker procese esta entrada vía inbox_queue -- ambas conviven sin
+    chocar, _link_entry_entity() ya usa ON CONFLICT DO UPDATE).
+
+    entry_type="RAW" a propósito: la entrada nueva todavía no pasó por
+    clasificación async en este punto, así que la relación siempre queda
+    'mentioned' (nunca 'subject', que link_entities_for_entry() solo asigna
+    para entry_type == 'PEOPLE') -- correcto acá, son correcciones/contexto
+    sobre una entidad ya conocida, no una ficha biográfica nueva.
+    """
+    from jarvis.entities.service import link_entities_for_entry
+
+    entities = _target_entities(target_entry_ids)
+    if entities:
+        link_entities_for_entry(new_entry_id, entities, entry_type="RAW", user_id=user_id)
+
+
+# ── Respuestas de texto libre con información nueva (7 acciones != clarify) ──
+# Ver Cerebro/decisiones-implementacion.md, 2026-08-31, "respuestas de texto
+# libre con información nueva" -- detalle caso por caso de por qué cada
+# acción se resuelve distinto.
+
+_CLEAN_NEGATIVE_PHRASES = {
+    "no", "n", "nel", "nop", "no gracias", "no, gracias", "no por ahora",
+}
+_CLEAN_AFFIRMATIVE_PHRASES = {"si", "sí", "yes", "y", "dale", "ok", "obvio"}
+_LEGACY_CLARIFY_NEGATIVE_PREFIXES = ("no", "n")
+
+
+def resolve_individual_reply(proposal_id: str, texto: str) -> dict:
+    """Punto de entrada único para interpretar una respuesta de texto libre
+    a una propuesta INDIVIDUAL (no agrupada) de jarvis_audit_proposals --
+    reemplaza la interpretación que antes vivía repartida en
+    project/mybot/jarvis_handlers.py.
+
+    Devuelve {"outcome": "not_found"|"rejected"|"accepted"|
+    "resolved_with_new_info", "entry_id": str|None}.
+
+    `clarify` usa el mismo criterio de negativo que ya tenía (cualquier "no"/
+    "no <algo>" rechaza, cualquier otra cosa por corta que sea ES la
+    respuesta) -- deliberadamente sin cambios, ver el documento de
+    decisiones. Las otras 7 acciones usan un negativo limpio más chico y
+    explícito (ver el documento, punto 1): una respuesta que empieza con
+    "no" pero sigue con contenido real (ej. "no, es sobre mi sueldo de
+    freelance") NO es negativo limpio ahí, cae en información nueva.
+    """
+    proposal = get_proposal(proposal_id)
+    if not proposal or proposal["status"] != "PENDING":
+        return {"outcome": "not_found", "entry_id": None}
+
+    stripped = texto.strip()
+    lowered = stripped.lower()
+
+    if proposal["action_type"] == "clarify":
+        if lowered in _LEGACY_CLARIFY_NEGATIVE_PREFIXES or lowered.startswith("no "):
+            reject_proposal(proposal_id)
+            return {"outcome": "rejected", "entry_id": None}
+        result = accept_proposal(proposal_id, reply_text=stripped)
+        entry_id = result.get("entry_id") if result else None
+        return {"outcome": "accepted" if entry_id else "not_found", "entry_id": entry_id}
+
+    bare = lowered.rstrip(" .!¡¿?")
+    if bare in _CLEAN_NEGATIVE_PHRASES:
+        reject_proposal(proposal_id)
+        return {"outcome": "rejected", "entry_id": None}
+
+    if lowered in _CLEAN_AFFIRMATIVE_PHRASES:
+        result = accept_proposal(proposal_id)
+        if not result:
+            return {"outcome": "not_found", "entry_id": None}
+        return {"outcome": "accepted", "entry_id": result.get("entry_id")}
+
+    return _resolve_with_new_info(proposal, stripped)
+
+
+def _resolve_with_new_info(proposal: dict, texto: str) -> dict:
+    action_type = proposal["action_type"]
+    if action_type == "create":
+        return _resolve_create_with_new_info(proposal, texto)
+    if action_type == "edit":
+        return _resolve_edit_with_new_info(proposal, texto)
+    if action_type == "retag":
+        return _resolve_retag_with_new_info(proposal, texto)
+    if action_type == "delete":
+        return _resolve_delete_with_new_info(proposal, texto)
+    if action_type in ("flag_contradiction", "flag_connection", "merge"):
+        return _resolve_as_new_entry(proposal, texto)
+    # Defensivo -- no debería pasar con los 8 action_type conocidos del CHECK.
+    reject_proposal(proposal["id"])
+    return {"outcome": "rejected", "entry_id": None}
+
+
+def _capture_new_info_entry(proposal: dict, texto: str) -> str:
+    """capture_raw() con el mismo criterio de origin_trust/created_by/source
+    que ya usa clarify (punto 5 del documento de decisiones): contenido
+    nuevo tipeado de verdad por el usuario, no un derivado sintetizado."""
+    from jarvis.memory.service import capture_raw
+
+    channel = proposal["channel"]
+    origin_trust = "telegram.user" if channel == "telegram" else "user.authenticated"
+    return capture_raw(
+        content=texto,
+        source=channel,
+        channel=proposal["channel_id"],
+        source_id=f"audit:{proposal['id']}:newinfo",
+        origin_trust=origin_trust,
+        user_id=proposal["user_id"],
+        created_by="jarvis_proposal_accepted",
+    )
+
+
+def _resolve_as_new_entry(proposal: dict, texto: str) -> dict:
+    """flag_contradiction/flag_connection/merge: la mutación normal de
+    'aceptar' no crea ni corrige contenido (flag_* solo marca; merge
+    supersede asumiendo que el LLM ya identificó bien cuál entrada es la
+    vieja, algo que no podemos inferir de forma determinística de la
+    respuesta). Se crea una entrada nueva independiente en su lugar, sin
+    tocar valid_to de ninguna entrada objetivo -- ver el documento de
+    decisiones, punto 2, para el razonamiento completo."""
+    target_ids = json.loads(proposal["target_entry_ids"])
+    entry_id = _capture_new_info_entry(proposal, texto)
+    _link_new_entry_to_targets(entry_id, target_ids, proposal["user_id"])
+    _resolve_proposal(proposal["id"], "RESOLVED_WITH_NEW_INFO", entry_id)
+    return {"outcome": "resolved_with_new_info", "entry_id": entry_id}
+
+
+def _resolve_create_with_new_info(proposal: dict, texto: str) -> dict:
+    """El contenido nuevo se trata como corrección/ampliación del borrador
+    ya sintetizado, no como entrada aparte -- se sigue aplicando 'create'
+    (ACCEPTED), solo que con contenido enriquecido. Mismo patrón de sufijo
+    que ya usa accept_proposal(extra_text=...) de captura pasiva."""
+    payload = json.loads(proposal["payload"]) if proposal["payload"] else {}
+    draft = (payload.get("content") or "").strip()
+    payload["content"] = f"{draft}\nAclaración: {texto}".strip()
+    channel = proposal["channel"]
+    payload["origin_trust"] = "telegram.user" if channel == "telegram" else "user.authenticated"
+
+    entry_id = _apply_create(proposal, payload)
+    target_ids = json.loads(proposal["target_entry_ids"])
+    _link_new_entry_to_targets(entry_id, target_ids, proposal["user_id"])
+    _resolve_proposal(proposal["id"], "ACCEPTED", entry_id)
+    return {"outcome": "accepted", "entry_id": entry_id}
+
+
+def _resolve_edit_with_new_info(proposal: dict, texto: str) -> dict:
+    """Mismo criterio que create: se amplía payload["content"] (la versión
+    combinada que ya proponía el hallazgo) y se aplica 'edit' tal cual --
+    ACCEPTED, sin entry_id nuevo (edit nunca lo seteaba, edita en el lugar)."""
+    payload = json.loads(proposal["payload"]) if proposal["payload"] else {}
+    draft = (payload.get("content") or "").strip()
+    payload["content"] = f"{draft}\nAclaración: {texto}".strip()
+
+    _apply_edit(payload)
+    _resolve_proposal(proposal["id"], "ACCEPTED", None)
+    return {"outcome": "accepted", "entry_id": None}
+
+
+def _resolve_retag_with_new_info(proposal: dict, texto: str) -> dict:
+    """El texto nuevo describe la entrada ya flaggeada (no un hecho del
+    mundo aparte) -- se concatena a su content_processed vía edit_entry(), y
+    el tag señalado NO se saca (la respuesta contradice el hallazgo de "tag
+    incorrecto"; aplicar la remoción igual sería ignorar lo que el usuario
+    acaba de decir). No se intenta además agregar un tag mejor -- eso ya lo
+    cubre _backfill_catalog_tags(), fuera de esta pieza."""
+    from jarvis.memory.service import edit_entry, get_entry
+
+    target_ids = json.loads(proposal["target_entry_ids"])
+    entry_id = target_ids[0]
+    entry = get_entry(entry_id)
+    current = (entry.get("content_processed") or entry.get("content_raw") or "").strip() if entry else ""
+    new_content = f"{current}\nAclaración: {texto}".strip() if current else texto
+
+    edit_entry(entry_id, content=new_content)
+    _resolve_proposal(proposal["id"], "RESOLVED_WITH_NEW_INFO", entry_id)
+    return {"outcome": "resolved_with_new_info", "entry_id": entry_id}
+
+
+def _resolve_delete_with_new_info(proposal: dict, texto: str) -> dict:
+    """El único disparador de 'delete' es contenido vacío -- una respuesta
+    con texto real significa "no está vacía, dice esto": se rellena la
+    misma entrada vía edit_entry() (sin prefijo "Aclaración:", no hay nada
+    previo a lo que amueblar) y no se borra."""
+    from jarvis.memory.service import edit_entry
+
+    target_ids = json.loads(proposal["target_entry_ids"])
+    entry_id = target_ids[0]
+    edit_entry(entry_id, content=texto)
+    _resolve_proposal(proposal["id"], "RESOLVED_WITH_NEW_INFO", entry_id)
+    return {"outcome": "resolved_with_new_info", "entry_id": entry_id}
 
 
 # ── Mensaje agrupado (flag_contradiction/flag_connection) ────────────────────

@@ -21,6 +21,7 @@ const inputStyle = {
 
 const AUDIT_STATUS_COLORS = {
   PENDING: '#7dd3fc', ACCEPTED: '#4ade80', REJECTED: 'rgba(200,214,255,0.4)', EXPIRED: '#fbbf24',
+  RESOLVED_WITH_NEW_INFO: '#c084fc',
 }
 const AUDIT_ACTION_LABELS = {
   create: 'CREAR', clarify: 'ACLARAR', flag_contradiction: 'CONTRADICCIÓN', flag_connection: 'CONEXIÓN',

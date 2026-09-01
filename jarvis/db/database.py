@@ -14,6 +14,10 @@ _MEMORY_ENTRIES_CREATE = re.search(
     r"CREATE TABLE IF NOT EXISTS memory_entries \(.*?\n\);", SCHEMA, re.DOTALL
 ).group(0)
 
+_AUDIT_PROPOSALS_CREATE = re.search(
+    r"CREATE TABLE IF NOT EXISTS jarvis_audit_proposals \(.*?\n\);", SCHEMA, re.DOTALL
+).group(0)
+
 
 def get_connection() -> sqlite3.Connection:
     JARVIS_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -141,6 +145,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE memory_entries ADD COLUMN last_audited_at DATETIME")
         conn.commit()
 
+    _migrate_audit_proposals_status(conn)
+
 
 def _migrate_people_type(conn: sqlite3.Connection) -> None:
     """Agrega 'PEOPLE' al CHECK(type IN (...)) de memory_entries (0.2 Slice 3).
@@ -213,3 +219,65 @@ def _people_type_present(conn: sqlite3.Connection) -> bool:
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memory_entries'"
     ).fetchone()
     return row is None or "'PEOPLE'" in row["sql"]
+
+
+def _migrate_audit_proposals_status(conn: sqlite3.Connection) -> None:
+    """Agrega 'RESOLVED_WITH_NEW_INFO' al CHECK(status IN (...)) de
+    jarvis_audit_proposals (ver Cerebro/decisiones-implementacion.md,
+    2026-08-31, "respuestas de texto libre con información nueva").
+
+    Mismo approach que _migrate_people_type() -- SQLite no permite alterar un
+    CHECK existente, hay que reconstruir la tabla. Más simple que ese caso:
+    ninguna otra tabla tiene una FK que referencie jarvis_audit_proposals (solo
+    tiene una FK saliente hacia memory_entries, que la sentencia CREATE ya
+    reescribe tal cual), así que no hace falta el cuidado de "nunca dejar la
+    tabla sin existir bajo su nombre canónico" contra referencias de OTRAS
+    tablas -- igual se sigue el mismo patrón (crear bajo nombre temporal,
+    dropear la vieja, renombrar) por consistencia y para minimizar la ventana
+    sin la tabla.
+    """
+    if _audit_proposals_new_status_present(conn):
+        return
+
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.execute("DROP TABLE IF EXISTS jarvis_audit_proposals_new")
+        conn.execute(
+            _AUDIT_PROPOSALS_CREATE.replace(
+                "CREATE TABLE IF NOT EXISTS jarvis_audit_proposals (",
+                "CREATE TABLE jarvis_audit_proposals_new (",
+                1,
+            )
+        )
+        cols = [row["name"] for row in conn.execute("PRAGMA table_info(jarvis_audit_proposals)")]
+        col_list = ", ".join(cols)
+        conn.execute(
+            f"INSERT INTO jarvis_audit_proposals_new ({col_list}) "
+            f"SELECT {col_list} FROM jarvis_audit_proposals"
+        )
+        conn.execute("DROP TABLE jarvis_audit_proposals")
+        conn.execute("ALTER TABLE jarvis_audit_proposals_new RENAME TO jarvis_audit_proposals")
+        conn.executescript(SCHEMA)  # recrea índices
+        conn.commit()
+    except sqlite3.OperationalError as exc:
+        # Misma carrera inofensiva entre procesos que _migrate_people_type()
+        # ya documenta (bot.py/uvicorn/worker llaman init_db() cada uno al
+        # arrancar) -- si el otro proceso ya migró, no es un error real.
+        conn.rollback()
+        if _audit_proposals_new_status_present(conn):
+            logger.warning(
+                "[jarvis.db] _migrate_audit_proposals_status: carrera con otro "
+                "proceso arrancando en simultáneo (%s), pero el esquema ya "
+                "quedó migrado -- se ignora.", exc,
+            )
+            return
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+
+
+def _audit_proposals_new_status_present(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'jarvis_audit_proposals'"
+    ).fetchone()
+    return row is None or "'RESOLVED_WITH_NEW_INFO'" in row["sql"]

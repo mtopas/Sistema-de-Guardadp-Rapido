@@ -242,7 +242,10 @@ CREATE TABLE IF NOT EXISTS jarvis_audit_proposals (
     channel           TEXT NOT NULL CHECK (channel IN ('telegram','desktop')),
     channel_id        TEXT,
     status            TEXT NOT NULL DEFAULT 'PENDING'
-                      CHECK (status IN ('PENDING','ACCEPTED','REJECTED','EXPIRED')),
+                      CHECK (status IN (
+                          'PENDING','ACCEPTED','REJECTED','EXPIRED',
+                          'RESOLVED_WITH_NEW_INFO'
+                      )),
     entry_id          TEXT REFERENCES memory_entries(id) ON DELETE SET NULL,
     user_id           TEXT NOT NULL DEFAULT 'default',
     created_at        DATETIME NOT NULL DEFAULT (datetime('now','utc')),

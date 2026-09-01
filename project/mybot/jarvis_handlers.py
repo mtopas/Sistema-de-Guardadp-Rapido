@@ -21,10 +21,9 @@ logger = logging.getLogger(__name__)
 
 try:
     from jarvis.audit.service import (
-        accept_proposal as _accept_audit_proposal,
         get_pending_individual_proposal_for_channel as _get_pending_individual_audit,
-        reject_proposal as _reject_audit_proposal,
         resolve_grouped_reply as _resolve_audit_grouped_reply,
+        resolve_individual_reply as _resolve_audit_individual_reply,
     )
     from jarvis.captures.clarification import infer_type_hint, needs_clarification
     from jarvis.captures.passive import (
@@ -309,7 +308,6 @@ async def handle_pending_audit_proposal(update: Update, context: ContextTypes.DE
 
     chat_id = msg.chat.id
     texto = msg.text.strip()
-    lowered = texto.lower()
     has_digit = any(ch.isdigit() for ch in texto)
 
     individual = _get_pending_individual_audit("telegram", chat_id)
@@ -323,57 +321,39 @@ async def handle_pending_audit_proposal(update: Update, context: ContextTypes.DE
     if not individual:
         return False
 
-    return await _resolve_individual_audit_proposal(msg, individual, lowered, texto)
+    return await _resolve_individual_audit_proposal(msg, individual, texto)
 
 
-async def _resolve_individual_audit_proposal(msg, proposal: dict, lowered: str, texto: str) -> bool:
+async def _resolve_individual_audit_proposal(msg, proposal: dict, texto: str) -> bool:
+    """Delega la interpretación de la respuesta en
+    jarvis.audit.service.resolve_individual_reply() (ver Cerebro/decisiones-
+    implementacion.md, 2026-08-31, "respuestas de texto libre con
+    información nueva") -- acá solo se traduce el resultado a un mensaje de
+    Telegram."""
     proposal_id = proposal["id"]
-    action_type = proposal["action_type"]
-
-    if lowered in _NEGATIVE_PREFIXES or lowered.startswith("no "):
-        _reject_audit_proposal(proposal_id)
-        await msg.reply_text("Descartado.")
-        return True
-
-    if action_type == "clarify":
-        # Mismo criterio que la aclaración de DECISION y que captura pasiva:
-        # texto libre a una pregunta pendiente ES la respuesta.
-        try:
-            result = _accept_audit_proposal(proposal_id, reply_text=texto)
-        except Exception as e:
-            logger.exception("[audit] Error al aceptar aclaración %s: %s", proposal_id, e)
-            await msg.reply_text(f"❌ Error al guardar: {e}")
-            return True
-        entry_id = result.get("entry_id") if result else None
-        if entry_id:
-            await msg.reply_text(
-                f"✅ Guardado — procesando…\n_ID: `{entry_id[:8]}`_", parse_mode="Markdown"
-            )
-        else:
-            await msg.reply_text("❌ Esa propuesta ya no está disponible (venció o ya se resolvió).")
-        return True
-
-    if lowered not in _AFFIRMATIVE_PREFIXES:
-        # Texto libre que no es "no" ni una confirmación clara -> rechazo con
-        # motivo (alcance de v1: no se reinterpreta como una instrucción
-        # distinta, ver Cerebro/decisiones-implementacion.md).
-        logger.info("[audit] Propuesta %s rechazada con motivo: %r", proposal_id, texto)
-        _reject_audit_proposal(proposal_id)
-        await msg.reply_text("Descartado.")
-        return True
 
     try:
-        result = _accept_audit_proposal(proposal_id)
+        result = _resolve_audit_individual_reply(proposal_id, texto)
     except Exception as e:
-        logger.exception("[audit] Error al aplicar propuesta %s: %s", proposal_id, e)
-        await msg.reply_text(f"❌ Error al aplicar: {e}")
+        logger.exception("[audit] Error al resolver propuesta %s: %s", proposal_id, e)
+        await msg.reply_text(f"❌ Error al procesar la respuesta: {e}")
         return True
-    if result is None:
-        await msg.reply_text("❌ Esa propuesta ya no está disponible (venció o ya se resolvió).")
-        return True
+
+    outcome = result.get("outcome")
     entry_id = result.get("entry_id")
-    if entry_id:
-        await msg.reply_text(f"✅ Confirmado — procesando…\n_ID: `{entry_id[:8]}`_", parse_mode="Markdown")
+
+    if outcome == "not_found":
+        await msg.reply_text("❌ Esa propuesta ya no está disponible (venció o ya se resolvió).")
+    elif outcome == "rejected":
+        await msg.reply_text("Descartado.")
+    elif outcome == "resolved_with_new_info":
+        await msg.reply_text(
+            f"✅ Guardé tu aclaración como información nueva — procesando…\n"
+            f"_ID: `{entry_id[:8]}`_",
+            parse_mode="Markdown",
+        )
+    elif entry_id:
+        await msg.reply_text(f"✅ Guardado — procesando…\n_ID: `{entry_id[:8]}`_", parse_mode="Markdown")
     else:
         await msg.reply_text("✅ Confirmado.")
     return True

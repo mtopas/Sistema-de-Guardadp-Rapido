@@ -69,9 +69,27 @@ el punto de entrada único (reemplaza la interpretación que antes vivía
 repartida en project/mybot/jarvis_handlers.py); no las 8 acciones se
 resuelven igual -- ver el docstring de esa función y el documento de
 decisiones para el detalle caso por caso y los trade-offs.
+
+Extensión 2026-09-03 ("pregunta abierta exploratoria", ver Cerebro/
+decisiones-implementacion.md): noveno action_type, `open_question` --
+dispara SOLO cuando run_consolidation() no tuvo NADA más que reportar
+(pairwise/stale/backfill/hallazgos de auditoría, ver
+jarvis/worker/consolidation.py::_nothing_to_report()). No es un cuarto tipo
+de hueco (A/B/C siguen exactamente igual, gateados por evidencia real) --
+es un mecanismo hermano y separado que solo se activa cuando esos tres
+mecanismos existentes ya buscaron y no encontraron nada. Jerarquía de
+fallback de dos niveles (ver maybe_ask_open_question()): entidades
+mencionadas exactamente 1 vez (por debajo del umbral memory_count>=2 del
+hueco tipo A -- hay algo real de qué preguntar) y, si no hay ninguna,
+preguntas de arranque genéricas (base recién vacía, el caso motivador). Se
+resuelve igual que `clarify` (la respuesta ES el contenido nuevo) porque
+comparte su forma -- "hay una pregunta pendiente, la respuesta de texto
+libre la contesta" -- no la forma de las otras 7 acciones (que proponen una
+mutación concreta sobre memoria ya existente).
 """
 import json
 import logging
+import random
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -81,6 +99,8 @@ from jarvis.config import (
     JARVIS_AUDIT_PROPOSAL_TIMEOUT_MINUTES,
     JARVIS_AUDIT_RANDOM_COOLDOWN_DAYS,
     JARVIS_DEFAULT_USER,
+    JARVIS_OPEN_QUESTION_COOLDOWN_DAYS,
+    JARVIS_OPEN_QUESTION_ENABLED,
 )
 from jarvis.db.database import get_connection
 from jarvis.llm.client import call_reason
@@ -119,7 +139,17 @@ def run_audit(now: datetime | None = None) -> dict:
 
     now = now or datetime.now(timezone.utc)
     user_id = JARVIS_DEFAULT_USER
-    summary = {"tag_block": 0, "random_block": 0, "proposed": 0, "errors": []}
+    summary = {
+        "tag_block": 0, "random_block": 0, "proposed": 0, "errors": [],
+        # Detalle solo para el reporte diario de Telegram (ver
+        # Cerebro/decisiones-implementacion.md, 2026-09-03) -- nada de esto
+        # se persiste más allá de jarvis_policies.consolidation_run.
+        "tag_block_name": None, "tag_block_entries": [], "tag_block_findings": [],
+        "tag_block_deleted_empty": [],
+        "random_block_entries": [], "random_block_findings": [],
+        "random_block_deleted_empty": [],
+        "entity_gap_detail": [],
+    }
 
     from jarvis.debug.service import get_debug_chat_id
 
@@ -128,20 +158,31 @@ def run_audit(now: datetime | None = None) -> dict:
 
     created_ids: list[str] = []
     try:
-        tag_block = _select_tag_block(user_id)
+        tag_name, tag_block = _select_tag_block(user_id)
         summary["tag_block"] = len(tag_block)
-        created_ids += _process_block(tag_block, channel, chat_id, user_id, summary)
+        summary["tag_block_name"] = tag_name
+        summary["tag_block_entries"] = [_entry_brief(e) for e in tag_block]
+        created, tag_findings, tag_deleted = _process_block(tag_block, channel, chat_id, user_id, summary)
+        created_ids += created
+        summary["tag_block_findings"] = tag_findings
+        summary["tag_block_deleted_empty"] = tag_deleted
 
         seen_ids = {e["id"] for e in tag_block}
         random_block = _select_random_block(user_id, exclude_ids=seen_ids)
         summary["random_block"] = len(random_block)
-        created_ids += _process_block(random_block, channel, chat_id, user_id, summary)
+        summary["random_block_entries"] = [_entry_brief(e) for e in random_block]
+        created, random_findings, random_deleted = _process_block(random_block, channel, chat_id, user_id, summary)
+        created_ids += created
+        summary["random_block_findings"] = random_findings
+        summary["random_block_deleted_empty"] = random_deleted
         seen_ids |= {e["id"] for e in random_block}
 
         if seen_ids:
             _mark_audited(seen_ids, now.isoformat())
 
-        created_ids += _process_entity_gaps(user_id, channel, chat_id, summary)
+        entity_created, entity_detail = _process_entity_gaps(user_id, channel, chat_id, summary)
+        created_ids += entity_created
+        summary["entity_gap_detail"] = entity_detail
     except Exception as exc:
         logger.exception("[audit] Error en run_audit")
         summary["errors"].append(str(exc))
@@ -164,15 +205,19 @@ def run_audit(now: datetime | None = None) -> dict:
 
 # ── Selección de bloques (punto 2) ───────────────────────────────────────────
 
-def _select_tag_block(user_id: str) -> list[dict]:
+def _select_tag_block(user_id: str) -> tuple[str | None, list[dict]]:
     """Bloque agrupado por el tag con más entradas sin auditar (last_audited_at
     más viejo dentro del grupo, mismo criterio que entry_ids_without_
-    catalog_tags()). [] si no hay ningún tag con entradas vigentes.
+    catalog_tags()). (None, []) si no hay ningún tag con entradas vigentes.
+
+    Devuelve también el nombre del tag (no solo el tag_id) -- lo necesita el
+    reporte diario de Telegram (ver Cerebro/decisiones-implementacion.md,
+    2026-09-03) para decir CUÁL tag se revisó, no solo cuántas entradas.
     """
     conn = get_connection()
     try:
         tag_row = conn.execute(
-            """SELECT mt.tag_id
+            """SELECT mt.tag_id, mt.name
                FROM memory_tags mt
                JOIN memory_entry_tags met ON met.tag_id = mt.tag_id
                JOIN memory_entries me ON me.id = met.entry_id
@@ -183,7 +228,7 @@ def _select_tag_block(user_id: str) -> list[dict]:
             (user_id,),
         ).fetchone()
         if not tag_row:
-            return []
+            return None, []
         rows = conn.execute(
             """SELECT me.* FROM memory_entries me
                JOIN memory_entry_tags met ON met.entry_id = me.id
@@ -192,7 +237,7 @@ def _select_tag_block(user_id: str) -> list[dict]:
                LIMIT ?""",
             (tag_row["tag_id"], user_id, JARVIS_AUDIT_BLOCK_SIZE),
         ).fetchall()
-        return [dict(r) for r in rows]
+        return tag_row["name"], [dict(r) for r in rows]
     finally:
         conn.close()
 
@@ -390,25 +435,40 @@ def _entry_entities_context(entry_id: str) -> str:
 
 
 def _current_tag_names(entry_id: str) -> list[str]:
-    conn = get_connection()
-    try:
-        rows = conn.execute(
-            """SELECT mt.name FROM memory_entry_tags met
-               JOIN memory_tags mt ON mt.tag_id = met.tag_id
-               WHERE met.entry_id = ?""",
-            (entry_id,),
-        ).fetchall()
-        return [r["name"] for r in rows]
-    finally:
-        conn.close()
+    from jarvis.tags.service import get_tags_for_entry
+
+    return get_tags_for_entry(entry_id)
 
 
 # ── Bloque -> propuestas ──────────────────────────────────────────────────────
 
-def _process_block(entries: list[dict], channel: str, chat_id, user_id: str, summary: dict) -> list[str]:
+def _entry_brief(entry: dict) -> dict:
+    """Resumen liviano de una entrada para el reporte diario de Telegram
+    (contenido corto + tags actuales) -- ver Cerebro/decisiones-
+    implementacion.md, 2026-09-03."""
+    content = (entry.get("content_processed") or entry.get("content_raw") or "").strip()
+    return {
+        "id": entry["id"],
+        "content": _short(content),
+        "tags": _current_tag_names(entry["id"]),
+    }
+
+
+def _process_block(
+    entries: list[dict], channel: str, chat_id, user_id: str, summary: dict
+) -> tuple[list[str], list[dict], list[str]]:
+    """Devuelve (proposal_ids creados, findings del bloque con outcome anotado,
+    ids de entradas vacías que dispararon 'delete'). Los findings se devuelven
+    completos (no solo los que generaron una propuesta nueva) -- el reporte
+    diario de Telegram (ver Cerebro/decisiones-implementacion.md, 2026-09-03)
+    necesita mostrar TODOS los hallazgos del LLM, incluidos los que ya tenían
+    una propuesta de una corrida anterior (dedup) y por eso no crean una fila
+    nueva.
+    """
     if not entries:
-        return []
+        return [], [], []
     created: list[str] = []
+    deleted_empty: list[str] = []
     entries_by_id = {e["id"]: e for e in entries}
 
     # Delete (nota 2 del docstring del módulo): único disparador SQL/local
@@ -421,6 +481,7 @@ def _process_block(entries: list[dict], channel: str, chat_id, user_id: str, sum
             "delete", [e["id"]], None, _question_delete_empty(e["id"]),
             channel, chat_id, user_id,
         )
+        deleted_empty.append(e["id"])
         if pid:
             created.append(pid)
 
@@ -428,12 +489,17 @@ def _process_block(entries: list[dict], channel: str, chat_id, user_id: str, sum
     for finding in findings:
         try:
             pid = _resolve_finding_to_proposal(finding, entries_by_id, channel, chat_id, user_id)
+            finding["_outcome"] = (
+                "propuesta creada, esperando confirmación" if pid
+                else "ya había una propuesta pendiente/resuelta para esto -- no se repite"
+            )
             if pid:
                 created.append(pid)
         except Exception as exc:
             logger.warning("[audit] No se pudo procesar hallazgo %r: %s", finding, exc)
+            finding["_outcome"] = f"error procesando el hallazgo: {exc}"
             summary["errors"].append(str(exc))
-    return created
+    return created, findings, deleted_empty
 
 
 def _resolve_finding_to_proposal(finding: dict, entries_by_id: dict, channel: str, chat_id, user_id: str) -> str | None:
@@ -516,19 +582,30 @@ Fragmentos:
 Resumen:"""
 
 
-def _process_entity_gaps(user_id: str, channel: str, chat_id, summary: dict) -> list[str]:
+def _process_entity_gaps(
+    user_id: str, channel: str, chat_id, summary: dict
+) -> tuple[list[str], list[dict]]:
     from jarvis.entities.service import get_entries_for_entity
 
     created: list[str] = []
+    detail: list[dict] = []
     for gap in _detect_entity_gaps(user_id)[:_ENTITY_CREATE_LIMIT]:
         entries = get_entries_for_entity(gap["name"], user_id)
         if not entries:
             continue
         target_ids = [e["id"] for e in entries]
         if _already_exists("create", target_ids):
+            detail.append({
+                "name": gap["name"], "n_mentions": len(entries),
+                "outcome": "ya había una propuesta pendiente/resuelta para esto -- no se repite",
+            })
             continue
         content = _synthesize_entity_summary(gap["name"], entries)
         if not content:
+            detail.append({
+                "name": gap["name"], "n_mentions": len(entries),
+                "outcome": "no se pudo sintetizar contenido suficiente a partir de lo ya escrito",
+            })
             continue
         payload = {
             "content": content,
@@ -540,9 +617,13 @@ def _process_entity_gaps(user_id: str, channel: str, chat_id, summary: dict) -> 
             _question_create(gap["name"], len(entries), content),
             channel, chat_id, user_id,
         )
+        detail.append({
+            "name": gap["name"], "n_mentions": len(entries), "content": _short(content),
+            "outcome": "propuesta creada, esperando confirmación" if pid else "ya existía",
+        })
         if pid:
             created.append(pid)
-    return created
+    return created, detail
 
 
 def _synthesize_entity_summary(name: str, entries: list[dict]) -> str | None:
@@ -649,6 +730,69 @@ def _question_create(name, n_mentions, content):
         f"🧠 Encontré {n_mentions} menciones de **{name}** sin ninguna entrada "
         f"propia. ¿Guardo esto?\n_{_short(content)}_"
     )
+
+
+# ── Reporte diario de Telegram (ver Cerebro/decisiones-implementacion.md, ────
+# 2026-09-03) -- arma el texto de la sección "Auditoría" del reporte de
+# consolidation.py a partir del summary enriquecido de run_audit(). No
+# depende de que haya habido hallazgos: dice explícitamente "sin hallazgos"
+# cuando corresponde, en vez de omitir la sección.
+
+def build_audit_report_text(summary: dict) -> str:
+    parts = ["🔍 *Auditoría de memoria*"]
+
+    tag_name = summary.get("tag_block_name")
+    tag_entries = summary.get("tag_block_entries") or []
+    if tag_name:
+        header = f"*Bloque por tag* `{tag_name}` ({len(tag_entries)} entradas):"
+    else:
+        header = "*Bloque por tag*: no había ningún tag con entradas vigentes para revisar."
+    parts.append("\n".join([header] + _entry_lines(tag_entries)))
+    parts.append(_findings_section(
+        "Hallazgos del bloque por tag", summary.get("tag_block_findings") or [], len(tag_entries)
+    ))
+
+    random_entries = summary.get("random_block_entries") or []
+    parts.append("\n".join(
+        [f"*Bloque random* ({len(random_entries)} entradas):"] + _entry_lines(random_entries)
+    ))
+    parts.append(_findings_section(
+        "Hallazgos del bloque random", summary.get("random_block_findings") or [], len(random_entries)
+    ))
+
+    empty_ids = (summary.get("tag_block_deleted_empty") or []) + (summary.get("random_block_deleted_empty") or [])
+    if empty_ids:
+        parts.append(
+            "*Entradas vacías detectadas* (propuesta de borrado creada para cada una): "
+            + ", ".join(i[:8] for i in empty_ids)
+        )
+
+    entity_detail = summary.get("entity_gap_detail") or []
+    if entity_detail:
+        lines = ["*Huecos de entidad* (persona mencionada 2+ veces sin entrada propia):"]
+        for d in entity_detail:
+            content_part = f" — _{d['content']}_" if "content" in d else ""
+            lines.append(f"  • {d['name']} ({d['n_mentions']} menciones) — {d['outcome']}{content_part}")
+        parts.append("\n".join(lines))
+
+    return "\n\n".join(parts)
+
+
+def _entry_lines(entries: list[dict]) -> list[str]:
+    return [f"  • {e['content']} — _{', '.join(e['tags']) or 'sin tags'}_" for e in entries]
+
+
+def _findings_section(title: str, findings: list[dict], n_entries: int) -> str:
+    if not findings:
+        return f"*{title}*: revisé {n_entries} entradas, sin hallazgos."
+    lines = [f"*{title}* ({len(findings)}):"]
+    for f in findings:
+        ftype = f.get("type", "?")
+        detail = (f.get("detail") or "").strip()
+        outcome = f.get("_outcome", "?")
+        ids = ", ".join(str(x)[:8] for x in (f.get("entry_ids") or []))
+        lines.append(f"  • [{ftype}] ({ids}) {detail} — _{outcome}_")
+    return "\n".join(lines)
 
 
 # ── Propuestas: CRUD + dedup ──────────────────────────────────────────────────
@@ -847,7 +991,10 @@ def accept_proposal(proposal_id: str, reply_text: str | None = None) -> dict | N
 
     if action_type == "create":
         entry_id = _apply_create(proposal, payload)
-    elif action_type == "clarify":
+    elif action_type in ("clarify", "open_question"):
+        # open_question comparte la resolución de clarify -- la respuesta de
+        # texto libre ES el contenido nuevo, mismo mecanismo, distinto
+        # disparador (ver docstring del módulo, 2026-09-03).
         entry_id = _apply_clarify(proposal, reply_text)
     elif action_type in ("flag_contradiction", "flag_connection"):
         pass  # aceptar solo confirma el registro -- nunca muta memory_entries
@@ -865,7 +1012,7 @@ def accept_proposal(proposal_id: str, reply_text: str | None = None) -> dict | N
     # implementacion.md, 2026-08-31 ("Vinculación", punto 4). Antes de esto,
     # create/clarify dependían solo de que extract_entities() (pipeline
     # normal del worker) volviera a detectar el mismo nombre en el contenido.
-    if entry_id and action_type in ("create", "clarify"):
+    if entry_id and action_type in ("create", "clarify", "open_question"):
         _link_new_entry_to_targets(entry_id, target_ids, proposal["user_id"])
 
     _resolve_proposal(proposal_id, "ACCEPTED", entry_id)
@@ -1008,10 +1155,13 @@ def resolve_individual_reply(proposal_id: str, texto: str) -> dict:
     `clarify` usa el mismo criterio de negativo que ya tenía (cualquier "no"/
     "no <algo>" rechaza, cualquier otra cosa por corta que sea ES la
     respuesta) -- deliberadamente sin cambios, ver el documento de
-    decisiones. Las otras 7 acciones usan un negativo limpio más chico y
-    explícito (ver el documento, punto 1): una respuesta que empieza con
-    "no" pero sigue con contenido real (ej. "no, es sobre mi sueldo de
-    freelance") NO es negativo limpio ahí, cae en información nueva.
+    decisiones. `open_question` (2026-09-03) usa exactamente el mismo
+    criterio que `clarify` -- comparte su forma ("hay una pregunta pendiente,
+    la respuesta de texto libre la contesta"), no la de las otras 7 acciones.
+    Esas otras 7 usan un negativo limpio más chico y explícito (ver el
+    documento, punto 1): una respuesta que empieza con "no" pero sigue con
+    contenido real (ej. "no, es sobre mi sueldo de freelance") NO es negativo
+    limpio ahí, cae en información nueva.
     """
     proposal = get_proposal(proposal_id)
     if not proposal or proposal["status"] != "PENDING":
@@ -1020,7 +1170,7 @@ def resolve_individual_reply(proposal_id: str, texto: str) -> dict:
     stripped = texto.strip()
     lowered = stripped.lower()
 
-    if proposal["action_type"] == "clarify":
+    if proposal["action_type"] in ("clarify", "open_question"):
         if lowered in _LEGACY_CLARIFY_NEGATIVE_PREFIXES or lowered.startswith("no "):
             reject_proposal(proposal_id)
             return {"outcome": "rejected", "entry_id": None}
@@ -1156,6 +1306,217 @@ def _resolve_delete_with_new_info(proposal: dict, texto: str) -> dict:
     edit_entry(entry_id, content=texto)
     _resolve_proposal(proposal["id"], "RESOLVED_WITH_NEW_INFO", entry_id)
     return {"outcome": "resolved_with_new_info", "entry_id": entry_id}
+
+
+# ── Pregunta abierta exploratoria (2026-09-03) ────────────────────────────────
+# Ver Cerebro/decisiones-implementacion.md, "pregunta abierta exploratoria".
+# Dispara SOLO cuando jarvis/worker/consolidation.py::run_consolidation()
+# determinó que la corrida no tuvo NADA más que reportar (pairwise/stale/
+# backfill/hallazgos de auditoría todos vacíos, ver _nothing_to_report() ahí).
+# No es un cuarto tipo de hueco -- A/B/C siguen intactos, gateados por
+# evidencia real; esto es "ya que no encontré nada urgente, aprovecho a
+# preguntar algo útil". Jerarquía de fallback, de más a menos específico:
+#   1. Entidad mencionada exactamente 1 vez (por debajo del umbral
+#      memory_count>=2 del hueco tipo A) -- hay una entrada real de la que
+#      colgar la pregunta, no es 100% genérica.
+#   2. Si no hay ninguna (memoria vacía o toda entidad ya tiene 2+ menciones)
+#      -- pregunta de arranque genérica, rotada al azar de una lista chica.
+# La resolución (aceptar/rechazar/guardar la respuesta) es idéntica a
+# `clarify` -- ver accept_proposal()/resolve_individual_reply() arriba.
+
+_POLICY_OPEN_QUESTION_LAST_ASKED = "open_question_last_asked"
+
+_BOOTSTRAP_QUESTIONS = [
+    "🧠 Ya que no tengo nada más para reportar hoy, aprovecho para preguntar: "
+    "¿en qué estás trabajando ahora que no te haya visto anotar todavía?",
+    "🧠 Sin nada más para reportar hoy, una pregunta suelta: contame algo "
+    "sobre vos que todavía no tenga guardado (a qué te dedicás, qué te "
+    "interesa).",
+    "🧠 Día tranquilo, sin hallazgos. Aprovecho: ¿hay algún proyecto o tema "
+    "importante para vos que no haya mencionado todavía?",
+    "🧠 Nada para reportar hoy -- pregunta abierta: ¿alguna persona "
+    "importante en tu vida de la que no tenga ninguna nota guardada?",
+    "🧠 Sin novedades hoy. Una que me quedó pendiente: ¿cuáles son tus "
+    "prioridades ahora mismo, en el trabajo o fuera de él?",
+]
+
+
+def _open_question_cooldown_elapsed(now: datetime) -> bool:
+    last = _last_open_question_at()
+    return last is None or (now - last) >= timedelta(days=JARVIS_OPEN_QUESTION_COOLDOWN_DAYS)
+
+
+def _last_open_question_at() -> datetime | None:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT value FROM jarvis_policies WHERE policy_type = ? ORDER BY created_at DESC LIMIT 1",
+            (_POLICY_OPEN_QUESTION_LAST_ASKED,),
+        ).fetchone()
+        if not row:
+            return None
+        return datetime.fromisoformat(row["value"])
+    finally:
+        conn.close()
+
+
+def _record_open_question_asked(now: datetime) -> None:
+    conn = get_connection()
+    try:
+        with conn:
+            conn.execute(
+                "INSERT INTO jarvis_policies (id, policy_type, value, created_at) VALUES (?, ?, ?, ?)",
+                (str(uuid.uuid4()), _POLICY_OPEN_QUESTION_LAST_ASKED, now.isoformat(), now.isoformat()),
+            )
+    finally:
+        conn.close()
+
+
+def _detect_single_mention_entities(user_id: str) -> list[dict]:
+    """Entidades 'person' mencionadas EXACTAMENTE 1 vez en entradas vigentes
+    -- justo por debajo del umbral memory_count>=2 que usa el hueco tipo A
+    (_detect_entity_gaps()). No se restringe a subject_count=0 como el hueco
+    tipo A porque con 1 sola mención nunca puede haber una entrada PEOPLE
+    propia de todos modos (haría falta una segunda entrada). Ordenado por
+    last_seen ASC -- mismo criterio de "las más viejas/postergadas primero"
+    que ya usa el resto del módulo (_select_tag_block(),
+    entry_ids_without_catalog_tags()).
+    """
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """SELECT e.entity_id, e.name,
+                      COUNT(DISTINCT CASE WHEN me.valid_to IS NULL THEN mee.entry_id END) AS memory_count
+               FROM memory_entities e
+               LEFT JOIN memory_entry_entities mee ON mee.entity_id = e.entity_id
+               LEFT JOIN memory_entries me ON me.id = mee.entry_id
+               WHERE e.user_id = ? AND e.entity_type = 'person'
+               GROUP BY e.entity_id
+               HAVING memory_count = 1
+               ORDER BY e.last_seen ASC""",
+            (user_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def _pick_entity_candidate(user_id: str) -> dict | None:
+    """Primera entidad de 1 mención que todavía no tiene una open_question ya
+    creada sobre su única entrada (dedup exacto vía _already_exists(), mismo
+    criterio que el resto de las acciones -- ver create_proposal()). None si
+    no hay ninguna disponible -- cae al nivel 2 (pregunta de arranque).
+    """
+    from jarvis.entities.service import get_entries_for_entity
+
+    for gap in _detect_single_mention_entities(user_id):
+        entries = get_entries_for_entity(gap["name"], user_id)
+        if len(entries) != 1:
+            # Se desalineó desde el SQL de arriba (ej. la entrada dejó de
+            # estar vigente entre una query y la otra) -- se salta, no es el
+            # candidato limpio que se esperaba.
+            continue
+        entry = entries[0]
+        if _already_exists("open_question", [entry["id"]]):
+            continue
+        return {"name": gap["name"], "entry_id": entry["id"], "entry": entry}
+    return None
+
+
+def _question_open_entity(name: str, entry: dict) -> str:
+    content = _short(entry.get("content_processed") or entry.get("content_raw") or "")
+    return (
+        f"🧠 Ya que no tengo nada más para reportar hoy, aprovecho para "
+        f"preguntar: mencionaste a **{name}** una vez y no sé mucho más --\n"
+        f"_{content}_\n¿Quién/qué es {name}?"
+    )
+
+
+def _create_open_question_proposal(
+    target_entry_ids: list[str], payload: dict | None, question: str,
+    channel: str, chat_id, user_id: str,
+) -> str:
+    """Igual que create_proposal() pero SIN el chequeo de _already_exists() --
+    a propósito. La variante de arranque (target_entry_ids=[], sin ninguna
+    entrada concreta de la que colgar el dedup) usaría siempre la misma
+    clave action_type+target_entry_ids=[]; con el dedup normal, la primera
+    pregunta de arranque jamás resuelta-de-nuevo bloquearía CUALQUIER
+    pregunta de arranque futura para siempre, sin importar cuánto tiempo
+    pase. Acá el único gate real contra repetir es el cooldown
+    (JARVIS_OPEN_QUESTION_COOLDOWN_DAYS), ya aplicado por el caller antes de
+    llegar acá -- no la coincidencia de destino.
+    """
+    proposal_id = str(uuid.uuid4())
+    now_iso = datetime.now(timezone.utc).isoformat()
+    conn = get_connection()
+    try:
+        with conn:
+            conn.execute(
+                """INSERT INTO jarvis_audit_proposals
+                    (id, action_type, target_entry_ids, payload, question,
+                     channel, channel_id, status, user_id, created_at)
+                   VALUES (?, 'open_question', ?, ?, ?, ?, ?, 'PENDING', ?, ?)""",
+                (
+                    proposal_id,
+                    json.dumps(sorted(target_entry_ids), ensure_ascii=False),
+                    json.dumps(payload, ensure_ascii=False) if payload else None,
+                    question, channel, str(chat_id) if chat_id is not None else None,
+                    user_id, now_iso,
+                ),
+            )
+        return proposal_id
+    finally:
+        conn.close()
+
+
+def maybe_ask_open_question(
+    now: datetime, channel: str, chat_id, user_id: str = JARVIS_DEFAULT_USER,
+) -> dict:
+    """Punto de entrada único, llamado desde consolidation.py SOLO cuando
+    _nothing_to_report(summary) dio True. Nunca lanza -- cualquier error debe
+    quedar en el resumen del caller, no tumbar el reporte diario.
+
+    A propósito NO empuja un mensaje de Telegram por su cuenta (a diferencia
+    de _push_created(), que sí lo hace para las propuestas de auditoría
+    normales) -- el pedido explícito era que la pregunta abierta (o su
+    ausencia) aparezca DENTRO del mismo mensaje de reporte diario, nunca como
+    un ping desconectado aparte. La propuesta queda igual creada con el
+    channel/channel_id correctos para que, cuando el usuario responda por
+    Telegram, se resuelva por el mismo camino que cualquier otra individual.
+
+    Devuelve {"asked": bool, "reason": str} si no preguntó nada, o
+    {"asked": True, "tier": "entity_1_mention"|"bootstrap", "question": str,
+    "proposal_id": str} si sí.
+    """
+    if not JARVIS_OPEN_QUESTION_ENABLED:
+        return {"asked": False, "reason": "JARVIS_OPEN_QUESTION_ENABLED=0"}
+    if not _open_question_cooldown_elapsed(now):
+        return {
+            "asked": False,
+            "reason": f"cooldown activo (< {JARVIS_OPEN_QUESTION_COOLDOWN_DAYS}d desde la última)",
+        }
+
+    candidate = _pick_entity_candidate(user_id)
+    if candidate:
+        question = _question_open_entity(candidate["name"], candidate["entry"])
+        pid = create_proposal(
+            "open_question", [candidate["entry_id"]],
+            {"kind": "entity_gap", "entity_name": candidate["name"]},
+            question, channel, chat_id, user_id,
+        )
+        tier = "entity_1_mention"
+    else:
+        question = random.choice(_BOOTSTRAP_QUESTIONS)
+        pid = _create_open_question_proposal(
+            [], {"kind": "bootstrap"}, question, channel, chat_id, user_id,
+        )
+        tier = "bootstrap"
+
+    if not pid:
+        return {"asked": False, "reason": "no se pudo crear la propuesta (dedup)"}
+
+    _record_open_question_asked(now)
+    return {"asked": True, "tier": tier, "question": question, "proposal_id": pid}
 
 
 # ── Mensaje agrupado (flag_contradiction/flag_connection) ────────────────────

@@ -430,6 +430,45 @@ Los contenedores son volátiles; los datos viven en el host:
 
 Sobreviven reinicios y `docker compose up --build`.
 
+### Wipe + reseed de `jarvis.db` con dataset de prueba (procedimiento, usado 2026-09-03)
+
+Para reemplazar `jarvis.db`/`vault`/`chroma` reales por el dataset de prueba de
+`jarvis/cli/seed_test.py` sin perder los datos reales:
+
+```bash
+# 1. Backup con timestamp (confirmar contenido ANTES de seguir)
+ssh mtopas@192.168.137.10
+cd ~/project/database
+TS=$(date +%Y%m%d-%H%M%S)
+mkdir -p backup-jarvis-$TS && cp -a jarvis.db chroma backup-jarvis-$TS/ && cp -a ../vault backup-jarvis-$TS/vault
+python3 -c "import sqlite3; print(sqlite3.connect('backup-jarvis-$TS/jarvis.db').execute('SELECT COUNT(*) FROM memory_entries').fetchone())"
+
+# 2. Parar los 3 contenedores (evita escrituras a mitad del wipe)
+cd ~/project && docker-compose stop backend worker bot
+
+# 3. Wipe (NUNCA tocar database/app.db -- es la DB de SGR, no de Jarvis)
+rm -f database/jarvis.db database/jarvis.db-wal database/jarvis.db-shm
+rm -rf database/chroma && mkdir -p database/chroma
+rm -rf vault/RAW vault/SEMANTIC vault/DECISIONS vault/PROJECTS vault/PEOPLE
+
+# 4. Reseed -- contenedor de un solo uso con el mismo image/volumes/red/env
+#    que el worker real (Ollama real via ICS, nunca embeddings inventados)
+docker-compose run --rm worker python -u -m jarvis.cli.seed_test
+
+# 5. Levantar el stack de nuevo
+docker-compose up -d --no-build
+```
+
+El wipe también borra `jarvis_policies.debug_chat_id` (el chat de Telegram
+que Jarvis recordó del primer `/j`) -- sin él, `run_audit()`/`_notify_run_report()`
+(ver `Cerebro/decisiones-implementacion.md`, 2026-09-03) no tienen a dónde
+empujar. Si hace falta seguir usando el mismo chat de antes del wipe (no uno
+nuevo), restaurar esa fila puntual desde el backup por `docker exec
+project-worker-1 python3 -c "..."` (el archivo es root:root dentro del
+volumen -- un `sqlite3` corrido como `mtopas` desde el host da `readonly
+database`, hace falta `docker exec` para escribir como el mismo usuario que
+lo creó).
+
 ### Docker sin DNS (`Temporary failure in name resolution` en `pip install`)
 
 En el gabinete **no hay salida a Internet durante `docker build`** (contenedor aislado; `build.network: host` del compose **no aplica** sin el plugin buildx — ver aviso `Docker Compose requires buildx plugin`).
@@ -478,6 +517,61 @@ sudo mkdir -p /etc/docker
 printf '%s\n' '{' '  "dns": ["8.8.8.8", "1.1.1.1"]' '}' | sudo tee /etc/docker/daemon.json
 sudo systemctl restart docker
 ```
+
+### Un solo bot activo por token (`telegram.error.Conflict: terminated by other getUpdates request`)
+
+Telegram solo permite **un** poller de `getUpdates` a la vez por `TELEGRAM_BOT_TOKEN`. Si corrés
+`python mybot/bot.py` en Windows (dev local) mientras el bot del homelab también está `Up` — mismo
+token en ambos `.env` — los dos entran en conflicto y ninguno recibe mensajes de forma confiable
+(reintenta cada ~10s, no crashea el proceso pero tampoco funciona). Visto en vivo en el deploy de
+2026-09-01: quedaron **6 procesos Python** corriendo en Windows (uvicorn + worker + bot, duplicados
+x2 — una vez vía `project/venv`, otra vez vía un Python 3.10 global suelto) peleando con
+`project-bot-1` del homelab.
+
+Antes de asumir "el bot no anda", verificar procesos locales:
+
+```powershell
+# Windows — busca bot.py/uvicorn/jarvis.worker.main corriendo
+wmic process where "name='python.exe'" get ProcessId,CommandLine
+```
+
+Si hay instancias locales sueltas y el homelab es la fuente "online": matarlas (`Stop-Process -Id
+<pid> -Force`). El conflicto tarda unos segundos en drenar del lado de Telegram después de matar al
+competidor — no asumir que sigue roto si el error persiste por ~30-60s más.
+
+### `litellm` sin techo real en `jarvis/pyproject.toml` (pese a lo documentado en `Cerebro/`)
+
+`Cerebro/decisiones-implementacion.md` (2026-08-25) documenta haber fijado `litellm==1.60.2`, pero
+ese pin se aplicó **solo al `project/venv` local** (`pip install litellm==1.60.2` a mano) — la nota
+ahí mismo dice explícitamente "pendiente de agregar" el techo a `jarvis/pyproject.toml`, y **nunca
+se agregó**: sigue en `litellm>=1.40.0` sin límite superior. Cada `docker build` en el homelab por
+lo tanto instala la última versión de PyPI (1.99.0 al 2026-09-01, no 1.60.2). No rompió nada en este
+deploy porque el bug original (`typing.NotRequired`) era específico de Python 3.10 y la imagen Docker
+usa `python:3.11-slim` — pero si algún día el build empieza a fallar de forma parecida, revisar acá
+primero. Pendiente real: agregar el techo a `jarvis/pyproject.toml` si se quiere reproducibilidad
+entre el venv local y el build de Docker.
+
+### Crash real por carrera de migración (`_migrate()`) entre los 3 contenedores al arrancar
+
+`project-bot-1` crasheó el 2026-09-01 (`RestartCount=1`, se auto-recuperó al reiniciar Docker) con
+`sqlite3.OperationalError: duplicate column name: created_by`. Causa: `backend` (uvicorn), `worker`
+y `bot` corren `init_db()` → `_migrate(conn)` cada uno al arrancar, los 3 contra el mismo
+`jarvis.db` en el volumen compartido — si dos de los tres ven una columna ausente en el mismo
+instante y ambos corren el `ALTER TABLE ... ADD COLUMN`, el segundo falla. La migración de
+`created_by` tenía un `try/except sqlite3.OperationalError` que **interpretaba** la excepción (la
+asumía "SQLite viejo sin soporte para CHECK en ADD COLUMN" y reintentaba sin CHECK) en vez de
+chequear el estado real — el reintento fallaba con el mismo "duplicate column name", sin capturar,
+y tumbaba el proceso. El resto de las columnas migradas ese día (`embedded_at`, `valid_to`, `title`,
+`last_passive_review_at`, `last_audited_at`) ni siquiera tenían try/except: cualquier ALTER
+concurrente las tumbaba directo.
+
+Fix (`jarvis/db/database.py::_add_column_if_missing()`): mismo estándar que ya usaba
+`_migrate_people_type()` para el rebuild de `memory_entries` con `'PEOPLE'` — nunca interpretar qué
+significó una excepción, siempre volver a leer `PRAGMA table_info()` después de un fallo y decidir
+en base al estado real (si la columna ya existe, fue la carrera benigna, se ignora; si no, es un
+fallo real). Las 6 migraciones `ALTER TABLE ... ADD COLUMN` de `_migrate()` pasan ahora por este
+helper. Detalle completo y reproducción con múltiples procesos reales contra una DB de scratch en
+`Cerebro/decisiones-implementacion.md` (2026-09-03).
 
 ### Bot sin DNS en runtime (`api.telegram.org` no resuelve)
 

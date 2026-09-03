@@ -226,15 +226,24 @@ CREATE INDEX IF NOT EXISTS idx_jcp_channel ON jarvis_capture_proposals(channel, 
 -- nuevo a partir de una conversación; audit actúa sobre memory_entries ya
 -- existentes con 8 tipos de acción, algunos con dos entry_ids target.
 -- action_type: create|clarify|flag_contradiction|flag_connection|merge|edit|
--- delete|retag. payload/target_entry_ids van serializados como JSON (mismo
--- criterio que memory_entries.tags). Ninguna acción se aplica sin pasar por
--- este ciclo PENDING -> ACCEPTED/REJECTED/EXPIRED.
+-- delete|retag|open_question. payload/target_entry_ids van serializados como
+-- JSON (mismo criterio que memory_entries.tags). Ninguna acción se aplica sin
+-- pasar por este ciclo PENDING -> ACCEPTED/REJECTED/EXPIRED.
+-- open_question (2026-09-03, ver Cerebro/decisiones-implementacion.md):
+-- pregunta exploratoria sin hueco concreto detectado, disparada solo cuando
+-- una corrida no tuvo nada más que reportar. Se resuelve igual que clarify
+-- (la respuesta ES el contenido nuevo) -- distinta acción, mismo mecanismo de
+-- resolución, para no mezclar dos disparadores conceptualmente distintos
+-- bajo el mismo action_type. target_entry_ids puede ser '[]' (JSON array
+-- vacío, NOT NULL sigue satisfecho) para la variante "pregunta de arranque"
+-- sin ninguna entrada concreta de la que colgarla.
 CREATE TABLE IF NOT EXISTS jarvis_audit_proposals (
     id                TEXT PRIMARY KEY,
     action_type       TEXT NOT NULL
                       CHECK (action_type IN (
                           'create','clarify','flag_contradiction',
-                          'flag_connection','merge','edit','delete','retag'
+                          'flag_connection','merge','edit','delete','retag',
+                          'open_question'
                       )),
     target_entry_ids  TEXT NOT NULL,
     payload           TEXT,

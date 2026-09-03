@@ -189,6 +189,26 @@ def get_entries_for_tag(name: str, user_id: str = JARVIS_DEFAULT_USER) -> list[d
         conn.close()
 
 
+def get_tags_for_entry(entry_id: str) -> list[str]:
+    """Nombres de tags vinculados a una entrada. Compartido por jarvis/audit/
+    service.py (bloques de auditoría) y jarvis/worker/consolidation.py
+    (reporte diario de Telegram, ver Cerebro/decisiones-implementacion.md
+    2026-09-03) -- antes vivía duplicado como `_current_tag_names()` privado
+    en audit/service.py.
+    """
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """SELECT mt.name FROM memory_entry_tags met
+               JOIN memory_tags mt ON mt.tag_id = met.tag_id
+               WHERE met.entry_id = ?""",
+            (entry_id,),
+        ).fetchall()
+        return [r["name"] for r in rows]
+    finally:
+        conn.close()
+
+
 def entry_ids_without_catalog_tags(user_id: str = JARVIS_DEFAULT_USER, limit: int = 20) -> list[dict]:
     """Entradas vigentes que nunca pasaron por el clasificador con catálogo
     (sin ninguna fila en memory_entry_tags) -- usado por el backfill de

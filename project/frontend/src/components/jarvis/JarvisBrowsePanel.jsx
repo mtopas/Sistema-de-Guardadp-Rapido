@@ -26,6 +26,7 @@ const AUDIT_STATUS_COLORS = {
 const AUDIT_ACTION_LABELS = {
   create: 'CREAR', clarify: 'ACLARAR', flag_contradiction: 'CONTRADICCIÓN', flag_connection: 'CONEXIÓN',
   merge: 'FUSIONAR', edit: 'CORREGIR', delete: 'ELIMINAR', retag: 'RETAGEAR',
+  open_question: 'PREGUNTA ABIERTA',
 }
 
 export default function JarvisBrowsePanel() {

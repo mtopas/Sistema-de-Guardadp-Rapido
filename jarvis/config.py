@@ -174,6 +174,22 @@ JARVIS_AUDIT_PROPOSAL_TIMEOUT_MINUTES = int(
     os.getenv("JARVIS_AUDIT_PROPOSAL_TIMEOUT_MINUTES", "1440")
 )
 
+# ── Pregunta abierta exploratoria (jarvis/audit/service.py) ──────────────────
+# Quinto paso de run_consolidation() -- dispara SOLO cuando la corrida no tuvo
+# nada más que reportar (pairwise/stale/backfill/auditoría vacíos, ver
+# Cerebro/decisiones-implementacion.md). Dos variables independientes a
+# propósito -- no un único número mágico: ENABLED apaga el mecanismo entero
+# (para cuando el usuario ya no lo quiere más) sin tocar el cooldown; COOLDOWN
+# ajusta la frecuencia (el usuario la va a subir a mano si empieza a molestar)
+# sin tener que desactivarlo. Nunca se mezclan en una sola variable.
+JARVIS_OPEN_QUESTION_ENABLED = os.getenv("JARVIS_OPEN_QUESTION_ENABLED", "1") == "1"
+# Días desde la última pregunta abierta antes de que el mecanismo pueda
+# disparar otra -- default corto (~2 días, roughly 3x/semana) porque el gate
+# real de "no molestar todos los días" ya lo da la condición de "nada más
+# para reportar" (un día con actividad real nunca dispara esto); el cooldown
+# es una segunda capa para no preguntar dos días quietos seguidos.
+JARVIS_OPEN_QUESTION_COOLDOWN_DAYS = int(os.getenv("JARVIS_OPEN_QUESTION_COOLDOWN_DAYS", "2"))
+
 # ── Health del worker (jarvis/worker/heartbeat.py) ───────────────────────────
 # El worker escribe un heartbeat cada JARVIS_WORKER_POLL_INTERVAL segundos.
 # worker_alive = True si el último heartbeat es más reciente que

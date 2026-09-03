@@ -90,15 +90,74 @@ def _init_fts(conn: sqlite3.Connection) -> bool:
         return False
 
 
+def _add_column_if_missing(
+    conn: sqlite3.Connection, table: str, column: str, *ddl_variants: str
+) -> None:
+    """Agrega `column` a `table` (con la primera DDL de `ddl_variants` que
+    funcione) si todavía no existe.
+
+    bot.py, uvicorn (backend) y el worker llaman init_db() cada uno al
+    arrancar contra la misma jarvis.db -- si dos procesos ven la columna
+    ausente en el chequeo inicial y ambos corren el ALTER, el segundo falla
+    con "duplicate column name". La versión anterior de esta migración
+    (created_by) interpretaba esa excepción asumiendo que el SQLite del
+    entorno no soportaba CHECK en ADD COLUMN, reintentaba sin CHECK, y ese
+    segundo intento fallaba con el mismo "duplicate column name" sin
+    capturar -- crash real en producción el 2026-09-01 (project-bot-1,
+    RestartCount=1). El resto de las columnas de abajo ni siquiera tenían
+    try/except: un ALTER concurrente las tumbaba directo.
+
+    Fix, mismo estándar que ya usa _migrate_people_type(): nunca interpretar
+    QUÉ significó la excepción -- volver a leer PRAGMA table_info() después
+    de un fallo y decidir en base al estado real. Si la columna ya está,
+    fue la carrera benigna de arriba, se ignora. Si no está, el fallo es
+    real: se prueba la siguiente variante de DDL (para created_by, la
+    ausencia de soporte CHECK sigue existiendo como motivo real de fallo,
+    solo que ahora nunca se confunde con la carrera) o se repropaga si no
+    queda ninguna.
+    """
+
+    def _cols() -> set[str]:
+        return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+    if column in _cols():
+        return
+
+    last_exc: sqlite3.OperationalError | None = None
+    for i, ddl in enumerate(ddl_variants):
+        try:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+            conn.commit()
+            return
+        except sqlite3.OperationalError as exc:
+            conn.rollback()
+            if column in _cols():
+                logger.warning(
+                    "[jarvis.db] _add_column_if_missing(%s.%s): carrera con "
+                    "otro proceso arrancando en simultáneo (%s) -- la columna "
+                    "ya existe, se ignora.", table, column, exc,
+                )
+                return
+            last_exc = exc
+            if i + 1 < len(ddl_variants):
+                logger.warning(
+                    "[jarvis.db] _add_column_if_missing(%s.%s): variante de "
+                    "DDL falló (%s) y la columna sigue ausente -- no es la "
+                    "carrera de arriba, probando la siguiente variante.",
+                    table, column, exc,
+                )
+    raise last_exc
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
-    """Migraciones ligeras para DBs de jarvis.db creadas antes de S2."""
-    cols = {row["name"] for row in conn.execute("PRAGMA table_info(memory_entries)")}
-    if "embedded_at" not in cols:
-        conn.execute("ALTER TABLE memory_entries ADD COLUMN embedded_at DATETIME")
-        conn.commit()
-    if "valid_to" not in cols:
-        conn.execute("ALTER TABLE memory_entries ADD COLUMN valid_to DATETIME")
-        conn.commit()
+    """Migraciones ligeras para DBs de jarvis.db creadas antes de S2.
+
+    Cada ADD COLUMN pasa por _add_column_if_missing() -- tolera que bot.py,
+    uvicorn y el worker corran esta función en paralelo contra la misma DB
+    al arrancar (ver su docstring).
+    """
+    _add_column_if_missing(conn, "memory_entries", "embedded_at", "embedded_at DATETIME")
+    _add_column_if_missing(conn, "memory_entries", "valid_to", "valid_to DATETIME")
     _migrate_people_type(conn)
 
     # Multi-chat web (Mejoras_Jarvis.md punto 3): `conversations` ya modelaba una
@@ -106,13 +165,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # nueva, ver Cerebro/decisiones-implementacion.md. Nullable + sin default:
     # sin CHECK de por medio, no hace falta el rebuild completo que exige
     # _migrate_people_type() arriba.
-    conv_cols = {row["name"] for row in conn.execute("PRAGMA table_info(conversations)")}
-    if "title" not in conv_cols:
-        conn.execute("ALTER TABLE conversations ADD COLUMN title TEXT")
-        conn.commit()
-    if "last_passive_review_at" not in conv_cols:
-        conn.execute("ALTER TABLE conversations ADD COLUMN last_passive_review_at DATETIME")
-        conn.commit()
+    _add_column_if_missing(conn, "conversations", "title", "title TEXT")
+    _add_column_if_missing(
+        conn, "conversations", "last_passive_review_at", "last_passive_review_at DATETIME"
+    )
 
     # created_by (pieza C -- captura pasiva): CHECK vía ALTER TABLE ADD COLUMN
     # funciona en SQLite >= 3.25 mientras el CHECK no referencie otras columnas
@@ -120,32 +176,22 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # tocaba una columna con datos preexistentes fuera de rango). Fallback sin
     # CHECK si la versión de SQLite del entorno no lo soporta -- la validación de
     # valores queda igual a cargo del código (memory/service.py), nunca None.
-    if "created_by" not in cols:
-        try:
-            conn.execute(
-                "ALTER TABLE memory_entries ADD COLUMN created_by TEXT NOT NULL DEFAULT 'explicit' "
-                "CHECK (created_by IN ('explicit','jarvis_proposal_accepted'))"
-            )
-        except sqlite3.OperationalError as exc:
-            logger.warning(
-                "[jarvis.db] ALTER TABLE ADD COLUMN con CHECK falló (%s) -- "
-                "agregando 'created_by' sin CHECK (SQLite viejo).", exc,
-            )
-            conn.execute(
-                "ALTER TABLE memory_entries ADD COLUMN created_by TEXT NOT NULL DEFAULT 'explicit'"
-            )
-        conn.commit()
+    _add_column_if_missing(
+        conn, "memory_entries", "created_by",
+        "created_by TEXT NOT NULL DEFAULT 'explicit' "
+        "CHECK (created_by IN ('explicit','jarvis_proposal_accepted'))",
+        "created_by TEXT NOT NULL DEFAULT 'explicit'",
+    )
 
     # Auditoría proactiva de memoria (extensión de consolidation.py, ver
     # Cerebro/decisiones-implementacion.md 2026-08-31): marca hasta cuándo se
     # revisó cada entrada por última vez en una corrida de audit -- mismo
     # patrón que conversations.last_passive_review_at (pieza C). Nullable,
     # sin CHECK -- no hace falta el rebuild completo.
-    if "last_audited_at" not in cols:
-        conn.execute("ALTER TABLE memory_entries ADD COLUMN last_audited_at DATETIME")
-        conn.commit()
+    _add_column_if_missing(conn, "memory_entries", "last_audited_at", "last_audited_at DATETIME")
 
     _migrate_audit_proposals_status(conn)
+    _migrate_audit_proposals_action_type(conn)
 
 
 def _migrate_people_type(conn: sqlite3.Connection) -> None:
@@ -281,3 +327,61 @@ def _audit_proposals_new_status_present(conn: sqlite3.Connection) -> bool:
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'jarvis_audit_proposals'"
     ).fetchone()
     return row is None or "'RESOLVED_WITH_NEW_INFO'" in row["sql"]
+
+
+def _migrate_audit_proposals_action_type(conn: sqlite3.Connection) -> None:
+    """Agrega 'open_question' al CHECK(action_type IN (...)) de
+    jarvis_audit_proposals (ver Cerebro/decisiones-implementacion.md,
+    2026-09-03, "pregunta abierta exploratoria").
+
+    Mismo approach que _migrate_audit_proposals_status() (rebuild completo,
+    detección vía sqlite_master.sql, tolerancia a la carrera benigna entre
+    procesos) -- CHECK distinto de la misma tabla, se trata como una
+    migración separada e idempotente propia en vez de generalizar la función
+    de status, para no mezclar dos condiciones de "ya migró" en una sola
+    función (cada CHECK se agrega en un momento distinto del historial del
+    código, y una futura migración de cualquiera de los dos CHECK no debe
+    depender de tocar la otra).
+    """
+    if _audit_proposals_open_question_present(conn):
+        return
+
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.execute("DROP TABLE IF EXISTS jarvis_audit_proposals_new")
+        conn.execute(
+            _AUDIT_PROPOSALS_CREATE.replace(
+                "CREATE TABLE IF NOT EXISTS jarvis_audit_proposals (",
+                "CREATE TABLE jarvis_audit_proposals_new (",
+                1,
+            )
+        )
+        cols = [row["name"] for row in conn.execute("PRAGMA table_info(jarvis_audit_proposals)")]
+        col_list = ", ".join(cols)
+        conn.execute(
+            f"INSERT INTO jarvis_audit_proposals_new ({col_list}) "
+            f"SELECT {col_list} FROM jarvis_audit_proposals"
+        )
+        conn.execute("DROP TABLE jarvis_audit_proposals")
+        conn.execute("ALTER TABLE jarvis_audit_proposals_new RENAME TO jarvis_audit_proposals")
+        conn.executescript(SCHEMA)  # recrea índices
+        conn.commit()
+    except sqlite3.OperationalError as exc:
+        conn.rollback()
+        if _audit_proposals_open_question_present(conn):
+            logger.warning(
+                "[jarvis.db] _migrate_audit_proposals_action_type: carrera con "
+                "otro proceso arrancando en simultáneo (%s), pero el esquema ya "
+                "quedó migrado -- se ignora.", exc,
+            )
+            return
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+
+
+def _audit_proposals_open_question_present(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'jarvis_audit_proposals'"
+    ).fetchone()
+    return row is None or "'open_question'" in row["sql"]

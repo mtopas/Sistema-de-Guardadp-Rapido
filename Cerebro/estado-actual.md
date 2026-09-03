@@ -1,5 +1,232 @@
 # Estado Actual de Jarvis
-Última actualización: 2026-08-31
+Última actualización: 2026-09-03
+
+## Deploy al homelab — pregunta abierta exploratoria en producción (2026-09-03)
+
+Hecho por el orquestador directamente (sync acotado, sin sesión aparte): la feature de
+"Sesión 2026-09-03 (2)" (ver abajo) estaba completa y verificada en local pero nunca
+desplegada. Backup previo (`~/backups/pre-openq-deploy-20260903-110105/`, jarvis.db+vault+chroma,
+confirmado con contenido) → sync de `jarvis/` completo vía `tar`/SSH → rebuild de imagen
+(`numpy==1.26.4` confirmado) → `docker-compose up -d --no-build`. **Sin wipe de DB** — a
+diferencia del deploy grande del 01/09 y del reseed de prueba, esta vez no se tocó
+`jarvis_policies`, así que el `debug_chat_id` recordado sobrevivió intacto y no se repitió el
+bug de canal `desktop` documentado en la corrección de más abajo (ese bug fue consecuencia
+específica de un wipe, no un riesgo general de deploy).
+
+**Verificado post-restart**: `RestartCount=0` en los 3 contenedores (`backend`/`worker`/`bot`) —
+confirma en producción real que el fix de la condición de carrera en `_migrate()` (ver sesión
+de abajo) sostiene el arranque concurrente de los 3 procesos sin crashear. `GET /jarvis/health`
+→ `worker_alive: true`. `open_question` confirmado dentro del `CHECK` de
+`jarvis_audit_proposals` en el `jarvis.db` real. Sin errores en logs de backend/worker; un
+único reintento transitorio de healthcheck del bot al arrancar (conexión reseteada mientras el
+backend terminaba de levantar), autoresuelto.
+
+---
+
+## Sesión 2026-09-03 (2) — pregunta abierta exploratoria cuando no hay nada más que reportar
+
+Extiende `run_consolidation()` con un quinto paso, hermano y separado de
+los huecos A/B/C existentes (que siguen intactos): cuando una corrida no
+encuentra NADA de las 4 categorías del reporte diario (pairwise/stale/
+backfill de tags/hallazgos de auditoría -- ver
+`jarvis/worker/consolidation.py::_nothing_to_report()`), Jarvis aprovecha
+para hacer una pregunta genuinamente exploratoria sobre el usuario, sus
+entidades o proyectos, en vez de quedar en silencio ese día. Diseño
+completo (jerarquía de fallback, por qué `open_question` es un
+`action_type` nuevo y no reusa `clarify`, gating de dos variables
+independientes) en `Cerebro/decisiones-implementacion.md`, misma fecha.
+
+**Jerarquía de fallback, dos niveles** (`jarvis/audit/service.py::
+maybe_ask_open_question()`): 1) entidad `person` mencionada exactamente 1
+vez (por debajo del umbral `memory_count>=2` del hueco tipo A) -- hay una
+entrada real de la que colgar la pregunta; 2) si no hay ninguna (memoria
+vacía, el caso motivador, o toda entidad ya tiene 2+ menciones), pregunta
+de arranque genérica de una lista chica fija, elegida al azar.
+
+**Gating**: `JARVIS_OPEN_QUESTION_ENABLED` (bool, default `true`) +
+`JARVIS_OPEN_QUESTION_COOLDOWN_DAYS` (int, default `2`) en
+`jarvis/config.py` -- dos variables independientes a propósito (apagar el
+mecanismo entero vs. ajustar la frecuencia, nunca mezcladas). Cooldown vía
+`jarvis_policies` (`policy_type='open_question_last_asked'`), mismo patrón
+que `consolidation_last_run`.
+
+**Resolución**: noveno `action_type` en `jarvis_audit_proposals`
+(`'open_question'`, migración de schema `_migrate_audit_proposals_
+action_type()` en `jarvis/db/database.py`, mismo patrón que
+`_migrate_audit_proposals_status()`) -- se resuelve idéntico a `clarify`
+(la respuesta de texto libre ES el contenido nuevo, mismo criterio de
+negativo/afirmativo) pero vive en su propio tipo para no forzar dos formas
+distintas (con/sin entrada concreta) dentro de la semántica de `clarify`,
+y para poder saltear el dedup normal en la variante de arranque (que
+usaría siempre la misma clave `target_entry_ids=[]` y quedaría bloqueada
+para siempre después de la primera vez -- `_create_open_question_
+proposal()` sin dedup, solo para ese caso).
+
+**Integración con el reporte diario**: la pregunta (o su ausencia, con
+motivo explícito -- no aplica hoy / ENABLED=0 / cooldown / error) aparece
+DENTRO del mismo mensaje de Telegram de la corrida (`_section_open_
+question()`, una sección más de `_build_report_sections()`), nunca como
+un ping de Telegram desconectado aparte -- pedido explícito de la tarea.
+
+**Verificado con Ollama real (`gemma3:12b` local, sin `OPENAI_API_KEY`)
+contra DBs de scratch, 8 escenarios** (nunca `jarvis.db` real): base
+vacía → nivel 2 + cooldown bloqueando la repetición inmediata; entidad de
+1 mención (Lucía, agregada a `jarvis/cli/seed_test.py`) → nivel 1;
+`ENABLED=0` y cooldown pre-existente bloqueando con motivo explícito;
+responder con texto real → entrada nueva creada Y vinculada a la entidad
+(confirmado con `SELECT` directo); responder "no sé" → rechazo limpio,
+sin entrada; `run_consolidation()` completo en DB mínima (quiet day) →
+pregunta disparada y confirmada dentro del texto del reporte armado;
+`run_consolidation()` completo con el dataset entero de 19 entradas (el
+mismo que ya dispara pairwise real en sesiones anteriores) → día NO
+quieto, sección explica "no aplica hoy" en vez de disparar. `python -m
+py_compile` limpio en los 6 Python tocados, `npm run build` del frontend
+limpio (label nuevo en `JarvisBrowsePanel.jsx`, cosmético).
+
+**No desplegado en el homelab en esta sesión** -- a propósito: el homelab
+real tiene 2 propuestas `PENDING` reales esperando respuesta del usuario
+en su Telegram real desde el cierre de la sesión anterior; ejercitar
+`run_consolidation()` ahí habría mutado datos reales y mandado mensajes de
+Telegram sin que fuera parte de lo pedido. Toda la verificación quedó en
+DBs de scratch locales. Deploy al homelab (sync + rebuild + restart) queda
+como paso aparte si el usuario lo pide.
+
+---
+
+## Corrección 2026-09-03 (3) — las 2 propuestas de auditoría del homelab NUNCA llegaron a Telegram (quedaron en channel='desktop')
+
+El usuario reportó que en su Telegram real solo tenía los 4 mensajes de la
+sesión anterior (3 partes del reporte + el ping de "Verificación tarea 4")
+y ninguna de las 2 preguntas individuales de auditoría que esa sesión
+documentó como "esperando respuesta en el Telegram real del usuario" (ver
+la entrada de abajo, punto 4). Esa afirmación era **incorrecta** —
+diagnosticado por SSH directo al homelab (`ssh mtopas@192.168.137.10`,
+disponible y funcional en este entorno pese a notas de sesiones anteriores
+que decían lo contrario):
+
+**Causa real**: al resembrar la DB, el worker arrancó y `should_run()`
+disparó una corrida automática de `run_consolidation()` (sin `consolidation_
+last_run` previo) ANTES de que se restaurara `debug_chat_id` -- confirmado
+en `docker-compose logs worker`: `"[consolidation] Sin chat_id de Telegram
+configurado... reporte solo queda en el log"`. En ese momento
+`run_audit()` calculó `channel = "desktop"` (sin chat_id) y creó las 2
+propuestas (`delete` de la entrada vacía, `create` de José) con
+`channel='desktop', channel_id=NULL` -- confirmado con una query directa a
+`jarvis_audit_proposals` en el homelab. La SEGUNDA corrida (forzada
+después de restaurar el chat_id, la que sí mandó los 3 mensajes de reporte
+reales) no volvió a crear estas 2 propuestas porque `_already_exists()`
+deduplica por `action_type + target_entry_ids` **sin mirar el canal** --
+así que quedaron atascadas para siempre en `desktop` aunque después sí
+hubiera un chat de Telegram real disponible. `desktop` solo se resuelve
+por polling del frontend (`GET /jarvis/audit-proposals`) o API directa,
+nunca por el bot de Telegram -- de ahí que nunca aparecieran en el chat.
+
+**Fix aplicado (manual, una vez, sobre datos reales)**: `UPDATE
+jarvis_audit_proposals SET channel='telegram', channel_id=<chat_id real>
+WHERE id IN (...)` sobre las 2 filas + `send_telegram_message()` con el
+mismo texto que hubiera mandado `_push_created()` originalmente --
+ejecutado vía `docker-compose exec worker python3 -c "..."` en el
+homelab, reusando `jarvis.debug.service.get_debug_chat_id()`/`jarvis.
+notify.telegram.send_telegram_message()` tal cual, sin código nuevo.
+**Confirmado recibido por el usuario en su Telegram real** (los 2 mensajes
+nuevos, uno de la entrada vacía y otro de José).
+
+**Gap de diseño real, no arreglado en código todavía** (queda documentado
+para que no se repita en silencio si vuelve a pasar): cualquier propuesta
+de auditoría creada mientras `debug_chat_id` no está disponible todavía
+queda huérfana en `channel='desktop'` para siempre, incluso después de que
+un chat de Telegram real exista -- el dedup de `_already_exists()` no
+distingue canal, así que nunca se vuelve a intentar por Telegram. Esto
+solo puede pasar en la ventana entre "el worker arranca/corre por primera
+vez tras un wipe" y "se restaura/establece `debug_chat_id`" -- no debería
+repetirse en operación normal (una vez seteado, `debug_chat_id` persiste).
+Si se quiere blindar esto en código, la corrección natural sería que
+`_push_created()` (o un sweep aparte) reintente re-canalizar propuestas
+`PENDING` con `channel='desktop'` hacia `telegram` apenas haya un chat_id
+disponible -- no implementado, no pedido explícitamente todavía.
+
+---
+
+## Sesión 2026-09-03 — fix de migración concurrente + reporte diario completo + dataset real en el homelab
+
+Cuatro piezas, cada una dependiente de la anterior. Detalle de diseño completo
+de las piezas 1 y 2 en `Cerebro/decisiones-implementacion.md` (mismo día).
+
+**1) Fix del crash real de `_migrate()` (RestartCount=1 en `project-bot-1`,
+2026-09-01)** — `_add_column_if_missing()` nueva en `jarvis/db/database.py`:
+mismo estándar que `_migrate_people_type()` (chequear `PRAGMA table_info`
+después de un fallo, nunca interpretar la excepción). Las 6 migraciones
+`ALTER TABLE ... ADD COLUMN` de `_migrate()` pasan ahora por este helper.
+Reproducido ANTES del fix contra una DB de scratch con 6 procesos reales
+(`multiprocessing`, no threads) × 15 corridas: 54/90 corridas crashearon con
+`duplicate column name`. Mismo repro contra el código con el fix: 0/90
+errores. Documentado en `HOMELAB.md` y `Cerebro/decisiones-implementacion.md`.
+
+**2) Reporte diario completo de consolidación por Telegram** — antes solo se
+empujaba un mensaje si la auditoría generaba una propuesta; ahora
+`run_consolidation()` manda SIEMPRE un reporte (varios mensajes si hace
+falta, `jarvis/notify/telegram.py::send_report()`, límite ~4096 chars/
+mensaje) con detalle completo de los 5 pasos: entradas analizadas + tags,
+cada par pairwise evaluado (contenido A/B, similitud, veredicto, acción o
+"sin acción"), stale por edad, backfill de tags, y auditoría (bloque por tag
++ bloque random, con sus entradas/tags y cada hallazgo del LLM o "sin
+hallazgos" explícito). `jarvis/audit/service.py`, `jarvis/worker/
+consolidation.py`, `jarvis/tags/service.py` (`get_tags_for_entry()` nuevo,
+compartido, reemplaza el `_current_tag_names()` duplicado de audit).
+Verificado con Ollama real (fallback local, sin `OPENAI_API_KEY`) contra una
+DB de scratch antes de tocar el homelab.
+
+**3) Dataset de prueba migrado al homelab real (reemplazo total)** — backup
+de las 15 entradas reales previas en
+`~/project/database/backup-jarvis-20260903-093629/` en el propio homelab
+(jarvis.db + vault + chroma, contenido confirmado antes de wipe: 17 filas en
+`memory_entries`, 17 archivos en vault). Contenedores parados
+(`docker-compose stop backend worker bot`), wipe de `jarvis.db`/`vault/`/
+`chroma/`, reseed vía `docker-compose run --rm worker python -m
+jarvis.cli.seed_test` (embeddings reales via Ollama en Windows por ICS,
+`192.168.137.1:11434` — nunca inventados). `jarvis/cli/seed_test.py` extendido
+(no existían antes en el script, solo "a mano" en una sesión de pruebas
+anterior): par José (`jose_cafe`/`jose_favor`, dispara hueco tipo A) y
+`seed_empty_entry()` (entrada con contenido vacío, insertada directo por SQL
+sin pasar por el pipeline de embeddings). Dataset resultante: 19 entradas
+(las 14 originales + par de contradicción remoto/oficina + par José + 1
+vacía). `jarvis/` (único código tocado en piezas 1/2) sincronizado al
+homelab vía `tar` a `~/jarvis` (sibling de `~/project`, ver HOMELAB.md);
+imagen `sgr-app:latest` reconstruida con `docker build --network=host`;
+stack completo reiniciado sin errores de migración (confirma la pieza 1 en
+producción real, no solo en el repro).
+
+**4) Verificación de punta a punta, con entrega real confirmada por el
+usuario** — al arrancar el worker con la DB recién sembrada, `should_run()`
+disparó una corrida automática de `run_consolidation()` (sin `consolidation_
+last_run` previo) ANTES de que hubiera un `chat_id` de Telegram disponible
+(se había perdido con el wipe) -- esa primera corrida solo quedó en el log.
+Restaurado el `debug_chat_id` previo al wipe (mismo valor, copiado del
+backup, con aprobación explícita del usuario tras un bloqueo del
+clasificador de permisos) y forzada una segunda corrida directa. Resultado
+real, no simulado: **3 mensajes de Telegram** (6307 caracteres totales),
+confirmados recibidos por el usuario. La corrida detectó y reportó
+**ambos** pares de contradicción vigentes: `contradiccion_remoto`/
+`contradiccion_oficina` (sim=0.871) Y **Madrid/Buenos Aires** (sim=0.748) —
+este último es el caso de falso positivo ya documentado (el par es
+`same_fact` según el criterio del prompt, pero el modelo externo lo marcó
+`contradiction` en esta corrida real) -- reportado tal cual en el mensaje,
+sin ocultarlo, tal como pedía la tarea. Auditoría real: **2 propuestas
+`PENDING` quedaron esperando respuesta en el Telegram real del usuario**
+(`delete` para la entrada vacía, `create` para José a partir de sus 2
+menciones) -- no resueltas por el agente, quedan para que el usuario
+responda cuando quiera. Verificación adicional de entrega: llamada directa
+a la Bot API de Telegram (`sendMessage`) con el mismo `chat_id`/token
+devolvió `ok: true` con `message_id` real.
+
+**Nota de seguridad de la sesión**: un `cat`/`sed` mal armado para leer
+`project/.env` expuso brevemente `TELEGRAM_BOT_TOKEN`/`OPENAI_API_KEY`
+reales en la salida de una herramienta (el patrón de redacción no
+matcheaba el formato real de las líneas). Reportado al usuario en el
+momento; decidió no rotar las credenciales. Feedback del bug de redacción
+enviado vía `SendFeedback`.
+
+---
 
 ## Respuestas de texto libre con información nueva en jarvis_audit_proposals — implementada (2026-08-31)
 

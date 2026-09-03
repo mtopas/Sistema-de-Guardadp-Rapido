@@ -24,12 +24,15 @@ bien casos claros de "same_fact", mientras que el externo sí; el volumen es
 bajo (~20 entradas/día) así que el costo es despreciable. Si ChromaDB no está
 disponible, se salta el paso 1 y sigue con el paso 2.
 
-Extendido con dos pasos más en la misma corrida (sin thread ni scheduling
+Extendido con tres pasos más en la misma corrida (sin thread ni scheduling
 propio, mismo gating de should_run()): backfill de tags del catálogo (pieza
-D, `_backfill_catalog_tags()`) y auditoría proactiva de memoria por bloques
+D, `_backfill_catalog_tags()`), auditoría proactiva de memoria por bloques
 (`jarvis.audit.service.run_audit()`, huecos/contradicciones/duplicados/
 conexiones/tags mal puestos, con propuestas por Telegram — ver
-Cerebro/decisiones-implementacion.md, 2026-08-31).
+Cerebro/decisiones-implementacion.md, 2026-08-31), y pregunta abierta
+exploratoria (`jarvis.audit.service.maybe_ask_open_question()`, dispara SOLO
+cuando `_nothing_to_report()` da True — ver Cerebro/decisiones-
+implementacion.md, 2026-09-03).
 """
 import json
 import logging
@@ -78,9 +81,17 @@ def run_consolidation() -> dict:
     MANIFEST.assert_allowed("consolidate_memory")
 
     now = datetime.now(timezone.utc)
+    entries: list[dict] = []
     summary = {
         "analyzed": 0, "obsolete": 0, "conflicts": 0, "tagged": 0,
         "audit": None, "errors": [],
+        # Detalle solo para el reporte diario de Telegram (ver
+        # Cerebro/decisiones-implementacion.md, 2026-09-03).
+        "pairwise_detail": [], "stale_detail": [], "tagged_detail": [],
+        # Pregunta abierta exploratoria (mismo día, 2026-09-03) -- quiet_day
+        # queda registrado siempre (True/False), open_question solo se llena
+        # si quiet_day fue True.
+        "quiet_day": False, "open_question": None,
     }
 
     try:
@@ -97,10 +108,14 @@ def run_consolidation() -> dict:
                 )
                 summary["errors"].append(str(exc))
 
-        summary["obsolete"] += _mark_stale_by_age(now)
+        stale_detail = _mark_stale_by_age(now)
+        summary["stale_detail"] = stale_detail
+        summary["obsolete"] += len(stale_detail)
 
         try:
-            summary["tagged"] = _backfill_catalog_tags()
+            tagged_detail = _backfill_catalog_tags()
+            summary["tagged_detail"] = tagged_detail
+            summary["tagged"] = len(tagged_detail)
         except Exception as exc:
             logger.exception("[consolidation] Backfill de tags (pieza D) falló")
             summary["errors"].append(str(exc))
@@ -115,6 +130,23 @@ def run_consolidation() -> dict:
         except Exception as exc:
             logger.exception("[consolidation] Auditoría de memoria falló")
             summary["errors"].append(str(exc))
+
+        # Pregunta abierta exploratoria -- quinto paso, dispara SOLO si esta
+        # corrida no tuvo nada más que reportar (ver _nothing_to_report() y
+        # Cerebro/decisiones-implementacion.md, 2026-09-03). No es un cuarto
+        # tipo de hueco A/B/C -- mecanismo hermano y separado.
+        summary["quiet_day"] = _nothing_to_report(summary)
+        if summary["quiet_day"]:
+            try:
+                from jarvis.audit.service import maybe_ask_open_question
+                from jarvis.debug.service import get_debug_chat_id
+
+                oq_chat_id = get_debug_chat_id()
+                oq_channel = "telegram" if oq_chat_id else "desktop"
+                summary["open_question"] = maybe_ask_open_question(now, oq_channel, oq_chat_id)
+            except Exception as exc:
+                logger.exception("[consolidation] Pregunta abierta exploratoria falló")
+                summary["errors"].append(str(exc))
     except Exception as exc:
         logger.exception("[consolidation] Error en run_consolidation")
         summary["errors"].append(str(exc))
@@ -125,6 +157,15 @@ def run_consolidation() -> dict:
         "[consolidation] %d entradas analizadas, %d marcadas obsoletas, %d conflictos",
         summary["analyzed"], summary["obsolete"], summary["conflicts"],
     )
+
+    # Notificación de cada corrida, haya o no haya algo -- ver Cerebro/
+    # decisiones-implementacion.md, 2026-09-03. Nunca debe tumbar el job:
+    # la corrida ya terminó y ya quedó grabada en jarvis_policies arriba.
+    try:
+        _notify_run_report(now, summary, entries)
+    except Exception:
+        logger.exception("[consolidation] Error armando/enviando el reporte de Telegram")
+
     return summary
 
 
@@ -255,8 +296,21 @@ JSON:"""
 
 
 def _resolve_pair(entry_a: dict, entry_b: dict, similarity: float, summary: dict) -> None:
+    from jarvis.tags.service import get_tags_for_entry
+
     content_a = entry_a.get("content_processed") or entry_a.get("content_raw") or ""
     content_b = entry_b.get("content_processed") or entry_b.get("content_raw") or ""
+
+    # Detalle para el reporte diario de Telegram (ver Cerebro/decisiones-
+    # implementacion.md, 2026-09-03) -- se completa "action" según la rama
+    # que siga abajo y se agrega SIEMPRE a summary, incluida "different"
+    # (nunca solo los pares con acción real): el pedido explícito era listar
+    # todo par que cruzó el umbral y llegó al LLM, con o sin consecuencia.
+    detail = {
+        "content_a": _short(content_a), "content_b": _short(content_b),
+        "tags_a": get_tags_for_entry(entry_a["id"]), "tags_b": get_tags_for_entry(entry_b["id"]),
+        "similarity": round(similarity, 3), "relation": None, "action": None,
+    }
 
     raw = call_reason(
         messages=[
@@ -276,6 +330,7 @@ def _resolve_pair(entry_a: dict, entry_b: dict, similarity: float, summary: dict
     )
     verdict = _parse_verdict(raw)
     relation = verdict.get("relation")
+    detail["relation"] = relation
 
     if relation == "same_fact":
         newer_id = verdict.get("newer_id")
@@ -289,6 +344,7 @@ def _resolve_pair(entry_a: dict, entry_b: dict, similarity: float, summary: dict
         )
         _mark_superseded(older["id"], newer["recorded_at"])
         summary["obsolete"] += 1
+        detail["action"] = f"{older['id'][:8]} marcada obsoleta (mismo hecho, reemplazada por {newer['id'][:8]})"
         logger.info(
             "[consolidation] %s superseded por %s (mismo hecho, similitud=%.3f)",
             older["id"], newer["id"], similarity,
@@ -312,17 +368,24 @@ def _resolve_pair(entry_a: dict, entry_b: dict, similarity: float, summary: dict
                 "(evita re-penalizar/re-loguear una contradicción todavía sin resolver)",
                 entry_a["id"], entry_b["id"],
             )
+            detail["action"] = "contradicción -- ya estaba logueada de una corrida anterior, no se repite la penalización"
+            summary["pairwise_detail"].append(detail)
             return
         _reduce_confidence(entry_a["id"], entry_a.get("confidence", 1.0))
         _reduce_confidence(entry_b["id"], entry_b.get("confidence", 1.0))
         _log_conflict(entry_a["id"], entry_b["id"], similarity)
         summary["conflicts"] += 1
+        detail["action"] = "confianza reducida en ambas entradas, conflicto logueado para revisión manual"
         logger.warning(
             "[consolidation] Conflicto entre %s y %s (similitud=%.3f) — revisión manual",
             entry_a["id"], entry_b["id"], similarity,
         )
 
-    # relation == "different" (o respuesta no reconocida) -> ignorar, ninguna mutación.
+    else:
+        # relation == "different" (o respuesta no reconocida) -> ignorar, ninguna mutación.
+        detail["action"] = "sin acción (el modelo los juzgó contenidos distintos)"
+
+    summary["pairwise_detail"].append(detail)
 
 
 def _parse_verdict(raw: str) -> dict:
@@ -397,26 +460,53 @@ def _pair_already_conflicted(id_a: str, id_b: str) -> bool:
     return False
 
 
-def _mark_stale_by_age(now: datetime) -> int:
+def _mark_stale_by_age(now: datetime) -> list[dict]:
+    """Marca obsoletas por antigüedad y devuelve el detalle de cada una
+    (contenido corto, antigüedad en días, confidence) para el reporte diario
+    de Telegram (ver Cerebro/decisiones-implementacion.md, 2026-09-03) --
+    antes solo devolvía el rowcount del UPDATE, sin decir CUÁLES ni POR QUÉ.
+    """
     cutoff = (now - timedelta(days=_STALE_DAYS)).isoformat()
     conn = get_connection()
     try:
         with conn:
-            cur = conn.execute(
-                """UPDATE memory_entries
-                   SET valid_to = ?
+            rows = conn.execute(
+                """SELECT id, content_raw, content_processed, confidence, valid_from
+                   FROM memory_entries
                    WHERE valid_to IS NULL
                      AND confidence < ?
                      AND valid_from IS NOT NULL
                      AND valid_from < ?""",
-                (now.isoformat(), _STALE_CONFIDENCE, cutoff),
-            )
-            return cur.rowcount
+                (_STALE_CONFIDENCE, cutoff),
+            ).fetchall()
+            ids = [r["id"] for r in rows]
+            if ids:
+                placeholders = ",".join("?" * len(ids))
+                conn.execute(
+                    f"UPDATE memory_entries SET valid_to = ? WHERE id IN ({placeholders})",
+                    [now.isoformat()] + ids,
+                )
+            detail = []
+            for r in rows:
+                content = r["content_processed"] or r["content_raw"] or ""
+                age_days = None
+                try:
+                    valid_from = datetime.fromisoformat(r["valid_from"])
+                    if valid_from.tzinfo is None:
+                        valid_from = valid_from.replace(tzinfo=timezone.utc)
+                    age_days = (now - valid_from).days
+                except Exception:
+                    pass
+                detail.append({
+                    "id": r["id"], "content": _short(content),
+                    "confidence": r["confidence"], "age_days": age_days,
+                })
+            return detail
     finally:
         conn.close()
 
 
-def _backfill_catalog_tags(user_id: str = JARVIS_DEFAULT_USER) -> int:
+def _backfill_catalog_tags(user_id: str = JARVIS_DEFAULT_USER) -> list[dict]:
     """Asigna tags del catálogo (pieza A) a entradas viejas que nunca pasaron
     por un clasificador catálogo-aware -- pieza D ("etiquetar entradas viejas
     que nunca pasaron por un clasificador con catálogo").
@@ -426,16 +516,20 @@ def _backfill_catalog_tags(user_id: str = JARVIS_DEFAULT_USER) -> int:
     job. No re-clasifica type/project ni toca content_processed -- reusa
     call_classify() con el catálogo (mismo prompt que el worker usa en
     captura normal, jarvis/llm/client.py), solo lee "tags" del resultado.
+
+    Devuelve el detalle por entrada (contenido corto + tags asignados) para
+    el reporte diario de Telegram (ver Cerebro/decisiones-implementacion.md,
+    2026-09-03) -- antes devolvía solo un contador.
     """
     from jarvis.llm.client import call_classify
     from jarvis.tags.service import entry_ids_without_catalog_tags, link_tags_for_entry, list_tag_catalog
 
     untagged = entry_ids_without_catalog_tags(user_id=user_id, limit=_TAG_BACKFILL_LIMIT)
     if not untagged:
-        return 0
+        return []
 
     catalog = list_tag_catalog(user_id)
-    tagged = 0
+    detail = []
     for entry in untagged:
         try:
             content = entry.get("content_processed") or entry.get("content_raw") or ""
@@ -447,12 +541,35 @@ def _backfill_catalog_tags(user_id: str = JARVIS_DEFAULT_USER) -> int:
             tags = parsed.get("tags")
             if isinstance(tags, list) and tags:
                 link_tags_for_entry(entry["id"], tags, user_id)
-                tagged += 1
+                detail.append({"id": entry["id"], "content": _short(content), "tags": tags})
         except Exception as exc:
             logger.warning(
                 "[consolidation] Backfill de tags falló para entry_id=%s: %s", entry["id"], exc
             )
-    return tagged
+    return detail
+
+
+def _nothing_to_report(summary: dict) -> bool:
+    """True si esta corrida no tuvo NADA de las 4 categorías del reporte
+    diario (pairwise/stale/backfill de tags/hallazgos de auditoría) -- gate
+    para disparar la pregunta abierta exploratoria (ver Cerebro/decisiones-
+    implementacion.md, 2026-09-03).
+
+    "Hallazgos de auditoría" se generaliza acá a
+    summary["audit"]["proposed"] == 0 en vez de mirar solo
+    tag_block_findings/random_block_findings por separado -- ese contador ya
+    suma bloques tag+random, entradas vacías detectadas Y huecos de entidad
+    tipo A (ver jarvis/audit/service.py::run_audit()). Si el audit propuso
+    ALGO ese día por CUALQUIER camino (incluido un hueco tipo A con 2+
+    menciones), no es un día "sin nada" -- la pregunta abierta no debe
+    competir por atención con una propuesta real ya generada.
+    """
+    if summary.get("pairwise_detail") or summary.get("stale_detail") or summary.get("tagged_detail"):
+        return False
+    audit = summary.get("audit")
+    if audit and audit.get("proposed", 0) > 0:
+        return False
+    return True
 
 
 def _last_run_at() -> datetime | None:
@@ -467,6 +584,130 @@ def _last_run_at() -> datetime | None:
         return datetime.fromisoformat(row["value"])
     finally:
         conn.close()
+
+
+def _short(content: str, n: int = 100) -> str:
+    c = (content or "").strip().replace("\n", " ")
+    return c if len(c) <= n else c[:n].rstrip() + "…"
+
+
+# ── Reporte diario de Telegram ────────────────────────────────────────────────
+# Ver Cerebro/decisiones-implementacion.md, 2026-09-03: antes solo se
+# empujaba un mensaje si la auditoría generaba una propuesta -- el resto (o
+# una corrida sin hallazgos) quedaba solo en el JSON terso de
+# jarvis_policies.consolidation_run. Ahora cada corrida manda siempre un
+# reporte con detalle legible, partido en varios mensajes si hace falta
+# (jarvis/notify/telegram.py::send_report(), límite ~4096 chars/mensaje de
+# la Bot API) -- se prefirió esto a "resumen corto + comando tipo /jdebug
+# para pedir el detalle" para que el detalle llegue siempre sin que el
+# usuario tenga que acordarse de pedirlo.
+
+def _notify_run_report(now: datetime, summary: dict, entries: list[dict]) -> None:
+    from jarvis.debug.service import get_debug_chat_id
+    from jarvis.notify.telegram import send_report
+
+    title = f"📊 *Consolidación diaria* — {now.strftime('%Y-%m-%d %H:%M')} UTC"
+    sections = _build_report_sections(summary, entries)
+
+    chat_id = get_debug_chat_id()
+    if not chat_id:
+        logger.info(
+            "[consolidation] Sin chat_id de Telegram configurado (JARVIS_TELEGRAM_CHAT_ID "
+            "ni derivado de /j) -- reporte solo queda en el log:\n%s",
+            "\n\n".join([title] + sections),
+        )
+        return
+    send_report(chat_id, title, sections)
+
+
+def _build_report_sections(summary: dict, entries: list[dict]) -> list[str]:
+    sections = [
+        _section_analyzed(entries),
+        _section_pairwise(summary.get("pairwise_detail") or []),
+        _section_stale(summary.get("stale_detail") or []),
+        _section_tagged(summary.get("tagged_detail") or []),
+    ]
+
+    audit_summary = summary.get("audit")
+    if audit_summary:
+        from jarvis.audit.service import build_audit_report_text
+
+        sections.append(build_audit_report_text(audit_summary))
+    else:
+        sections.append("🔍 *Auditoría de memoria*: no corrió esta vez (ver errores abajo).")
+
+    sections.append(_section_open_question(summary.get("quiet_day", False), summary.get("open_question")))
+
+    if summary.get("errors"):
+        sections.append(
+            "⚠️ *Errores durante la corrida:*\n" + "\n".join(f"• {e}" for e in summary["errors"])
+        )
+    return sections
+
+
+def _section_analyzed(entries: list[dict]) -> str:
+    from jarvis.tags.service import get_tags_for_entry
+
+    lines = [f"📋 *Analizado:* {len(entries)} entradas vigentes"]
+    for e in entries:
+        content = _short(e.get("content_processed") or e.get("content_raw") or "")
+        tags = get_tags_for_entry(e["id"])
+        lines.append(f"  • {content} — _{', '.join(tags) or 'sin tags'}_")
+    return "\n".join(lines)
+
+
+def _section_pairwise(detail: list[dict]) -> str:
+    if not detail:
+        return f"*Pares comparados* (similitud > {_SIMILARITY_THRESHOLD:.2f}): ninguno esta corrida."
+    lines = [f"*Pares comparados* (similitud > {_SIMILARITY_THRESHOLD:.2f}, {len(detail)}):"]
+    for d in detail:
+        lines.append(
+            f"  • [A] {d['content_a']} _{', '.join(d['tags_a']) or 'sin tags'}_ / "
+            f"[B] {d['content_b']} _{', '.join(d['tags_b']) or 'sin tags'}_\n"
+            f"    sim={d['similarity']:.3f} — veredicto: {d['relation']} — {d['action']}"
+        )
+    return "\n".join(lines)
+
+
+def _section_stale(detail: list[dict]) -> str:
+    if not detail:
+        return "*Marcadas obsoletas por antigüedad:* ninguna esta corrida."
+    lines = [f"*Marcadas obsoletas por antigüedad* ({len(detail)}):"]
+    for d in detail:
+        age = f"{d['age_days']}d" if d["age_days"] is not None else "?"
+        lines.append(f"  • {d['content']} — antigüedad {age}, confidence={d['confidence']}")
+    return "\n".join(lines)
+
+
+def _section_tagged(detail: list[dict]) -> str:
+    if not detail:
+        return "*Tags nuevos asignados (backfill):* ninguno esta corrida."
+    lines = [f"*Tags nuevos asignados (backfill)* ({len(detail)}):"]
+    for d in detail:
+        lines.append(f"  • {d['content']} → {', '.join(d['tags'])}")
+    return "\n".join(lines)
+
+
+def _section_open_question(quiet_day: bool, open_question: dict | None) -> str:
+    """Sección "Pregunta abierta" del reporte diario -- nunca se omite (mismo
+    criterio del resto del reporte: decir explícitamente por qué no pasó
+    nada, en vez de quedar en silencio). Va DENTRO del mismo mensaje de
+    reporte (ver _build_report_sections()) -- pedido explícito, nunca un
+    ping de Telegram desconectado aparte (ver maybe_ask_open_question()).
+    """
+    if not quiet_day:
+        return "❓ *Pregunta abierta:* no aplica hoy (hubo otras cosas para reportar arriba)."
+    if open_question is None:
+        return "❓ *Pregunta abierta:* no se evaluó (error interno, ver errores abajo)."
+    if not open_question.get("asked"):
+        return (
+            f"❓ *Pregunta abierta:* nada más para reportar hoy, pero no "
+            f"disparé ninguna ({open_question.get('reason')})."
+        )
+    return (
+        f"❓ *Pregunta abierta* (nada más para reportar hoy, aprovecho a "
+        f"preguntar):\n{open_question['question']}"
+    )
 
 
 def _record_run(now: datetime, summary: dict) -> None:

@@ -54,3 +54,54 @@ def send_telegram_message(chat_id: str, text: str) -> None:
             "[jarvis.notify] No se pudo notificar a Telegram (chat_id=%s): %s",
             chat_id, exc,
         )
+
+
+# Margen bajo el límite real de Telegram (4096 caracteres/mensaje) -- deja
+# lugar al prefijo "(parte N/M)" que se antepone cuando un reporte necesita
+# más de un mensaje.
+_REPORT_MESSAGE_LIMIT = 3900
+
+
+def send_report(chat_id: str, title: str, sections: list[str]) -> None:
+    """Arma y envía un reporte largo (ej. consolidación diaria, ver
+    jarvis/worker/consolidation.py) como uno o varios mensajes de Telegram.
+
+    `sections` son bloques de texto ya formados por el caller (uno por paso
+    del job) -- se empaquetan de a varios por mensaje mientras entren bajo
+    _REPORT_MESSAGE_LIMIT, respetando el límite real de ~4096 caracteres/
+    mensaje de la Bot API. Solo se corta a mitad de una sección cuando esa
+    sección sola ya supera el límite (último recurso, no debería pasar con
+    el tamaño de reporte esperado). Se eligió "varios mensajes" en vez de
+    "resumen corto + comando para pedir detalle" para que el detalle
+    completo llegue siempre sin que el usuario tenga que pedirlo -- ver
+    Cerebro/decisiones-implementacion.md, 2026-09-03, para el resto de las
+    alternativas consideradas y por qué se descartaron.
+    """
+    chunks = _pack_sections([title] + list(sections), _REPORT_MESSAGE_LIMIT)
+    total = len(chunks)
+    for i, chunk in enumerate(chunks, start=1):
+        prefix = f"_(parte {i}/{total})_\n\n" if total > 1 else ""
+        send_telegram_message(chat_id, (prefix + chunk)[:4096])
+
+
+def _pack_sections(sections: list[str], limit: int) -> list[str]:
+    chunks: list[str] = []
+    current = ""
+    for section in sections:
+        candidate = f"{current}\n\n{section}" if current else section
+        if len(candidate) <= limit:
+            current = candidate
+            continue
+        if current:
+            chunks.append(current)
+        if len(section) <= limit:
+            current = section
+        else:
+            start = 0
+            while start < len(section):
+                chunks.append(section[start : start + limit])
+                start += limit
+            current = ""
+    if current:
+        chunks.append(current)
+    return chunks

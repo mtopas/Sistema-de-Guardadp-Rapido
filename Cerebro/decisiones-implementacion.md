@@ -11,6 +11,516 @@ Formato de cada entrada:
 
 ---
 
+## 2026-09-03 — IMPLEMENTADO: pregunta abierta exploratoria cuando no hay nada más que reportar
+
+Contexto: la entrada de abajo ("Reporte diario completo...", mismo día)
+dejó el reporte diario cubriendo con detalle las 4 categorías existentes
+(pairwise/stale/backfill/auditoría), incluido decir explícitamente "sin
+hallazgos" cuando no hay nada. Se pidió un mecanismo hermano y separado
+(no un cuarto tipo de hueco A/B/C -- esos siguen exactamente igual,
+gateados por evidencia real): cuando una corrida no encuentra NADA de esas
+4 categorías, que Jarvis aproveche para hacer una pregunta genuinamente
+exploratoria sobre el usuario, sus entidades o proyectos -- "ya que estoy
+despierto y no hay nada urgente, pregunto algo útil" -- en vez de quedar
+en silencio ese día.
+
+### 1) Gating: dos variables independientes + policy de cooldown
+
+`JARVIS_OPEN_QUESTION_ENABLED` (bool, default `"1"`) y
+`JARVIS_OPEN_QUESTION_COOLDOWN_DAYS` (int, default `2`) en
+`jarvis/config.py` -- deliberadamente separadas, mismo patrón que
+`debug_mode` en `jarvis_policies` (una convención explícita, no implícita):
+el usuario puede subir el cooldown con el tiempo sin apagar el mecanismo
+entero, o apagarlo con `ENABLED=0` sin perder el valor de cooldown que
+tenía configurado. Nunca se mezclan en una sola variable.
+
+Cooldown vía policy en `jarvis_policies` (`policy_type=
+'open_question_last_asked'`, mismo patrón exacto que `consolidation_
+last_run` de `consolidation.py`): `_open_question_cooldown_elapsed(now)`
+lee la última fila, `_record_open_question_asked(now)` inserta una nueva
+SOLO cuando una pregunta efectivamente se creó (no en cada intento) --
+`jarvis/audit/service.py`.
+
+### 2) Disparo: quinto paso de `run_consolidation()`, gateado por
+`_nothing_to_report()`
+
+`jarvis/worker/consolidation.py::_nothing_to_report(summary)` -- nuevo
+helper, corre DESPUÉS de que pairwise/stale/backfill/auditoría ya
+completaron esa corrida (necesita el `summary` final de los 4 pasos). Es
+`True` solo si `pairwise_detail`, `stale_detail` y `tagged_detail` están
+los tres vacíos Y `summary["audit"]["proposed"] == 0`.
+
+**Decisión no especificada explícitamente por la tarea, resuelta con
+criterio propio**: la tarea dice literalmente "ni pairwise, ni stale, ni
+backfill de tags, ni hallazgos de auditoría en los bloques tag/random" --
+sin mencionar los huecos de entidad tipo A (`entity_gap_detail`) ni las
+entradas vacías detectadas (`deleted_empty`) como parte explícita del gate.
+Se generalizó a `audit["proposed"] == 0` (que YA suma bloques tag+random +
+huecos tipo A + entradas vacías -- ver `run_audit()`) en vez de mirar solo
+`tag_block_findings`/`random_block_findings` por separado, porque la
+alternativa literal tenía un hueco real: si el hueco tipo A encontró a
+José (2+ menciones, dataset de prueba) y generó una propuesta `create`,
+ESO ya es "algo para reportar" ese día -- dispararle además una pregunta
+abierta competiría por atención con una propuesta real recién creada, lo
+que contradice el espíritu de "aprovechar un día sin nada" del pedido.
+Documentado explícitamente en el docstring de `_nothing_to_report()` para
+que quede claro que es una generalización deliberada, no un descuido.
+
+`summary["quiet_day"]` (bool, siempre presente) y `summary["open_question"]`
+(el resultado de `maybe_ask_open_question()`, o `None` si no era un día
+quieto) se agregan al summary de la corrida.
+
+### 3) Jerarquía de fallback de la pregunta -- dos niveles
+
+`jarvis/audit/service.py::maybe_ask_open_question(now, channel, chat_id,
+user_id)`:
+
+1. **Entidad con exactamente 1 mención** (`_detect_single_mention_entities()`
+   -- mismo SQL que el hueco tipo A pero `HAVING memory_count = 1` en vez
+   de `>= 2`, mismo scope `entity_type = 'person'` por consistencia con
+   tipo A). `_pick_entity_candidate()` itera las candidatas (ordenadas por
+   `last_seen ASC`, mismo criterio de "las más postergadas primero" que ya
+   usa el resto del módulo) y salta las que ya tienen una `open_question`
+   creada sobre su única entrada (`_already_exists("open_question",
+   [entry_id])` -- dedup exacto, mismo mecanismo que las otras 8 acciones).
+   Se sigue la sugerencia de la tarea: hay una entrada real de la que
+   colgar la pregunta ("mencionaste a X una vez, ¿quién es?"), no es 100%
+   genérica.
+2. **Pregunta de arranque genérica** (`_BOOTSTRAP_QUESTIONS`, 5 variantes
+   fijas, elegidas al azar con `random.choice()`) -- solo cuando el nivel 1
+   no encontró ninguna candidata (memoria vacía, el caso motivador; o toda
+   entidad person ya tiene 2+ menciones). Deliberadamente simple (sin
+   tracking de "cuál se preguntó la última vez" para rotar sin repetir) --
+   el volumen esperado de disparos de nivel 2 es bajo (el nivel 1 absorbe
+   la mayoría de los casos reales una vez que hay algo de memoria
+   acumulada), no se justificó más mecanismo por ahora.
+
+### 4) Resolución: `jarvis_audit_proposals` con un noveno `action_type`
+('open_question'), NO reutilizando 'clarify' directamente
+
+La tarea pedía evaluar explícitamente si alcanzaba con la acción `clarify`
+ya existente, o si hacía falta un caso especial -- se investigó antes de
+decidir:
+
+- **Nivel 1 (entidad con 1 mención) SÍ encaja en la forma de `clarify`**:
+  hay una entrada concreta (`target_entry_ids=[entry_id]`), y semánticamente
+  es lo mismo que un hueco tipo C ("referencia sin resolver dentro de una
+  entrada") -- podría haberse creado literalmente como una fila `clarify`
+  sin ningún cambio de schema.
+- **Nivel 2 (pregunta de arranque) NO encaja limpio en `clarify`**: no hay
+  ninguna entrada de la que colgar la pregunta -- `target_entry_ids`
+  tendría que ser `[]` (JSON array vacío, `NOT NULL` de la columna sigue
+  satisfecho, así que no rompe el schema). El problema real es el **dedup**:
+  `create_proposal()` deduplica por `action_type + target_entry_ids`
+  exacto (`_already_exists()`) -- con `target_entry_ids=[]` SIEMPRE
+  idéntico, la primera pregunta de arranque jamás resuelta bloquearía
+  cualquier pregunta de arranque futura para siempre (el dedup no vence, a
+  diferencia del cooldown). Forzar el nivel 2 dentro de `clarify` habría
+  significado o bien romper el dedup de `clarify` para TODOS sus usos
+  (riesgo real: `clarify` real sí necesita ese dedup por entrada) o
+  agregar un caso especial dentro de la función compartida -- ninguna de
+  las dos es limpia.
+
+**Decisión**: `action_type='open_question'` nuevo (migración de schema,
+ver punto 5) para AMBOS niveles -- no se separó nivel 1 en `clarify` y
+nivel 2 en algo distinto, para no bifurcar la resolución de una respuesta
+de texto libre en dos caminos con reglas de negativo/afirmativo
+potencialmente distintas (ver punto 6). `open_question` se resuelve
+exactamente como `clarify` (`accept_proposal()`/`resolve_individual_reply()`
+tratan `("clarify", "open_question")` como el mismo caso) pero vive en su
+propio `action_type`, lo que además dejó lugar para resolver el problema
+de dedup del nivel 2 de forma limpia: `_create_open_question_proposal()`
+(sin dedup, solo para el nivel 2) en vez de `create_proposal()` (con dedup,
+usado para el nivel 1 -- ahí sí es correcto, cada entidad de 1 mención
+tiene una entrada distinta).
+
+### 5) Migración de schema: `_migrate_audit_proposals_action_type()`
+
+Mismo patrón exacto que `_migrate_audit_proposals_status()` (rebuild
+completo de la tabla, SQLite no permite `ALTER` sobre un `CHECK`
+existente, detección de "ya migró" leyendo `sqlite_master.sql`, tolerancia
+a la carrera benigna entre `backend`/`worker`/`bot` arrancando en
+simultáneo -- ver la entrada de más abajo, "FIX: carrera real en
+`_migrate()`..."). Se implementó como función SEPARADA de
+`_migrate_audit_proposals_status()` (no generalizada en una sola función
+con dos condiciones) para no mezclar dos CHECK distintos de la misma tabla,
+agregados en momentos distintos del historial del código, bajo una sola
+condición de "ya migró" -- cada CHECK migra independiente.
+
+### 6) Negativo/afirmativo: `open_question` usa el criterio de `clarify`,
+no el de las otras 7 acciones
+
+`resolve_individual_reply()` ya tenía dos criterios de negativo distintos
+(ver la entrada de abajo, "respuestas de texto libre con información
+nueva"): `clarify` acepta cualquier `"no"`/`"no <algo>"` como rechazo
+limpio; las otras 7 acciones usan un set chico y explícito
+(`_CLEAN_NEGATIVE_PHRASES`). `open_question` se sumó al bucket de
+`clarify` -- comparte su FORMA ("hay una pregunta pendiente, la respuesta
+de texto libre la contesta"), no la de las 7 acciones (que proponen una
+mutación concreta sobre memoria ya existente que el usuario confirma o
+no). Concretamente: una respuesta como "no sé" a "¿quién es Lucía?"
+debe rechazar limpio (no crear una entrada con "no sé" como contenido) --
+el criterio de `clarify` (`startswith("no ")`) ya cubre ese caso; el set
+chico de las 7 acciones NO lo cubriría (`"no sé"` no está en
+`_CLEAN_NEGATIVE_PHRASES`), lo que hubiera creado una entrada basura.
+Verificado con Ollama real (ver punto 8): "no sé" rechaza limpio, status
+`REJECTED`, sin entrada creada.
+
+### 7) Integración con el reporte diario -- mismo mensaje, nunca un ping aparte
+
+Pedido explícito de la tarea: la pregunta abierta (o su ausencia) tiene
+que aparecer DENTRO del mismo mensaje de "esto pasó esta corrida", no
+como un ping desconectado. Por eso `maybe_ask_open_question()` NO llama a
+`send_telegram_message()` por su cuenta (a diferencia de `_push_created()`,
+que sí empuja mensajes individuales para las propuestas de auditoría
+normales) -- solo crea la propuesta `PENDING` con el `channel`/`channel_id`
+correctos (para que una respuesta futura por Telegram se resuelva por el
+mismo camino que cualquier otra individual) y devuelve el resultado.
+`jarvis/worker/consolidation.py::_section_open_question()` arma la sección
+de texto a partir de `summary["quiet_day"]`/`summary["open_question"]` y se
+agrega como una sección más de `_build_report_sections()` -- termina en el
+mismo `send_report()` (varios mensajes empaquetados si hace falta, ver la
+entrada de abajo) que ya manda las otras 4 secciones. Mismo criterio de
+"nunca omitir la sección, decir explícitamente por qué no pasó nada" que
+ya usa el resto del reporte: la sección siempre aparece, con uno de 4
+textos posibles (no aplica hoy / no se evaluó por error / no disparé por
+ENABLED-o-cooldown / la pregunta en sí).
+
+### 8) Verificado con Ollama real (`gemma3:12b` local, sin `OPENAI_API_KEY`)
+contra DBs de scratch -- 8 escenarios, nunca `jarvis.db` real
+
+Cada escenario en un subproceso propio (env vars `JARVIS_DB_PATH`/`VAULT`/
+`CHROMA` apuntando a un directorio de scratch nuevo, `jarvis.config` lee
+`os.getenv()` al importarse):
+
+1. **Base vacía** (`init_db()` solo, cero entradas) → nivel 2 dispara
+   (`tier="bootstrap"`); segunda llamada inmediata bloqueada por cooldown
+   (`"cooldown activo (< 2d desde la última)"`).
+2. **Una entidad de 1 mención** (Lucía, agregada al dataset de
+   `jarvis/cli/seed_test.py` -- ver más abajo) → nivel 1 dispara
+   (`tier="entity_1_mention"`), la pregunta menciona a Lucía; visible vía
+   `list_pending_proposals(channel="desktop")` (polling real del
+   frontend, no `get_pending_individual_proposal_for_channel()` -- esa es
+   específica del bot de Telegram).
+3. **`JARVIS_OPEN_QUESTION_ENABLED=0`** → no dispara, razón explícita.
+4. **Cooldown activo** (fila de policy insertada a mano con timestamp
+   reciente) → no dispara, razón explícita.
+5. **Responder con texto real** ("Es mi hermana, vive en Rosario.") a la
+   pregunta de nivel 1 → `resolve_individual_reply()` devuelve
+   `outcome="accepted"`, entrada nueva creada, proposal `ACCEPTED`,
+   **vinculada a la entidad Lucía** (confirmado con `SELECT` directo sobre
+   `memory_entry_entities`) vía `_link_new_entry_to_targets()` (reusado sin
+   cambios).
+6. **Responder "no sé"** → `outcome="rejected"`, `entry_id=None`, proposal
+   `REJECTED`, sin entrada creada.
+7. **`run_consolidation()` completo en una DB mínima de 1 entrada** (solo
+   Lucía) → `quiet_day=True`, `audit proposed=0`, pregunta de nivel 1
+   disparada, **confirmada dentro del texto del reporte armado por
+   `_build_report_sections()`** (sección `❓ *Pregunta abierta*` con la
+   pregunta completa, en el mismo bloque que "Analizado"/"Pares
+   comparados"/"Auditoría").
+8. **`run_consolidation()` completo con el dataset entero de
+   `seed_test.py`** (19 entradas, el mismo que ya dispara pairwise real
+   documentado en sesiones anteriores) → `quiet_day=False` (13 pares
+   comparados), `summary["open_question"] is None`, sección
+   `❓ *Pregunta abierta*: no aplica hoy (hubo otras cosas para reportar
+   arriba).` -- confirma que un día con actividad real nunca compite con
+   la pregunta abierta.
+
+**Dataset de prueba extendido** (`jarvis/cli/seed_test.py`): entidad nueva
+"Lucía" mencionada UNA sola vez (`lucia_mencion`), a propósito por debajo
+del umbral tipo A -- José (ya existente en el dataset, 2 menciones) cubre
+el hueco tipo A: ahora el dataset cubre ambos niveles del hueco de entidad
+por separado, sin pisarse entre sí.
+
+`python -m py_compile` limpio en los 6 archivos Python tocados. `npm run
+build` del frontend limpio (agregado `open_question: 'PREGUNTA ABIERTA'`
+a `AUDIT_ACTION_LABELS` en `JarvisBrowsePanel.jsx` -- polish menor, el
+fallback `|| p.action_type` ya evitaba cualquier crash con o sin esto).
+
+**No desplegado en el homelab en esta sesión** -- a propósito: el homelab
+real tiene, desde el cierre de la sesión anterior, **2 propuestas
+`PENDING` reales esperando respuesta del usuario en su Telegram real**
+(`delete` de la entrada vacía, `create` de José) más el dataset de prueba
+recién sembrado ahí. Ejercitar `run_consolidation()` contra esa DB en esta
+sesión habría mutado datos reales (confidence, `valid_to`) y mandado
+mensajes de Telegram reales sin que fuera parte de lo pedido -- se
+mantuvo la verificación 100% en DBs de scratch locales, mismo criterio
+que toda sesión anterior cuando no hace falta tocar producción para
+validar el mecanismo. Si el usuario quiere esto en el homelab, es un paso
+aparte (sync + rebuild + restart, ver `HOMELAB.md`) que puede pedir
+explícitamente.
+
+Impacto: `jarvis/config.py` (2 variables nuevas), `jarvis/db/schema.py`
+(noveno valor de `action_type`), `jarvis/db/database.py`
+(`_migrate_audit_proposals_action_type()`), `jarvis/audit/service.py`
+(sección nueva completa + 3 puntos de dispatch extendidos con
+`"open_question"`), `jarvis/worker/consolidation.py`
+(`_nothing_to_report()`, `_section_open_question()`, quinto paso en
+`run_consolidation()`), `jarvis/cli/seed_test.py` (entidad Lucía),
+`project/frontend/src/components/jarvis/JarvisBrowsePanel.jsx` (label).
+
+---
+
+## 2026-09-03 — Reporte diario completo de consolidación por Telegram (cada corrida, no solo cuando hay propuestas)
+
+Contexto: `run_consolidation()` corre 5 pasos (pares mismo-tipo, pares
+cross-type, stale por edad, backfill de tags, auditoría proactiva) pero
+solo empujaba un mensaje de Telegram cuando la auditoría generaba una
+propuesta -- una corrida sin hallazgos de auditoría, o una corrida donde
+pairwise/stale/backfill sí hicieron cambios reales, no dejaba rastro
+fuera del JSON terso de `jarvis_policies.consolidation_run`. Se pidió que
+**cada corrida diaria mande un mensaje, sin excepción**, con detalle
+legible (no JSON crudo) de las 4 etapas + auditoría, incluyendo
+explícitamente "sin hallazgos" cuando no hay nada, en vez de omitir la
+sección.
+
+### 1) Qué ya existía y no se exponía
+
+Antes de escribir nada nuevo se revisó qué ya se calculaba: el campo
+`detail` de cada hallazgo de auditoría (`_BLOCK_PROMPT`, ya lo pedía el
+prompt) se guardaba en la propuesta pero nunca se mostraba fuera de la
+pregunta individual de Telegram; `_mark_stale_by_age()` y
+`_backfill_catalog_tags()` devolvían solo un contador (rowcount / len),
+descartando el detalle por entrada; `_resolve_pair()` no devolvía nada en
+absoluto, ni siquiera para el caso `same_fact`/`contradiction` que sí
+mutan la DB -- el caso `different` (la mayoría de los pares en la
+práctica) no dejaba ningún rastro, ni interno. `jarvis_event_log` se
+descartó como fuente: lo llena `processor.py` para el pipeline de
+captura normal, no para consolidación/auditoría, así que no tenía nada
+de esto. Conclusión: hacía falta capturar detalle nuevo en 4 de los 5
+pasos (todo salvo backfill... no, backfill también, ver abajo), no solo
+exponer algo que ya estaba calculado y escondido.
+
+### 2) Mecanismo elegido: varios mensajes, no resumen + comando
+
+El pedido daba tres opciones: varios mensajes, resumen corto + comando
+tipo `/jdebug` para pedir el detalle completo, u otro mecanismo propio.
+Se eligió **varios mensajes** (`jarvis/notify/telegram.py::send_report()`,
+empaqueta secciones de texto en mensajes de hasta ~3900 caracteres,
+respetando el límite real de ~4096/mensaje de la Bot API, numerando
+"(parte N/M)" solo si hace falta más de uno):
+
+- **A favor**: el detalle completo llega siempre, sin que el usuario
+  tenga que acordarse de pedirlo -- coincide con el espíritu del pedido
+  original ("con detalle completo", "sin excepción"). Reusa
+  `send_telegram_message()` ya existente (`jarvis/notify/telegram.py`),
+  sin agregar un comando de bot nuevo ni tocar `project/mybot/
+  jarvis_handlers.py`/`bot.py` -- menor superficie de cambio en una
+  sesión que ya toca 4 piezas grandes distintas.
+- **En contra, aceptado**: un día con mucho volumen (pairwise con muchos
+  pares, bloques de auditoría con varios hallazgos) puede mandar 3-4
+  mensajes seguidos -- confirmado con datos reales de la prueba de abajo
+  (16 entradas sembradas → 8620 caracteres → 4 mensajes). Se aceptó el
+  trade-off porque el volumen real diario (~20 entradas/día, documentado
+  en varias piezas anteriores) es acotado -- si en la práctica se vuelve
+  ruidoso, la mitigación más simple es capar cuántos pares/hallazgos se
+  detallan en el mensaje (ej. primeros N + "...y M más") antes de migrar
+  al mecanismo de resumen+comando, que es más trabajo (requiere persistir
+  el reporte completo en algún lado recuperable y un comando de bot
+  nuevo).
+- **Por qué no resumen+comando**: agregar un `/jconsolidacion` (o
+  similar) que devuelva el detalle bajo demanda hubiera requerido
+  persistir el reporte completo en un lugar consultable (hoy
+  `jarvis_policies.consolidation_run` ya lo tiene, así que técnicamente
+  el dato está -- lo que faltaría es el comando de bot + parseo) y
+  dejaría el caso por defecto (sin pedir nada) con menos información que
+  la pedida explícitamente ("sin excepción... con detalle completo"). Se
+  descarta para esta pieza, no como mala idea en general -- si el
+  volumen de mensajes se vuelve un problema real, es la alternativa
+  natural a reconsiderar.
+
+### 3) Qué cambió en cada módulo
+
+**`jarvis/worker/consolidation.py`**:
+- `_resolve_pair()` ahora arma un `detail` (contenido corto A/B + tags,
+  similitud, veredicto, acción) y lo agrega SIEMPRE a
+  `summary["pairwise_detail"]`, incluida la rama `different` (que antes
+  no dejaba ningún rastro) y la rama "contradicción ya conocida, se
+  omite" (antes solo un `logger.info`).
+- `_mark_stale_by_age()` pasa de `UPDATE ... ; return rowcount` a
+  `SELECT` primero (contenido, confidence, `valid_from`) y devolver el
+  detalle (con antigüedad en días calculada contra `now`) antes de
+  aplicar el mismo `UPDATE`.
+- `_backfill_catalog_tags()` devuelve el detalle por entrada (contenido +
+  tags asignados) en vez de un contador -- `summary["tagged"]` sigue
+  siendo un conteo (`len(detail)`) para no romper el log existente.
+- Nuevo: `_short()`, `_build_report_sections()`, `_section_analyzed/
+  _pairwise/_stale/_tagged()`, `_notify_run_report()` -- arma título +
+  secciones y llama `send_report()`. Se llama al final de
+  `run_consolidation()`, envuelto en su propio try/except (nunca debe
+  tumbar el job -- la corrida ya terminó y ya quedó grabada en
+  `jarvis_policies` antes de este paso).
+
+**`jarvis/audit/service.py`**:
+- `_select_tag_block()` devuelve `(tag_name, entries)` en vez de solo
+  `entries` -- hacía falta el nombre del tag para el reporte, no solo el
+  tag_id interno.
+- `_process_block()` devuelve `(created_ids, findings, deleted_empty_ids)`
+  en vez de solo `created_ids` -- los `findings` se devuelven COMPLETOS
+  (con un `_outcome` anotado: "propuesta creada" / "ya había una
+  propuesta... no se repite" / error), no solo los que generaron una fila
+  nueva -- el reporte necesita mostrar TODO lo que encontró el LLM,
+  incluido lo que el dedup (`_already_exists()`) ya había visto antes.
+- `_process_entity_gaps()` devuelve `(created_ids, detail)` con el mismo
+  criterio (nombre de la entidad, N menciones, contenido sintetizado u
+  outcome de por qué no se creó nada).
+- Nuevo: `build_audit_report_text()` -- arma la sección "Auditoría" del
+  reporte a partir del `summary` enriquecido de `run_audit()`. Dice
+  explícitamente "revisé N entradas, sin hallazgos" cuando corresponde
+  (`_findings_section()`), nunca omite la sección.
+- `_entry_brief()` nuevo (contenido corto + tags de una entrada, para
+  listar los bloques).
+
+**`jarvis/tags/service.py`**: `get_tags_for_entry()` nuevo -- compartido
+por `audit/service.py` (que antes tenía un `_current_tag_names()` privado
+duplicando la misma query) y por `consolidation.py` (que lo necesitaba
+por primera vez para el reporte). Mismo criterio de abstracción
+compartida que ya aplica el resto de Jarvis (ver
+`jarvis_shared_abstraction_pattern` en memoria del agente): lógica usada
+por más de un módulo va a `jarvis/`, no se duplica.
+
+**`jarvis/notify/telegram.py`**: `send_report()` + `_pack_sections()`
+nuevos -- empaquetado de secciones en mensajes bajo el límite de
+Telegram, cortando en límites de sección salvo que una sola sección ya
+supere el límite (caso no esperado con el tamaño real de reporte, pero
+cubierto igual).
+
+### 4) Verificado con Ollama real contra una DB de scratch
+
+Nunca `jarvis.db` real -- DB/vault/Chroma de scratch nuevos, dataset de
+`jarvis/cli/seed_test.py` (16 entradas, incluye el par de contradicción
+Madrid-no/oficina-remoto... el real es "100% remoto" vs "100%
+presencial", ver el dataset) sembrado con embeddings reales
+(`nomic-embed-text` vía Ollama). `call_reason()`/`call_classify()`
+corrieron en modo local (`gemma3:12b`/`llama3.2:3b` vía fallback
+automático, sin `OPENAI_API_KEY` seteada a propósito en el proceso de
+prueba -- no hacía falta el modelo externo para validar la mecánica del
+reporte).
+
+`run_consolidation()` completo, un solo ciclo: `analyzed=16→13 vigentes
+tras 3 same_fact`, `obsolete=3`, `conflicts=1` (el par
+`contradiccion_remoto`/`contradiccion_oficina`, sim=0.871 -- coincide con
+el dato de calibración ya documentado el 31/08), `tagged=0`, `errors=[]`.
+Auditoría: bloque por tag `react` (2 entradas, sin hallazgos), bloque
+random (10 entradas, 4 hallazgos: 1 `contradiction` -- el mismo par de
+arriba, redetectado independientemente por el camino de auditoría --, 1
+`duplicate`, 2 `connection`), las 4 con `detail` real del LLM y
+`_outcome="propuesta creada"`. Reporte final: **8620 caracteres, empaquetado
+en 4 mensajes** (1570/3900/338/2786 chars, ninguno pasa el límite),
+confirmando que el mecanismo de partido funciona con datos reales, no
+solo en teoría. Texto inspeccionado a mano: todas las secciones pedidas
+presentes (analizado con tags, pares con contenido A/B+tags+similitud+
+veredicto+acción incluidos los `different`, stale/backfill con "ninguna
+esta corrida" explícito al no haber casos, auditoría con bloque+tag,
+entradas+tags de cada bloque, y hallazgos con el `detail` del LLM o "sin
+hallazgos" explícito).
+
+### 5) Trade-off documentado, no resuelto en esta pieza
+
+La sección "Analizado" lista TODAS las entradas vigentes con sus tags
+(no solo las nuevas del día) porque eso es literalmente lo que
+`_fetch_active_entries()` ya compara en el paso de pares -- a medida que
+la memoria crezca más allá de los ~20/día de ritmo de captura, esta
+sección va a crecer sin límite (a diferencia de pairwise/stale/backfill/
+auditoría, que sí están acotados por umbral o por `_TAG_BACKFILL_LIMIT`/
+`JARVIS_AUDIT_BLOCK_SIZE`). El empaquetado en varios mensajes lo resuelve
+técnicamente, pero podría volverse ruidoso con el tiempo -- riesgo
+aceptado a propósito por seguir el pedido literal ("cuántas entradas, con
+sus tags"), documentado acá para que quede explícito y no como un
+descuido. Si se vuelve un problema real, la corrección más simple sería
+capar esa sección a un conteo por tag en vez de listar cada entrada.
+
+Impacto: `jarvis/worker/consolidation.py`, `jarvis/audit/service.py`,
+`jarvis/tags/service.py`, `jarvis/notify/telegram.py`.
+
+---
+
+## 2026-09-03 — FIX: carrera real en `_migrate()` entre los 3 contenedores (crash en producción)
+
+Contexto: `project-bot-1` crasheó en el homelab el 2026-09-01 con
+`sqlite3.OperationalError: duplicate column name: created_by`
+(`RestartCount=1`, se auto-recuperó al reiniciar Docker — ver
+`HOMELAB.md`, entrada del mismo día, junto al hallazgo hermano de
+`litellm` sin techo). `backend` (uvicorn), `worker` y `bot` son 3
+procesos separados que llaman `init_db()` → `_migrate(conn)` cada uno al
+arrancar, los 3 contra el mismo `jarvis.db` en el volumen compartido —
+condición de carrera real, no hipotética: si dos de los tres ven una
+columna ausente en el mismo instante (mismo chequeo `PRAGMA table_info`
+al inicio de la función) y ambos corren `ALTER TABLE ... ADD COLUMN`, el
+segundo falla con "duplicate column name".
+
+**Bug concreto que causó el crash**: la migración de `created_by` tenía
+un `try/except sqlite3.OperationalError` que **interpretaba** la
+excepción en vez de chequear el estado real — asumía que cualquier fallo
+del `ALTER ... CHECK (...)` significaba "este SQLite es viejo y no
+soporta CHECK en ADD COLUMN", y reintentaba sin CHECK. Cuando la causa
+real era la carrera (otro proceso ya había agregado `created_by`), el
+reintento fallaba con el mismo "duplicate column name: created_by" — sin
+capturar, tumbando el proceso. Se pidió explícitamente revisar **todas**
+las migraciones del archivo por el mismo patrón, no solo esa: el resto
+de las columnas agregadas ese mismo día de diseño (`embedded_at`,
+`valid_to`, `title`, `last_passive_review_at`, `last_audited_at`) ni
+siquiera tenían try/except — un `ALTER` concurrente las tumbaba directo,
+sin ninguna chance de recuperarse.
+
+**Por qué no se notó antes**: `_migrate_people_type()` (agosto 2026, ver
+entrada "Aviso de listo + corrección de corrupción de foreign keys..."
+más abajo en este archivo) y `_migrate_audit_proposals_status()`
+(2026-08-31, entrada de arriba) ya tenían el patrón correcto —
+reconstruyen la tabla completa cuando hace falta cambiar un `CHECK`, y en
+su `except` **vuelven a chequear el estado real** (`_people_type_present()`
+/ `_audit_proposals_new_status_present()`) antes de decidir si la
+excepción es la carrera benigna o un error real. Las migraciones simples
+de `ALTER TABLE ... ADD COLUMN` (más chicas, agregadas en distintas
+piezas del paquete A-F) nunca recibieron ese mismo estándar — quedaron
+como el único punto ciego del archivo hasta que la carrera real de 3
+contenedores arrancando juntos en producción lo expuso.
+
+**Fix**: `_add_column_if_missing(conn, table, column, *ddl_variants)`
+nuevo en `jarvis/db/database.py` — mismo estándar que
+`_migrate_people_type()`: nunca interpretar QUÉ significó una excepción,
+volver a leer `PRAGMA table_info()` después de un fallo y decidir en base
+al estado real. Si la columna ya existe, fue la carrera benigna, se
+ignora (con `logger.warning`, no silencioso). Si no existe, el fallo es
+real: se prueba la siguiente variante de DDL en la lista (para
+`created_by`, la ausencia real de soporte `CHECK` en `ADD COLUMN` sigue
+siendo un motivo de fallo legítimo — el fix no lo elimina, solo deja de
+confundirlo con la carrera) o se repropaga si no queda ninguna. Las 6
+migraciones `ALTER TABLE ... ADD COLUMN` de `_migrate()`
+(`memory_entries.embedded_at`, `memory_entries.valid_to`,
+`conversations.title`, `conversations.last_passive_review_at`,
+`memory_entries.created_by` con y sin `CHECK`,
+`memory_entries.last_audited_at`) pasan ahora por este helper.
+`_migrate_people_type()` y `_migrate_audit_proposals_status()` no se
+tocaron — ya seguían el estándar correcto.
+
+**Reproducido antes de dar el fix por bueno** (pedido explícito): script
+de repro (`multiprocessing`, procesos reales — no threads — sincronizados
+con un `Barrier` para maximizar la colisión, 6 procesos × 15 corridas)
+contra una DB de scratch con el shape "viejo" (sin `embedded_at`/
+`valid_to`/`created_by`/`title`/`last_passive_review_at`/
+`last_audited_at`, calcado de `jarvis/db/schema.py` menos esas columnas).
+Contra la versión del código previa al fix (`git show HEAD:jarvis/db/
+database.py`, cargada como módulo aparte): **54 de 90 corridas de
+`_migrate()` crashearon** con `OperationalError: duplicate column name`
+(mayormente `embedded_at`, la primera columna que chequea la función —
+también se vio en `valid_to` y `last_audited_at` en corridas puntuales),
+confirmando el bug real, no solo en teoría. Contra la versión con el fix,
+mismo script, mismos 6 procesos × 15 corridas: **0 errores, 0 rondas con
+schema final incompleto** — los logs muestran la carrera ocurriendo de
+verdad en cada ronda (`carrera con otro proceso arrancando en
+simultáneo... la columna ya existe, se ignora`), simplemente ya no
+crashea. Nunca se corrió contra `jarvis.db` real de producción — DB de
+scratch construida a mano para cada ronda.
+
+Impacto: `jarvis/db/database.py` (`_add_column_if_missing()` nueva,
+`_migrate()` reescrita para usarla en las 6 columnas simples). Documentado
+también en `HOMELAB.md` junto al hallazgo hermano de `litellm` sin techo
+(mismo día de deploy, 2026-09-01).
+
+---
+
 ## 2026-08-31 — IMPLEMENTADO: respuestas de texto libre con información nueva en jarvis_audit_proposals
 
 Contexto: la entrada de arriba ("IMPLEMENTADO: auditoría proactiva...",

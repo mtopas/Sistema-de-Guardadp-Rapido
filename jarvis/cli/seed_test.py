@@ -235,6 +235,48 @@ ENTRIES = [
         entities=[],
         recorded_at_offset_minutes=70,
     ),
+    # Hueco tipo A + tipo C real (2026-09-03) -- antes solo existían "a mano"
+    # en la sesión de pruebas de auditoría del 31/08 (ver Cerebro/estado-
+    # actual.md), nunca en este script. "José" mencionado 2 veces sin
+    # entrada PEOPLE propia: dispara el hueco tipo A (SQL puro, entity_type=
+    # 'person', memory_count>=2, subject_count=0 -- ver jarvis/audit/
+    # service.py::_detect_entity_gaps()) y da contenido real para que el
+    # hueco tipo C (LLM, "referencia sin resolver dentro de una entrada")
+    # tenga algo que encontrar si estas entradas caen en un bloque auditado
+    # -- ninguno de los dos está garantizado en una corrida puntual (tipo A
+    # depende de _ENTITY_CREATE_LIMIT, tipo C de qué bloque se sortea), pero
+    # el dataset ahora los deja disponibles para cuando corresponda.
+    dict(
+        key="jose_cafe",
+        type="RAW",
+        content="Me fui con José a tomar un café después del trabajo, charlamos un rato largo.",
+        tags=["personal"],
+        project=None,
+        entities=[{"name": "José", "type": "person"}],
+    ),
+    dict(
+        key="jose_favor",
+        type="RAW",
+        content="José me ayudó a mover unas cajas el fin de semana, se lo debo.",
+        tags=["personal"],
+        project=None,
+        entities=[{"name": "José", "type": "person"}],
+    ),
+    # Entidad de UNA sola mención (2026-09-03) -- por debajo del umbral
+    # memory_count>=2 del hueco tipo A a propósito: candidata natural para el
+    # nivel 1 de la pregunta abierta exploratoria (jarvis/audit/service.py::
+    # _detect_single_mention_entities()/_pick_entity_candidate()), sin
+    # disparar tipo A al mismo tiempo (José, arriba, sí lo dispara -- las dos
+    # entidades del dataset ahora cubren ambos niveles del hueco de entidad
+    # por separado, sin pisarse).
+    dict(
+        key="lucia_mencion",
+        type="RAW",
+        content="Lucía me recomendó un libro sobre historia argentina que todavía no empecé.",
+        tags=["personal"],
+        project=None,
+        entities=[{"name": "Lucía", "type": "person"}],
+    ),
 ]
 
 
@@ -359,10 +401,56 @@ def seed_items(items: list[dict], base_time: datetime | None = None) -> dict[str
     return created
 
 
+def seed_empty_entry() -> str:
+    """Entrada con contenido vacío/en blanco, insertada directo por SQL --
+    sin pasar por seed_items() (sin embedding, sin vault, sin inbox_queue) a
+    propósito: no hay contenido real que embeder, y el disparador de
+    'delete' en jarvis/audit/service.py::_process_block() es puramente de
+    contenido (no depende de que la entrada tenga embedding) -- mismo
+    criterio "a mano" que ya se usó en la sesión de pruebas de auditoría del
+    2026-08-31 (ver Cerebro/estado-actual.md), ahora parte del script en vez
+    de un insert suelto que no queda documentado en ningún lado.
+
+    Devuelve el entry_id.
+    """
+    entry_id = str(uuid.uuid4())
+    recorded_at = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    conn = get_connection()
+    try:
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO memory_entries
+                    (id, type, content_raw, content_processed, source, channel,
+                     local_only, confidential, tags,
+                     recorded_at, valid_from, source_id,
+                     origin_trust, user_id, created_at, created_by,
+                     confidence, extraction_confidence)
+                VALUES
+                    (?, 'RAW', '', '', ?, NULL,
+                     0, 0, '[]',
+                     ?, ?, ?,
+                     'migration', ?, ?, 'explicit',
+                     1.0, 0.9)
+                """,
+                (
+                    entry_id, SOURCE,
+                    recorded_at, recorded_at, "seed-test-entrada_vacia",
+                    USER, recorded_at,
+                ),
+            )
+    finally:
+        conn.close()
+    print(f"[entrada_vacia] id={entry_id} type=RAW recorded_at={recorded_at} (sin embedding/vault a propósito)")
+    return entry_id
+
+
 def main() -> None:
     init_db()
     created = seed_items(ENTRIES)
-    print(f"\nSEED DONE — {len(ENTRIES)} entries")
+    empty_id = seed_empty_entry()
+    created["entrada_vacia"] = empty_id
+    print(f"\nSEED DONE — {len(ENTRIES)} entries + 1 entrada vacía")
     for k, v in created.items():
         print(f"  {k}: {v}")
 

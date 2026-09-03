@@ -92,7 +92,7 @@ Componente → useStore.js → fetch → app/main.py → app/db/crud.py → SQLi
 ```
 
 - **Un** store Zustand (`frontend/src/store/useStore.js`): Bóveda + Finanzas + Agenda + Hábitos + tema/idioma/modales.
-- **Backend plano:** rutas en `app/main.py`; SQL en `app/db/crud.py`. `app/routes/` y `app/services/` **no se usan**.
+- **Backend plano:** rutas en `app/main.py`; SQL en `app/db/crud.py`. No hay `app/routes/` ni `app/services/` — si alguna vez se agregan, verificar primero que no sea el mismo patrón plano fragmentado en archivos.
 - Mutaciones: update optimista local en Finanzas/Agenda/Hábitos; sin React Query ni invalidación centralizada.
 
 ```
@@ -100,7 +100,7 @@ project/
 ├── app/main.py, config.py, db/{database,crud}.py
 ├── frontend/src/
 │   ├── App.jsx              # Router + fetch inicial + modales globales
-│   ├── screens/             # Browse, Finanzas, Agenda, Habitos, Detail, Settings, Capture (legacy)
+│   ├── screens/             # Browse, Finanzas, Agenda, Habitos, Jarvis, Detail, Settings, Capture (legacy)
 │   ├── components/          # Bóveda + finanzas/* + agenda/* + habitos/*
 │   ├── store/useStore.js
 │   ├── data/finanzas.js, finCategorias.js, finCategoriaColors.js
@@ -117,6 +117,7 @@ project/
 - `/finanzas` — `FinanzasScreen` (tabs: dashboard | anual | fire | ahorro | datos)
 - `/agenda` — `AgendaScreen` (tabs: hoy | mes | tareas | revisión)
 - `/habitos` — `HabitosScreen` (tabs: hoy | progreso | historial)
+- `/jarvis` — `JarvisScreen` (ver sección Jarvis más abajo)
 - `/hoja/:id`, `/settings`, `/capture` (legacy)
 
 Modales en `App.jsx`: `CaptureModal`, `MovementModal`, `TweaksPanel` (Ctrl+M: temas, tono, fuentes).
@@ -234,7 +235,7 @@ en Windows aunque el explorador de archivos la muestre igual.
 - Proceso Python separado (worker) hace polling a `jarvis.db`; sin Redis/Celery
 - DB Jarvis: `project/database/jarvis.db` (separada de `app.db` de SGR)
 - Todo llamado LLM va via **LiteLLM** — nunca openai.* ni ollama.* directamente
-- Modelos via LiteLLM: GPT-5.4 mini (razonamiento externo) + llama3.2:3b (extracción local)
+- Modelos via LiteLLM: GPT-5.4 mini (razonamiento externo) + gemma3:12b (extracción local — ganador del bake-off 2026-08-26 contra llama3.2:3b, ver `Cerebro/decisiones-implementacion.md`)
 - Embeddings: `nomic-embed-text` via Ollama
 - Vector store: ChromaDB en 0.1 (índice reconstruible); pgvector en 0.2
 - Observabilidad: Langfuse (self-hosted, trazas LLM) + OpenTelemetry (infra + audit log)

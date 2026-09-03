@@ -198,6 +198,23 @@ Lógica en `Layout.jsx` (`ARCOIRIS_ACCENTS`).
 
 ---
 
+## Convenciones de Git
+
+### Commits
+
+- Mensaje en español, imperativo, foco en **qué** cambió y **por qué** — el diff ya muestra el cómo.
+- Una unidad lógica de cambio por commit (no mezclar higiene de docs con features sin relación).
+- Evitar mensajes de una palabra ("Retruco", "A", "Bugs") — el propio autor no puede reconstruir qué pasó ahí seis meses después sin abrir el diff completo.
+- Sin prefijos tipo `feat:`/`fix:` (no hace falta esa ceremonia en un repo de un solo desarrollador); si el mensaje corto no es autoexplicativo, agregar 1-2 líneas de cuerpo con el motivo.
+
+### Ramas
+
+- `master` para cambios chicos y acotados: bugfixes, docs, ajustes localizados a una función o componente.
+- Rama de feature (`feature/<nombre-corto>`) para trabajo grande o riesgoso: reescrituras de un módulo entero, cambios de arquitectura, migraciones de datos — cualquier cosa donde dejar `master` en un estado intermedio roto sería un problema si hay que parar a mitad de camino.
+- Mergear a `master` cuando el trabajo esté probado, no a mitad de camino — el criterio es "¿rompería algo si alguien tira de `master` ahora mismo?".
+
+---
+
 ## Antes de implementar (SGR)
 
 1. Leer `project/README.md` (arquitectura y estado global).

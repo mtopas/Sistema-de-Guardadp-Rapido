@@ -8,7 +8,10 @@ version = "0.1.0"
 description = "Jarvis — Memory Core 0.1"
 requires-python = ">=3.10"
 dependencies = [
-    "litellm>=1.40.0",
+    # Techo <1.90: litellm>=1.90 rompe el import en Python 3.10 (falta typing.NotRequired,
+    # disponible recién en 3.11). litellm==1.60.2 confirmado funcional en producción
+    # (ver Cerebro/decisiones-implementacion.md, 2026-08-25) — pendiente desde esa sesión.
+    "litellm>=1.40.0,<1.90",
     "langfuse>=2.0.0",
     "opentelemetry-sdk>=1.20.0",
     "opentelemetry-exporter-otlp>=1.20.0",

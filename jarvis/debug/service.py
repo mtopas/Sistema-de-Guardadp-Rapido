@@ -184,8 +184,8 @@ def notify_debug_processed(
         )
 
         text = (
-            "🐛 *Debug — entrada procesada*\n"
-            f"ID: `{entry.get('id', '')[:8]}`\n"
+            "🐛 Debug — entrada procesada\n"
+            f"ID: {entry.get('id', '')[:8]}\n"
             f"Tipo detectado: {entry_type}\n"
             f"Confianza: {confidence}\n"
             f"Entidades: {entidades_txt}\n"

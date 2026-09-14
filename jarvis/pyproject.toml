@@ -24,6 +24,13 @@ dependencies = [
     # en ese mismo host; <2 alcanza para evitar el wheel roto sin fijar una versión
     # exacta que quede vieja innecesariamente en hardware moderno.
     "numpy<2",
+    # jarvis/ingestion/agenda.py (0.3) llama HTTP localhost a la API de SGR
+    # (GET /agenda/eventos, GET /agenda/tareas) -- mismo patrón que
+    # project/mybot/agenda_handlers.py, que ya usa esta librería para hablar
+    # con la misma API. Ya estaba disponible en project/venv (requirements.txt
+    # de SGR) porque jarvis se instala editable ahí, pero no estaba declarada
+    # como dependencia propia del paquete jarvis.
+    "requests>=2.28.0",
 ]
 
 [tool.setuptools.packages.find]

@@ -27,6 +27,8 @@ class TaskManifest:
             "propose_capture",
             "audit_memory",
             "propose_audit_action",
+            "read_agenda_source",
+            "propose_agenda_capture",
         })
     )
 

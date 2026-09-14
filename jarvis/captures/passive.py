@@ -238,7 +238,7 @@ def _notify_telegram_proposal(chat_id: str, question: str, content: str) -> None
     try:
         send_telegram_message(
             chat_id,
-            f"🧠 {question}\n\n_{content}_\n\nRespondé sí/no (o agregá una aclaración en tu respuesta).",
+            f"🧠 {question}\n\n{content}\n\nRespondé sí/no (o agregá una aclaración en tu respuesta).",
         )
     except Exception as exc:
         logger.warning("[jarvis.captures.passive] Aviso de propuesta a Telegram falló: %s", exc)
@@ -257,9 +257,19 @@ def mark_reviewed(conversation_id: str, when_iso: str) -> None:
 
 
 def create_proposal(
-    conversation_id: str, channel: str, channel_id: str | None,
+    conversation_id: str | None, channel: str, channel_id: str | None,
     content: str, question: str, user_id: str,
+    origin_source: str = "passive_capture",
+    origin_source_key: str | None = None,
 ) -> str:
+    """origin_source/origin_source_key (0.3, ingestión automática -- ver
+    Cerebro/decisiones-implementacion.md, 2026-09-03): por default una
+    propuesta nace de captura pasiva por inactividad (conversation_id
+    obligatorio en ese caso). jarvis/ingestion/agenda.py es el otro llamador
+    -- pasa conversation_id=None (no viene de una charla) y
+    origin_source='agenda_ingestion' con origin_source_key seteado (clave
+    determinística del evento/tarea de origen, usada para no re-proponer lo
+    mismo -- ver esa función)."""
     proposal_id = str(uuid.uuid4())
     conn = get_connection()
     try:
@@ -267,11 +277,12 @@ def create_proposal(
             conn.execute(
                 """INSERT INTO jarvis_capture_proposals
                     (id, conversation_id, channel, channel_id, content, question,
-                     status, user_id, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)""",
+                     status, user_id, created_at, origin_source, origin_source_key)
+                   VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?)""",
                 (
                     proposal_id, conversation_id, channel, channel_id, content, question,
                     user_id, datetime.now(timezone.utc).isoformat(),
+                    origin_source, origin_source_key,
                 ),
             )
         return proposal_id
@@ -294,12 +305,30 @@ def accept_proposal(proposal_id: str, extra_text: str | None = None) -> str | No
     if extra_text and extra_text.strip():
         content = f"{content}\nAclaración: {extra_text.strip()}"
 
-    origin_trust = "telegram.user" if proposal["channel"] == "telegram" else "user.authenticated"
+    # Ingestión automática (0.3, Agenda de SGR -- ver Cerebro/decisiones-
+    # implementacion.md, 2026-09-03, punto 1.4): el dato vino de la Agenda
+    # del propio usuario, no de una conversación por el canal donde se
+    # confirmó -- ni ese channel ni 'telegram.user' describen el origen real.
+    # source='agenda' (cuarto valor del CHECK, ver jarvis/db/database.py::
+    # _migrate_memory_entries_source) y origin_trust='user.authenticated'
+    # fijo, sin importar por qué canal se aceptó. source_id determinístico
+    # (origin_source_key) en vez de "passive:{proposal_id}" -- así una
+    # entrada ya aceptada también cuenta para el dedup de
+    # jarvis/ingestion/agenda.py (chequea memory_entries.source_id).
+    if proposal.get("origin_source") == "agenda_ingestion":
+        source = "agenda"
+        origin_trust = "user.authenticated"
+        source_id = proposal.get("origin_source_key") or f"passive:{proposal_id}"
+    else:
+        source = proposal["channel"]
+        origin_trust = "telegram.user" if proposal["channel"] == "telegram" else "user.authenticated"
+        source_id = f"passive:{proposal_id}"
+
     entry_id = capture_raw(
         content=content,
-        source=proposal["channel"],
+        source=source,
         channel=proposal["channel_id"],
-        source_id=f"passive:{proposal_id}",
+        source_id=source_id,
         origin_trust=origin_trust,
         user_id=proposal["user_id"],
         created_by="jarvis_proposal_accepted",

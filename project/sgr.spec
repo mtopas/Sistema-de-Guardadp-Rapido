@@ -4,6 +4,7 @@
 
 import sys
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_data_files
 
 block_cipher = None
 ROOT = Path(SPECPATH)
@@ -15,6 +16,10 @@ if not dist_frontend.is_dir():
     )
 
 datas = [(str(dist_frontend), "frontend/dist")]
+# litellm trae archivos de datos propios (tokenizers, precios por proveedor, etc.) que
+# PyInstaller no detecta solo (solo analiza imports de Python, no package_data) -- sin esto
+# falla con FileNotFoundError apenas litellm intenta abrir uno de esos JSON (2026-09-14).
+datas += collect_data_files("litellm")
 
 hiddenimports = [
     "uvicorn.logging",
@@ -31,8 +36,19 @@ hiddenimports = [
     "multipart",
     "app.db.crud",
     "app.db.database",
+    "app.vault.guard",
+    "app.vault.parser",
+    "app.vault.sync",
+    "app.vault.markdown",
+    "app.vault.writer",
     "tkinter",
     "_tkinter",
+    # tiktoken descubre sus encodings via el mecanismo de plugins tiktoken_ext,
+    # que no funciona con el import estatico de PyInstaller (pkgutil.iter_modules
+    # no ve nada dentro del bundle congelado) -- sin esto, litellm/jarvis fallan
+    # al arrancar con "Unknown encoding cl100k_base" (2026-09-14).
+    "tiktoken_ext",
+    "tiktoken_ext.openai_public",
 ]
 
 a = Analysis(

@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS memory_entries (
     content_raw           TEXT NOT NULL,
     content_processed     TEXT,
     source                TEXT NOT NULL
-                          CHECK (source IN ('telegram','desktop','migration')),
+                          CHECK (source IN ('telegram','desktop','migration','agenda')),
     channel               TEXT,
     local_only            INTEGER NOT NULL DEFAULT 0
                           CHECK (local_only IN (0,1)),
@@ -46,7 +46,37 @@ CREATE TABLE IF NOT EXISTS memory_entries (
     -- vía propuesta pasiva; created_by es sobre CÓMO se decidió guardarlo).
     -- Ver Cerebro/decisiones-implementacion.md, pieza C.
     created_by            TEXT NOT NULL DEFAULT 'explicit'
-                          CHECK (created_by IN ('explicit','jarvis_proposal_accepted'))
+                          CHECK (created_by IN ('explicit','jarvis_proposal_accepted')),
+    -- Fusión Jarvis + Bóveda (Cerebro/decisiones-implementacion.md,
+    -- 2026-09-11): eje de autoría, NO el mismo eje que created_by. created_by
+    -- distingue "el usuario lo tipeó directo" vs "nació de una propuesta que
+    -- aceptó" -- en ambos casos el CONTENIDO puede ser palabra del usuario
+    -- (ej. clarify: la respuesta de texto libre ES lo que el usuario tipeó).
+    -- authorship distingue de verdad quién escribió la PROSA final: 'user'
+    -- (el usuario, sea cual sea el canal/mecanismo) vs 'jarvis_synthesis'
+    -- (LLM combinando fragmentos -- hoy solo audit 'create', ver
+    -- jarvis/audit/service.py::_apply_create()). Determina a qué raíz del
+    -- vault escribe write_entry(): 'user' -> D:\Boveda (árbol PARA,
+    -- 00 - Sin categorizar/), 'jarvis_synthesis' -> Boveda/Jarvis/.
+    authorship            TEXT NOT NULL DEFAULT 'user'
+                          CHECK (authorship IN ('user','jarvis_synthesis')),
+    -- Auditoría proactiva de memoria (0.2 Slice 4, ver Cerebro/decisiones-
+    -- implementacion.md, 2026-08-31): hasta cuándo se revisó esta entrada
+    -- por última vez en una corrida de jarvis.audit.service.run_audit().
+    -- Bug real encontrado 2026-09-03 implementando 0.3 (ver Cerebro/
+    -- decisiones-implementacion.md): esta columna solo vivía en la
+    -- migración (_add_column_if_missing en _migrate()), nunca acá en el
+    -- CREATE estático -- cualquier migración de rebuild que corriera
+    -- DESPUÉS de que una DB real ya tuviera la columna (como
+    -- _migrate_memory_entries_source(), 0.3) reconstruía memory_entries_new
+    -- a partir de _MEMORY_ENTRIES_CREATE sin esta columna, y el INSERT
+    -- posterior (que sí la lista, porque lee las columnas reales de la
+    -- tabla vieja) fallaba con "no column named last_audited_at". Agregada
+    -- acá para que _MEMORY_ENTRIES_CREATE (jarvis/db/database.py) siempre
+    -- incluya TODAS las columnas reales -- el _add_column_if_missing()
+    -- correspondiente en _migrate() queda como red de seguridad para DBs
+    -- viejas que todavía no la tengan (mismo patrón que created_by arriba).
+    last_audited_at       DATETIME
 );
 
 CREATE INDEX IF NOT EXISTS idx_me_type   ON memory_entries(type);
@@ -203,18 +233,32 @@ CREATE INDEX IF NOT EXISTS idx_met_tag ON memory_entry_tags(tag_id);
 -- Solo entra a memory_entries/inbox_queue si el usuario acepta (capture_raw
 -- normal, created_by='jarvis_proposal_accepted' -- ver esa columna abajo).
 CREATE TABLE IF NOT EXISTS jarvis_capture_proposals (
-    id              TEXT PRIMARY KEY,
-    conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
-    channel         TEXT NOT NULL CHECK (channel IN ('telegram','desktop')),
-    channel_id      TEXT,
-    content         TEXT NOT NULL,
-    question        TEXT NOT NULL,
-    status          TEXT NOT NULL DEFAULT 'PENDING'
-                    CHECK (status IN ('PENDING','ACCEPTED','REJECTED','EXPIRED')),
-    entry_id        TEXT REFERENCES memory_entries(id) ON DELETE SET NULL,
-    user_id         TEXT NOT NULL DEFAULT 'default',
-    created_at      DATETIME NOT NULL DEFAULT (datetime('now','utc')),
-    resolved_at     DATETIME
+    id                 TEXT PRIMARY KEY,
+    conversation_id    TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+    channel            TEXT NOT NULL CHECK (channel IN ('telegram','desktop')),
+    channel_id         TEXT,
+    content            TEXT NOT NULL,
+    question           TEXT NOT NULL,
+    status             TEXT NOT NULL DEFAULT 'PENDING'
+                       CHECK (status IN ('PENDING','ACCEPTED','REJECTED','EXPIRED')),
+    entry_id           TEXT REFERENCES memory_entries(id) ON DELETE SET NULL,
+    user_id            TEXT NOT NULL DEFAULT 'default',
+    created_at         DATETIME NOT NULL DEFAULT (datetime('now','utc')),
+    resolved_at        DATETIME,
+    -- Ingestión automática (0.3, Agenda de SGR -- ver Cerebro/decisiones-
+    -- implementacion.md, 2026-09-03): distingue de dónde salió la propuesta.
+    -- No cambia el flujo de aceptar/rechazar (mismo accept_proposal()/
+    -- resolve de siempre) -- solo para mensaje/UI y para el dedup propio de
+    -- jarvis/ingestion/agenda.py (origin_source_key).
+    origin_source      TEXT NOT NULL DEFAULT 'passive_capture'
+                       CHECK (origin_source IN ('passive_capture','agenda_ingestion')),
+    -- Clave determinística ("agenda:evento:{id}:{fecha_inicio}" /
+    -- "agenda:tarea:{id}") que identifica el evento/tarea de origen -- NULL
+    -- para 'passive_capture'. Se chequea en jarvis/ingestion/agenda.py antes
+    -- de proponer de nuevo, cualquiera sea el status ya resuelto (incluye
+    -- REJECTED -- una vez que el usuario dijo que no a un evento puntual, no
+    -- se le vuelve a preguntar por el mismo).
+    origin_source_key TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_jcp_status ON jarvis_capture_proposals(status);
@@ -243,7 +287,7 @@ CREATE TABLE IF NOT EXISTS jarvis_audit_proposals (
                       CHECK (action_type IN (
                           'create','clarify','flag_contradiction',
                           'flag_connection','merge','edit','delete','retag',
-                          'open_question'
+                          'open_question','archive_superseded'
                       )),
     target_entry_ids  TEXT NOT NULL,
     payload           TEXT,

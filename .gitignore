@@ -10,6 +10,7 @@ project/build/
 # Datos y secretos — nunca commitear
 project/.env
 project/database/app.db
+project/database/vault_index.db
 project/database/jarvis.db
 project/database/jarvis.db-shm
 project/database/jarvis.db-wal

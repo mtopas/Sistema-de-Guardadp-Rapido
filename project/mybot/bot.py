@@ -22,6 +22,11 @@ from telegram.request import HTTPXRequest
 
 from api_config import API_BASE
 
+# api_config ya insertó project/ en sys.path -- ver docstring de app/vault/guard.py
+# (riesgo 1 de Cerebro/decisiones/2026-09-11-share-smb-boveda-homelab.md).
+from app.config import VAULT_ROOT
+from app.vault.guard import ensure_vault_mounted
+
 import agenda_handlers as ah
 import assistant
 import dev_reporter as dr
@@ -1226,6 +1231,10 @@ def main():
         force=True,
     )
     print("[bot] Iniciando bot SGR…", flush=True)
+
+    # Riesgo 1 de Cerebro/decisiones/2026-09-11-share-smb-boveda-homelab.md -- antes de
+    # cualquier otra cosa, ver docstring de app/vault/guard.py.
+    ensure_vault_mounted(VAULT_ROOT, label="VAULT_ROOT")
 
     if not TOKEN:
         raise SystemExit("Definí TELEGRAM_BOT_TOKEN en el entorno.")

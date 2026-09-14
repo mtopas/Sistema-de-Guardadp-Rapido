@@ -12,6 +12,9 @@ from app.paths import is_frozen, resolve_db_path
 # Docker / override manual; si no, project/database (dev y .exe desde el repo)
 DB_PATH = os.getenv("DB_PATH") or resolve_db_path()
 
+# Raíz del vault Bóveda (D:\Boveda) -- override para el sandbox dev (dev-start.ps1)
+VAULT_ROOT = Path(os.getenv("VAULT_ROOT") or r"D:\Boveda")
+
 _DEBUG_DEFAULT = "0" if is_frozen() else "1"
 DEBUG = os.getenv("SGR_DEBUG", _DEBUG_DEFAULT).lower() in ("1", "true", "yes")
 

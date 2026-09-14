@@ -3,12 +3,18 @@ import re
 import sqlite3
 from pathlib import Path
 
-from jarvis.config import JARVIS_DB_PATH, JARVIS_VAULT_PATH
+from jarvis.config import JARVIS_BOVEDA_PATH, JARVIS_DB_PATH, JARVIS_SYNTH_PATH
 from jarvis.db.schema import SCHEMA
 
 logger = logging.getLogger(__name__)
 
-_VAULT_SUBDIRS = ["RAW", "SEMANTIC", "DECISIONS", "PROJECTS", "PEOPLE"]
+# Fusión Jarvis + Bóveda (2026-09-11): ya no se crean subcarpetas por `type`
+# (RAW/SEMANTIC/...) -- esa organización deja de ser física, sobrevive solo
+# como metadato de clasificación (ver jarvis/vault/writer.py). Lo único que
+# Jarvis crea de entrada es su propio subárbol dentro de D:\Boveda; el árbol
+# PARA en sí (00 - Sin categorizar/, etc.) ya existe de antes, gestionado
+# del lado de la Bóveda (project/app/vault/), Jarvis no lo recrea.
+_SYNTH_SUBDIRS = ["Entidades", "Proyectos", "Sintesis"]
 
 _MEMORY_ENTRIES_CREATE = re.search(
     r"CREATE TABLE IF NOT EXISTS memory_entries \(.*?\n\);", SCHEMA, re.DOTALL
@@ -38,8 +44,13 @@ def init_db() -> None:
     finally:
         conn.close()
 
-    for sub in _VAULT_SUBDIRS:
-        (JARVIS_VAULT_PATH / sub).mkdir(parents=True, exist_ok=True)
+    # No se crea JARVIS_BOVEDA_PATH acá -- D:\Boveda ya existe, gestionado
+    # por project/app/vault/ (Milestone 2). Si no existe, es una falla de
+    # configuración real (JARVIS_BOVEDA_PATH mal seteado) que preferimos que
+    # falle visible en vez de crear un árbol vacío silencioso en el lugar
+    # equivocado.
+    for sub in _SYNTH_SUBDIRS:
+        (JARVIS_SYNTH_PATH / sub).mkdir(parents=True, exist_ok=True)
 
 
 def _init_fts(conn: sqlite3.Connection) -> bool:
@@ -190,8 +201,33 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # sin CHECK -- no hace falta el rebuild completo.
     _add_column_if_missing(conn, "memory_entries", "last_audited_at", "last_audited_at DATETIME")
 
+    # Fusión Jarvis + Bóveda (2026-09-11): eje de autoría -- mismo patrón que
+    # created_by (CHECK vía ADD COLUMN, sin rebuild; fallback sin CHECK si el
+    # SQLite del entorno no lo soporta).
+    _add_column_if_missing(
+        conn, "memory_entries", "authorship",
+        "authorship TEXT NOT NULL DEFAULT 'user' "
+        "CHECK (authorship IN ('user','jarvis_synthesis'))",
+        "authorship TEXT NOT NULL DEFAULT 'user'",
+    )
+
     _migrate_audit_proposals_status(conn)
     _migrate_audit_proposals_action_type(conn)
+    _migrate_audit_proposals_archive_superseded(conn)
+
+    # Ingestión automática (0.3, Agenda de SGR -- ver Cerebro/decisiones-
+    # implementacion.md, 2026-09-03). Columnas nuevas en jarvis_capture_proposals:
+    # nullable/con default, sin rebuild -- ver el comentario del schema.
+    _add_column_if_missing(
+        conn, "jarvis_capture_proposals", "origin_source",
+        "origin_source TEXT NOT NULL DEFAULT 'passive_capture' "
+        "CHECK (origin_source IN ('passive_capture','agenda_ingestion'))",
+        "origin_source TEXT NOT NULL DEFAULT 'passive_capture'",
+    )
+    _add_column_if_missing(
+        conn, "jarvis_capture_proposals", "origin_source_key", "origin_source_key TEXT"
+    )
+    _migrate_memory_entries_source(conn)
 
 
 def _migrate_people_type(conn: sqlite3.Connection) -> None:
@@ -385,3 +421,126 @@ def _audit_proposals_open_question_present(conn: sqlite3.Connection) -> bool:
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'jarvis_audit_proposals'"
     ).fetchone()
     return row is None or "'open_question'" in row["sql"]
+
+
+def _migrate_audit_proposals_archive_superseded(conn: sqlite3.Connection) -> None:
+    """Agrega 'archive_superseded' al CHECK(action_type IN (...)) de
+    jarvis_audit_proposals -- fusión Jarvis + Bóveda (Cerebro/decisiones-
+    implementacion.md, 2026-09-11, addendum punto 1). Décimo action_type:
+    cuando consolidation.py marca una entrada `same_fact`/stale-por-edad
+    (juicio algorítmico, puede estar mal -- mismo precedente del falso
+    positivo Madrid/Buenos Aires), se propone moverla a `04 - Archivo/` en
+    vez de moverla sola. NO se dispara desde forget_entry() (esa confirmación
+    humana ya existió al pedir "olvidar" -- mueve directo a `05 - Basura/`
+    sin propuesta nueva, ver jarvis/memory/service.py::forget_entry()).
+
+    Mismo approach que las otras migraciones de action_type/status de esta
+    tabla (rebuild completo bajo nombre temporal, detección vía
+    sqlite_master.sql, misma carrera benigna tolerada) -- función separada
+    por el mismo motivo que _migrate_audit_proposals_action_type() ya
+    documenta: cada CHECK se agrega en un momento distinto, una futura
+    migración de cualquiera no debe depender de tocar las otras.
+    """
+    if _audit_proposals_archive_superseded_present(conn):
+        return
+
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.execute("DROP TABLE IF EXISTS jarvis_audit_proposals_new")
+        conn.execute(
+            _AUDIT_PROPOSALS_CREATE.replace(
+                "CREATE TABLE IF NOT EXISTS jarvis_audit_proposals (",
+                "CREATE TABLE jarvis_audit_proposals_new (",
+                1,
+            )
+        )
+        cols = [row["name"] for row in conn.execute("PRAGMA table_info(jarvis_audit_proposals)")]
+        col_list = ", ".join(cols)
+        conn.execute(
+            f"INSERT INTO jarvis_audit_proposals_new ({col_list}) "
+            f"SELECT {col_list} FROM jarvis_audit_proposals"
+        )
+        conn.execute("DROP TABLE jarvis_audit_proposals")
+        conn.execute("ALTER TABLE jarvis_audit_proposals_new RENAME TO jarvis_audit_proposals")
+        conn.executescript(SCHEMA)  # recrea índices
+        conn.commit()
+    except sqlite3.OperationalError as exc:
+        conn.rollback()
+        if _audit_proposals_archive_superseded_present(conn):
+            logger.warning(
+                "[jarvis.db] _migrate_audit_proposals_archive_superseded: carrera "
+                "con otro proceso arrancando en simultáneo (%s), pero el esquema "
+                "ya quedó migrado -- se ignora.", exc,
+            )
+            return
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+
+
+def _audit_proposals_archive_superseded_present(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'jarvis_audit_proposals'"
+    ).fetchone()
+    return row is None or "'archive_superseded'" in row["sql"]
+
+
+def _migrate_memory_entries_source(conn: sqlite3.Connection) -> None:
+    """Agrega 'agenda' al CHECK(source IN (...)) de memory_entries (0.3,
+    ingestión automática -- ver Cerebro/decisiones-implementacion.md,
+    2026-09-03, punto 1.4 de la propuesta aprobada: ninguno de los 3 valores
+    existentes ('telegram'/'desktop'/'migration') describe honestamente
+    "vino de la Agenda de SGR" -- 'migration' ya significa específicamente la
+    migración one-time de la Bóveda (0.2 Slice 5), reusarlo hubiera sido
+    engañoso para cualquier futura auditoría de proveniencia.
+
+    Mismo approach que _migrate_people_type() (rebuild completo bajo un
+    nombre temporal, nunca dejar memory_entries sin existir bajo su nombre
+    canónico, tolerancia a la misma carrera benigna entre procesos). Si
+    _migrate_people_type() ya corrió en esta misma llamada a _migrate() (DB
+    vieja sin 'PEOPLE'), esta función es un no-op: ambas reconstruyen la
+    tabla a partir del MISMO _MEMORY_ENTRIES_CREATE (derivado de SCHEMA tal
+    como está ahora, con 'agenda' ya incluido), así que la primera que corra
+    deja el CHECK completo listo.
+    """
+    if _source_agenda_present(conn):
+        return
+
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.execute("DROP TABLE IF EXISTS memory_entries_new")
+        conn.execute(
+            _MEMORY_ENTRIES_CREATE.replace(
+                "CREATE TABLE IF NOT EXISTS memory_entries (",
+                "CREATE TABLE memory_entries_new (",
+                1,
+            )
+        )
+        cols = [row["name"] for row in conn.execute("PRAGMA table_info(memory_entries)")]
+        col_list = ", ".join(cols)
+        conn.execute(
+            f"INSERT INTO memory_entries_new ({col_list}) SELECT {col_list} FROM memory_entries"
+        )
+        conn.execute("DROP TABLE memory_entries")
+        conn.execute("ALTER TABLE memory_entries_new RENAME TO memory_entries")
+        conn.executescript(SCHEMA)  # recrea índices + tablas nuevas que falten
+        conn.commit()
+    except sqlite3.OperationalError as exc:
+        conn.rollback()
+        if _source_agenda_present(conn):
+            logger.warning(
+                "[jarvis.db] _migrate_memory_entries_source: carrera con otro "
+                "proceso arrancando en simultáneo (%s), pero el esquema ya "
+                "quedó migrado -- se ignora.", exc,
+            )
+            return
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+
+
+def _source_agenda_present(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memory_entries'"
+    ).fetchone()
+    return row is None or "'agenda'" in row["sql"]

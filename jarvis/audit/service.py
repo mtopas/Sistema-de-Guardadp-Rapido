@@ -702,33 +702,33 @@ def _question_merge(entries_by_id, older_id, newer_id):
 def _question_edit(entries_by_id, keep_id, new_content):
     return (
         f"🧠 Encontré una posible corrección combinando dos entradas:\n"
-        f"_{_content_of(entries_by_id, keep_id)}_\n"
+        f"{_content_of(entries_by_id, keep_id)}\n"
         f"→ ¿la cambio a: {_short(new_content)}?"
     )
 
 
 def _question_delete_empty(entry_id):
-    return f"🧠 Esta entrada parece vacía (id `{entry_id[:8]}`). ¿La borro?"
+    return f"🧠 Esta entrada parece vacía (id {entry_id[:8]}). ¿La borro?"
 
 
 def _question_clarify(entries_by_id, entry_id, reference):
     return (
-        f"🧠 En esta entrada mencionás a **{reference}** sin más contexto:\n"
-        f"_{_content_of(entries_by_id, entry_id)}_\n¿Quién/qué es?"
+        f"🧠 En esta entrada mencionás a {reference} sin más contexto:\n"
+        f"{_content_of(entries_by_id, entry_id)}\n¿Quién/qué es?"
     )
 
 
 def _question_retag(entries_by_id, entry_id, wrong_tag):
     return (
-        f"🧠 El tag `{wrong_tag}` no parece corresponder a esta entrada:\n"
-        f"_{_content_of(entries_by_id, entry_id)}_\n¿Lo saco?"
+        f"🧠 El tag {wrong_tag} no parece corresponder a esta entrada:\n"
+        f"{_content_of(entries_by_id, entry_id)}\n¿Lo saco?"
     )
 
 
 def _question_create(name, n_mentions, content):
     return (
-        f"🧠 Encontré {n_mentions} menciones de **{name}** sin ninguna entrada "
-        f"propia. ¿Guardo esto?\n_{_short(content)}_"
+        f"🧠 Encontré {n_mentions} menciones de {name} sin ninguna entrada "
+        f"propia. ¿Guardo esto?\n{_short(content)}"
     )
 
 
@@ -739,14 +739,14 @@ def _question_create(name, n_mentions, content):
 # cuando corresponde, en vez de omitir la sección.
 
 def build_audit_report_text(summary: dict) -> str:
-    parts = ["🔍 *Auditoría de memoria*"]
+    parts = ["🔍 Auditoría de memoria"]
 
     tag_name = summary.get("tag_block_name")
     tag_entries = summary.get("tag_block_entries") or []
     if tag_name:
-        header = f"*Bloque por tag* `{tag_name}` ({len(tag_entries)} entradas):"
+        header = f"Bloque por tag {tag_name} ({len(tag_entries)} entradas):"
     else:
-        header = "*Bloque por tag*: no había ningún tag con entradas vigentes para revisar."
+        header = "Bloque por tag: no había ningún tag con entradas vigentes para revisar."
     parts.append("\n".join([header] + _entry_lines(tag_entries)))
     parts.append(_findings_section(
         "Hallazgos del bloque por tag", summary.get("tag_block_findings") or [], len(tag_entries)
@@ -754,7 +754,7 @@ def build_audit_report_text(summary: dict) -> str:
 
     random_entries = summary.get("random_block_entries") or []
     parts.append("\n".join(
-        [f"*Bloque random* ({len(random_entries)} entradas):"] + _entry_lines(random_entries)
+        [f"Bloque random ({len(random_entries)} entradas):"] + _entry_lines(random_entries)
     ))
     parts.append(_findings_section(
         "Hallazgos del bloque random", summary.get("random_block_findings") or [], len(random_entries)
@@ -763,15 +763,15 @@ def build_audit_report_text(summary: dict) -> str:
     empty_ids = (summary.get("tag_block_deleted_empty") or []) + (summary.get("random_block_deleted_empty") or [])
     if empty_ids:
         parts.append(
-            "*Entradas vacías detectadas* (propuesta de borrado creada para cada una): "
+            "Entradas vacías detectadas (propuesta de borrado creada para cada una): "
             + ", ".join(i[:8] for i in empty_ids)
         )
 
     entity_detail = summary.get("entity_gap_detail") or []
     if entity_detail:
-        lines = ["*Huecos de entidad* (persona mencionada 2+ veces sin entrada propia):"]
+        lines = ["Huecos de entidad (persona mencionada 2+ veces sin entrada propia):"]
         for d in entity_detail:
-            content_part = f" — _{d['content']}_" if "content" in d else ""
+            content_part = f" — {d['content']}" if "content" in d else ""
             lines.append(f"  • {d['name']} ({d['n_mentions']} menciones) — {d['outcome']}{content_part}")
         parts.append("\n".join(lines))
 
@@ -779,19 +779,19 @@ def build_audit_report_text(summary: dict) -> str:
 
 
 def _entry_lines(entries: list[dict]) -> list[str]:
-    return [f"  • {e['content']} — _{', '.join(e['tags']) or 'sin tags'}_" for e in entries]
+    return [f"  • {e['content']} — {', '.join(e['tags']) or 'sin tags'}" for e in entries]
 
 
 def _findings_section(title: str, findings: list[dict], n_entries: int) -> str:
     if not findings:
-        return f"*{title}*: revisé {n_entries} entradas, sin hallazgos."
-    lines = [f"*{title}* ({len(findings)}):"]
+        return f"{title}: revisé {n_entries} entradas, sin hallazgos."
+    lines = [f"{title} ({len(findings)}):"]
     for f in findings:
         ftype = f.get("type", "?")
         detail = (f.get("detail") or "").strip()
         outcome = f.get("_outcome", "?")
         ids = ", ".join(str(x)[:8] for x in (f.get("entry_ids") or []))
-        lines.append(f"  • [{ftype}] ({ids}) {detail} — _{outcome}_")
+        lines.append(f"  • [{ftype}] ({ids}) {detail} — {outcome}")
     return "\n".join(lines)
 
 
@@ -1006,6 +1006,8 @@ def accept_proposal(proposal_id: str, reply_text: str | None = None) -> dict | N
         _apply_delete(target_ids)
     elif action_type == "retag":
         _apply_retag(target_ids, payload, proposal["user_id"])
+    elif action_type == "archive_superseded":
+        _apply_archive_superseded(target_ids)
 
     # Vinculación determinística a las entidades del hallazgo (no solo a las
     # que el texto de la entrada nueva mencione) -- ver Cerebro/decisiones-
@@ -1020,6 +1022,15 @@ def accept_proposal(proposal_id: str, reply_text: str | None = None) -> dict | N
 
 
 def _apply_create(proposal: dict, payload: dict) -> str:
+    """`create` es el único camino de _apply_* que produce prosa SINTETIZADA
+    por el LLM (ver _synthesize_entity_summary()/_CREATE_PROMPT arriba) --
+    aunque el usuario aprobó guardarlo, el texto en sí no lo tipeó nadie.
+    authorship='jarvis_synthesis' (fusión Jarvis + Bóveda, 2026-09-11) rutea
+    esto a Boveda/Jarvis/ en vez del árbol PARA -- ver jarvis/vault/writer.py.
+    Es el único _apply_* que pasa este valor; todos los demás (clarify,
+    open_question, _resolve_with_new_info) son texto que el usuario tipeó de
+    verdad como respuesta, así que quedan en 'user' (default de capture_raw).
+    """
     from jarvis.memory.service import capture_raw
 
     return capture_raw(
@@ -1030,6 +1041,7 @@ def _apply_create(proposal: dict, payload: dict) -> str:
         origin_trust=payload.get("origin_trust") or "system",
         user_id=proposal["user_id"],
         created_by="jarvis_proposal_accepted",
+        authorship="jarvis_synthesis",
     )
 
 
@@ -1086,6 +1098,48 @@ def _apply_retag(target_ids: list[str], payload: dict, user_id: str) -> None:
     remove = (payload.get("remove_tag") or "").strip().lower()
     remaining = [t for t in _current_tag_names(entry_id) if t.lower() != remove]
     replace_tags_for_entry(entry_id, remaining, user_id)
+
+
+def _apply_archive_superseded(target_ids: list[str]) -> None:
+    """Mueve el .md de la entrada superseded a `04 - Archivo/` -- fusión
+    Jarvis + Bóveda (2026-09-11, addendum punto 1). Nunca aplica sola (llega
+    acá solo vía accept_proposal(), gateada); solo aplica a contenido del
+    usuario (authorship='user') -- una síntesis de Jarvis marcada superseded
+    no tiene archivo en el árbol PARA que mover (vive en Boveda/Jarvis/, no
+    forma parte del criterio "vigente vs. archivado" de la Bóveda).
+    """
+    from jarvis.memory.service import get_entry, update_entry
+    from jarvis.vault.writer import move_entry_file
+
+    entry_id = target_ids[0]
+    entry = get_entry(entry_id)
+    if not entry or entry.get("authorship") == "jarvis_synthesis":
+        return
+    vault_path = entry.get("vault_path")
+    if not vault_path:
+        return
+    new_path = move_entry_file(vault_path, "04 - Archivo")
+    if new_path:
+        update_entry(entry_id, vault_path=new_path)
+
+
+def propose_archive_superseded(
+    entry_id: str, reason: str, channel: str, channel_id, user_id: str
+) -> str | None:
+    """Crea la propuesta gateada para mover una entrada `same_fact`/stale-por-
+    edad a `04 - Archivo/` -- llamada desde jarvis/worker/consolidation.py
+    justo después de marcar valid_to (ese marcado en SQL sigue siendo
+    inmediato, sin gating, como ya funcionaba; lo nuevo es el movimiento
+    físico del archivo, que sí requiere confirmación -- ver addendum de
+    Cerebro/decisiones-implementacion.md, 2026-09-11, punto 1: el juicio que
+    la origina es algorítmico y puede estar mal, mismo precedente del falso
+    positivo Madrid/Buenos Aires).
+    """
+    return create_proposal(
+        "archive_superseded", [entry_id], None,
+        f"🧠 Esta entrada quedó marcada como superada ({reason}). ¿La archivo?",
+        channel, channel_id, user_id,
+    )
 
 
 # ── Vinculación determinística a las entidades del hallazgo ─────────────────
@@ -1202,7 +1256,7 @@ def _resolve_with_new_info(proposal: dict, texto: str) -> dict:
         return _resolve_retag_with_new_info(proposal, texto)
     if action_type == "delete":
         return _resolve_delete_with_new_info(proposal, texto)
-    if action_type in ("flag_contradiction", "flag_connection", "merge"):
+    if action_type in ("flag_contradiction", "flag_connection", "merge", "archive_superseded"):
         return _resolve_as_new_entry(proposal, texto)
     # Defensivo -- no debería pasar con los 8 action_type conocidos del CHECK.
     reject_proposal(proposal["id"])
@@ -1611,7 +1665,7 @@ def _push_created(created_ids: list[str], channel: str, chat_id, user_id: str) -
 
     for p in individual:
         send_telegram_message(
-            chat_id, p["question"] + "\n\n_Respondé sí/no (o agregá una aclaración)._"
+            chat_id, p["question"] + "\n\nRespondé sí/no (o agregá una aclaración)."
         )
 
     if has_grouped:

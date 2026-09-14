@@ -1,5 +1,488 @@
 # Estado Actual de Jarvis
-Última actualización: 2026-09-03
+Última actualización: 2026-09-14
+
+## Riesgos del share SMB resueltos antes del deploy (2026-09-14)
+
+Sesión acotada a propósito a los 2 riesgos dejados abiertos en
+`Cerebro/decisiones/2026-09-11-share-smb-boveda-homelab.md` — **no** se tocó el share real de
+Windows, ni el mount CIFS del homelab, ni `docker-compose.yml` real, ni se reiniciaron
+contenedores. Eso sigue para el checkpoint de deploy, sesión aparte.
+
+**Riesgo 1 (mount no disponible al arrancar) — implementado y verificado corriendo el código.**
+Función compartida `ensure_vault_mounted()` en `project/app/vault/guard.py` (stdlib puro, sin
+importar `jarvis` ni FastAPI — ver docstring), enganchada como primer paso en los 3 entrypoints
+(`app/main.py::lifespan()`, `jarvis/worker/main.py::main()`, `mybot/bot.py::main()`): si
+`VAULT_ROOT`/`JARVIS_BOVEDA_PATH` no tiene las 6 carpetas estructurales del árbol PARA, loguea
+`[vault_guard] FATAL: ...` y hace `sys.exit(1)` antes de tocar ninguna DB. Verificado corriendo
+`uvicorn app.main:app`, `python -m jarvis.worker.main` y `python mybot/bot.py` de verdad contra una
+carpeta de scratch vacía (simulando el mount roto): los 3 se negaron a arrancar (exit 3/1/1).
+Corrida aparte contra el `D:\Boveda` real (solo el chequeo, sin arrancar el proceso completo)
+confirmó que pasa limpio. Confirmado por mtime que `D:\Boveda`, `app.db` y `jarvis.db` reales no se
+tocaron en ningún momento.
+
+**Riesgo 2 (precisión de `mtime` en CIFS) — decisión documentada, sin código.** Se acepta como
+riesgo de baja frecuencia para uso personal; no se implementa fallback por hash de contenido
+todavía. Criterio de revisión explícito (addendum en el archivo de decisión): solo si se confirma
+un caso real de sync perdido por esto.
+
+## Milestone 3 de la fusión: `jarvis/vault/writer.py`/`index_writer.py` conectados a `D:\Boveda` (2026-09-11)
+
+Implementado y verificado en un entorno de scratch completamente aislado (`jarvis.db` + `D:\Boveda`
+de prueba propios, nunca los reales — confirmado por mtime al terminar: cero archivos reales
+tocados). **No aplicado a `jarvis.db`/`D:\Boveda` reales** — mismo criterio que Milestone 2, queda
+a criterio del usuario cuándo disparar el arranque real.
+
+**Qué cambió**: `write_entry()` rutea por `entry["authorship"]` (columna nueva en `memory_entries`,
+ver `Cerebro/decisiones/2026-09-11-jarvis-authorship-columna-nueva.md` — corrige la resolución
+original que asumía poder derivarlo de `action_type` sin campo nuevo, no viable contra el flujo
+real de 2 pasos captura→procesamiento) en vez de por `type`. `'user'` (default) → `D:\Boveda\
+00 - Sin categorizar\` con el frontmatter común exacto de Milestone 2 (`id/tipo/creado_en/
+actualizado_en/origen/tags[/url]`, `origen` derivado de `source`: telegram→telegram,
+desktop→app, agenda→agenda, migration→migracion). `'jarvis_synthesis'` (solo
+`audit/service.py::_apply_create()`) → `Boveda\Jarvis\Sintesis\`, con el frontmatter rico completo
+(`confidence`/`origin_trust`/`valid_from`/`valid_to`/`source_id`) — primera vez que estos campos se
+reflejan en archivo, antes vivían solo en SQLite. `index_writer.py`: `INDEX/ENTITIES`→
+`Boveda\Jarvis\Entidades\`, `INDEX/PROJECTS`→`Boveda\Jarvis\Proyectos\`, misma lógica de
+reconstrucción desde SQL sin cambios.
+
+Nuevo décimo `action_type` en `jarvis_audit_proposals`: `archive_superseded` — cuando
+`consolidation.py` marca `same_fact`/stale-por-edad (el `valid_to` en SQL sigue siendo inmediato,
+sin gating, sin cambios de comportamiento ahí), propone (gateado, Telegram/desktop) mover el `.md`
+a `04 - Archivo\`. `forget_entry()` no pasa por esta propuesta nueva (la confirmación humana ya
+existió al pedir "olvidar") — mueve directo a `05 - Basura\` si es contenido del usuario, o borra
+directo si es síntesis de Jarvis. `memory_entries.vault_path` se actualiza al mover; se dejó de
+escribir esa misma info como metadata en ChromaDB (confirmado sin lectores, era dead weight).
+
+**Verificado con datos reales de LLM/embeddings** (Ollama local, `gemma3:12b` + `nomic-embed-text`,
+nunca simulado) contra el dataset de `jarvis/cli/seed_test.py` en el scratch: corrida completa de
+`run_consolidation()` (19 entradas + 1 vacía) → 3 marcadas obsoletas (same_fact) → exactamente 3
+propuestas `archive_superseded` PENDING, una por entrada, ninguna aplicada sola. Aceptar una movió
+el `.md` real de `00 - Sin categorizar\` a `04 - Archivo\` (confirmado en disco). `forget_entry()`
+sobre una entrada de usuario movió su `.md` a `05 - Basura\` (confirmado en disco, sin duplicados
+en ningún caso). Hueco de entidad "José" (2 menciones) → propuesta `create` → aceptada → entrada con
+`authorship='jarvis_synthesis'` → procesada por el worker → `.md` en `Jarvis\Sintesis\` con
+frontmatter rico completo, ficha canónica sincronizada en `Jarvis\Entidades\` con wikilink real.
+`origen: agenda` confirmado ya cableado correctamente del lado de `jarvis/captures/passive.py`
+(`source='agenda'` para `origin_source='agenda_ingestion'`, preexistente) — el mapeo nuevo en
+`writer.py` lo traduce bien sin tocar ese archivo.
+
+**No verificado en esta sesión** (fuera de alcance explícito): share SMB, deploy al homelab —
+ver `Cerebro/decisiones/2026-09-11-share-smb-boveda-homelab.md` (preparado en paralelo por otra
+sesión). Migración de datos reales de Jarvis: no aplica — `jarvis.db` real ya estaba vacío (wipe de
+seed previo a toda esta fusión).
+
+Detalle completo de las decisiones tácticas divergentes en `Cerebro/decisiones/` (3 archivos nuevos,
+ver índice en `Cerebro/decisiones/README.md`, sección "Milestone 3").
+
+---
+
+## Milestone 2 de la fusión: `crud.py` de Bóveda conectado a `D:\Boveda` (2026-09-11)
+
+Implementado, verificado en sandbox, **no aplicado todavía a `app.db`/`D:\Boveda` reales**
+(decisión pendiente del usuario, ver "Pendiente" al final de esta entrada). Sigue el plan de
+`Cerebro/decisiones-implementacion.md` (propuesta del 2026-09-11) y las decisiones tácticas en
+`Cerebro/decisiones/` (una por archivo: schema, sandbox, borrado soft, detección de origen,
+fotos). Alcance respetado: Jarvis, share SMB, deploy al homelab y el editor TipTap **no** se
+tocaron.
+
+**Decisión del usuario sobre categorías** (ya cerrada antes de esta sesión en
+`Cerebro/decisiones/2026-09-11-categorias-viejas-boveda.md`): las 7 categorías viejas
+(`Desarrollo`, `React`, `Universidad`, `Ideas`, `General`, `IAs Noticias`, `Sin Categorizar`)
+se reemplazan por el árbol PARA real — ejecutado como parte de esta sesión, probado en sandbox.
+
+**Qué cambió en `crud.py`/`main.py`** (detalle completo en las 5 decisiones tácticas del
+2026-09-11 en `Cerebro/decisiones/`):
+- `GET /categorias`/`GET /hojas` (y variantes) sincronizan contra `D:\Boveda` antes de leer
+  SQL (`app/vault/sync.py::sincronizar_vault()`, llamada al arrancar FastAPI y al inicio de
+  cada lectura Bóveda — barata por skip de `mtime`, sin poller en background).
+- `POST/PATCH/DELETE /hojas` y `/categorias` escriben/mueven/borran el archivo real primero,
+  la fila SQL se actualiza después (nunca al revés) — `app/vault/writer.py`.
+- `categorias.nombre` dejó de ser `UNIQUE` global (ahora `ruta` lo es) — el árbol real repite
+  nombres bajo padres distintos (`Facultad` en Áreas y en Recursos).
+- `DELETE` es soft-delete a `05 - Basura/`; carpetas estructurales del árbol PARA nunca se
+  borran ni renombran/mueven.
+- `origen: app | telegram` se infiere del header `Origin` (sin tocar `bot.py`/frontend).
+- Conversión HTML↔Markdown bidireccional para `apuntes` (`app/vault/markdown.py`) — escribir
+  a MD limpio, releer a HTML para que TipTap siga funcionando igual.
+- Fotos: se detectaron y unificaron dos convenciones reales distintas (frontend vs. bot) — ver
+  decisión táctica dedicada. Adjuntos van a `D:\Boveda\_adjuntos\`, servidos por un mount
+  nuevo `/adjuntos` (mismo patrón que `/uploads`).
+- `project/scripts/vault_indexer.py` (Milestone 1) se refactorizó para reusar el parseo de
+  `app/vault/parser.py` en vez de duplicarlo; sigue funcionando como CLI de auditoría manual.
+  `vault_index.db`/`vault_notas` quedan retirados del flujo en vivo.
+
+**Verificado en sandbox** (`dev-start.ps1` extendido, copia de `app.db` + copia liviana de
+`D:\Boveda` sin `_adjuntos/`, backend real en `:8765` + frontend real `npm run dev` en `:5173`
+apuntando ahí): categoría duplicada bajo padres distintos (`Facultad` en Áreas y en Recursos,
+ambas coexisten sin error); crear/editar/mover/borrar hoja (archivo se mueve/mueve-a-Basura
+de verdad en el sandbox); crear/renombrar/mover categoría (carpeta real); borrar categoría con
+hojas sin forzar → 409, con forzar → hojas a Basura + carpeta borrada; borrar categoría
+estructural → 409 siempre; nombre de categoría duplicado exacto → 400; detección de origen
+(`Origin: http://localhost:5173` → `app`, sin header → `telegram`); foto por las dos
+convenciones (frontend: `contenido`=URL; bot simulado: `contenido`=título +
+`apuntes`=`<img>`) → mismo resultado final coherente en el archivo y en la respuesta; re-sync
+completo desde archivo (fila SQL borrada y reconstruida desde el `.md`) reproduce exactamente
+lo mismo; `scripts/vault_indexer.py` reejecutado standalone contra la copia sandbox, mismos
+resultados que Milestone 1 (65/65 archivos, 0 errores). **No verificado visualmente en
+navegador** — el entorno de esta sesión no tenía la extensión Claude en Chrome conectada;
+la verificación fue a nivel API real (incluido el header `Origin` que manda el navegador) más
+el frontend real corriendo y sirviendo contra el backend sandbox, pero sin captura de pantalla
+ni interacción de mouse/teclado real. Confirmado por hash que `app.db` real no cambió un solo
+byte durante toda la sesión; en `D:\Boveda` real solo cambiaron los 6 README de subcarpeta
+(documentación de los campos opcionales nuevos) — ningún archivo de nota, ninguna carpeta.
+Homelab: no se tocó (sin SSH, sin `docker-compose`, sin `sgr-sync-push.ps1`).
+
+**Pendiente**: aplicar esto a `app.db`/`D:\Boveda` reales locales es una decisión aparte del
+usuario, no tomada en esta sesión — arrancar el backend real (`uvicorn` sin `VAULT_ROOT`/
+`DB_PATH` override) dispara la migración real la primera vez. Después de eso: 1) Share SMB
+homelab (infraestructura, no código). 2) `jarvis/vault/writer.py`/`index_writer.py` — sigue
+sin tocar. 3) Deploy al homelab — sesión aparte, explícita.
+
+## Milestone 1 de la fusión: indexador/poller de `D:\Boveda` construido y verificado (2026-09-11)
+
+Primera pieza de código real de la fusión aprobada (ver entrada de abajo y
+`Cerebro/decisiones-implementacion.md`, 2026-09-11). Alcance acotado a propósito: solo el
+indexador — no se tocó `project/app/main.py`/`crud.py` (Bóveda sigue escribiendo a `hojas`/
+`categorias` en `app.db` exactamente igual que antes), no se tocó `jarvis/vault/writer.py` ni
+`index_writer.py`, no hay share SMB todavía (corre local contra `D:\Boveda` directo), y Agenda
+sigue fuera.
+
+**Decisión de schema cerrada con el usuario** (estaba pendiente, ver el "Pendiente" de la entrada
+de decisiones-implementacion.md del 09-11): **Opción B** — el índice nuevo vive en una base
+SQLite separada (`project/database/vault_index.db`, gitignoreada igual que `app.db`/`jarvis.db`),
+con nombres de tabla propios (`vault_notas`, `vault_corridas`), sin tocar ni pretender reemplazar
+`hojas`/`categorias` todavía. Quedan dos fuentes de "qué categorías/hojas existen" conviviendo
+a propósito hasta que una sesión futura decida unificarlas — el usuario prefirió esto a
+"Opción A" (jubilar `categorias`, rediseñar `hojas` con ruta en vez de FK) precisamente porque
+esta sesión no toca `crud.py`, y ese schema nuevo solo tiene sentido una vez que `crud.py`/
+`main.py`/frontend/bot se adapten a leer por ruta.
+
+**Construido**: `project/scripts/vault_indexer.py` — recorre `D:\Boveda` completo con
+`Path.rglob("*.md")` (excluye `README.md`), parsea el frontmatter YAML de cada nota, y upsertea
+`vault_notas` (`id, ruta, carpeta, carpeta_raiz, titulo, tipo, creado_en, actualizado_en, origen,
+tags, url, mtime, tamano_bytes, indexado_en`) más una fila de auditoría por corrida en
+`vault_corridas` (conteos de nuevos/actualizados/sin-cambios/con-error/ids-asignados/eliminados).
+Detecta cambios por `mtime` contra lo ya indexado (no re-lee/re-parsea si no cambió); el upsert es
+por `id` (no por ruta), así que mover una nota de carpeta PARA (el mecanismo real de "cambiar de
+estado" en este diseño) actualiza la fila existente en vez de duplicarla; una nota que desaparece
+del árbol se borra del índice al final de la corrida. Si un archivo no tiene `id` en el
+frontmatter (o no tiene frontmatter en absoluto — caso de creación a mano), se le asigna
+`uuid4()`, se completan los campos que falten con criterio conservador (`tipo`: detecta si el
+cuerpo es una URL pelada igual que `detectType.js` del bot, si no `texto`; `origen: manual`;
+`creado_en`/`actualizado_en`: mtime del archivo) y se reescribe el `.md` en el formato canónico del
+README de cada carpeta — solo se toca el bloque de frontmatter, el cuerpo queda intacto.
+
+**Verificado** contra el contenido real (65 notas migradas, no datos de prueba):
+- Corrida limpia: 65 archivos, 0 errores, 0 ids faltantes (las 65 notas migradas ya traían
+  frontmatter completo) — `tipo: link` 12 / `tipo: texto` 53, `origen: migracion` 65/65 (coincide
+  con un escaneo manual independiente hecho antes de escribir el indexador), 0 links sin `url`,
+  conteo por `carpeta_raiz` consistente con lo que hay en disco (`00 - Sin categorizar`: 7,
+  `03 - Recursos`: 48, `04 - Archivo`: 9, `05 - Basura`: 1 — `01 - Proyectos` y `02 - Areas` sin
+  notas propias todavía, solo `README.md`).
+- Segunda corrida sobre el mismo árbol: 65 `archivos_sin_cambios`, 0 reprocesados — confirma que
+  la detección por `mtime` funciona.
+- Casos de borde probados contra una bóveda de prueba en el scratchpad (nunca contra `D:\Boveda`
+  real): archivo sin `id` (frontmatter parcial) → id asignado, campos faltantes completados,
+  reescritura correcta; archivo **sin frontmatter en absoluto** (solo un H1 + texto) → mismo
+  resultado, `origen: manual`; nota movida de `00 - Sin categorizar/` a `04 - Archivo/` → misma
+  fila actualizada (sin duplicar, conteo pasa a `archivos_actualizados` en vez de
+  `archivos_nuevos`); archivo borrado del disco → fila borrada del índice, `notas_eliminadas: 1`.
+- Se verificó también que el UTF-8 con tildes/eñes en rutas/títulos llega intacto a la base
+  (algunos nombres de archivo reales tienen acentos) — el resumen impreso en consola se ve
+  mojibake por la codepage de la terminal, pero el contenido real en la base está bien.
+
+**Dependencia nueva**: `PyYAML==6.0.3` agregado a `project/requirements.txt` (ya estaba instalado
+transitivamente en el venv, pero el script lo usa directo y no estaba declarado).
+
+**Pendiente para la siguiente sesión** (orden sugerido, a discutir con el usuario):
+1. Conectar `crud.py`/`main.py` (o decidir si directamente se migra a leer `vault_notas` en vez de
+   `hojas`/`categorias` — esto reabre la pregunta A/B con más información real en mano).
+2. `jarvis/vault/writer.py`/`index_writer.py` — reescritura real hacia el árbol PARA +
+   `Boveda/Jarvis/` (nada de esto se tocó en esta sesión).
+3. Share SMB (paso de infraestructura, no de código).
+4. Editor TipTap → Markdown.
+5. Decidir si el indexador corre por cron/systemd/tarea programada de Windows, o sigue siendo
+   manual hasta que haya algo consumiendo `vault_notas` — no se decidió en esta sesión porque
+   todavía no hay ningún consumidor del índice.
+
+## `jarvis.db` wipeado en el homelab — arranca vacío, a propósito (2026-09-11)
+
+Confirmado que todo el contenido de `jarvis.db` era dataset de prueba (`jarvis/cli/seed_test.py`,
+19-20 entradas — José, el par contradicción remoto/oficina, Madrid/Buenos Aires, la entrada vacía).
+Backup completo tomado antes (`~/project/database/backup-pre-limpieza-seed-20260910-213410/`,
+contenido confirmado) → contenedores parados → `jarvis.db`/vault de Jarvis/`chroma` eliminados por
+completo → contenedores reiniciados, `RestartCount=0` en los 3, `jarvis.db` recreado limpio y vacío
+por `init_db()` al arrancar. Es intencional y esperado: si una sesión futura ve `memory_entries`
+vacía, no es un bug, es el estado post-wipe. Ver `Cerebro/decisiones-implementacion.md` (2026-09-11)
+para el motivo completo: es el prerequisito de la fusión aprobada de Jarvis con la Bóveda de SGR
+sobre `D:\Boveda`.
+
+De paso se limpió `habitos`/`habitos_registros` en `app.db` (mismo criterio, confirmado seed) —
+`fin_movimientos`, `agenda_eventos` y `hojas` son datos reales del usuario y no se tocaron.
+
+## Fusión Jarvis + Bóveda de SGR sobre `D:\Boveda` — diseño aprobado, sin implementar (2026-09-11)
+
+Ver entrada completa en `Cerebro/decisiones-implementacion.md` (2026-09-11) — arquitectura entera
+del árbol PARA + `Boveda/Jarvis/`, mapeo de autoría, y los 4 huecos de diseño resueltos con el
+usuario tras revisar el código real (`write_entry()`, `index_writer.py`, `audit/service.py`,
+`consolidation.py`). **Antes de implementar cualquier parte de esto**, leer esa entrada completa —
+invierte un principio central de `jarvis-spec.html` (SQLite deja de ser la fuente de verdad de
+`memory_entries`). Pendiente: revisión cruzada por una sesión con conocimiento profundo del código
+de Jarvis antes de tocar código real.
+
+---
+
+## Deploy al homelab — fix de Telegram en texto plano en producción (2026-09-04)
+
+Hecho por el orquestador directamente (mismo patrón de siempre): backup previo
+(`~/backups/pre-telegram-fix-deploy-20260904-204900/`, confirmado con contenido) → sync de
+`jarvis/` → rebuild → `docker-compose up -d --no-build`. Código confirmado post-sync (sin
+`parse_mode` funcional en el payload, `TELEGRAM_FAIL` presente). Post-restart: `RestartCount=0`
+en los 3 contenedores, `GET /jarvis/health` → `worker_alive: true`, sin errores en logs.
+
+La próxima corrida diaria (o cualquier push de auditoría/Agenda) ya usa texto plano — el bug
+de "parte 2/3 perdida" queda cerrado en producción.
+
+---
+
+## Fix: mensajes de Telegram en texto plano — bug "parte 2/3 perdida" del reporte diario (2026-09-04)
+
+Investigado y arreglado (ver decisiones-implementacion.md, misma fecha, para el detalle completo
+de diagnóstico/decisión/verificación). Resumen: `send_telegram_message()` mandaba
+`parse_mode: "Markdown"` (legacy) y varios mensajes — reporte diario, preguntas de propuestas de
+auditoría, avisos de captura por Agenda — interpolan texto libre (contenido de memoria, tags,
+nombres de entidades) que puede traer un `_`/`*`/`` ` `` sin cerrar por azar. Eso rompe el parseo
+de Telegram (400 "can't parse entities") y el mensaje se pierde en silencio — el envío es
+best-effort a propósito, así que la excepción solo se logueaba, sin dejar rastro persistente.
+Reproducido y confirmado contra la API real de Telegram antes de tocar código.
+
+**Fix**: texto plano (sin `parse_mode`) en las 7 funciones que arman mensajes de Telegram
+(`jarvis/notify/telegram.py`, `jarvis/worker/processor.py`, `jarvis/debug/service.py`,
+`jarvis/captures/passive.py`, `jarvis/ingestion/agenda.py`, `jarvis/audit/service.py`,
+`jarvis/worker/consolidation.py`) — se prefirió a escapar para MarkdownV2 porque un solo punto de
+interpolación sin escapar (de los ~15 repartidos en 6 archivos) reintroduce el mismo bug. Además:
+un fallo de envío ahora queda registrado de forma persistente en `jarvis_event_log`
+(`log_event("TELEGRAM_FAIL", ...)`, reusa la tabla de Fase B5, visible en `JarvisDebugPanel`) en
+vez de solo en el log efímero de Docker.
+
+**Verificado** contra el bot real y un chat_id real: el mensaje que antes daba 400 ahora llega
+completo (confirmado por el usuario en Telegram); una falla forzada (token inválido) quedó
+registrada y consultable en `jarvis_event_log`.
+
+**Deploy al homelab: pendiente** — código listo y verificado en local/contra la API real de
+Telegram, pero no desplegado todavía (paso aparte, a pedido del usuario).
+
+---
+
+## Deploy al homelab — Ingestión Automática de Agenda en producción (2026-09-04)
+
+Hecho por el orquestador directamente (sync acotado, mismo patrón que el deploy de la
+pregunta abierta del 03/09): la feature de 0.3 (sesión "Ingestión Automática: Agenda de SGR",
+ver abajo) estaba completa y verificada en local/scratch pero nunca desplegada. Backup previo
+(`~/backups/pre-agenda-deploy-20260904-192600/` en el homelab, jarvis.db+vault+chroma,
+confirmado con contenido) → sync de `jarvis/` completo vía `tar`/SSH (incluye
+`jarvis/ingestion/agenda.py` nuevo, confirmado presente post-sync) → rebuild de imagen →
+`docker-compose up -d --no-build`.
+
+**Verificado post-restart**: `RestartCount=0` en los 3 contenedores — el fix de la condición
+de carrera en `_migrate()` (sesión del 01/09) sigue sosteniendo el arranque concurrente sin
+crashear, ahora con una migración más (columna `origin_source`/`origin_source_key` +
+`'agenda'` en el `CHECK` de `source`). `GET /jarvis/health` → `worker_alive: true`. Ambos
+cambios de schema confirmados en el `jarvis.db` real del homelab. Sin errores en logs de
+backend/worker.
+
+El 6to paso de `run_consolidation()` (lectura de Agenda vía `GET /agenda/eventos`/
+`GET /agenda/tareas` de la API real de SGR, propuestas `PENDING` en `jarvis_capture_proposals`)
+va a correr contra datos reales por primera vez en la próxima corrida diaria del homelab.
+
+---
+
+## Sesión "Ingestión Automática: Agenda de SGR" (2026-09-03) — 0.3 implementado
+
+Implementa la propuesta aprobada el mismo día en la sesión anterior ("Jarvis
+0.2→0.3", ver abajo) — detalle completo de diseño, decisiones resueltas y
+verificación en `Cerebro/decisiones-implementacion.md`, entrada "IMPLEMENTADO:
+0.3, Ingestión Automática desde Agenda de SGR".
+
+**Qué hace**: sexto paso de `jarvis/worker/consolidation.py::run_consolidation()`
+(mismo gating diario que el resto del job) — lee eventos ya terminados y
+tareas ya completadas de la Agenda de SGR de los últimos
+`JARVIS_AGENDA_INGESTION_WINDOW_DAYS` días (default 7) vía
+`GET /agenda/eventos`/`GET /agenda/tareas` (HTTP localhost, sin credenciales
+nuevas) y propone una fila `PENDING` en `jarvis_capture_proposals` por cada
+evento/tarea todavía no propuesto — nunca eventos futuros, nunca escribe en
+Agenda, nunca escribe en `memory_entries` directo. Se acepta/rechaza por
+Telegram o desktop exactamente igual que cualquier otra propuesta de captura
+pasiva (mismo `accept_proposal()`/`reject_proposal()`,
+`jarvis/captures/passive.py`, ahora con un cuarto valor `source='agenda'` en
+`memory_entries` para las aceptadas).
+
+**Archivo nuevo**: `jarvis/ingestion/agenda.py`. Tocados:
+`jarvis/db/schema.py`, `jarvis/db/database.py` (migración nueva de
+`memory_entries.source`), `jarvis/worker/task_manifest.py` (2 operaciones
+nuevas), `jarvis/config.py`, `jarvis/captures/passive.py`,
+`jarvis/worker/consolidation.py`, `jarvis/pyproject.toml`. Sin cambios de
+frontend (reusa el banner genérico de propuestas ya existente).
+
+**4 decisiones subespecificadas por la propuesta, resueltas con criterio
+conservador y documentadas explícitamente** (detalle completo en
+`Cerebro/decisiones-implementacion.md`): zona horaria naive-local de Agenda
+vs. UTC-aware del resto de Jarvis; `agenda_tareas` no tiene columna de fecha
+de completado real (se usa `fecha_opcional` como proxy, tareas completadas
+sin fecha quedan fuera de 0.3); eventos recurrentes comparten `id` entre
+ocurrencias (clave de dedup incluye `fecha_inicio`); y un gap real del
+documento (dedupear solo contra `memory_entries.source_id` no respetaba un
+rechazo explícito del usuario — se agregó dedup también contra
+`jarvis_capture_proposals` sin mirar status).
+
+**Bug real encontrado y arreglado ANTES de tocar cualquier DB real**:
+`jarvis/db/schema.py` nunca tenía `last_audited_at` en el `CREATE TABLE`
+estático de `memory_entries` (solo vivía en una migración runtime) — hacía
+que cualquier migración de rebuild de esa tabla que corriera después de que
+una DB real ya tuviera esa columna fallara. Ver detalle en decisiones.
+
+**Incidente real durante la verificación**: un primer intento de levantar el
+backend real de SGR para poder consultar Agenda real corrió, como efecto
+colateral de `import app.main`, la migración de Jarvis (con el bug de arriba
+todavía sin arreglar) contra `project/database/jarvis.db` de producción.
+`memory_entries` nunca se tocó (falló antes del rename, `integrity_check` OK,
+22 filas intactas), pero quedó una tabla `memory_entries_new` vacía y
+huérfana. Backup completo tomado de inmediato (`project/database/
+backup-pre-0.3-agenda-incident-20260903-210637/`, contenido confirmado) →
+tabla huérfana dropeada → `integrity_check` OK. Toda la verificación
+posterior (incluida la ingestión real) se hizo contra una copia scratch del
+backup, con el backend de SGR real pero Jarvis sandboxeado a rutas scratch
+(`JARVIS_DB_PATH`/`JARVIS_VAULT_PATH`/`JARVIS_CHROMA_PATH`). Detalle completo
+y feedback enviado sobre el patrón de riesgo en decisiones-implementacion.md.
+
+**Verificado con Agenda real del usuario** (backend de SGR real corriendo,
+Jarvis sandboxeado a scratch — nunca `jarvis.db` de producción): migración
+limpia sobre una copia del backup real (22 filas preservadas, sin tablas
+huérfanas, idempotente); ingestión real encontró 16 eventos reales pasados
+(parciales de julio-agosto) y creó 16 propuestas; segunda corrida sin
+duplicar (dedup); `accept_proposal()`/`reject_proposal()` reales sobre
+propuestas de Agenda (la aceptada generó `memory_entries.source='agenda'`
+correcto y quedó encolada en `inbox_queue`; ninguna de las dos se
+repropuso en una tercera corrida); canal `telegram` probado aparte (chat_id
+seteado, best-effort de notificación falló sin tumbar nada, sin token real
+en el entorno); filtro "ya pasó" probado con 5 casos sintéticos de borde;
+filtro de tareas completadas probado con 4 casos sintéticos (la Agenda real
+no tenía ninguna tarea completada en este momento). `python -m py_compile`
+limpio en los 6 archivos tocados/nuevos.
+
+**No desplegado al homelab en esta sesión** — paso aparte, a pedido
+explícito.
+
+---
+
+## Sesión "Jarvis 0.2→0.3" (2026-09-03) — cierre de 0.2 + propuesta de diseño de 0.3
+
+Dos fases de rigor distinto, pedidas explícitamente separadas.
+
+### Fase A — 0.2 cerrada: Obsidian wikilinks reales + PII detector completo
+
+Las dos piezas que `jarvis-spec.html` §29 listaba para 0.2 ("Obsidian sync",
+"PII detector completo") y que habían quedado sin hacer. **Implementadas,
+verificadas con Ollama real contra DB/vault de scratch (nunca `jarvis.db`
+real), documentadas en `Cerebro/decisiones-implementacion.md`** (dos
+entradas completas, mismo día — ahí está el detalle de diseño, los
+trade-offs descartados y la verificación caso por caso).
+
+**Wikilinks reales** (`jarvis/vault/index_writer.py` nuevo +
+`jarvis/vault/writer.py` extendido): cada entrada vinculada a una entidad/
+proyecto conocido ahora escribe una sección `## Vinculado a` con
+`[[wikilinks]]` reales al final de su `.md`; cada entidad/proyecto gana una
+nota canónica propia en `INDEX/ENTITIES/`/`INDEX/PROJECTS/` (carpetas
+nuevas, separadas de `PEOPLE/`/`PROJECTS/` que ya guardaban entradas
+individuales) con una sección "Menciones" que enlaza de vuelta a todas sus
+entradas vigentes — abrir `vault/` en Obsidian ya no da un grafo vacío.
+Sincronizado en los 3 puntos donde el código toca el vault de una entrada
+(pipeline normal, editar, olvidar). Backfill nuevo:
+`python -m jarvis.cli.backfill_vault_links` (reescribe entradas vigentes ya
+existentes que tienen vínculos, recrea las notas canónicas desde cero) —
+**no corrido todavía contra la DB/vault reales** (ni local ni homelab), a
+propósito, mismo criterio que toda sesión anterior con datos reales; es un
+paso aparte si el usuario lo pide.
+
+**Bug real encontrado y arreglado verificando el backfill**:
+`write_entry()` sin `title` explícito re-derivaba el nombre de archivo de
+`content_raw` en vez de reusar el ya asignado — creaba un `.md` huérfano
+nuevo y dejaba el archivo real (el que SQLite sigue referenciando) sin
+actualizar. Reproducido con Ollama real antes del fix (huérfano confirmado),
+y de nuevo después (0 huérfanos). Efecto colateral: también corrige el
+mismo bug latente que ya tenía `_resync_vault_only()` (editar solo tags).
+
+**Gap real encontrado y documentado, NO arreglado** (fuera de alcance
+explícito de esta pieza): `memory_entities` y `memory_projects` son dos
+catálogos sin reconciliar — un mismo nombre real (ej. "SGR") puede
+detectarse como entidad-organización Y como proyecto a la vez, apareciendo
+dos veces en `## Vinculado a` con dos notas canónicas distintas. Confirmado
+en vivo. Reconciliar los dos conceptos es una decisión de diseño más grande
+que no se pidió acá.
+
+**PII detector completo** (`jarvis/privacy/gateway.py` extendido): 3
+categorías nuevas de PII sensible — documentos de identidad (CUIT/CUIL
+formato fijo; DNI solo con palabra clave cerca, para evitar falsos
+positivos de números sueltos), cuentas/tarjetas financieras (CBU/CVU de 22
+dígitos; número de tarjeta con checksum de Luhn real, no cualquier
+secuencia larga), y contexto de salud (heurística de palabras clave,
+confianza menor y documentada como tal). Mismo criterio que los secretos ya
+existentes: bloquea el FRAGMENTO que sale como contexto RAG al LLM externo
+(`filter_context()`), nunca la captura en sí — deliberadamente NO bloquea
+nombres de personas ni contenido personal en general (el tipo `PEOPLE` sigue
+siendo el lugar correcto para eso). Verificado con casos reales (CUIT/DNI/
+CBU/tarjeta real, y confirmando que contenido personal normal ["José vive en
+Rosario..."] NO se bloquea) — no necesita Ollama, es regex puro.
+
+No se tocó frontend en la Fase A — no aplica `npm run build`.
+
+### Fase B — 0.3 (Ingestión Automática): propuesta APROBADA, todavía sin
+implementar
+
+**Aprobada por el usuario tal cual, sin cambios, el mismo día** — queda
+lista para que una sesión futura la implemente directamente (ver punto 5
+de la entrada en `decisiones-implementacion.md`, "qué falta para poder
+implementar esto"), sin tener que volver a proponerla ni confirmarla.
+
+**Ningún código nuevo en esta sesión** — pedido explícito de la tarea: 0.3 es el primer
+salto a contenido/credenciales que no son 100% del usuario tipeando a mano,
+así que esta sesión entrega diseño, no implementación. Propuesta completa
+en `Cerebro/decisiones-implementacion.md` (entrada
+"PROPUESTA (sin implementar, pendiente de aprobación): 0.3, Ingestión
+Automática — arrancando por Agenda de SGR", mismo día, mismo formato que la
+propuesta de auditoría proactiva del 31/08).
+
+Resumen de la propuesta:
+- **Fuente para arrancar: Agenda de SGR** (no Google Calendar externo, no
+  email, no GitHub, no documentos) — vía la API ya existente
+  (`GET /agenda/eventos`, `GET /agenda/tareas`), no acceso directo a
+  `app.db`. Argumento central: es la única de las 4 lecturas de "calendario"
+  sin contenido de terceros (lo escribió el propio usuario en la UI de SGR)
+  y sin credenciales nuevas — mejor esfuerzo/valor para este usuario
+  puntual, y sienta base directa para 0.4 ("Agenda/Finanzas/Hábitos como
+  fuentes de contexto").
+- **Credenciales**: ninguna nueva hace falta para Agenda (HTTP localhost sin
+  auth). Para cuando se agregue una fuente que sí las necesite: reusar el
+  patrón `.env` + `os.getenv()` que ya usa todo Jarvis, nada nuevo — Infisical
+  sigue diferido a 0.5 según ya estaba decidido.
+- **Blast radius explícito**, mismo principio que
+  `jarvis/worker/task_manifest.py`: solo puede leer 2 endpoints de la API de
+  SGR, nunca escribe en Agenda, nunca hace otro request externo, y NUNCA
+  escribe en `memory_entries` directo — solo puede crear filas `PENDING` en
+  `jarvis_capture_proposals` (reusando la tabla de captura pasiva), la misma
+  confirmación humana por Telegram/desktop de siempre antes de que algo se
+  vuelva memoria real.
+- **Descartado a propósito, con motivo**: email (mayor riesgo de contenido
+  no confiable + credenciales reales, sin la pieza de admisión que
+  `Componentes-Evaluados.md` ya marca como prerequisito), GitHub (mismo
+  problema de credenciales, sin señal de que sea relevante para este
+  usuario hoy), documentos/archivos locales (alcance de lectura sin acotar
+  todavía, necesita su propia sub-propuesta).
+
+**Aprobada.** La próxima sesión que la tome puede implementar directamente
+sin volver a confirmar nada de lo de arriba.
+
+---
 
 ## Deploy al homelab — pregunta abierta exploratoria en producción (2026-09-03)
 

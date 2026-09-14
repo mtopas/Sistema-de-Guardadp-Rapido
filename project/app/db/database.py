@@ -477,6 +477,59 @@ def _apply_migrations(cursor):
         if DEBUG:
             print("migration: categorias.color added")
 
+    # --- categorias: Milestone 2 (D:\Boveda como fuente de verdad) ---
+    # `nombre` tenía UNIQUE global; el árbol real de carpetas repite nombre bajo
+    # padres distintos (ej. "Facultad" en 02 - Areas/ y en 03 - Recursos/), así
+    # que la constraint se retira y se reemplaza por UNIQUE(ruta). SQLite no
+    # soporta ALTER TABLE para constraints -- hace falta reconstruir la tabla,
+    # igual que ya se hizo con agenda_eventos más abajo en esta función.
+    cat_cols = _get_columns(cursor, "categorias")
+    if "ruta" not in cat_cols:
+        categorias_viejas = {
+            "Desarrollo", "React", "Universidad", "Ideas", "General",
+            "IAs Noticias", "Sin Categorizar",
+        }
+        cursor.execute("SELECT nombre FROM categorias")
+        nombres_actuales = {row[0] for row in cursor.fetchall()}
+        purgar_legacy = nombres_actuales and nombres_actuales <= categorias_viejas
+
+        cursor.connection.commit()
+        cursor.execute("PRAGMA foreign_keys = OFF")
+        cursor.execute("""
+            CREATE TABLE categorias_new (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                nombre      TEXT NOT NULL,
+                padre_id    INTEGER REFERENCES categorias(id),
+                icono       TEXT,
+                color       TEXT,
+                ruta        TEXT,
+                estructural INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        if purgar_legacy:
+            # Filas viejas (Desarrollo/React/Universidad/Ideas/General/IAs Noticias/
+            # Sin Categorizar): su contenido real ya está migrado a D:\Boveda (ver
+            # Cerebro/decisiones-implementacion.md 2026-09-11); el resto era basura
+            # de prueba. No se copian -- sincronizar_vault() repuebla desde las
+            # carpetas reales en el próximo arranque. Las hojas que las
+            # referenciaban se borran con ellas (su contenido real, si existía,
+            # también vive ya en D:\Boveda como archivo).
+            cursor.execute("DELETE FROM hojas WHERE categoria_id IN (SELECT id FROM categorias)")
+            if DEBUG:
+                print("migration: categorias/hojas legacy purgadas (reemplazadas por árbol PARA)")
+        else:
+            cursor.execute("""
+                INSERT INTO categorias_new (id, nombre, padre_id, icono, color)
+                SELECT id, nombre, padre_id, icono, color FROM categorias
+            """)
+        cursor.execute("DROP TABLE categorias")
+        cursor.execute("ALTER TABLE categorias_new RENAME TO categorias")
+        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_categorias_ruta ON categorias(ruta)")
+        cursor.connection.commit()
+        cursor.execute("PRAGMA foreign_keys = ON")
+        if DEBUG:
+            print("migration: categorias reconstruida con ruta/estructural (UNIQUE nombre retirado)")
+
     # --- hojas ---
     hoja_cols = _get_columns(cursor, "hojas")
 
@@ -537,6 +590,29 @@ def _apply_migrations(cursor):
         cursor.execute("ALTER TABLE hojas ADD COLUMN link_preview TEXT")
         if DEBUG:
             print("migration: hojas.link_preview added")
+
+    # --- hojas: Milestone 2 (D:\Boveda como fuente de verdad) ---
+    # `id` (INTEGER PK) sigue siendo el id que ya usan frontend/bot; vault_id/ruta
+    # son el vínculo con el archivo real, mtime permite saltar notas sin cambios
+    # en sincronizar_vault() (mismo criterio de Milestone 1). UNIQUE vía índice
+    # (no constraint inline) porque ALTER TABLE ADD COLUMN no soporta UNIQUE
+    # directo en SQLite; múltiples NULL conviven sin problema en un índice único.
+    if "vault_id" not in hoja_cols:
+        cursor.execute("ALTER TABLE hojas ADD COLUMN vault_id TEXT")
+        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_hojas_vault_id ON hojas(vault_id)")
+        if DEBUG:
+            print("migration: hojas.vault_id added")
+
+    if "ruta" not in hoja_cols:
+        cursor.execute("ALTER TABLE hojas ADD COLUMN ruta TEXT")
+        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_hojas_ruta ON hojas(ruta)")
+        if DEBUG:
+            print("migration: hojas.ruta added")
+
+    if "mtime" not in hoja_cols:
+        cursor.execute("ALTER TABLE hojas ADD COLUMN mtime REAL")
+        if DEBUG:
+            print("migration: hojas.mtime added")
 
     inst_cols = {row[1] for row in cursor.execute("PRAGMA table_info(fin_instrumentos)")}
     if "sociedad" not in inst_cols:

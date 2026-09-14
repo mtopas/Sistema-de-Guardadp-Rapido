@@ -20,8 +20,9 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator, model_validator
 
-from app.config import DEBUG, DB_PATH
+from app.config import DEBUG, DB_PATH, VAULT_ROOT
 from app.paths import data_root, dist_directory, uploads_directory
+from app.vault.guard import ensure_vault_mounted
 from app.db.crud import (
     actualizar_apuntes,
     actualizar_icono,
@@ -30,7 +31,6 @@ from app.db.crud import (
     actualizar_categoria,
     buscar_hojas,
     categoria_existe,
-    categoria_tiene_hojas,
     crear_categoria,
     crear_hoja,
     eliminar_categoria,
@@ -356,6 +356,11 @@ def _spa_index() -> FileResponse:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Riesgo 1 de Cerebro/decisiones/2026-09-11-share-smb-boveda-homelab.md: primero
+    # que cualquier otra cosa, antes de tocar app.db -- un mount CIFS caído bind-montea
+    # una carpeta vacía sin error, así que sin este chequeo el backend arrancaría
+    # silenciosamente contra un vault vacío.
+    ensure_vault_mounted(VAULT_ROOT, label="VAULT_ROOT")
     init_db()
     # Backfill: indexar hojas que faltan en ChromaDB (best-effort, falla si Ollama no está)
     try:
@@ -377,10 +382,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# Orígenes de confianza del frontend -- una sola lista, reusada tanto por CORS
+# como por la detección de origen (app vs telegram) de POST /hojas (Milestone 2).
+FRONTEND_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
+
 # Allow Vite dev server to call the API during development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=FRONTEND_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -395,6 +404,12 @@ if DIST_DIR.exists():
 
 # Serve uploaded images
 app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
+
+# Adjuntos del vault Bóveda (D:\Boveda\_adjuntos) -- fotos de hojas ya migradas
+# al vault (Milestone 2); se crea si todavía no existe (primer arranque).
+_ADJUNTOS_DIR = VAULT_ROOT / "_adjuntos"
+_ADJUNTOS_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/adjuntos", StaticFiles(directory=_ADJUNTOS_DIR), name="adjuntos")
 
 
 # --- Frontend ---
@@ -515,20 +530,43 @@ def actualizar_categoria_endpoint(categoria_id: int, body: CategoriaPatch):
 
 @app.delete("/categorias/{categoria_id}")
 def eliminar_categoria_endpoint(categoria_id: int, forzar: bool = Query(False)):
-    if not forzar and categoria_tiene_hojas(categoria_id):
+    resultado = eliminar_categoria(categoria_id, forzar=forzar)
+    if resultado == "no_encontrada":
+        raise HTTPException(status_code=404, detail="Categoría no encontrada")
+    if resultado == "estructural":
+        raise HTTPException(
+            status_code=409,
+            detail="Carpeta estructural del árbol PARA -- no se puede eliminar."
+        )
+    if resultado == "tiene_hojas":
         raise HTTPException(
             status_code=409,
             detail="La categoría tiene hojas. Usá ?forzar=true para eliminar de todos modos."
         )
-    if not eliminar_categoria(categoria_id):
-        raise HTTPException(status_code=404, detail="Categoría no encontrada")
     return {"mensaje": "Categoría eliminada"}
 
 
 # --- Hojas ---
 
+def _detectar_origen(request: Request) -> str:
+    """app | telegram, sin tocar el contrato de POST /hojas (ni bot.py ni el
+    frontend mandan un campo explícito). Compara el header `Origin` contra la
+    misma lista de orígenes de confianza que ya usa CORSMiddleware -- no una
+    regla nueva implícita. Se agrega también el propio origen de la request
+    (scheme://netloc) para no confundir con `telegram` al `.exe` empaquetado,
+    donde frontend y API comparten origen fuera de los puertos de dev de Vite.
+    python-requests (el bot) no manda `Origin`; el fetch del navegador sí."""
+    origin = request.headers.get("origin")
+    if not origin:
+        return "telegram"
+    self_origin = f"{request.url.scheme}://{request.url.netloc}"
+    if origin in FRONTEND_ORIGINS or origin == self_origin:
+        return "app"
+    return "telegram"
+
+
 @app.post("/hojas")
-async def crear_hoja_endpoint(hoja: HojaCreate, background_tasks: BackgroundTasks):
+async def crear_hoja_endpoint(hoja: HojaCreate, background_tasks: BackgroundTasks, request: Request):
     if not hoja.contenido.strip():
         raise HTTPException(status_code=400, detail="El contenido no puede estar vacío")
     if not categoria_existe(hoja.categoria_id):
@@ -551,6 +589,7 @@ async def crear_hoja_endpoint(hoja: HojaCreate, background_tasks: BackgroundTask
         fecha_recordatorio=hoja.fecha_recordatorio,
         icono=hoja.icono,
         link_preview=preview,
+        origen=_detectar_origen(request),
     )
     # Indexar en background — no bloquea la respuesta
     cat = next((c["nombre"] for c in obtener_categorias() if c["id"] == hoja.categoria_id), "")

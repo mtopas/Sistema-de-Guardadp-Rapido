@@ -1,11 +1,60 @@
 from datetime import datetime, date, timedelta
 import calendar as _calendar
 import json
+import os
+import re
 import sqlite3
+import uuid
+from pathlib import Path
 from typing import Optional
 
-from app.config import DEBUG
+from app.config import DEBUG, VAULT_ROOT
 from app.db.database import get_connection
+from app.vault import parser as vault_parser
+from app.vault import sync as vault_sync
+from app.vault import writer as vault_writer
+from app.vault.markdown import html_a_markdown, markdown_a_html, construir_apuntes_html_foto
+
+_TAG_RE = re.compile(r"#([a-zA-Z]\w*)")
+_TAG_HTML_STRIP_RE = re.compile(r"<[^>]*>")
+_IMG_ADJUNTO_RE = re.compile(r"!\[[^\]]*\]\(_adjuntos/[^)]+\)")
+_UPLOAD_PATH_RE = re.compile(r"/uploads/([^\s\"')]+)")
+_LEADING_IMG_TAG_RE = re.compile(r"^\s*<img\b[^>]*/?>", re.IGNORECASE)
+
+
+def _extraer_tags(contenido: str, apuntes_html: Optional[str]) -> list:
+    texto = (contenido or "") + " " + _TAG_HTML_STRIP_RE.sub(" ", apuntes_html or "")
+    vistos, tags = set(), []
+    for m in _TAG_RE.findall(texto):
+        low = m.lower()
+        if low not in vistos:
+            vistos.add(low)
+            tags.append(low)
+    return tags
+
+
+def _bajo_prefijo(ruta: str, prefijo: str) -> bool:
+    return ruta == prefijo or ruta.startswith(prefijo + os.sep)
+
+
+def _extraer_upload_filename(contenido: Optional[str], apuntes_html: Optional[str]) -> Optional[str]:
+    """Encuentra el archivo en uploads/ para una hoja tipo=foto sin importar
+    si vino por el flujo del frontend (contenido=URL de /uploads/) o del bot
+    (contenido=título, apuntes trae un <img src="…/uploads/…"> como primera
+    etiqueta -- ver mybot/bot.py handle_photo/STEP_PHOTO_TITLE)."""
+    for texto in (contenido or "", apuntes_html or ""):
+        m = _UPLOAD_PATH_RE.search(texto)
+        if m:
+            return m.group(1)
+    return None
+
+
+def sincronizar_vault_si_hace_falta() -> None:
+    conn = get_connection()
+    try:
+        vault_sync.sincronizar_vault(VAULT_ROOT, conn)
+    finally:
+        conn.close()
 
 
 def _parse_preview(raw):
@@ -37,6 +86,10 @@ def _hoja_dict(f):
 
 
 # --- Categorias ---
+# Las categorías representan carpetas reales de D:\Boveda. `ruta` es la carpeta
+# relativa (única); `estructural=1` marca las 6 raíces del árbol PARA + los
+# dominios fijos de 02 - Areas/03 - Recursos -- nunca se borran ni renombran/
+# mueven por esta vía (decisión 2026-09-11, Milestone 2).
 
 def _categoria_row_dict(row) -> dict:
     return {"id": row[0], "nombre": row[1], "padre_id": row[2], "icono": row[3], "color": row[4]}
@@ -54,29 +107,64 @@ def _categoria_descendant_ids(cursor, categoria_id: int) -> list:
     return ids
 
 
+def _reescribir_rutas_descendientes(cursor, categoria_id: int, ruta_vieja: str, ruta_nueva: str) -> None:
+    for did in _categoria_descendant_ids(cursor, categoria_id):
+        cursor.execute("SELECT ruta FROM categorias WHERE id = ?", (did,))
+        r = cursor.fetchone()
+        if r and r[0] and _bajo_prefijo(r[0], ruta_vieja):
+            cursor.execute(
+                "UPDATE categorias SET ruta = ? WHERE id = ?",
+                (ruta_nueva + r[0][len(ruta_vieja):], did),
+            )
+    ids_categorias = [categoria_id] + _categoria_descendant_ids(cursor, categoria_id)
+    placeholders = ",".join("?" * len(ids_categorias))
+    cursor.execute(f"SELECT id, ruta FROM hojas WHERE categoria_id IN ({placeholders})", ids_categorias)
+    for hoja_id, ruta_hoja in cursor.fetchall():
+        if ruta_hoja and _bajo_prefijo(ruta_hoja, ruta_vieja):
+            cursor.execute(
+                "UPDATE hojas SET ruta = ? WHERE id = ?",
+                (ruta_nueva + ruta_hoja[len(ruta_vieja):], hoja_id),
+            )
+
+
 def crear_categoria(
     nombre: str,
     padre_id: Optional[int] = None,
     icono: Optional[str] = None,
     color: Optional[str] = None,
 ) -> Optional[int]:
+    sincronizar_vault_si_hace_falta()
     conn = get_connection()
     cursor = conn.cursor()
     inherited_color = color
-    if inherited_color is None and padre_id is not None:
-        cursor.execute("SELECT color FROM categorias WHERE id = ?", (padre_id,))
+    padre_ruta = None
+    if padre_id is not None:
+        cursor.execute("SELECT ruta, color FROM categorias WHERE id = ?", (padre_id,))
         parent_row = cursor.fetchone()
-        if parent_row and parent_row[0]:
-            inherited_color = parent_row[0]
+        if parent_row is None:
+            conn.close()
+            return None
+        padre_ruta = parent_row[0]
+        if inherited_color is None and parent_row[1]:
+            inherited_color = parent_row[1]
+
+    nombre_limpio = nombre.strip()
+    carpeta = vault_writer.sanitize_nombre(nombre_limpio)
+    ruta = str(Path(padre_ruta) / carpeta) if padre_ruta else carpeta
+    cursor.execute("SELECT 1 FROM categorias WHERE ruta = ?", (ruta,))
+    if cursor.fetchone() is not None or (VAULT_ROOT / ruta).exists():
+        conn.close()
+        return None
     try:
+        vault_writer.crear_carpeta_categoria(VAULT_ROOT, ruta)
         cursor.execute(
-            "INSERT INTO categorias (nombre, padre_id, icono, color) VALUES (?, ?, ?, ?)",
-            (nombre.strip(), padre_id, icono, inherited_color),
+            "INSERT INTO categorias (nombre, padre_id, icono, color, ruta, estructural) VALUES (?, ?, ?, ?, ?, 0)",
+            (nombre_limpio, padre_id, icono, inherited_color, ruta),
         )
         cid = cursor.lastrowid
         conn.commit()
         if DEBUG:
-            print(f"crear_categoria: id={cid} nombre={nombre} padre_id={padre_id}")
+            print(f"crear_categoria: id={cid} nombre={nombre} padre_id={padre_id} ruta={ruta}")
         return cid
     except sqlite3.IntegrityError:
         conn.rollback()
@@ -86,6 +174,7 @@ def crear_categoria(
 
 
 def obtener_categorias():
+    sincronizar_vault_si_hace_falta()
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT id, nombre, padre_id, icono, color FROM categorias ORDER BY id ASC")
@@ -103,19 +192,68 @@ def categoria_existe(categoria_id: int) -> bool:
     return ok
 
 
-def eliminar_categoria(categoria_id: int) -> bool:
+def eliminar_categoria(categoria_id: int, forzar: bool = False) -> str:
+    """Devuelve 'ok' | 'no_encontrada' | 'estructural' | 'tiene_hojas'."""
     conn = get_connection()
     cursor = conn.cursor()
+    cursor.execute("SELECT ruta, estructural FROM categorias WHERE id = ?", (categoria_id,))
+    row = cursor.fetchone()
+    if row is None:
+        conn.close()
+        return "no_encontrada"
+    ruta, estructural = row
+    if estructural:
+        conn.close()
+        return "estructural"
+
+    cursor.execute("SELECT ruta FROM hojas WHERE categoria_id = ?", (categoria_id,))
+    rutas_hojas = [r[0] for r in cursor.fetchall() if r[0]]
+    if rutas_hojas and not forzar:
+        conn.close()
+        return "tiene_hojas"
+
+    if rutas_hojas:
+        nuevas = vault_writer.mover_notas_a_basura_y_borrar_carpeta(VAULT_ROOT, ruta, rutas_hojas)
+        cursor.execute("SELECT id FROM categorias WHERE ruta = ?", (vault_writer.BASURA_CARPETA,))
+        basura_row = cursor.fetchone()
+        basura_id = basura_row[0] if basura_row else None
+        for ruta_vieja, ruta_nueva in nuevas.items():
+            cursor.execute(
+                "UPDATE hojas SET ruta = ?, categoria_id = COALESCE(?, categoria_id) WHERE ruta = ?",
+                (ruta_nueva, basura_id, ruta_vieja),
+            )
+    else:
+        carpeta_abs = VAULT_ROOT / ruta
+        if carpeta_abs.exists() and carpeta_abs.is_dir():
+            try:
+                carpeta_abs.rmdir()
+            except OSError:
+                pass
+
     cursor.execute("DELETE FROM categorias WHERE id = ?", (categoria_id,))
-    deleted = cursor.rowcount > 0
     conn.commit()
     conn.close()
     if DEBUG:
-        print(f"eliminar_categoria: id={categoria_id} deleted={deleted}")
-    return deleted
+        print(f"eliminar_categoria: id={categoria_id} forzar={forzar} hojas_movidas={len(rutas_hojas)}")
+    return "ok"
 
 
 # --- Hojas ---
+# Cada hoja es un .md real en D:\Boveda. `hojas.id` (INTEGER, autoincrement)
+# sigue siendo el id que ya usan frontend/bot; `vault_id`/`ruta`/`mtime` son el
+# vínculo con el archivo -- nunca se exponen en la API. Regla dura: el archivo
+# se escribe/mueve primero, la fila se actualiza después (nunca al revés).
+
+_HOJA_SELECT = """
+    SELECT h.id, h.contenido, h.fecha, h.categoria_id, c.nombre,
+           h.tipo, h.apuntes, h.lugar, h.latitud, h.longitud, h.fecha_recordatorio,
+           h.icono, h.fecha_actualizado, h.link_preview
+    FROM hojas h
+    JOIN categorias c ON c.id = h.categoria_id
+"""
+
+_UPDATABLE_HOJA = frozenset({"contenido", "categoria_id", "tipo", "apuntes", "icono", "lugar"})
+
 
 def crear_hoja(
     contenido: str,
@@ -125,31 +263,98 @@ def crear_hoja(
     lugar: Optional[str] = None,
     latitud: Optional[float] = None,
     longitud: Optional[float] = None,
-    fecha_recordatorio: Optional[str] = None,
+    fecha_recordatorio: Optional[str] = None,  # aceptado por compat de firma; sin uso real, se descarta (ver Milestone 2)
     icono: Optional[str] = None,
     link_preview: Optional[dict] = None,
+    origen: str = "app",
 ) -> int:
+    sincronizar_vault_si_hace_falta()
     conn = get_connection()
     cursor = conn.cursor()
-    fecha = datetime.now().isoformat()
+    cursor.execute("SELECT ruta FROM categorias WHERE id = ?", (categoria_id,))
+    cat_row = cursor.fetchone()
+    if cat_row is None or not cat_row[0]:
+        conn.close()
+        raise ValueError(f"categoria_id {categoria_id} sin carpeta sincronizada en el vault")
+    categoria_ruta = cat_row[0]
+
+    vault_id = str(uuid.uuid4())
+    ahora = vault_parser.now_iso()
+    titulo = (contenido or "").strip() or "Sin título"
+
+    # Fotos: dos convenciones coexisten hoy (ninguna se toca, se detectan las dos)
+    #   - Frontend (CaptureModal): contenido = URL de /uploads/, apuntes vacío.
+    #   - Bot (mybot/bot.py handle_photo): contenido = título, apuntes trae un
+    #     <img src="URL absoluta de /uploads/…"> como primera etiqueta.
+    # En el archivo, la foto queda unificada como imagen Markdown en el cuerpo;
+    # `apuntes_final_html` reconstruye el <img> líder que RightPanel.jsx espera.
+    imagen_ref = None
+    apuntes_sin_img = apuntes
+    if tipo == "foto":
+        nombre_upload = _extraer_upload_filename(contenido, apuntes)
+        contenido_es_upload_path = bool(contenido and contenido.startswith("/uploads/"))
+        if nombre_upload:
+            from app.paths import uploads_directory
+            origen_abs = uploads_directory() / nombre_upload
+            if origen_abs.exists():
+                nombre_final = vault_writer.mover_adjunto(VAULT_ROOT, origen_abs)
+                if contenido_es_upload_path:
+                    titulo = "Foto"
+                    contenido = f"/adjuntos/{nombre_final}"
+                else:
+                    titulo = (contenido or "").strip() or "Foto"
+                imagen_ref = f"![{titulo}](_adjuntos/{nombre_final})"
+                apuntes_sin_img = _LEADING_IMG_TAG_RE.sub("", apuntes or "", count=1)
+
+    md_apuntes = html_a_markdown(apuntes_sin_img) if apuntes_sin_img else ""
+    body_parts = [imagen_ref] if imagen_ref else []
+    if md_apuntes:
+        body_parts.append(md_apuntes)
+    body_md = "\n\n".join(body_parts)
+
+    frontmatter = {
+        "id": vault_id, "tipo": tipo, "creado_en": ahora, "actualizado_en": ahora,
+        "origen": origen, "tags": _extraer_tags(contenido, apuntes),
+    }
+    if tipo == "link" and contenido:
+        frontmatter["url"] = contenido.strip()
+    if icono:
+        frontmatter["icono"] = icono
+    if lugar:
+        frontmatter["lugar"] = lugar
+    if latitud is not None:
+        frontmatter["latitud"] = latitud
+    if longitud is not None:
+        frontmatter["longitud"] = longitud
+
+    ruta_rel = vault_writer.crear_nota(VAULT_ROOT, categoria_ruta, titulo, frontmatter, body_md)
+    mtime = (VAULT_ROOT / ruta_rel).stat().st_mtime
+    apuntes_final_html = (
+        construir_apuntes_html_foto(imagen_ref, md_apuntes) if tipo == "foto"
+        else (markdown_a_html(md_apuntes) if md_apuntes else "")
+    )
     preview_json = json.dumps(link_preview) if link_preview else None
+
     cursor.execute(
         """
         INSERT INTO hojas
-            (contenido, fecha, categoria_id, tipo, apuntes, lugar, latitud, longitud, fecha_recordatorio, icono, fecha_actualizado, link_preview)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (contenido, fecha, categoria_id, tipo, apuntes, lugar, latitud, longitud,
+             icono, fecha_actualizado, link_preview, vault_id, ruta, mtime)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (contenido, fecha, categoria_id, tipo, apuntes, lugar, latitud, longitud, fecha_recordatorio, icono, fecha, preview_json),
+        (contenido, ahora, categoria_id, tipo, apuntes_final_html, lugar, latitud, longitud,
+         icono, ahora, preview_json, vault_id, ruta_rel, mtime),
     )
     conn.commit()
     hid = cursor.lastrowid
     conn.close()
     if DEBUG:
-        print(f"crear_hoja: id={hid} tipo={tipo} categoria_id={categoria_id}")
+        print(f"crear_hoja: id={hid} tipo={tipo} categoria_id={categoria_id} ruta={ruta_rel}")
     return hid
 
 
 def obtener_hojas():
+    sincronizar_vault_si_hace_falta()
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -187,33 +392,17 @@ def obtener_hoja_por_id(hoja_id: int):
 
 
 def actualizar_apuntes(hoja_id: int, apuntes: Optional[str]) -> str:
-    conn = get_connection()
-    cursor = conn.cursor()
-    ahora = datetime.now().isoformat()
-    cursor.execute(
-        "UPDATE hojas SET apuntes = ?, fecha_actualizado = ? WHERE id = ?",
-        (apuntes, ahora, hoja_id),
-    )
-    conn.commit()
-    conn.close()
+    resultado = actualizar_hoja(hoja_id, {"apuntes": apuntes})
     if DEBUG:
         print(f"actualizar_apuntes: id={hoja_id}")
-    return ahora
+    return resultado.get("fecha_actualizado") if resultado else datetime.now().isoformat()
 
 
 def actualizar_icono(hoja_id: int, icono: Optional[str]) -> str:
-    conn = get_connection()
-    cursor = conn.cursor()
-    ahora = datetime.now().isoformat()
-    cursor.execute(
-        "UPDATE hojas SET icono = ?, fecha_actualizado = ? WHERE id = ?",
-        (icono, ahora, hoja_id),
-    )
-    conn.commit()
-    conn.close()
+    resultado = actualizar_hoja(hoja_id, {"icono": icono})
     if DEBUG:
         print(f"actualizar_icono: id={hoja_id} icono={icono}")
-    return ahora
+    return resultado.get("fecha_actualizado") if resultado else datetime.now().isoformat()
 
 
 def actualizar_link_preview(hoja_id: int, preview: Optional[dict]):
@@ -228,56 +417,146 @@ def actualizar_link_preview(hoja_id: int, preview: Optional[dict]):
 
 
 def eliminar_hoja(hoja_id: int) -> Optional[str]:
-    """Delete hoja; returns its `contenido` (needed to clean up uploaded files), or None if not found."""
+    """Soft-delete: mueve el .md a 05 - Basura/ (decisión Milestone 2 -- coherente
+    con la convención del vault, recuperable). Devuelve `contenido` (para el
+    cleanup best-effort de /uploads/ legacy en main.py), o None si no existía."""
+    sincronizar_vault_si_hace_falta()
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT contenido FROM hojas WHERE id = ?", (hoja_id,))
+    cursor.execute("SELECT contenido, ruta FROM hojas WHERE id = ?", (hoja_id,))
     row = cursor.fetchone()
     if not row:
         conn.close()
         return None
-    contenido = row[0]
-    cursor.execute("DELETE FROM hojas WHERE id = ?", (hoja_id,))
+    contenido, ruta = row
+    if ruta and (VAULT_ROOT / ruta).exists():
+        ruta_nueva = vault_writer.mover_a_basura(VAULT_ROOT, ruta)
+        nuevo_mtime = (VAULT_ROOT / ruta_nueva).stat().st_mtime
+        cursor.execute("SELECT id FROM categorias WHERE ruta = ?", (vault_writer.BASURA_CARPETA,))
+        basura_row = cursor.fetchone()
+        cursor.execute(
+            "UPDATE hojas SET ruta = ?, mtime = ?, categoria_id = COALESCE(?, categoria_id) WHERE id = ?",
+            (ruta_nueva, nuevo_mtime, basura_row[0] if basura_row else None, hoja_id),
+        )
+    else:
+        cursor.execute("DELETE FROM hojas WHERE id = ?", (hoja_id,))
     conn.commit()
     conn.close()
     if DEBUG:
-        print(f"eliminar_hoja: id={hoja_id}")
+        print(f"eliminar_hoja: id={hoja_id} movida_a_basura={bool(ruta)}")
     return contenido
 
 
-_HOJA_SELECT = """
-    SELECT h.id, h.contenido, h.fecha, h.categoria_id, c.nombre,
-           h.tipo, h.apuntes, h.lugar, h.latitud, h.longitud, h.fecha_recordatorio,
-           h.icono, h.fecha_actualizado, h.link_preview
-    FROM hojas h
-    JOIN categorias c ON c.id = h.categoria_id
-"""
-
-_UPDATABLE_HOJA = frozenset({"contenido", "categoria_id", "tipo", "apuntes", "icono",
-                              "lugar", "fecha_recordatorio"})
-
-
 def actualizar_hoja(hoja_id: int, campos: dict) -> Optional[dict]:
-    """Generic PATCH for a hoja; always stamps fecha_actualizado."""
+    """PATCH genérico: reescribe el .md (y lo mueve si cambia categoria_id)
+    antes de actualizar la fila -- mismo criterio que crear_hoja."""
     safe = {k: v for k, v in campos.items() if k in _UPDATABLE_HOJA}
     if not safe:
         return obtener_hoja_por_id(hoja_id)
+
+    sincronizar_vault_si_hace_falta()
     conn = get_connection()
     cursor = conn.cursor()
-    ahora = datetime.now().isoformat()
-    safe["fecha_actualizado"] = ahora
-    sets = ", ".join(f"{k} = ?" for k in safe)
-    vals = list(safe.values()) + [hoja_id]
-    cursor.execute(f"UPDATE hojas SET {sets} WHERE id = ?", vals)
+    cursor.execute(
+        "SELECT contenido, categoria_id, tipo, apuntes, icono, lugar, latitud, longitud, "
+        "vault_id, ruta, fecha FROM hojas WHERE id = ?",
+        (hoja_id,),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        conn.close()
+        return None
+    (contenido_actual, categoria_id_actual, tipo_actual, apuntes_actual, icono_actual,
+     lugar_actual, latitud_actual, longitud_actual, vault_id, ruta_actual, creado_en) = row
+
+    if not vault_id or not ruta_actual:
+        conn.close()
+        return None
+
+    contenido = safe.get("contenido", contenido_actual)
+    categoria_id_nuevo = safe.get("categoria_id", categoria_id_actual)
+    tipo = safe.get("tipo", tipo_actual)
+    apuntes_html = safe.get("apuntes", apuntes_actual)
+    icono = safe.get("icono", icono_actual)
+    lugar = safe.get("lugar", lugar_actual)
+
+    ruta_abs_actual = VAULT_ROOT / ruta_actual
+    origen_existente, url_existente, imagen_ref = "app", None, None
+    if ruta_abs_actual.exists():
+        try:
+            texto_actual = ruta_abs_actual.read_text(encoding="utf-8")
+            data_existente, _ = vault_parser.split_frontmatter(texto_actual)
+            if data_existente:
+                origen_existente = data_existente.get("origen") or "app"
+                url_existente = data_existente.get("url")
+            m = _IMG_ADJUNTO_RE.search(texto_actual)
+            if m:
+                imagen_ref = m.group(0)
+        except OSError:
+            pass
+
+    ruta_rel = ruta_actual
+    if categoria_id_nuevo != categoria_id_actual:
+        cursor.execute("SELECT ruta FROM categorias WHERE id = ?", (categoria_id_nuevo,))
+        cat_row = cursor.fetchone()
+        if cat_row is None or not cat_row[0]:
+            conn.close()
+            return None
+        ruta_rel = vault_writer.mover_a_categoria(VAULT_ROOT, ruta_actual, cat_row[0])
+
+    ahora = vault_parser.now_iso()
+    titulo = (contenido or "").strip() or "Sin título"
+    # RightPanel.jsx re-antepone el <img> líder al guardar apuntes de una hoja
+    # foto (ver onUpdate en RightPanel.jsx) -- se saca antes de convertir a MD,
+    # la imagen ya vive en `imagen_ref` (leída del archivo más arriba).
+    apuntes_sin_img = apuntes_html
+    if tipo == "foto" and apuntes_sin_img:
+        apuntes_sin_img = _LEADING_IMG_TAG_RE.sub("", apuntes_sin_img, count=1)
+    md_apuntes = html_a_markdown(apuntes_sin_img) if apuntes_sin_img else ""
+    body_parts = [imagen_ref] if imagen_ref else []
+    if md_apuntes:
+        body_parts.append(md_apuntes)
+    body_md = "\n\n".join(body_parts)
+
+    frontmatter = {
+        "id": vault_id, "tipo": tipo, "creado_en": creado_en or ahora, "actualizado_en": ahora,
+        "origen": origen_existente, "tags": _extraer_tags(contenido, apuntes_html),
+    }
+    if tipo == "link":
+        frontmatter["url"] = contenido or url_existente
+    if icono:
+        frontmatter["icono"] = icono
+    if lugar:
+        frontmatter["lugar"] = lugar
+    if latitud_actual is not None:
+        frontmatter["latitud"] = latitud_actual
+    if longitud_actual is not None:
+        frontmatter["longitud"] = longitud_actual
+
+    vault_writer.actualizar_nota(VAULT_ROOT, ruta_rel, titulo, frontmatter, body_md)
+    nuevo_mtime = (VAULT_ROOT / ruta_rel).stat().st_mtime
+    apuntes_final_html = (
+        construir_apuntes_html_foto(imagen_ref, md_apuntes) if tipo == "foto"
+        else (markdown_a_html(md_apuntes) if md_apuntes else "")
+    )
+
+    sets = {
+        "contenido": contenido, "categoria_id": categoria_id_nuevo, "tipo": tipo,
+        "apuntes": apuntes_final_html, "icono": icono, "lugar": lugar,
+        "fecha_actualizado": ahora, "ruta": ruta_rel, "mtime": nuevo_mtime,
+    }
+    cols = ", ".join(f"{k} = ?" for k in sets)
+    cursor.execute(f"UPDATE hojas SET {cols} WHERE id = ?", list(sets.values()) + [hoja_id])
     conn.commit()
     cursor.execute(_HOJA_SELECT + " WHERE h.id = ?", (hoja_id,))
-    row = cursor.fetchone()
+    result = cursor.fetchone()
     conn.close()
-    return _hoja_dict(row) if row else None
+    return _hoja_dict(result) if result else None
 
 
 def buscar_hojas(q: Optional[str] = None, tipo: Optional[str] = None,
                  categoria_id: Optional[int] = None) -> list:
+    sincronizar_vault_si_hace_falta()
     conn = get_connection()
     cursor = conn.cursor()
     where = []
@@ -302,6 +581,7 @@ def buscar_hojas(q: Optional[str] = None, tipo: Optional[str] = None,
 
 
 def obtener_hojas_recientes(limit: int = 20) -> list:
+    sincronizar_vault_si_hace_falta()
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(_HOJA_SELECT + " ORDER BY h.fecha_actualizado DESC LIMIT ?", (limit,))
@@ -320,12 +600,49 @@ def categoria_tiene_hojas(categoria_id: int) -> bool:
 
 
 def actualizar_categoria(categoria_id: int, campos: dict) -> Optional[dict]:
+    """Renombrar/mover mueve la carpeta real primero (bloqueado para carpetas
+    estructurales -- si no, se podría renombrar una raíz del árbol PARA y
+    perder la protección de borrado que depende de reconocer su nombre)."""
     safe = {k: v for k, v in campos.items() if k in {"nombre", "padre_id", "icono", "color"}}
     if not safe:
         return None
     conn = get_connection()
     cursor = conn.cursor()
+    cursor.execute("SELECT ruta, padre_id, estructural, nombre FROM categorias WHERE id = ?", (categoria_id,))
+    row = cursor.fetchone()
+    if row is None:
+        conn.close()
+        return None
+    ruta_actual, padre_actual, estructural, nombre_actual = row
+
+    mueve_o_renombra = "nombre" in safe or "padre_id" in safe
+    if mueve_o_renombra and estructural:
+        conn.close()
+        return None
+
     try:
+        ruta_nueva = ruta_actual
+        if mueve_o_renombra and ruta_actual:
+            nuevo_nombre = (safe.get("nombre") or nombre_actual).strip()
+            nuevo_padre_id = safe["padre_id"] if "padre_id" in safe else padre_actual
+            padre_ruta = None
+            if nuevo_padre_id is not None:
+                cursor.execute("SELECT ruta FROM categorias WHERE id = ?", (nuevo_padre_id,))
+                prow = cursor.fetchone()
+                if prow is None:
+                    conn.close()
+                    return None
+                padre_ruta = prow[0]
+            carpeta = vault_writer.sanitize_nombre(nuevo_nombre)
+            ruta_nueva = str(Path(padre_ruta) / carpeta) if padre_ruta else carpeta
+            if ruta_nueva != ruta_actual:
+                cursor.execute("SELECT 1 FROM categorias WHERE ruta = ? AND id != ?", (ruta_nueva, categoria_id))
+                if cursor.fetchone() is not None:
+                    conn.close()
+                    return None
+                vault_writer.mover_carpeta_categoria(VAULT_ROOT, ruta_actual, ruta_nueva)
+                _reescribir_rutas_descendientes(cursor, categoria_id, ruta_actual, ruta_nueva)
+
         color_val = safe.pop("color", None)
         if color_val is not None and str(color_val).strip():
             color_val = str(color_val).strip()
@@ -334,10 +651,13 @@ def actualizar_categoria(categoria_id: int, campos: dict) -> Optional[dict]:
                 cursor.execute("UPDATE categorias SET color = ? WHERE id = ?", (color_val, cid))
             if DEBUG:
                 print(f"actualizar_categoria: color={color_val} en ids={ids}")
-        if safe:
-            sets = ", ".join(f"{k} = ?" for k in safe)
-            vals = list(safe.values()) + [categoria_id]
-            cursor.execute(f"UPDATE categorias SET {sets} WHERE id = ?", vals)
+
+        sets = dict(safe)
+        if mueve_o_renombra:
+            sets["ruta"] = ruta_nueva
+        if sets:
+            cols = ", ".join(f"{k} = ?" for k in sets)
+            cursor.execute(f"UPDATE categorias SET {cols} WHERE id = ?", list(sets.values()) + [categoria_id])
         conn.commit()
     except sqlite3.IntegrityError:
         conn.rollback()

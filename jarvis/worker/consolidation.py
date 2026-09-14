@@ -24,12 +24,15 @@ bien casos claros de "same_fact", mientras que el externo sí; el volumen es
 bajo (~20 entradas/día) así que el costo es despreciable. Si ChromaDB no está
 disponible, se salta el paso 1 y sigue con el paso 2.
 
-Extendido con tres pasos más en la misma corrida (sin thread ni scheduling
+Extendido con cuatro pasos más en la misma corrida (sin thread ni scheduling
 propio, mismo gating de should_run()): backfill de tags del catálogo (pieza
 D, `_backfill_catalog_tags()`), auditoría proactiva de memoria por bloques
 (`jarvis.audit.service.run_audit()`, huecos/contradicciones/duplicados/
 conexiones/tags mal puestos, con propuestas por Telegram — ver
-Cerebro/decisiones-implementacion.md, 2026-08-31), y pregunta abierta
+Cerebro/decisiones-implementacion.md, 2026-08-31), ingestión automática desde
+la Agenda de SGR (`jarvis.ingestion.agenda.run_agenda_ingestion()`, 0.3 —
+lee eventos/tareas ya pasados vía la API HTTP local y propone capturas, ver
+Cerebro/decisiones-implementacion.md, 2026-09-03), y pregunta abierta
 exploratoria (`jarvis.audit.service.maybe_ask_open_question()`, dispara SOLO
 cuando `_nothing_to_report()` da True — ver Cerebro/decisiones-
 implementacion.md, 2026-09-03).
@@ -88,6 +91,9 @@ def run_consolidation() -> dict:
         # Detalle solo para el reporte diario de Telegram (ver
         # Cerebro/decisiones-implementacion.md, 2026-09-03).
         "pairwise_detail": [], "stale_detail": [], "tagged_detail": [],
+        # Ingestión automática desde Agenda de SGR (0.3, mismo día) -- sexto
+        # paso, ver jarvis/ingestion/agenda.py.
+        "agenda_ingestion": None,
         # Pregunta abierta exploratoria (mismo día, 2026-09-03) -- quiet_day
         # queda registrado siempre (True/False), open_question solo se llena
         # si quiet_day fue True.
@@ -131,7 +137,21 @@ def run_consolidation() -> dict:
             logger.exception("[consolidation] Auditoría de memoria falló")
             summary["errors"].append(str(exc))
 
-        # Pregunta abierta exploratoria -- quinto paso, dispara SOLO si esta
+        # Ingestión automática desde Agenda de SGR -- sexto paso (0.3, ver
+        # Cerebro/decisiones-implementacion.md, 2026-09-03, "0.3, Ingestión
+        # Automática"). Mismo gating de 24h que el resto del job. Corre ANTES
+        # del chequeo de quiet_day para que sus propuestas (si las hubo)
+        # cuenten como "hubo algo que reportar" y no compitan con la
+        # pregunta abierta exploratoria por atención (ver _nothing_to_report()).
+        try:
+            from jarvis.ingestion.agenda import run_agenda_ingestion
+
+            summary["agenda_ingestion"] = run_agenda_ingestion(now)
+        except Exception as exc:
+            logger.exception("[consolidation] Ingestión de Agenda falló")
+            summary["errors"].append(str(exc))
+
+        # Pregunta abierta exploratoria -- séptimo paso, dispara SOLO si esta
         # corrida no tuvo nada más que reportar (ver _nothing_to_report() y
         # Cerebro/decisiones-implementacion.md, 2026-09-03). No es un cuarto
         # tipo de hueco A/B/C -- mecanismo hermano y separado.
@@ -349,6 +369,7 @@ def _resolve_pair(entry_a: dict, entry_b: dict, similarity: float, summary: dict
             "[consolidation] %s superseded por %s (mismo hecho, similitud=%.3f)",
             older["id"], newer["id"], similarity,
         )
+        _propose_archive(older["id"], f"mismo hecho que {newer['id'][:8]}, reemplazada")
 
     elif relation == "contradiction":
         # Bug real encontrado 2026-08-31: a diferencia de same_fact (que marca
@@ -405,6 +426,28 @@ def _mark_superseded(entry_id: str, newer_recorded_at: str) -> None:
     from jarvis.memory.service import update_entry
 
     update_entry(entry_id, valid_to=newer_recorded_at)
+
+
+def _propose_archive(entry_id: str, reason: str) -> None:
+    """Fusión Jarvis + Bóveda (2026-09-11, addendum punto 1): el marcado de
+    valid_to arriba sigue siendo inmediato, sin gating, como ya funcionaba --
+    lo nuevo es proponer (gateado, nunca automático) mover el .md a
+    `04 - Archivo/`. Solo aplica a same_fact/stale_por_edad (juicio
+    algorítmico, puede estar mal); forget_entry() explícito NO pasa por acá
+    (ver jarvis/memory/service.py::forget_entry(), esa confirmación ya
+    existió). Best-effort -- nunca debe tumbar la corrida de consolidación.
+    """
+    try:
+        from jarvis.audit.service import propose_archive_superseded
+        from jarvis.debug.service import get_debug_chat_id
+
+        chat_id = get_debug_chat_id()
+        channel = "telegram" if chat_id else "desktop"
+        propose_archive_superseded(entry_id, reason, channel, chat_id, JARVIS_DEFAULT_USER)
+    except Exception as exc:
+        logger.warning(
+            "[consolidation] No se pudo proponer archivado para entry_id=%s: %s", entry_id, exc
+        )
 
 
 def _reduce_confidence(entry_id: str, current_confidence: float) -> None:
@@ -501,9 +544,16 @@ def _mark_stale_by_age(now: datetime) -> list[dict]:
                     "id": r["id"], "content": _short(content),
                     "confidence": r["confidence"], "age_days": age_days,
                 })
-            return detail
     finally:
         conn.close()
+
+    # Propuesta de archivado (fuera del `with conn:` de arriba -- fusión
+    # Jarvis + Bóveda, ver _propose_archive()) por cada entrada recién
+    # marcada stale, una por una (no hay agrupación como en same_fact).
+    for d in detail:
+        _propose_archive(d["id"], f"stale por antigüedad ({d['age_days']}d)")
+
+    return detail
 
 
 def _backfill_catalog_tags(user_id: str = JARVIS_DEFAULT_USER) -> list[dict]:
@@ -550,10 +600,10 @@ def _backfill_catalog_tags(user_id: str = JARVIS_DEFAULT_USER) -> list[dict]:
 
 
 def _nothing_to_report(summary: dict) -> bool:
-    """True si esta corrida no tuvo NADA de las 4 categorías del reporte
-    diario (pairwise/stale/backfill de tags/hallazgos de auditoría) -- gate
-    para disparar la pregunta abierta exploratoria (ver Cerebro/decisiones-
-    implementacion.md, 2026-09-03).
+    """True si esta corrida no tuvo NADA de las 5 categorías del reporte
+    diario (pairwise/stale/backfill de tags/hallazgos de auditoría/ingestión
+    de Agenda) -- gate para disparar la pregunta abierta exploratoria (ver
+    Cerebro/decisiones-implementacion.md, 2026-09-03).
 
     "Hallazgos de auditoría" se generaliza acá a
     summary["audit"]["proposed"] == 0 en vez de mirar solo
@@ -562,12 +612,17 @@ def _nothing_to_report(summary: dict) -> bool:
     tipo A (ver jarvis/audit/service.py::run_audit()). Si el audit propuso
     ALGO ese día por CUALQUIER camino (incluido un hueco tipo A con 2+
     menciones), no es un día "sin nada" -- la pregunta abierta no debe
-    competir por atención con una propuesta real ya generada.
+    competir por atención con una propuesta real ya generada. Mismo criterio
+    para la ingestión de Agenda (0.3, mismo día): si propuso algo, tampoco
+    es un día "sin nada".
     """
     if summary.get("pairwise_detail") or summary.get("stale_detail") or summary.get("tagged_detail"):
         return False
     audit = summary.get("audit")
     if audit and audit.get("proposed", 0) > 0:
+        return False
+    agenda = summary.get("agenda_ingestion")
+    if agenda and agenda.get("proposed", 0) > 0:
         return False
     return True
 
@@ -606,7 +661,7 @@ def _notify_run_report(now: datetime, summary: dict, entries: list[dict]) -> Non
     from jarvis.debug.service import get_debug_chat_id
     from jarvis.notify.telegram import send_report
 
-    title = f"📊 *Consolidación diaria* — {now.strftime('%Y-%m-%d %H:%M')} UTC"
+    title = f"📊 Consolidación diaria — {now.strftime('%Y-%m-%d %H:%M')} UTC"
     sections = _build_report_sections(summary, entries)
 
     chat_id = get_debug_chat_id()
@@ -634,13 +689,15 @@ def _build_report_sections(summary: dict, entries: list[dict]) -> list[str]:
 
         sections.append(build_audit_report_text(audit_summary))
     else:
-        sections.append("🔍 *Auditoría de memoria*: no corrió esta vez (ver errores abajo).")
+        sections.append("🔍 Auditoría de memoria: no corrió esta vez (ver errores abajo).")
+
+    sections.append(_section_agenda_ingestion(summary.get("agenda_ingestion")))
 
     sections.append(_section_open_question(summary.get("quiet_day", False), summary.get("open_question")))
 
     if summary.get("errors"):
         sections.append(
-            "⚠️ *Errores durante la corrida:*\n" + "\n".join(f"• {e}" for e in summary["errors"])
+            "⚠️ Errores durante la corrida:\n" + "\n".join(f"• {e}" for e in summary["errors"])
         )
     return sections
 
@@ -648,22 +705,22 @@ def _build_report_sections(summary: dict, entries: list[dict]) -> list[str]:
 def _section_analyzed(entries: list[dict]) -> str:
     from jarvis.tags.service import get_tags_for_entry
 
-    lines = [f"📋 *Analizado:* {len(entries)} entradas vigentes"]
+    lines = [f"📋 Analizado: {len(entries)} entradas vigentes"]
     for e in entries:
         content = _short(e.get("content_processed") or e.get("content_raw") or "")
         tags = get_tags_for_entry(e["id"])
-        lines.append(f"  • {content} — _{', '.join(tags) or 'sin tags'}_")
+        lines.append(f"  • {content} — {', '.join(tags) or 'sin tags'}")
     return "\n".join(lines)
 
 
 def _section_pairwise(detail: list[dict]) -> str:
     if not detail:
-        return f"*Pares comparados* (similitud > {_SIMILARITY_THRESHOLD:.2f}): ninguno esta corrida."
-    lines = [f"*Pares comparados* (similitud > {_SIMILARITY_THRESHOLD:.2f}, {len(detail)}):"]
+        return f"Pares comparados (similitud > {_SIMILARITY_THRESHOLD:.2f}): ninguno esta corrida."
+    lines = [f"Pares comparados (similitud > {_SIMILARITY_THRESHOLD:.2f}, {len(detail)}):"]
     for d in detail:
         lines.append(
-            f"  • [A] {d['content_a']} _{', '.join(d['tags_a']) or 'sin tags'}_ / "
-            f"[B] {d['content_b']} _{', '.join(d['tags_b']) or 'sin tags'}_\n"
+            f"  • [A] {d['content_a']} {', '.join(d['tags_a']) or 'sin tags'} / "
+            f"[B] {d['content_b']} {', '.join(d['tags_b']) or 'sin tags'}\n"
             f"    sim={d['similarity']:.3f} — veredicto: {d['relation']} — {d['action']}"
         )
     return "\n".join(lines)
@@ -671,8 +728,8 @@ def _section_pairwise(detail: list[dict]) -> str:
 
 def _section_stale(detail: list[dict]) -> str:
     if not detail:
-        return "*Marcadas obsoletas por antigüedad:* ninguna esta corrida."
-    lines = [f"*Marcadas obsoletas por antigüedad* ({len(detail)}):"]
+        return "Marcadas obsoletas por antigüedad: ninguna esta corrida."
+    lines = [f"Marcadas obsoletas por antigüedad ({len(detail)}):"]
     for d in detail:
         age = f"{d['age_days']}d" if d["age_days"] is not None else "?"
         lines.append(f"  • {d['content']} — antigüedad {age}, confidence={d['confidence']}")
@@ -681,10 +738,30 @@ def _section_stale(detail: list[dict]) -> str:
 
 def _section_tagged(detail: list[dict]) -> str:
     if not detail:
-        return "*Tags nuevos asignados (backfill):* ninguno esta corrida."
-    lines = [f"*Tags nuevos asignados (backfill)* ({len(detail)}):"]
+        return "Tags nuevos asignados (backfill): ninguno esta corrida."
+    lines = [f"Tags nuevos asignados (backfill) ({len(detail)}):"]
     for d in detail:
         lines.append(f"  • {d['content']} → {', '.join(d['tags'])}")
+    return "\n".join(lines)
+
+
+def _section_agenda_ingestion(agenda: dict | None) -> str:
+    """Sección "Ingestión de Agenda" del reporte diario (0.3, ver
+    jarvis/ingestion/agenda.py) -- mismo criterio que el resto del reporte:
+    decir explícitamente qué se revisó y qué no pasó nada, nunca en silencio.
+    """
+    if agenda is None:
+        return "🗓️ Ingestión de Agenda: no corrió esta vez (ver errores abajo)."
+    proposed = agenda.get("proposed_detail") or []
+    header = (
+        f"🗓️ Ingestión de Agenda ({agenda.get('events_scanned', 0)} eventos, "
+        f"{agenda.get('tasks_scanned', 0)} tareas completadas revisadas):"
+    )
+    if not proposed:
+        return f"{header} nada nuevo para proponer esta corrida."
+    lines = [header]
+    for d in proposed:
+        lines.append(f"  • {_short(d['content'])}")
     return "\n".join(lines)
 
 
@@ -696,16 +773,16 @@ def _section_open_question(quiet_day: bool, open_question: dict | None) -> str:
     ping de Telegram desconectado aparte (ver maybe_ask_open_question()).
     """
     if not quiet_day:
-        return "❓ *Pregunta abierta:* no aplica hoy (hubo otras cosas para reportar arriba)."
+        return "❓ Pregunta abierta: no aplica hoy (hubo otras cosas para reportar arriba)."
     if open_question is None:
-        return "❓ *Pregunta abierta:* no se evaluó (error interno, ver errores abajo)."
+        return "❓ Pregunta abierta: no se evaluó (error interno, ver errores abajo)."
     if not open_question.get("asked"):
         return (
-            f"❓ *Pregunta abierta:* nada más para reportar hoy, pero no "
+            f"❓ Pregunta abierta: nada más para reportar hoy, pero no "
             f"disparé ninguna ({open_question.get('reason')})."
         )
     return (
-        f"❓ *Pregunta abierta* (nada más para reportar hoy, aprovecho a "
+        f"❓ Pregunta abierta (nada más para reportar hoy, aprovecho a "
         f"preguntar):\n{open_question['question']}"
     )
 

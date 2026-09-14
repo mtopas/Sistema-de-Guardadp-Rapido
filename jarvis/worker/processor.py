@@ -104,11 +104,25 @@ def process_entry(entry_id: str) -> None:
         now = datetime.now(timezone.utc).isoformat()
         update_entry(entry_id, vault_path=vault_rel_path, processed_at=now)
 
+        try:
+            from jarvis.vault.index_writer import sync_indexes_for_entry
+
+            sync_indexes_for_entry(entry_id)
+        except Exception as exc:
+            logger.warning(
+                "[processor] Sync de notas canónicas de entidad/proyecto falló para entry_id=%s: %s",
+                entry_id, exc,
+            )
+
         embed_text = updated_entry.get("content_processed") or updated_entry.get("content_raw") or ""
 
         MANIFEST.assert_allowed("generate_embedding")
         embedding = generate_embedding(embed_text)
 
+        # vault_path fuera del metadata de Chroma a propósito (addendum
+        # fusión Jarvis+Bóveda, 2026-09-11) -- nada lo lee de vuelta, era
+        # write-only y quedaba desincronizado en cuanto el archivo se movía.
+        # memory_entries.vault_path (SQL, actualizado arriba) es el puntero real.
         MANIFEST.assert_allowed("store_embedding")
         upsert_embedding(
             entry_id,
@@ -120,7 +134,6 @@ def process_entry(entry_id: str) -> None:
                 "origin_trust": entry.get("origin_trust") or "",
                 "local_only": bool(entry.get("local_only")),
                 "confidential": bool(entry.get("confidential")),
-                "vault_path": vault_rel_path,
             },
         )
 
@@ -138,7 +151,7 @@ def process_entry(entry_id: str) -> None:
                 MANIFEST.assert_allowed("notify_telegram")
                 notify_telegram_done(
                     entry["channel"],
-                    f"✅ Listo — guardado como *{entry_type}*.\n_ID: `{entry_id[:8]}`_",
+                    f"✅ Listo — guardado como {entry_type}.\nID: {entry_id[:8]}",
                 )
             except Exception as exc:
                 logger.warning(

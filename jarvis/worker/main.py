@@ -14,13 +14,23 @@ from datetime import datetime, timezone
 
 from jarvis.audit.service import expire_stale_proposals as expire_stale_audit_proposals
 from jarvis.captures.passive import expire_stale_proposals, scan_and_propose
-from jarvis.config import JARVIS_PASSIVE_CAPTURE_ENABLED, JARVIS_WORKER_POLL_INTERVAL
+from jarvis.config import (
+    JARVIS_BOVEDA_PATH,
+    JARVIS_PASSIVE_CAPTURE_ENABLED,
+    JARVIS_WORKER_POLL_INTERVAL,
+)
 from jarvis.db.database import get_connection, init_db
 from jarvis.observability import setup as setup_observability
 from jarvis.worker.consolidation import run_consolidation, should_run as should_run_consolidation
 from jarvis.worker.heartbeat import write_heartbeat
 from jarvis.worker.processor import process_entry
 from jarvis.worker.task_manifest import MANIFEST
+
+# Vive en app/ (project/), no en jarvis/ -- ver docstring de app/vault/guard.py. Importable
+# acá porque el worker siempre corre con project/ en sys.path (cwd=project en dev por
+# CLAUDE.md, cwd=/app -- WORKDIR del Dockerfile -- en el deploy real), igual que
+# jarvis/config.py ya asume project/ como sibling fijo.
+from app.vault.guard import ensure_vault_mounted
 
 logging.basicConfig(
     level=logging.INFO,
@@ -143,6 +153,9 @@ def _maybe_run_passive_capture() -> None:
 
 def main() -> None:
     logger.info("[worker] Iniciando Jarvis worker…")
+    # Riesgo 1 de Cerebro/decisiones/2026-09-11-share-smb-boveda-homelab.md -- antes de
+    # cualquier otra cosa, ver docstring de app/vault/guard.py.
+    ensure_vault_mounted(JARVIS_BOVEDA_PATH, label="JARVIS_BOVEDA_PATH")
     setup_observability()
     init_db()
 

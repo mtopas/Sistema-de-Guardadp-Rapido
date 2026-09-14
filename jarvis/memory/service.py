@@ -22,6 +22,7 @@ def capture_raw(
     confidential: bool = False,
     user_id: str | None = None,
     created_by: str = "explicit",
+    authorship: str = "user",
 ) -> str:
     """Inserta el contenido en memory_entries (tipo RAW) y encola en inbox_queue.
 
@@ -34,6 +35,12 @@ def capture_raw(
     que el usuario aceptó -- ver jarvis/captures/passive.py). No afecta
     origin_trust: esa columna describe la confiabilidad de la FUENTE del
     texto, no cómo se decidió guardarlo.
+
+    authorship (fusión Jarvis + Bóveda, 2026-09-11): 'user' (default -- el
+    texto es palabra del usuario, sea cual sea created_by/canal) o
+    'jarvis_synthesis' (prosa que el LLM generó combinando fragmentos -- hoy
+    solo jarvis/audit/service.py::_apply_create()). Determina a qué raíz de
+    D:\\Boveda escribe write_entry(): ver jarvis/vault/writer.py.
 
     Devuelve el entry_id generado.
     """
@@ -59,12 +66,12 @@ def capture_raw(
                     (id, type, content_raw, source, channel,
                      local_only, confidential, content_hash,
                      recorded_at, valid_from, source_id,
-                     origin_trust, user_id, created_at, created_by)
+                     origin_trust, user_id, created_at, created_by, authorship)
                 VALUES
                     (?, 'RAW', ?, ?, ?,
                      ?, ?, ?,
                      ?, ?, ?,
-                     ?, ?, ?, ?)
+                     ?, ?, ?, ?, ?)
                 """,
                 (
                     entry_id, content, source, channel,
@@ -72,7 +79,7 @@ def capture_raw(
                     1 if confidential else 0,
                     content_hash,
                     now, now, source_id,
-                    origin_trust, uid, now, created_by,
+                    origin_trust, uid, now, created_by, authorship,
                 ),
             )
             conn.execute(
@@ -218,6 +225,10 @@ def _resync_vault_and_embedding(entry: dict, old_vault_path: str | None) -> None
         if old_vault_path and old_vault_path != new_vault_path:
             delete_entry_file(old_vault_path)
         update_entry(entry["id"], vault_path=new_vault_path)
+
+        from jarvis.vault.index_writer import sync_indexes_for_entry
+
+        sync_indexes_for_entry(entry["id"])
     except Exception as exc:
         logger.warning("[jarvis.memory] Reescritura de vault falló para entry_id=%s: %s", entry["id"], exc)
 
@@ -227,6 +238,11 @@ def _resync_vault_and_embedding(entry: dict, old_vault_path: str | None) -> None
 
         embed_text = entry.get("content_processed") or entry.get("content_raw") or ""
         embedding = generate_embedding(embed_text)
+        # vault_path NO va en el metadata de Chroma (addendum, 2026-09-11):
+        # confirmado que nada lo lee de vuelta (ni retriever.py ni el router
+        # de la API) -- era write-only y quedaba desincronizado en cuanto el
+        # archivo se movía. memory_entries.vault_path (SQL) sigue siendo el
+        # puntero real, se actualiza dos líneas más abajo.
         upsert_embedding(
             entry["id"],
             embedding,
@@ -237,7 +253,6 @@ def _resync_vault_and_embedding(entry: dict, old_vault_path: str | None) -> None
                 "origin_trust": entry.get("origin_trust") or "",
                 "local_only": bool(entry.get("local_only")),
                 "confidential": bool(entry.get("confidential")),
-                "vault_path": entry.get("vault_path") or "",
             },
         )
         update_entry(entry["id"], embedded_at=datetime.now(timezone.utc).isoformat())
@@ -258,20 +273,27 @@ def _resync_vault_only(entry: dict) -> None:
 
 
 def forget_entry(entry_id: str) -> bool:
-    """"Olvidar" una entrada -- soft-delete vía valid_to, reusando el mismo
-    mecanismo que jarvis/worker/consolidation.py ya usa para marcar una
-    entrada 'superseded' (nunca un DELETE físico -- preserva auditoría,
-    spec: Memoria != destrucción).
+    """"Olvidar" una entrada -- soft-delete vía valid_to (nunca un DELETE
+    físico de la fila -- preserva auditoría, spec: Memoria != destrucción).
 
-    Con esto desaparece de retrieval/entidades/proyectos/tags sin tocar una
-    sola línea de esos módulos: todos ya filtran `valid_to IS NULL` (retriever,
-    jarvis.entities.service, jarvis.projects.service, jarvis.tags.service). El
-    embedding en Chroma y el .md del vault se dejan intactos a propósito
-    (mismo criterio que una entrada superseded): el embedding puede seguir en
-    el índice, pero _load_entries() lo descarta por el filtro de valid_to
-    antes de rankear, así que nunca puede reaparecer en una respuesta -- borrar
-    el vector físicamente no cambia el comportamiento observable, solo
-    complica revertir un "olvidar" hecho por error.
+    Fusión Jarvis + Bóveda (2026-09-11): a diferencia de una entrada
+    marcada superseded por consolidation.py (juicio algorítmico, gateado
+    detrás de una propuesta de auditoría antes de tocar el archivo --
+    ver jarvis/audit/service.py, action_type='archive_superseded'), acá
+    la confirmación humana YA EXISTIÓ -- el usuario pidió explícitamente
+    "olvidar"/"borrar" (incluida la acción `delete` de auditoría ya
+    aceptada, que llama esta misma función). Por eso el archivo SÍ se
+    mueve acá, sin pasar por una propuesta nueva: a `05 - Basura/` si es
+    contenido del usuario (authorship='user', vive en el árbol PARA), o se
+    borra directo si es síntesis de Jarvis (authorship='jarvis_synthesis',
+    vive en Boveda/Jarvis/ -- no es "tu contenido" para conservar en una
+    papelera, es reconstruible).
+
+    El embedding en Chroma se deja intacto a propósito (mismo criterio de
+    siempre): _load_entries() lo descarta por el filtro de valid_to antes de
+    rankear, así que nunca puede reaparecer en una respuesta -- borrar el
+    vector físicamente no cambia el comportamiento observable, solo complica
+    revertir un "olvidar" hecho por error.
 
     Devuelve False si la entrada no existe o ya estaba olvidada/superseded.
     """
@@ -279,4 +301,34 @@ def forget_entry(entry_id: str) -> bool:
     if not entry or entry.get("valid_to"):
         return False
     update_entry(entry_id, valid_to=datetime.now(timezone.utc).isoformat())
+
+    vault_path = entry.get("vault_path")
+    if vault_path:
+        try:
+            if entry.get("authorship") == "jarvis_synthesis":
+                from jarvis.vault.writer import delete_entry_file
+
+                delete_entry_file(vault_path)
+            else:
+                from jarvis.vault.writer import move_entry_file
+
+                new_path = move_entry_file(vault_path, "05 - Basura")
+                if new_path:
+                    update_entry(entry_id, vault_path=new_path)
+        except Exception as exc:
+            logger.warning(
+                "[jarvis.memory] Mover/borrar archivo tras olvidar entry_id=%s falló: %s",
+                entry_id, exc,
+            )
+
+    try:
+        from jarvis.vault.index_writer import sync_indexes_for_entry
+
+        sync_indexes_for_entry(entry_id)
+    except Exception as exc:
+        logger.warning(
+            "[jarvis.memory] Sync de notas canónicas tras olvidar entry_id=%s falló: %s",
+            entry_id, exc,
+        )
+
     return True

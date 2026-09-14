@@ -10,6 +10,7 @@ $SgrExe         = "D:\Sistema-de-Guardadp-Rapido\project\dist\SGR\SGR.exe"
 $LocalDataRoot  = "D:\Sistema-de-Guardadp-Rapido\project"
 $LocalDb        = "$LocalDataRoot\database\app.db"
 $LocalUploads   = "$LocalDataRoot\uploads"
+$LocalVault     = "D:\Boveda"
 
 ## Token de seguridad opcional.
 ## Si el homelab tiene SGR_SYNC_TOKEN=<valor> en su .env, poner el mismo valor aqui.

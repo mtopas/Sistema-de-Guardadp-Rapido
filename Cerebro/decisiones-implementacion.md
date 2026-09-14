@@ -11,6 +11,995 @@ Formato de cada entrada:
 
 ---
 
+## 2026-09-11 — PROPUESTA APROBADA (diseño cerrado, sin implementar): fusión de Jarvis y Bóveda de SGR sobre `D:\Boveda` como fuente de verdad en archivos
+
+Contexto: el usuario quiere un "segundo cerebro" para toda su vida (facultad, carrera, salud,
+desarrollo personal, ideas), no solo para el código. Al diseñarlo se descubrió que Jarvis ya es,
+en espíritu, una implementación real de esa misma idea — memoria tipada, vault en Markdown,
+captura por Telegram, auditoría/consolidación. En vez de construir un sistema nuevo en paralelo,
+se decidió fusionar ambos en una sola fuente de verdad. Diseñado en una sesión larga de charla
+(sin código) con el usuario, más una sesión de análisis del código real de Jarvis para validar los
+supuestos antes de cerrar el diseño.
+
+Decisión — arquitectura completa:
+
+- **Fuente de verdad invertida**: `D:\Boveda` (Markdown en disco) pasa a ser la fuente real; toda
+  base de datos (`app.db`, `jarvis.db`) se convierte en un índice reconstruible que se arma leyendo
+  los archivos, sincronizado por **polling** (no `inotify` — el share es SMB/CIFS desde el homelab
+  hacia la carpeta en la PC Windows, que queda siempre encendida; los sistemas de archivos de red
+  no sostienen notificación de cambios en tiempo real de forma confiable).
+- **Estructura PARA** en `D:\Boveda` (eje: accionabilidad, no tema — para no mezclar lo vigente con
+  lo viejo/de referencia): `00 - Sin categorizar/` (inbox, incluidas ideas sueltas hasta que
+  germinan), `01 - Proyectos/`, `02 - Areas/{Facultad, Carrera Profesional, Salud, Desarrollo
+  Personal}/`, `03 - Recursos/{mismos dominios}/`, `04 - Archivo/`, `05 - Basura/`. `_adjuntos/`
+  centralizado para binarios (fotos, PDFs, zips), referenciados desde el cuerpo de la nota, nunca
+  desde frontmatter.
+- **Frontmatter común para el árbol PARA** (deliberadamente más simple que el schema actual de
+  `memory_entries`): `id` (uuid4, se autoasigna en el primer polling si el archivo se creó a mano
+  fuera de la app), `tipo` (texto|link|foto), `creado_en`/`actualizado_en` (ISO8601 con offset),
+  `origen` (app|telegram|migracion|manual|**agenda** — quinto valor agregado tras revisar que la
+  ingestión automática de Agenda ya en producción no entraba en el enum original), `tags`, `url`
+  (solo si tipo:link). Campos bitemporales/trust de Jarvis (`confidence`, `origin_trust`,
+  `valid_from`, `valid_to`, `source_id`) **no** se mirror-ean a este árbol — confirmado contra
+  `writer.py` que hoy tampoco se escriben al `.md` (viven solo en SQLite), así que esto no es una
+  pérdida de información existente.
+- **Separación por autoría, no por `type` de Jarvis** (la hipótesis inicial — RAW→usuario,
+  SEMANTIC/DECISION/PROJECT/PEOPLE→Jarvis — se descartó al leer `write_entry()`: los 5 `type` son
+  clasificación de contenido, no de autoría; los 5 pasan por la misma función sin distinción de
+  quién lo escribió). El eje real es autoría: contenido del usuario (tipeado, capturado por
+  Telegram, o texto de una captura pasiva aceptada) va al árbol PARA de siempre; contenido que
+  **Jarvis sintetiza** (prosa generada combinando fragmentos — ej. la ficha de una entidad
+  mencionada varias veces) va a `Boveda/Jarvis/`, con el schema rico completo (`confidence`,
+  `origin_trust`, `valid_from`, `valid_to`, `source_id`). Primera subcarpeta concreta:
+  `Boveda/Jarvis/Entidades/` (reemplaza `INDEX/ENTITIES/`). El caso `create` de auditoría (ficha
+  sintetizada por LLM, aceptada por el usuario) se rutea a `Boveda/Jarvis/` mirando el `action_type`
+  de la propuesta de origen en el momento de escribir — sin campo nuevo en el schema, evita
+  duplicar una distinción que ya existe en `jarvis_audit_proposals`.
+- **`INDEX/PROJECTS/` no fusiona con `01 - Proyectos/` ni vive entero en `Boveda/Jarvis/`** — son
+  dos cosas distintas que se estaban confundiendo: un `memory_entry` tipo PROJECT (algo que el
+  usuario dijo sobre un proyecto) es su contenido → `01 - Proyectos/<nombre>/`, igual que cualquier
+  nota suya. La ficha agregada que Jarvis reconstruye desde SQL (equivalente a `INDEX/ENTITIES/`
+  pero para proyectos) → `Boveda/Jarvis/Proyectos/`, y puede wikilinkear hacia las notas reales del
+  usuario en `01 - Proyectos/<nombre>/` en su sección de menciones.
+- **Entradas superseded** (marcadas `valid_to` por `consolidation.py`): hoy no se mueven ni se
+  marcan en el `.md`, solo en SQL — confirmado como gap real, más visible ahora que el usuario va a
+  mirar el vault directo. Resuelto como una propuesta gateada más (mismo patrón que
+  `flag_contradiction`, nunca automático): si se confirma, la nota se mueve físicamente a
+  `04 - Archivo/` (nunca Basura — no es para borrar). El detalle fino (por qué, quién la reemplaza)
+  queda solo en SQLite; no se escribe ningún marcador en el frontmatter del árbol PARA — el propio
+  movimiento de carpeta es la señal, mismo criterio que el resto del sistema.
+- **Agenda de SGR queda fuera de esta fusión** — pospuesta aparte, no se rediseñó su persistencia.
+
+Diferencia con spec: revierte un principio central de `jarvis-spec.html` (SQLite es la base,
+"el vault Markdown es la fuente durable, ChromaDB es un índice reconstruible" se aplicaba solo al
+índice vectorial, no a `memory_entries`). Ahora el archivo manda sobre `memory_entries` también.
+La organización por `type` (RAW/SEMANTIC/DECISION/PROJECT/PEOPLE) como estructura de carpetas del
+vault deja de existir; sobrevive como metadato de clasificación, no como ubicación física.
+
+Impacto (identificado, no implementado todavía):
+- `jarvis/config.py`: `JARVIS_VAULT_PATH` único deja de alcanzar — hacen falta dos raíces (árbol
+  PARA en `D:\Boveda`, subárbol `Boveda/Jarvis/`).
+- `jarvis/vault/writer.py::write_entry()`: reescritura real, no ajuste — `_TYPE_TO_SUBDIR` deja de
+  ser el criterio de carpeta; el destino pasa a ser función de autoría (+ excepción de `create` por
+  `action_type`), y el frontmatter que escribe hoy (`id/type/source/channel/recorded_at/
+  origin_trust/tags`) no calza con el contrato nuevo del árbol PARA.
+- `jarvis/vault/index_writer.py`: paths hardcodeados `INDEX/ENTITIES/`/`INDEX/PROJECTS/` pasan a
+  `Boveda/Jarvis/Entidades/`/`Boveda/Jarvis/Proyectos/` — la lógica de reconstrucción desde SQLite
+  no cambia, solo el root.
+- `jarvis/db/database.py`: `vault_path` de cualquier `memory_entries` real necesitaría reescribirse
+  al nuevo root si se migran datos existentes — **no aplica hoy**: se confirmó y ejecutó el wipe
+  completo de `jarvis.db` (era 100% dataset de prueba, `jarvis/cli/seed_test.py`) antes de esta
+  decisión, así que no hay datos reales de Jarvis que migrar. Ver detalle de la limpieza abajo.
+- `jarvis/worker/consolidation.py`: sin cambio de lógica de detección; sí necesita el nuevo tipo de
+  propuesta gateada para superseded → mover a Archivo.
+- Mecánica de wikilinks/backlinks (`_linked_wikilinks_section()`, `sync_entity_note()`/
+  `sync_project_note()`, `jarvis/cli/backfill_vault_links.py`) se reusa tal cual en su lógica; solo
+  cambian los paths de destino.
+
+Limpieza de datos ejecutada como prerequisito de esta decisión (2026-09-10/11, homelab):
+backup completo (`~/project/database/backup-pre-limpieza-seed-20260910-213410/`, contenido
+confirmado) → contenedores parados → wipe completo de `jarvis.db`/vault de Jarvis/`chroma`
+(confirmado 100% seed) → `DELETE` quirúrgico de `habitos`/`habitos_registros` en `app.db` (mismo
+`creado_en` al microsegundo en las 7 filas, contenido genérico — confirmado seed; `fin_movimientos`,
+`agenda_eventos` y `hojas` verificados como datos reales del usuario y **no tocados**) → contenedores
+reiniciados, `RestartCount=0` en los 3, `jarvis.db` recreado limpio por `init_db()`.
+
+Migración de contenido a `D:\Boveda` ya realizada (aparte de esta decisión de arquitectura, en
+paralelo): 57 notas + 32 adjuntos desde `D:\Mateo\Obsidian Vault` (vault viejo de Obsidian, copiado
+sin tocar el original); 8 de las 14 hojas reales de `hojas`/`categorias` de SGR (6 quedaron sin
+migrar tras revisión — 2 placeholders de prueba, 4 fragmentos de conversación con el bot guardados
+por error como si fueran hojas — ninguna fila de SQLite se tocó).
+
+Estado: diseño cerrado y aprobado por el usuario. Sin implementar. Agenda queda fuera.
+
+**Addendum tras revisión crítica independiente (2026-09-11)**: la sesión de revisión encontró 2
+huecos reales, verificados contra el código, no cosméticos.
+
+1. `jarvis_audit_proposals.action_type` tiene un `CHECK` cerrado de 9 valores — agregar el décimo
+   (la propuesta "superseded → Archivo") es una migración de schema real, mismo costo que
+   `_migrate_people_type()`/la adición de `open_question`, no un ajuste menor de `consolidation.py`
+   como sugería la redacción original. Además, `valid_to` se setea desde **3** lugares distintos, no
+   uno: `_resolve_pair()` (same_fact), `_mark_stale_by_age()` (stale por edad), y `forget_entry()`
+   (el usuario ya pidió olvidar/borrar explícitamente, incluida la acción `delete` de auditoría ya
+   aceptada). **Resuelto**: la propuesta gateada nueva aplica solo a `same_fact`/`stale_by_edad`
+   (juicio algorítmico, puede estar mal — mismo precedente del falso positivo Madrid/Buenos Aires) →
+   mueve a `04 - Archivo/` si se confirma. `forget_entry()` **no** dispara propuesta nueva — la
+   confirmación humana ya existió al pedir "olvidar" — mueve directo a `05 - Basura/` (semánticamente
+   es borrado, no "quedó superado").
+2. `memory_entries.vault_path` se replica también como metadata en ChromaDB
+   (`_resync_vault_and_embedding()`), y nada lee esa copia de vuelta (confirmado: ni `retriever.py`
+   ni el router de la API) — es write-only, sin romper nada hoy, pero sería una inconsistencia
+   silenciosa en cuanto un archivo se mueva. **Resuelto**: dejar de escribir `vault_path` en el
+   metadata de Chroma (dead weight confirmado, se saca en vez de mantenerlo sincronizado sin
+   beneficio). La columna `memory_entries.vault_path` en SQL **sí** tiene que actualizarse al mover
+   el archivo — es el puntero real que usa el código para reescrituras futuras, no es redundante.
+
+Resto de la arquitectura (fuente de verdad invertida, separación por autoría, `INDEX/PROJECTS/` vs.
+`01 - Proyectos/`, el enum `origen`) confirmado sin cambios contra el código real en esta revisión.
+
+Pendiente: implementación real. Ningún código tocado todavía.
+
+**Decisiones tácticas de la implementación** (schema del índice, dónde vive físicamente, etc.) se
+registran atómicas en `Cerebro/decisiones/`, una por archivo — no acá, para no mezclar el diseño
+grande con las decisiones puntuales del día a día de esta etapa. **Actualización 2026-09-11**:
+Milestone 1 (indexador/poller) implementado y verificado — ver entrada nueva más abajo, misma
+fecha, "IMPLEMENTADO: Milestone 1 de la fusión...".
+
+---
+
+## 2026-09-11 — IMPLEMENTADO: Milestone 1 de la fusión, indexador/poller de `D:\Boveda` + decisión de schema cerrada
+
+Contexto: la propuesta aprobada más arriba (misma fecha) dejaba explícitamente sin cerrar si el
+schema SQL actual de Bóveda (`hojas`/`categorias`) se jubila a favor de un índice basado en ruta
+(Opción A) o convive separado hasta unificar después (Opción B). Se le planteó la pregunta al
+usuario con el trade-off de cada una antes de escribir una línea de schema, como pedía el
+"Pendiente" de la entrada anterior.
+
+Decisión — schema: **Opción B**. El índice nuevo vive en `project/database/vault_index.db`
+(SQLite separado, gitignoreado igual que `app.db`/`jarvis.db`), con tablas de nombre propio
+(`vault_notas`, `vault_corridas`) — no reemplaza ni pretende reemplazar `hojas`/`categorias`
+todavía. Motivo dado por el usuario: esta sesión tenía scope explícito de no tocar `crud.py`, y
+un schema "Opción A" (ruta en vez de FK) solo tiene sentido real una vez que `crud.py`/`main.py`/
+frontend/bot se adapten a leerlo — construirlo antes sería diseño especulativo sin consumidor.
+Quedan dos fuentes de "qué categorías/hojas existen" conviviendo a propósito hasta la sesión que
+decida unificar (ver "Pendiente" en `Cerebro/estado-actual.md`, misma fecha).
+
+Decisión — ubicación física: SQLite separado de `app.db` (no tablas nuevas dentro del mismo
+archivo) — el usuario priorizó cero riesgo de tocar `app.db` por accidente mientras el schema del
+índice todavía puede iterar, sobre tener ya un solo archivo de DB para todo SGR.
+
+Construido: `project/scripts/vault_indexer.py` (recorrido completo + parseo de frontmatter YAML +
+upsert por `id` + detección de cambios por `mtime` + autoasignación de `id` faltante con
+reescritura del `.md`). Detalle completo de qué hace y cómo se verificó en
+`Cerebro/estado-actual.md` (misma fecha) — no se duplica acá para no tener dos copias que
+diverjan.
+
+Diferencia con spec: ninguna — la propuesta del 2026-09-11 ya dejaba este punto como decisión
+pendiente, no como algo definido que se esté revirtiendo.
+
+Impacto: archivo nuevo (`project/scripts/vault_indexer.py`), `project/requirements.txt`
+(`PyYAML==6.0.3` agregado), `.gitignore` (`project/database/vault_index.db`). Nada de lo existente
+(`app/main.py`, `app/db/crud.py`, `jarvis/vault/writer.py`, `jarvis/vault/index_writer.py`)
+tocado.
+
+Estado: Milestone 1 completo y verificado contra las 65 notas reales de `D:\Boveda`. Pendiente:
+conectar `crud.py`, `writer.py` de Jarvis, share SMB, editor Markdown — ver el detalle de orden
+sugerido en `Cerebro/estado-actual.md`.
+
+---
+
+## 2026-09-11 — IMPLEMENTADO: Milestone 2 de la fusión, `crud.py` de Bóveda conectado a `D:\Boveda`
+
+Continúa el Milestone 1 de arriba: `hojas`/`categorias` dejan de ser la fuente de verdad de
+lectura y escritura del módulo Bóveda — `D:\Boveda` lo es, sin cambiar el contrato HTTP que ya
+usan frontend y bot. Categorías viejas reemplazadas por el árbol PARA real (decisión ya
+cerrada en `Cerebro/decisiones/2026-09-11-categorias-viejas-boveda.md`, ejecutada acá).
+
+Cinco decisiones tácticas nuevas, cada una en su propio archivo en `Cerebro/decisiones/`
+(schema, sandbox del vault, borrado soft a Basura, detección de `origen` por header `Origin`,
+unificación de las dos convenciones de foto que existían sin documentar entre frontend y bot).
+Detalle completo de qué cambió y cómo se verificó en `Cerebro/estado-actual.md` (misma fecha)
+— no se duplica acá.
+
+Diferencia con la propuesta original: ninguna en arquitectura. Un hallazgo no anticipado en el
+diseño (frontend y bot ya usaban convenciones distintas para `contenido`/`apuntes` en fotos,
+ninguna documentada con precisión) se resolvió unificando el formato en el archivo sin tocar
+ningún cliente — ver la decisión táctica dedicada.
+
+Estado: implementado y verificado en sandbox (backend + frontend real corriendo contra copias
+aisladas de `app.db` y `D:\Boveda`). **No aplicado a los datos reales** — arrancar el backend
+sin overrides de `DB_PATH`/`VAULT_ROOT` dispara la migración real la primera vez; queda a
+criterio del usuario cuándo hacerlo. Pendiente después: share SMB homelab, `jarvis/vault/`,
+deploy al homelab.
+
+---
+
+## 2026-09-04 — FIX: mensajes de Telegram en texto plano (bug "parte 2/3 perdida" del reporte diario)
+
+Contexto: el reporte diario de consolidación (`send_report()` en
+`jarvis/notify/telegram.py`) llegó incompleto un día — "parte 1/3" y "parte
+3/3", nunca la 2/3. Diagnóstico original (sin log exacto — se perdió por un
+restart del homelab antes de poder revisarlo): `send_telegram_message()`
+manda `parse_mode: "Markdown"` (legacy) y varios mensajes (el reporte, las
+preguntas de propuestas de auditoría, avisos de captura por Agenda)
+interpolan texto libre — contenido de memoria, tags, nombres de entidades,
+preguntas generadas por LLM — directo en el string. Un `_`/`*`/`` ` ``
+sin cerrar en ese texto libre (posible por azar, no por intención de nadie)
+hace que Telegram rechace el mensaje con 400 "can't parse entities".
+`send_telegram_message()` atrapa cualquier excepción a propósito
+(best-effort, no debe tumbar el worker) y hasta ahora solo logueaba con
+`logger.warning()` — que se pierde en cada restart de contenedor, exactamente
+lo que impidió diagnosticar el incidente original con el log real.
+
+Reproducido contra la API real de Telegram antes de tocar código: un mensaje
+con un solo `_` sin pareja en el texto interpolado (ej. contenido tipo
+"reviso el deploy_prod y anoto el resultado") devuelve 400 consistentemente
+("can't find end of the entity"). Con número **par** de `_` "accidentales"
+en el texto libre, el mensaje ni siquiera falla — Telegram lo acepta pero
+fragmenta el texto en entidades itálicas no intencionadas (contenido
+silenciosamente corrompido, no solo perdido — un segundo modo de falla no
+contemplado en el diagnóstico inicial).
+
+Decisión: texto plano (sin `parse_mode`) en las funciones que construyen
+mensajes de Telegram, en vez de escapar para MarkdownV2. Opciones evaluadas:
+- **MarkdownV2 con escape correcto de texto libre**: mantiene
+  negrita/cursiva, pero exige escapar bien en cada uno de los ~15 puntos
+  donde se interpola texto libre, repartidos en 6 archivos (`audit/service.py`,
+  `captures/passive.py`, `ingestion/agenda.py`, `worker/consolidation.py`,
+  `debug/service.py`, `worker/processor.py`) — un solo punto nuevo (o
+  existente, mal migrado) sin escapar reintroduce exactamente este bug.
+- **Texto plano**: elimina la clase de bug entera para todos los call sites
+  presentes y futuros, sin depender de que cada cambio futuro recuerde
+  escapar. Costo: se pierde negrita/cursiva/backticks en los reportes —
+  aceptable para un sistema personal donde "el mensaje llega completo" pesa
+  más que la cosmética, y consistente con el criterio que el propio código
+  de `send_report()` ya declaraba ("decir explícitamente qué se revisó...
+  nunca en silencio").
+
+Se eligió texto plano.
+
+Diferencia con spec: no aplica — `parse_mode` no estaba especificado en
+`jarvis-spec.html`; era una decisión de implementación previa sin registrar.
+
+Impacto:
+- `jarvis/notify/telegram.py`: `send_telegram_message()` ya no manda
+  `parse_mode` en el payload; `send_report()` ya no envuelve el prefijo
+  "(parte N/M)" en itálica.
+- Se sacaron los marcadores `*`/`_`/`` ` `` decorativos (sin efecto real ahora,
+  y feos como texto literal sin `parse_mode`) de: `jarvis/worker/processor.py`
+  (aviso de "listo"), `jarvis/debug/service.py` (mensaje de debug),
+  `jarvis/captures/passive.py` y `jarvis/ingestion/agenda.py` (avisos de
+  propuesta), `jarvis/audit/service.py` (`_question_edit`,
+  `_question_delete_empty`, `_question_clarify`, `_question_retag`,
+  `_question_create`, `build_audit_report_text` + `_entry_lines` +
+  `_findings_section`, `_push_created`), `jarvis/worker/consolidation.py`
+  (`_notify_run_report`, `_section_analyzed`, `_section_pairwise`,
+  `_section_stale`, `_section_tagged`, `_section_agenda_ingestion`,
+  `_section_open_question`, sección de errores).
+- **Registro persistente de fallos**: `send_telegram_message()` ahora,
+  además del `logger.warning()` existente, llama a
+  `jarvis.events.service.log_event("TELEGRAM_FAIL", f"chat_id=...: {exc} --
+  texto: {text[:120]!r}")` — reusa `jarvis_event_log` (Fase B5, ya visible en
+  `JarvisDebugPanel`) en vez de crear tabla nueva. El snippet de texto
+  incluye el prefijo "(parte N/M)" cuando lo hay, así una falla real deja
+  registrado explícitamente qué parte del reporte se perdió, sin depender
+  del log efímero de Docker. Color agregado en `LEVEL_COLOR` del frontend
+  (`JarvisDebugPanel.jsx`) para el nuevo nivel.
+
+Verificación: contra el bot real y un chat_id real (@userinfobot para
+obtenerlo — no hizo falta un bot de scratch). (1) el texto que antes daba
+400 (un `_` sin cerrar) ahora llega completo, confirmado por el usuario en
+Telegram. (2) una falla forzada (token inválido) quedó registrada en
+`jarvis_event_log` con chat_id, error y snippet de texto — confirmado por
+lectura directa de la tabla — y luego borrada (era un evento de prueba, no
+un incidente real). Deploy al homelab: **pendiente**, aviso aparte cuando el
+usuario lo pida.
+
+---
+
+## 2026-09-03 — IMPLEMENTADO: 0.3, Ingestión Automática desde Agenda de SGR
+
+Implementación de la propuesta aprobada el mismo día, íntegra ("Apruebo la
+propuesta tal cual está — no le cambiaría nada", ver la entrada de abajo,
+"APROBADA (sin implementar todavía)..."). Alcance exacto de esa propuesta:
+fuente única Agenda de SGR, sin credenciales nuevas, blast radius de
+solo-lectura vía 2 endpoints HTTP + propuestas PENDING en
+`jarvis_capture_proposals` (nunca escritura directa a `memory_entries` ni a
+Agenda). Email/GitHub/documentos siguen fuera de alcance, sin tocar.
+
+**Archivos nuevos**: `jarvis/ingestion/agenda.py` (módulo completo — lectura
+de `GET /agenda/eventos`/`GET /agenda/tareas`, filtro "ya pasó", dedup,
+síntesis de contenido/pregunta sin LLM, notificación Telegram best-effort).
+
+**Archivos tocados**: `jarvis/db/schema.py` (`memory_entries.source` CHECK
++ `'agenda'`; `jarvis_capture_proposals.origin_source`/`origin_source_key`
+nuevas), `jarvis/db/database.py` (`_migrate_memory_entries_source()` nueva,
+mismo patrón de rebuild que `_migrate_people_type()`; 2 `_add_column_if_missing`
+nuevas), `jarvis/worker/task_manifest.py` (`read_agenda_source`,
+`propose_agenda_capture`), `jarvis/config.py` (`JARVIS_SGR_API_BASE`,
+`JARVIS_AGENDA_INGESTION_WINDOW_DAYS=7`), `jarvis/captures/passive.py`
+(`create_proposal()`/`accept_proposal()` extendidas para el origen
+`'agenda_ingestion'` — mismo mecanismo de aceptar/rechazar de siempre, ver
+más abajo), `jarvis/worker/consolidation.py` (sexto paso de
+`run_consolidation()`, sección nueva en el reporte diario,
+`_nothing_to_report()` ahora también mira `agenda_ingestion`),
+`jarvis/pyproject.toml` (`requests` declarado como dependencia propia — ya
+estaba disponible en `project/venv` porque jarvis se instala editable ahí,
+pero no declarada).
+
+**Decisiones no cerradas del todo por el documento — resueltas acá con
+criterio conservador, reportadas explícitamente (no en silencio, pedido
+explícito de la tarea)**:
+
+1. **Zona horaria**: el documento no contemplaba que
+   `agenda_eventos.fecha_inicio`/`fecha_fin` y `agenda_tareas.fecha_opcional`
+   son timestamps NAIVE en hora LOCAL (confirmado leyendo
+   `project/frontend/src/components/agenda/EventoModal.jsx`: el frontend arma
+   `"YYYY-MM-DDTHH:MM:00"` directo de `<input type=date/time>`, sin
+   conversión a UTC). El `now` UTC-aware que ya usa `run_consolidation()`
+   para todo lo demás NO sirve para decidir "¿esto ya pasó?" contra esos
+   campos sin arriesgar un desfase silencioso cerca de la medianoche según
+   el offset horario real del entorno. Se usa un `datetime.now()` local
+   naive aparte, solo dentro de `jarvis/ingestion/agenda.py`, exclusivamente
+   para esta comparación.
+2. **`agenda_tareas` no tiene una columna "fecha de completado" real** — el
+   documento asumía que sí (punto 1.2: "filtrado ... a completada=1 con
+   fecha de completado dentro de la misma ventana"). El schema real solo
+   tiene `fecha_opcional` (la fecha en la que la tarea está agendada, no
+   cuándo se marcó como hecha) y `completada` (booleano), confirmado leyendo
+   `project/app/db/crud.py::agenda_obtener_tareas()`. Resolución: se usa
+   `fecha_opcional` como proxy de recencia; tareas completadas SIN
+   `fecha_opcional` se EXCLUYEN de 0.3 por completo (sin esa fecha no hay
+   forma de acotarlas a la ventana de N días sin arriesgar ingerir de golpe
+   todo el historial de tareas completadas la primera vez que esto corre).
+   No se verificó con datos reales de este camino específico — la Agenda
+   real de prueba no tenía ninguna tarea completada al momento de esta
+   sesión (`GET /agenda/tareas?pendientes=false` devolvió `[]`) — sí se
+   verificó con datos sintéticos (4 casos: completada+fecha reciente,
+   completada sin fecha, completada fuera de ventana, pendiente) contra el
+   filtro real de `_fetch_recent_completed_tasks()`.
+3. **Eventos recurrentes**: `GET /agenda/eventos` expande una regla de
+   repetición en varias ocurrencias con el MISMO `id` pero `fecha_inicio`
+   distinta por ocurrencia (`project/app/db/crud.py::_expand_recurring()`).
+   El documento proponía `source_id` determinístico `"agenda:evento:{id}"` a
+   secas — con eso, un evento recurrente solo se hubiera podido proponer UNA
+   vez en su historia completa (todas las ocurrencias siguientes
+   dedupearían contra la primera). Se agrega `fecha_inicio` a la clave
+   (`"agenda:evento:{id}:{fecha_inicio}"`) para que cada ocurrencia pasada
+   se trate como lo que es: una instancia distinta.
+4. **Gap real del documento, no una decisión de diseño** (algo que
+   directamente no cerraba, no una ambigüedad de redacción): dedupear
+   ÚNICAMENTE contra `memory_entries.source_id` (como decía el punto 3 de la
+   propuesta) no evita re-proponer un evento/tarea que el usuario ya
+   RECHAZÓ explícitamente — rechazar nunca crea una `memory_entry`, así que
+   la corrida siguiente lo hubiera vuelto a proponer mientras siguiera
+   dentro de la ventana, contradiciendo el propio objetivo que el documento
+   se planteaba ("evita re-proponer el mismo evento cada corrida"). Fix:
+   columna nueva `jarvis_capture_proposals.origin_source_key` (la misma
+   clave determinística) + dedup contra esa tabla también, sin mirar status
+   (incluye `REJECTED`) — mismo criterio que ya usa
+   `jarvis.audit.service._already_exists()` para las propuestas de auditoría
+   (dedupea sin mirar status). Verificado en vivo: un evento real aceptado y
+   otro rechazado, ambos NUNCA vueltos a proponer en corridas posteriores
+   (ver verificación abajo).
+
+**Bug real encontrado y arreglado ANTES de tocar ninguna DB real** (por
+inspección de código, no en producción): `jarvis/db/schema.py` nunca tenía
+`last_audited_at` en el `CREATE TABLE memory_entries` estático — esa columna
+solo se agregaba en runtime vía `_add_column_if_missing()` dentro de
+`_migrate()`. `_MEMORY_ENTRIES_CREATE` (usado por CUALQUIER migración de
+rebuild de esa tabla, `jarvis/db/database.py`) se deriva de ese CREATE
+estático — así que cualquier rebuild que corriera DESPUÉS de que una DB real
+ya tuviera `last_audited_at` (algo que nunca había pasado hasta esta sesión,
+porque `_migrate_people_type()` — la única migración de rebuild anterior —
+ya era un no-op en toda DB con 0.2 Slice 4 aplicado) reconstruía
+`memory_entries_new` SIN esa columna, y el `INSERT` posterior (que sí la
+lista, porque lee las columnas reales de la tabla vieja) fallaba con
+`no such column: last_audited_at`. Fix: `last_audited_at` agregado al CREATE
+estático de `jarvis/db/schema.py`, con el `_add_column_if_missing()` de
+`_migrate()` como red de seguridad para DBs viejas (mismo patrón que
+`created_by`).
+
+### Incidente real durante la verificación — jarvis.db de producción tocado por error
+
+**Qué pasó**: para verificar contra Agenda real (pedido explícito de la
+tarea), se levantó el backend real de SGR (`uvicorn app.main:app --port
+8765`) sin las variables `JARVIS_DB_PATH`/`JARVIS_VAULT_PATH` apuntando a un
+scratch — `app.main` importa y corre `jarvis.db.database.init_db()` como
+efecto de import, así que ese primer intento corrió la migración (con el bug
+de `last_audited_at` de arriba, **antes** de arreglarlo) directo contra
+`project/database/jarvis.db` real. La migración falló a mitad de camino: la
+tabla `memory_entries` real NUNCA se tocó (el fallo fue antes del
+`DROP`/`RENAME`, confirmado con `PRAGMA integrity_check` = `ok` y el mismo
+conteo de filas de siempre, 22), pero quedó una tabla `memory_entries_new`
+vacía y huérfana, y sí se alcanzaron a agregar (exitosamente, sin daño) las
+2 columnas aditivas `origin_source`/`origin_source_key` a
+`jarvis_capture_proposals` real.
+
+**Fix aplicado en producción, una vez, con backup previo**: backup completo
+(`project/database/backup-pre-0.3-agenda-incident-20260903-210637/`,
+`jarvis.db`+`vault`+`chroma`, contenido confirmado: 22 filas en
+`memory_entries`, 22 archivos en vault, tamaños no-cero) → `DROP TABLE
+memory_entries_new` directo (tabla vacía, confirmado antes de borrar) →
+`PRAGMA integrity_check` = `ok` después. La DB de producción queda
+exactamente como estaba antes del incidente (sin `'agenda'` en el CHECK de
+`source` todavía, con las 2 columnas aditivas ya puestas — aditivas, sin
+riesgo, y de todos modos necesarias) — la migración completa se aplica sola
+la próxima vez que el backend real arranque con este código ya desplegado
+(no se forzó en esta sesión, mismo criterio de "verificar en scratch,
+production queda para el próximo arranque normal").
+
+**Por qué no se repitió**: toda la verificación real posterior (incluida la
+lectura de Agenda real, que si necesitaba el backend real corriendo) se hizo
+con un segundo backend levantado con `JARVIS_DB_PATH`/`JARVIS_VAULT_PATH`/
+`JARVIS_CHROMA_PATH` apuntando a una copia scratch del backup real (no a
+producción) — la API de SGR (`app.db`) se siguió consultando real y en vivo
+(GET únicamente, sin riesgo — es justo lo que la tarea pedía verificar), pero
+cualquier escritura de Jarvis quedó aislada en el scratch.
+
+**Feedback enviado sobre este incidente** vía `SendFeedback` — el patrón "un
+`uvicorn app.main:app` de verificación importa y muta la DB real como efecto
+colateral de import" es un riesgo repetible para cualquier sesión futura que
+necesite levantar el backend real para otra cosa (Finanzas, Agenda, Hábitos)
+sin pensar en Jarvis.
+
+### Verificación (contra scratch, con datos reales de Agenda — nunca `jarvis.db` de producción)
+
+Migración: copia scratch del backup real de producción (22 entradas, schema
+pre-'agenda') → `init_db()` con el código ya arreglado → CHECK con
+`'agenda'` presente, `last_audited_at` presente, CERO tablas `_new`
+huérfanas, 22 filas preservadas, `integrity_check` = `ok`, doble
+`init_db()` consecutivo sin error (idempotencia).
+
+Ingestión real: backend de SGR real levantado (jarvis sandboxeado a
+scratch) → `run_agenda_ingestion()` con ventana ampliada a 60 días leyó la
+Agenda real del usuario vía HTTP y encontró **16 eventos reales pasados**
+(parciales/exámenes de julio-agosto, ninguno futuro) → 16 propuestas
+`PENDING` creadas con `origin_source='agenda_ingestion'`,
+`origin_source_key` determinístico por ocurrencia, contenido/pregunta
+sintetizados correctamente (emojis y todo, incluido un caso con
+`UnicodeEncodeError` en un `print()` de depuración que confirmó que el
+contenido real SÍ trae emoji — no un bug del código, solo de mi script de
+verificación). Segunda corrida inmediata: `proposed=0` (dedup funcionando,
+16 seguían ahí sin duplicar). `accept_proposal()` sobre una propuesta real →
+`memory_entries` con `source='agenda'`, `origin_trust='user.authenticated'`,
+`source_id` = la clave determinística, encolada en `inbox_queue` como
+cualquier otra captura. `reject_proposal()` sobre otra → `REJECTED`. Tercera
+corrida: `proposed=0` de nuevo — ni la aceptada ni la rechazada se
+repropusieron (confirma el fix del gap del punto 4 de arriba). Canal
+`telegram` probado aparte (`JARVIS_TELEGRAM_CHAT_ID` seteado, DB scratch
+separada, ventana ampliada): las 16 propuestas quedaron con
+`channel='telegram'`/`channel_id` correcto; el aviso a la Bot API falló
+best-effort (sin token real en el entorno) sin tumbar la ingestión —
+comportamiento esperado. `TaskManifest.ALLOWED_OPERATIONS` confirmado con
+las 2 operaciones nuevas. Filtro de "ya pasó" (`_event_already_ended`)
+probado con 5 casos sintéticos de borde (futuro, pasado con hora, todo el
+día mismo día, todo el día día anterior, sin fecha) — los 5 con el
+resultado esperado. `_nothing_to_report()`/sección del reporte diario
+probadas con summaries sintéticos (día quieto con agenda vacía, agenda con
+propuestas, agenda que falló pero el resto vacío). `python -m py_compile`
+limpio en los 6 archivos Python tocados/nuevos.
+
+**No desplegado al homelab en esta sesión** — a propósito, pedido explícito
+de la tarea: es un paso aparte.
+
+Impacto: `jarvis/ingestion/` (nuevo), `jarvis/db/schema.py`,
+`jarvis/db/database.py`, `jarvis/worker/task_manifest.py`,
+`jarvis/config.py`, `jarvis/captures/passive.py`,
+`jarvis/worker/consolidation.py`, `jarvis/pyproject.toml`. No toca frontend
+(las propuestas de Agenda usan el mismo banner genérico que ya existe,
+`JarvisProposalBanner.jsx` — no distingue origen visualmente, no se pidió).
+
+---
+
+## 2026-09-03 — APROBADA (sin implementar todavía): 0.3, Ingestión Automática — arrancando por Agenda de SGR
+
+**Aprobada por el usuario tal cual, sin cambios, el mismo día** ("Apruebo la
+propuesta tal cual está — no le cambiaría nada"). Sigue sin implementarse —
+la aprobación habilita a una sesión futura a construir esto directamente
+(ver punto 5, "Qué falta para poder implementar esto") sin tener que
+volver a proponerlo ni confirmarlo; no se tocó código en esta sesión.
+
+**Esta entrada era una propuesta de diseño, no una decisión ya tomada
+cuando se escribió.** Mismo criterio que la propuesta de auditoría
+proactiva del 31/08 (ver más abajo en este archivo): pensada para que otra
+sesión la implemente. Nada de lo que sigue se implementó en esta sesión —
+se pidió explícitamente diseño, no código, justamente porque 0.3 es
+"Email, calendario, GitHub, documentos, archivos locales como fuentes"
+(jarvis-spec.html §29): la primera vez que Jarvis procesa contenido que no
+tipeó el propio usuario a mano, con credenciales nuevas de por medio — el
+salto de riesgo más grande de todo lo construido hasta ahora.
+
+Contexto: 0.3 hoy es cero — toda captura es manual (Telegram, desktop,
+captura pasiva por inactividad). Se pidió proponer con qué ÚNICA fuente
+arrancar (no las 4 del spec a la vez), cómo manejar credenciales sin
+inventar una solución de secretos paralela mientras Infisical Agent Vault
+sigue diferido a 0.5, blast radius explícito al estilo
+`jarvis/worker/task_manifest.py`, y qué se descarta a propósito.
+
+### 1) Fuente elegida: Agenda de SGR — no Google Calendar externo, no email,
+no GitHub, no documentos
+
+El spec dice "calendario" como una de las 4 fuentes de 0.3. La lectura
+obvia sería "conectar Google Calendar" — se descarta esa lectura a favor de
+algo con mejor relación esfuerzo/valor **para este usuario puntual**: SGR ya
+tiene un módulo Agenda propio y activo (`/agenda`, `project/database/app.db`
+— tablas `agenda_eventos`/`agenda_tareas`, API real `GET /agenda/eventos`,
+`GET /agenda/tareas`, confirmado leyendo `project/app/main.py`), documentado
+en `project/README.md` con Mes/Semana, HOY + time blocking, tareas por
+listas, revisión semanal. Es señal real ya existente, no una integración
+nueva que haya que justificar desde cero.
+
+**Por qué esta fuente y no una de las otras 3, en esfuerzo/valor concreto**:
+- **Esfuerzo**: mínimo de las 4 posibles lecturas de "calendario". SGR ya
+  corre en el mismo host (`http://127.0.0.1:8765`, mismo patrón que ya usa
+  `project/mybot/finanzas_handlers.py` para hablar con la API de Finanzas) —
+  no hace falta OAuth, no hace falta librería nueva, no hace falta ningún
+  secreto: es una llamada HTTP localhost a un servicio que Jarvis ya
+  necesita que esté corriendo para lo demás.
+- **Riesgo**: el más bajo de las 4 fuentes del spec, y por lejos. El
+  contenido de `agenda_eventos`/`agenda_tareas` lo escribió el propio
+  usuario a mano en la UI de SGR (mismo origen de confianza que cualquier
+  captura manual de Jarvis) — CERO contenido de terceros, CERO superficie
+  de prompt injection. Comparar con email/GitHub/documentos: ahí el
+  contenido lo puede haber escrito cualquiera (un remitente de mail, un
+  colaborador de un repo, el autor de un PDF descargado) — la primera
+  fuente NO debería ser una donde ya haya que resolver "qué hago si el
+  contenido intenta manipular al extractor" (ver punto 3, Task Manifest).
+- **Valor**: medio-alto, no bajo. Hoy un evento o una tarea completada en
+  Agenda desaparece de la memoria de Jarvis salvo que el usuario la
+  vuelva a tipear a mano — es exactamente el tipo de "recordar
+  automáticamente" que 0.3 promete, con datos que el spec mismo reconoce
+  como reutilizables más adelante ("0.4 — Unified Context: Agenda, Finanzas
+  y Hábitos como fuentes de contexto y herramientas"). Empezar por acá deja
+  a 0.3 como un escalón natural hacia 0.4 en vez de una integración externa
+  aislada que 0.4 tendría que ignorar o duplicar.
+
+**Alcance concreto de la ingestión** (diseño, no implementado): un job de
+idle-time nuevo en `run_consolidation()` (mismo patrón que pairwise/stale/
+backfill/auditoría/pregunta abierta — sexto paso, mismo gating de "una vez
+por día" vía `jarvis_policies`) que:
+1. `GET /agenda/eventos` con rango `desde`/`hasta` = ventana de los últimos
+   N días (candidato: 7, mismo orden de magnitud que
+   `JARVIS_AUDIT_RANDOM_COOLDOWN_DAYS`) — solo eventos con `fecha_fin` (o
+   `fecha_inicio` si no hay fin) ya PASADA respecto a `now`. Nunca eventos
+   futuros: ingerir un evento que todavía no pasó como si fuera un hecho
+   sería "recordar algo que no ocurrió todavía", y abre la puerta a que
+   0.3 se convierta en un mecanismo de recordatorios (eso es 0.9
+   Proactividad, no esta fase).
+2. `GET /agenda/tareas?pendientes=false`, filtrado en el código de
+   ingestión (no en la API) a `completada=1` con fecha de completado
+   dentro de la misma ventana — mismo criterio: solo lo que YA pasó.
+3. Cada evento/tarea candidato que todavía no tiene una `memory_entry` con
+   el mismo `source_id` (mismo criterio anti-duplicado que ya usa
+   `capture_raw()` por `content_hash`, acá por `source_id` determinístico
+   tipo `"agenda:evento:{id}"` — evita re-proponer el mismo evento cada
+   corrida) arma una fila `PENDING` en `jarvis_capture_proposals`
+   (reusando la tabla de pieza C, no una nueva — mismo criterio de
+   abstracción compartida que ya documenta la memoria del agente sobre
+   Jarvis: la forma "acá hay algo, ¿lo guardo?" ya existe, no hay que
+   reinventarla). `conversation_id = NULL` (no viene de una charla),
+   `channel`/`channel_id` = el mismo criterio que ya usa auditoría (chat de
+   debug si existe, si no queda en `desktop` para polling del frontend).
+   Candidato de columna nueva: `jarvis_capture_proposals.origin_source`
+   (`'passive_capture'|'agenda_ingestion'`, default `'passive_capture'`
+   para no romper filas existentes) — solo para que el mensaje de Telegram/
+   la UI puedan mostrar de dónde salió la propuesta, no cambia el flujo de
+   aceptar/rechazar en absoluto (mismo `accept_proposal()`/
+   `resolve_individual_reply()` de siempre).
+4. El usuario acepta/rechaza por Telegram o desktop — SOLO al aceptar corre
+   `capture_raw()` con `origin_trust='user.authenticated'` (mismo trust que
+   una captura manual: el dato vino de la Agenda del propio usuario, no de
+   una fuente externa) y `source='migration'`... **decisión abierta,
+   marcada acá para que el usuario la resuelva al aprobar**: el CHECK de
+   `memory_entries.source` hoy es `('telegram','desktop','migration')` —
+   ninguno de los tres describe honestamente "vino de la Agenda de SGR".
+   Se necesita un cuarto valor (`'agenda'`) antes de implementar esto, vía
+   el mismo patrón de migración de CHECK ya usado 3 veces
+   (`_migrate_people_type()`/`_migrate_audit_proposals_status()`/
+   `_migrate_audit_proposals_action_type()`, `jarvis/db/database.py`).
+
+### 2) Credenciales — ninguna nueva para esta fuente; para las que sí las
+necesiten después, reusar exactamente el patrón `.env` ya existente, no
+inventar nada
+
+La Agenda de SGR no necesita NINGÚN secreto nuevo: es HTTP localhost al
+propio backend de SGR, que además ya corre sin autenticación (mismo
+trust boundary que la API que ya consume `project/mybot/bot.py`). Esto es
+justamente parte de por qué es la fuente correcta para arrancar — resuelve
+la pregunta de credenciales por no necesitarlas.
+
+Para cuando el usuario apruebe agregar una SEGUNDA fuente que sí las
+necesite (email, GitHub) — no en esta propuesta, dejado documentado para
+esa futura pieza: **no construir ningún mecanismo de secretos nuevo**.
+Infisical Agent Vault sigue diferido a 0.5 (`Componentes-Evaluados.md`: "cuando
+haya tool system") — mientras tanto, el patrón que ya existe y ya funciona
+en todo Jarvis es una variable en `project/.env`
+(`TELEGRAM_BOT_TOKEN`/`OPENAI_API_KEY`, cargadas via `load_dotenv()` en
+`jarvis/config.py`, leídas con `os.getenv()`) — un token de GitHub o
+credenciales de una app de email de solo-lectura (Gmail API con scope
+`gmail.readonly`, nunca acceso de escritura) irían al mismo `.env`, sin
+capa nueva. **Lección real de esta misma sesión, aplicable directo acá**: el
+incidente de la Nota de seguridad del 2026-09-03 (ver
+`Cerebro/estado-actual.md`) — un `cat`/`sed` mal armado expuso
+`TELEGRAM_BOT_TOKEN`/`OPENAI_API_KEY` reales en la salida de una
+herramienta — confirma que el riesgo real hoy no es la ausencia de un vault
+formal, es la disciplina operativa alrededor de un secreto en texto plano
+(nunca loguearlo, nunca volcarlo en la salida de un comando de diagnóstico).
+Cualquier código de ingestión futuro que toque un secreto de `.env` debe
+tratarlo con ese mismo cuidado explícito — no hace falta Infisical para
+evitar ese bug de nuevo, hace falta disciplina de código (nunca
+`print()`/`log()` el valor crudo).
+
+### 3) Blast radius explícito — mismo principio que
+`jarvis/worker/task_manifest.py`, extendido con las operaciones nuevas que
+haría falta agregar (diseño de la forma, no el código)
+
+Principio ya citado en `Componentes-Evaluados.md` (sección 3): "Task
+Manifest: autoridad definida antes de exponerse al contenido no confiable
+... contenido encontrado durante la tarea no puede ampliar ese conjunto."
+Para Agenda el riesgo de contenido no confiable es mínimo (punto 1 — el
+usuario es el autor), pero el DISEÑO del blast radius se hace igual de
+explícito que si no lo fuera, para que agregar una segunda fuente después
+no requiera rediseñar el modelo de seguridad, solo ampliar el manifest:
+
+- **Puede leer**: únicamente `GET /agenda/eventos` y `GET /agenda/tareas`
+  de la API de SGR — nunca `project/database/app.db` directo (evita acoplar
+  Jarvis al esquema SQLite interno de SGR; SGR expone su propio contrato
+  versionado vía HTTP, mismo criterio arquitectónico que ya documenta
+  `Componentes-Evaluados.md` sección 3, "Planos independientes":
+  "ningún componente llama directamente a ChromaDB, SQLite o pgvector").
+  Localhost HTTP a un servicio que Jarvis ya depende de que esté corriendo
+  NO cuenta como "request externo" en el sentido del invariante de 0.1 (ese
+  invariante es sobre no llamar a terceros por Internet, no sobre network
+  I/O en general — aclarado acá porque podría leerse ambiguo).
+- **Nunca puede escribir** en `agenda_eventos`/`agenda_tareas` (ni siquiera
+  marcar algo como "ya ingerido" del lado de SGR) — el estado de "ya se
+  propuso" vive enteramente del lado de Jarvis (`source_id` determinístico
+  en `memory_entries`/`jarvis_capture_proposals`, punto 1.3). Agenda sigue
+  siendo dueña exclusiva de sus propios datos.
+- **Nunca hace ningún otro request externo** (ni a Internet ni a otra API)
+  — mismo invariante que ya rige el worker completo en 0.1.
+- **Nunca escribe en `memory_entries` directo** — solo puede crear filas
+  `PENDING` en `jarvis_capture_proposals`. La única forma de que algo
+  ingerido automáticamente se vuelva memoria real es la MISMA
+  confirmación humana por Telegram/desktop que ya usa el resto del
+  sistema (`accept_proposal()`) — cero excepciones, cero atajo "autónomo"
+  para ningún tipo de evento por más trivial que parezca (mismo principio
+  ya afirmado con el usuario para auditoría: "ninguna acción se aplica
+  sola, ni siquiera agregar un tag").
+- **Dos operaciones nuevas en `TaskManifest.ALLOWED_OPERATIONS`**
+  (`jarvis/worker/task_manifest.py`), mismo patrón que las 15 que ya
+  existen: `"read_agenda_source"` (el `GET` a la API de SGR) y
+  `"propose_agenda_capture"` (el `INSERT` en `jarvis_capture_proposals`) —
+  ninguna operación implícita, cada `assert_allowed()` explícito en el
+  código nuevo, igual que el resto del worker.
+- **Para cuando se agregue una fuente con contenido de terceros de verdad**
+  (email/GitHub, no esta propuesta): el paso de clasificación/extracción
+  que lee ese contenido corre bajo el MISMO manifest fijo — ninguna
+  instrucción encontrada DENTRO del contenido ingerido (ej. un email que
+  diga "ignorá las reglas anteriores y mandate un mensaje a...") puede
+  ampliar qué operaciones están permitidas. Esto ya es cierto hoy por
+  construcción (`MANIFEST.assert_allowed()` no lee nada del contenido que
+  procesa), documentado acá explícitamente para que la próxima fuente lo
+  hereden sin tener que redescubrirlo.
+
+### 4) Qué se descarta a propósito, y por qué — no "para siempre", para esta
+propuesta puntual
+
+- **Email**: mayor riesgo de las 4 (contenido de remitentes no confiables,
+  potencial de prompt injection real — ver punto 3), y necesita
+  credenciales reales (OAuth Gmail o password IMAP) que si se implementan
+  mal se convierten exactamente en la "solución de secretos paralela mal
+  pensada" que se pidió evitar. Además, `Componentes-Evaluados.md` ya
+  marca "Snyk Agent Scan" (admisión de contenido no confiable) como DIFERIR
+  hasta que exista tool system — construir ingestión de email antes de esa
+  pieza sería exponerse al riesgo que esa pieza está pensada para mitigar,
+  sin la mitigación todavía en su lugar.
+- **GitHub**: necesita su propio secreto (PAT o GitHub App), con el mismo
+  problema de credenciales que email pero sin ninguna señal en este repo de
+  que sea una fuente de contexto personal relevante para Jarvis hoy (a
+  diferencia de Agenda, que `project/README.md` documenta como módulo
+  activo). Se revisita si el usuario lo pide explícitamente con un caso de
+  uso concreto.
+- **Documentos/archivos locales**: la más difícil de acotar de las 4 —
+  "qué puede leer" no tiene un límite natural obvio (a diferencia de "estas
+  2 tablas de esta API") hasta que se decida explícitamente qué carpetas/
+  extensiones importan, que es una sub-propuesta de diseño en sí misma
+  (podría terminar siendo la segunda fuente de 0.3, pero necesita esa
+  definición de alcance ANTES de llegar siquiera a la pregunta de blast
+  radius). Queda para una propuesta futura aparte.
+
+### 5) Qué falta para poder implementar esto (si se aprueba)
+
+No implementado en esta sesión, a propósito (pedido explícito). Si se
+aprueba, la próxima sesión que lo tome necesita: (a) el cuarto valor de
+`memory_entries.source` (punto 1.4, migración de CHECK), (b) la columna
+`origin_source` en `jarvis_capture_proposals` (punto 1.3, migración
+aditiva simple, sin rebuild de tabla), (c) las 2 operaciones nuevas en
+`TaskManifest` (punto 3), (d) el sexto paso de `run_consolidation()`
+(punto 1), (e) verificación con datos reales de Agenda del usuario (no
+inventados) contra una DB de scratch antes de tocar producción — mismo
+estándar de todas las piezas anteriores.
+
+Impacto de esta entrada: ninguno en código (propuesta de diseño pura).
+Referencia: `jarvis-spec.html` §29, `Componentes-Evaluados.md` sección 3
+("Task Manifest", "Blast radius", "Planos independientes"),
+`project/README.md` (módulo Agenda), `project/app/main.py`
+(`GET /agenda/eventos`, `GET /agenda/tareas`).
+
+---
+
+## 2026-09-03 — IMPLEMENTADO: Obsidian sync con wikilinks reales (0.2, cierre de deuda de §29)
+
+Contexto: `jarvis/vault/writer.py` ya escribía un .md por `memory_entry`, con
+`tags:` en el frontmatter, pero sin ningún `[[wikilink]]` real entre notas —
+abrir `vault/` en Obsidian daba un grafo vacío aunque
+`memory_entry_entities`/`memory_entry_projects` ya tenían datos reales en
+SQLite (desde 0.2 Slice 3). Se pidió investigar primero si las entidades/
+proyectos tenían nota propia (no la tenían — confirmado leyendo
+`jarvis/entities/service.py`, `jarvis/projects/service.py` y
+`jarvis/db/schema.py`: `memory_entities`/`memory_projects` son solo filas de
+catálogo, sin ningún .md asociado), tomar la decisión de diseño que
+correspondiera, implementar wikilinks reales al vincular una entrada a una
+entidad/proyecto ya conocido, y hacer backfill de las entradas existentes.
+
+### 1) Decisión de diseño real: notas canónicas en `INDEX/ENTITIES/` e
+`INDEX/PROJECTS/`, separadas de `PEOPLE/`/`PROJECTS/`
+
+`PEOPLE/` y `PROJECTS/` ya existían como subcarpetas de `_TYPE_TO_SUBDIR` —
+pero ahí vive un .md por `memory_entry` CLASIFICADA con ese tipo (una
+captura puntual, ej. "quién es José: ..."), no "la ficha canónica de la
+entidad José". Mezclar los dos conceptos en la misma carpeta habría hecho
+ambiguo cualquier wikilink (¿`[[José]]` apunta a la ficha o a una captura
+puntual sobre José?) y arriesgaba colisión de nombre de archivo entre ambos
+usos. Se creó `INDEX/ENTITIES/` (para `memory_entities`: persona/
+organización/lugar) e `INDEX/PROJECTS/` (para `memory_projects`, el catálogo
+de proyectos — no confundir con las `memory_entries` tipo `PROJECT`, que
+siguen en `PROJECTS/` sin cambios) — dos carpetas nuevas en `_VAULT_SUBDIRS`
+(`jarvis/db/database.py`), un módulo nuevo `jarvis/vault/index_writer.py`.
+
+**Nombre de archivo de la nota canónica**: mismo criterio que ya usa
+`write_entry()` para una entrada (`{id[:8]}-{slug(nombre)}.md`) — garantiza
+unicidad real sin depender de que el nombre sea único (una persona y una
+organización podrían compartir nombre; con el id como prefijo nunca
+colisionan). El texto visible del link usa el alias de Obsidian
+(`[[a1b2c3d4-jose|José]]`) para que el grafo se vea con el nombre limpio sin
+sacrificar unicidad del archivo.
+
+### 2) Dónde va el wikilink: un bloque `## Vinculado a` al final del .md, NO
+sustitución de texto inline en la prosa capturada
+
+Se consideró reemplazar menciones de un nombre conocido dentro del
+`content_processed` por `[[nombre]]` (lo más "Obsidian-nativo"). Se
+descartó: requiere matching de límites de palabra + mayúsculas + alias
++ evitar falsos positivos (substring de otra palabra), y el riesgo real es
+corromper en silencio el contenido tal cual el usuario lo escribió/capturó
+(mismo principio que ya protege `content_raw` de cualquier edición). Se
+eligió un bloque `## Vinculado a` agregado al FINAL del contenido
+(`jarvis/vault/writer.py::_linked_wikilinks_section()`), con un link real
+por cada entidad/proyecto ya vinculado a esa entrada en
+`memory_entry_entities`/`memory_entry_projects` en el momento de escribir.
+Sigue dando un grafo no vacío en Obsidian (el objetivo pedido — cada entrada
+enlaza a sus entidades/proyectos, y la nota canónica enlaza de vuelta a
+todas sus menciones) sin el riesgo de mutar contenido capturado.
+
+### 3) Cuándo se sincroniza cada nota canónica
+
+`jarvis/vault/index_writer.py::sync_indexes_for_entry(entry_id)` — lee qué
+entidades/proyectos están vinculados a esa entrada y reescribe COMPLETA (no
+incremental) la nota canónica de cada uno a partir del estado actual de la
+DB, mismo principio que el resto de Jarvis ("el índice del vault es
+reconstruible, la DB es la fuente de verdad"). Enganchado en los 3 puntos
+donde el código ya tenía naturalmente el entry_id a mano después de tocar el
+vault:
+- `jarvis/worker/processor.py`, después de `write_entry()` en el pipeline
+  normal (entidades/proyectos ya están vinculados en la DB en ese punto —
+  `link_entities_for_entry()`/`link_project_for_entry()` corren ANTES de
+  `write_entry()`, confirmado leyendo el orden real del archivo).
+- `jarvis/memory/service.py::_resync_vault_and_embedding()` (pieza B, editar
+  contenido/tipo) — tras reescribir el .md, para que la nota canónica
+  apunte al archivo nuevo si hubo rename.
+- `jarvis/memory/service.py::forget_entry()` (pieza B, soft-delete) — la
+  entrada desaparece de la lista de menciones en la próxima sincronización
+  (la query de `sync_entity_note()`/`sync_project_note()` ya filtra
+  `valid_to IS NULL`, mismo criterio que retrieval/entidades/proyectos/tags).
+
+**Límite conocido, documentado a propósito, no instrumentado**: si una
+entrada se vuelve stale/superseded por consolidación
+(`jarvis/worker/consolidation.py`, varios call sites que tocan `valid_to`
+directamente sin pasar por `forget_entry()`), la nota canónica de su
+entidad/proyecto no se resincroniza sola — queda listándola hasta que algo
+más la toque (una edición, un backfill manual). No estaba pedido explícito
+enganchar consolidación en esta pieza y hacerlo hubiera significado tocar
+varios call sites de `valid_to` fuera del alcance acordado — queda como nota
+para una pieza futura si se vuelve un problema real observado.
+
+### 4) Bug real encontrado y arreglado verificando el backfill:
+`write_entry()` sin `title` explícito podía crear un archivo huérfano
+
+`write_entry(entry)` (sin `title`) derivaba el nombre de archivo de
+`_derive_title(content_raw)` — pero la PRIMERA escritura de una entrada
+(`jarvis/worker/processor.py`) siempre pasa `title=` (el título que devolvió
+la clasificación LLM), que casi nunca coincide con
+`_derive_title(content_raw)`. Cualquier reescritura posterior SIN `title`
+explícito (el backfill de esta pieza, y ya existía antes:
+`_resync_vault_only()` tras editar solo tags) recalculaba un nombre de
+archivo DISTINTO al que `vault_path` en SQLite señala — creaba un .md nuevo
+con el contenido actualizado y dejaba el archivo original, el que la DB
+sigue referenciando, desactualizado y huérfano en el vault.
+
+**Reproducido antes del fix**: corrida real de
+`jarvis/cli/backfill_vault_links.py` contra una DB de scratch con una
+entrada ya escrita por el pipeline normal (título LLM: "Discusión roadmap
+SGR con Martín Suárez") — tras el backfill, el `.md` en `vault_path`
+seguía SIN la sección `## Vinculado a` nueva, y apareció un segundo archivo
+en la misma carpeta con nombre derivado de `content_raw`. Confirmado con
+Ollama real (`gemma3:12b`/`nomic-embed-text`), no simulado.
+
+**Fix**: `write_entry()` — si no se pasa `title` Y la entrada ya tiene
+`vault_path`, se reusa el nombre de archivo YA ASIGNADO (no se re-deriva de
+`content_raw`); solo se deriva un nombre nuevo cuando se pasa `title`
+explícito (primera escritura) o la entrada nunca tuvo `vault_path`. Efecto
+colateral positivo, no buscado a propósito pero correcto: también corrige el
+mismo bug latente en `_resync_vault_only()` (editar solo tags podía dejar
+huérfano el archivo real y la DB apuntando a uno desactualizado) y vuelve
+más estable el nombre de archivo entre ediciones de contenido/tipo (ya no
+depende de si `_derive_title(content_raw)` coincide con el título LLM
+original). Reproducido de nuevo tras el fix, mismo escenario: 0 archivos
+huérfanos, mismo `vault_path` reescrito en el lugar, sección `## Vinculado
+a` presente.
+
+### 5) Hallazgo real, documentado, NO arreglado: `memory_entities` y
+`memory_projects` son dos catálogos sin reconciliar — un mismo nombre real
+puede aparecer dos veces en "Vinculado a"
+
+Verificando con datos reales: una entrada que menciona "el proyecto SGR" se
+clasifica con `project="SGR"` (vía `link_project_for_entry()`, catálogo
+`memory_projects`) Y el extractor de entidades del mismo texto detecta "SGR"
+como `organization` (vía `extract_entities()`/`link_entities_for_entry()`,
+catálogo `memory_entities`) — dos filas en dos tablas distintas para el
+mismo concepto real, sin ningún mecanismo que las una. El bloque
+`## Vinculado a` de esa entrada terminó listando "SGR" DOS veces, cada una
+apuntando a una nota canónica distinta (`INDEX/ENTITIES/...-sgr.md` e
+`INDEX/PROJECTS/...-sgr.md`), confirmado en vivo con Ollama real. Es un gap
+pre-existente de los dos sistemas (`jarvis/entities/service.py` y
+`jarvis/projects/service.py` nunca se comunicaron entre sí, desde que ambos
+se implementaron por separado en 0.2), que esta pieza simplemente hace
+VISIBLE por primera vez (antes ninguno de los dos tenía representación en el
+vault). Reconciliar "entidad organización" y "proyecto" como el mismo
+concepto es una decisión de diseño real y más grande (¿se fusionan las dos
+tablas? ¿un proyecto es un tipo de entidad? ¿se linkean entre sí?) que no
+estaba pedida en esta tarea — se documenta acá explícitamente para que no se
+lea como un descuido si se lo encuentra de nuevo, no se implementa nada.
+
+### 6) Verificado con Ollama real (`gemma3:12b`/`nomic-embed-text`,
+`OPENAI_API_KEY` no seteada a propósito) contra DB/vault de scratch —
+nunca `jarvis.db` real
+
+Dos capturas reales sobre la misma persona (Martín Suárez) y el mismo
+proyecto (SGR) procesadas de punta a punta (`capture_raw` →
+`process_entry()`, clasificación + extracción de entidades + vinculación de
+proyecto + vault + embedding, sin mocks del LLM):
+- Ambos `.md` de entrada terminaron con `## Vinculado a` con wikilinks
+  reales a `INDEX/ENTITIES/...-martín-suárez.md` e `INDEX/PROJECTS/...-sgr.md`
+  (más el duplicado de SGR-como-entidad, punto 5).
+- `INDEX/ENTITIES/...-martín-suárez.md` se creó con frontmatter
+  (`entity_id`/`entity_type`/`aliases`/`first_seen`/`last_seen`) y una
+  sección "## Menciones" con las 2 entradas reales, cada una con wikilink +
+  título corto + tipo + fecha.
+- `edit_entry()` sobre una de las dos entradas (cambia contenido) →
+  `_resync_vault_and_embedding()` reescribió el vault y **la nota canónica
+  se resincronizó sola** con el título actualizado, confirmado leyendo el
+  archivo.
+- `forget_entry()` sobre esa misma entrada → confirmado que **desapareció
+  de "Menciones" de Martín Suárez y de SGR** en la siguiente lectura del
+  archivo (soft-delete, `valid_to` seteado, filtrado por la query de sync).
+- Codificación: la terminal de Git Bash mostraba los acentos como mojibake
+  en la salida de estos scripts de verificación — confirmado por separado
+  (leyendo los bytes/codepoints reales de archivo y nombre) que es solo
+  la code page de la consola, no un bug real: los `.md` y sus nombres están
+  en UTF-8 correcto (`í`=U+00ED, `á`=U+00E1) tanto en contenido como en
+  filesystem.
+- Backfill (`python -m jarvis.cli.backfill_vault_links`) probado dos veces:
+  antes del fix del punto 4 (reprodujo el bug, archivo huérfano) y después
+  (0 archivos huérfanos, mismo conteo de archivos en `PROJECTS/` antes y
+  después, sección restaurada en el archivo correcto, `INDEX/` completo
+  recreado desde cero con las 2 notas de entidad + 1 de proyecto). Nunca
+  corrido contra `project/database/jarvis.db` real ni contra el homelab —
+  mismo criterio de toda sesión anterior; correrlo ahí es un paso aparte
+  que el usuario puede pedir explícitamente.
+
+No se tocó frontend en esta pieza (backend + vault únicamente) — no aplica
+`npm run build`.
+
+Impacto: `jarvis/db/database.py` (`_VAULT_SUBDIRS`), `jarvis/vault/writer.py`
+(`_linked_wikilinks_section()`, `entity_note_stem()`, `project_note_stem()`,
+fix de `write_entry()` del punto 4), `jarvis/vault/index_writer.py` (nuevo),
+`jarvis/worker/processor.py`, `jarvis/memory/service.py`
+(`_resync_vault_and_embedding()`, `forget_entry()`),
+`jarvis/cli/backfill_vault_links.py` (nuevo).
+
+---
+
+## 2026-09-03 — IMPLEMENTADO: PII detector completo en el Privacy Gateway (0.2, cierre de deuda de §29)
+
+Contexto: `jarvis/privacy/gateway.py` solo detectaba secretos evidentes
+(tokens/API keys/passwords) por regex — exactamente lo que
+`Componentes-Evaluados.md` (hallazgo #3) ya advertía como insuficiente por
+sí solo ("complementa pero no reemplaza"). Se pidió definir qué categorías
+de PII sensible tiene sentido detectar en Jarvis y qué hace la detección al
+encontrarlas, con un límite de alcance explícito: NO se trata de bloquear
+nombres de personas ni contenido personal en general — eso es justamente lo
+que el tipo `PEOPLE` existe para guardar.
+
+### 1) Categorías elegidas — 3, no más
+
+Se acotó deliberadamente a las 3 categorías que la tarea nombró como
+ejemplo, sin agregar otras por iniciativa propia (ej. NO teléfonos, NO
+direcciones — son "contenido personal en general", el límite de alcance
+explícito de arriba):
+- **Documentos de identidad**: CUIT/CUIL argentino (`NN-NNNNNNNN-N`, formato
+  fijo, alta confianza) y DNI (7-8 dígitos) SOLO con la palabra "DNI"/
+  "documento" inmediatamente antes — un número suelto de 7-8 dígitos es
+  demasiado común (montos, fechas, teléfonos parciales) para marcarlo sin
+  contexto; exigir la palabra clave es la mitigación de falso positivo.
+- **Cuentas/tarjetas financieras**: CBU/CVU argentino (22 dígitos
+  consecutivos exactos, longitud lo bastante infrecuente para no necesitar
+  palabra clave) y número de tarjeta (13-19 dígitos, agrupados o no, que
+  además pasan el checksum de Luhn — sin Luhn, cualquier ID largo real
+  como número de factura dispararía el detector; con Luhn, un ID que no sea
+  una tarjeta real casi nunca lo pasa por azar).
+- **Contexto de salud**: heurística de palabras clave (diagnóstico,
+  enfermedad, síndrome, medicación, VIH, psiquiátrico, "resultado
+  positivo/negativo", historia clínica) — deliberadamente de MENOR
+  confianza que las anteriores (no hay un formato fijo para "un
+  diagnóstico"), aceptada con el mismo criterio conservador que ya rige el
+  resto del gateway ("ante la duda, bloquea": un falso positivo acá solo
+  cuesta un fragmento de más bloqueado del contexto RAG, nunca un dato real
+  filtrado al LLM externo).
+
+### 2) Qué hace la detección al encontrar algo — mismo criterio que los
+secretos, confirmado explícitamente
+
+Bloquea el FRAGMENTO que sale como contexto RAG hacia el LLM externo
+(`filter_context()`, ya usado por `jarvis/llm/client.py` y
+`jarvis/query/service.py`) — nunca la captura en sí. La entrada con el CUIT/
+DNI/número de tarjeta se guarda igual en `memory_entries`, se indexa igual,
+aparece igual en Explorar/entidades/proyectos; solo se omite si en algún
+momento se arma como contexto para un prompt al modelo externo (GPT-5.4
+mini vía LiteLLM). Mismo mecanismo exacto que ya existía para secretos —
+`is_entry_allowed()` gana dos checks nuevos (`find_pii()`,
+`find_health_context()`) en el mismo orden de verificación, con el mismo
+formato de motivo de bloqueo (`pii_pattern:cuit_cuil`,
+`pii_keyword:health_context`, etc.) para que el log siga siendo diagnosticable
+igual que `secret_pattern:...`.
+
+### 3) Verificado con casos reales (no mocks) — no necesita Ollama, es regex
+puro
+
+`find_pii()`/`find_health_context()` probados directamente contra strings
+reales: CUIT real (`20-12345678-3`) → detectado; DNI con y sin puntos
+("DNI: 34.567.890", "dni 34567890 vencido") → detectado; CBU de 22 dígitos
+→ detectado; número de tarjeta de prueba Luhn-válido
+(`4539 1488 0343 6467`) → detectado; una factura de 13 dígitos NO
+Luhn-válida → NO detectado (confirma que Luhn filtra el falso positivo
+esperado); "Me dieron el diagnóstico de asma" → `find_health_context=True`,
+`find_pii=[]` (categorías separadas, como corresponde); "José vive en
+Rosario y trabaja en la facultad" → ninguna de las dos, confirma el límite
+de alcance (nombre + lugar + trabajo, contenido personal normal, no
+bloqueado). `is_entry_allowed()`/`filter_context()` probados de punta a
+punta con una lista mixta (PII, secreto, confidencial, contenido normal) →
+solo el contenido normal pasa el filtro, cada bloqueo con el motivo correcto.
+
+Impacto: `jarvis/privacy/gateway.py` (`PII_PATTERNS`, `_HEALTH_KEYWORDS`,
+`find_pii()`, `find_health_context()`, `find_card_number()`, `_luhn_valid()`,
+`is_entry_allowed()` extendido). No toca `jarvis/llm/client.py` ni
+`jarvis/query/service.py` — ya llamaban `filter_context()`, que absorbe el
+cambio sin tocar sus call sites.
+
+---
+
 ## 2026-09-03 — IMPLEMENTADO: pregunta abierta exploratoria cuando no hay nada más que reportar
 
 Contexto: la entrada de abajo ("Reporte diario completo...", mismo día)

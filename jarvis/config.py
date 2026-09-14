@@ -28,9 +28,22 @@ except ImportError:
 JARVIS_DB_PATH = Path(
     os.getenv("JARVIS_DB_PATH", str(_BASE / "database" / "jarvis.db"))
 )
-JARVIS_VAULT_PATH = Path(
-    os.getenv("JARVIS_VAULT_PATH", str(_BASE / "vault"))
+# Fusión Jarvis + Bóveda (Cerebro/decisiones-implementacion.md, 2026-09-11):
+# dos raíces en vez de una sola JARVIS_VAULT_PATH. JARVIS_BOVEDA_PATH es el
+# árbol PARA (D:\Boveda) -- contenido del usuario, mismo contrato de
+# frontmatter que ya usa project/app/vault/. JARVIS_SYNTH_PATH es el
+# subárbol Boveda/Jarvis/ -- SOLO contenido que Jarvis sintetiza (fichas de
+# entidades/proyectos, resúmenes de auditoría 'create'), con el schema rico
+# (confidence/origin_trust/valid_from/valid_to/source_id). Derivado, no un
+# env var independiente, a propósito: evita que las dos raíces queden
+# apuntando a lugares no relacionados por un typo de configuración.
+# Default: sibling de D:\Boveda al lado del repo (_BASE.parent.parent es la
+# carpeta que contiene el repo, ej. D:\ -- no D: hardcodeado, portable a
+# donde sea que viva el repo real).
+JARVIS_BOVEDA_PATH = Path(
+    os.getenv("JARVIS_BOVEDA_PATH", str(_BASE.parent.parent / "Boveda"))
 )
+JARVIS_SYNTH_PATH = JARVIS_BOVEDA_PATH / "Jarvis"
 JARVIS_CHROMA_PATH = Path(
     os.getenv("JARVIS_CHROMA_PATH", str(_BASE / "database" / "chroma"))
 )
@@ -189,6 +202,19 @@ JARVIS_OPEN_QUESTION_ENABLED = os.getenv("JARVIS_OPEN_QUESTION_ENABLED", "1") ==
 # para reportar" (un día con actividad real nunca dispara esto); el cooldown
 # es una segunda capa para no preguntar dos días quietos seguidos.
 JARVIS_OPEN_QUESTION_COOLDOWN_DAYS = int(os.getenv("JARVIS_OPEN_QUESTION_COOLDOWN_DAYS", "2"))
+
+# ── Ingestión automática — Agenda de SGR (jarvis/ingestion/agenda.py, 0.3) ──
+# Sexto paso de run_consolidation() -- ver Cerebro/decisiones-implementacion.md
+# (2026-09-03, "0.3, Ingestión Automática — arrancando por Agenda de SGR").
+# HTTP localhost sin auth al propio backend de SGR (mismo patrón que
+# project/mybot/api_config.py / project/mybot/agenda_handlers.py, que ya
+# consumen esta misma API) -- ninguna credencial nueva.
+_SGR_PORT = os.getenv("SGR_PORT", "8765")
+JARVIS_SGR_API_BASE = os.getenv("API_BASE_URL", f"http://127.0.0.1:{_SGR_PORT}")
+# Ventana de días hacia atrás que cada corrida revisa (eventos ya terminados,
+# tareas completadas) -- candidato de la propuesta aprobada, mismo orden de
+# magnitud que JARVIS_AUDIT_RANDOM_COOLDOWN_DAYS.
+JARVIS_AGENDA_INGESTION_WINDOW_DAYS = int(os.getenv("JARVIS_AGENDA_INGESTION_WINDOW_DAYS", "7"))
 
 # ── Health del worker (jarvis/worker/heartbeat.py) ───────────────────────────
 # El worker escribe un heartbeat cada JARVIS_WORKER_POLL_INTERVAL segundos.

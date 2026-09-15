@@ -400,7 +400,9 @@ En lugar de instalar dependencias en el sistema host, usamos **Docker** (`projec
 
 Backend + bot + worker en Docker (`docker-compose.yml`), desplegados 2026-08-26. DB canónica en `~/project/database/`. El `.exe` en Windows mantiene una réplica local y sincroniza con `sgr-abrir.ps1` (pull al abrir, push opcional al cerrar). Ver [`project/SYNC-WINDOWS.md`](project/SYNC-WINDOWS.md).
 
-**Jarvis vive fuera de `project/`, en `~/jarvis` (hermano de `~/project`, mismo layout que el repo — ver CLAUDE.md).** El build context de `docker-compose.yml` es por eso el **root del repo** (`context: ..` desde `project/docker-compose.yml`, `dockerfile: project/Dockerfile`), no `project/` como antes de que Jarvis existiera — el `Dockerfile` copia `project/app`, `project/mybot` **y** `jarvis` en la misma imagen. Los tres servicios comparten `jarvis.db` + `vault/` + `database/chroma/` vía volumes (`JARVIS_DB_PATH`/`JARVIS_VAULT_PATH`/`JARVIS_CHROMA_PATH` fijados en el compose a rutas dentro de `/app/database` y `/app/vault`) — mismo patrón que ya usaba `app.db` entre backend y el resto.
+**Jarvis vive fuera de `project/`, en `~/jarvis` (hermano de `~/project`, mismo layout que el repo — ver CLAUDE.md).** El build context de `docker-compose.yml` es por eso el **root del repo** (`context: ..` desde `project/docker-compose.yml`, `dockerfile: project/Dockerfile`), no `project/` como antes de que Jarvis existiera — el `Dockerfile` copia `project/app`, `project/mybot` **y** `jarvis` en la misma imagen. Los tres servicios comparten `jarvis.db` + `database/chroma/` vía volumes (`JARVIS_DB_PATH`/`JARVIS_CHROMA_PATH`).
+
+**Desde 2026-09-15 (fusión Bóveda-Jarvis, ver `CLAUDE.md` y `Cerebro/decisiones-implementacion.md`):** ya no hay volumen local `./vault:/app/vault`. Los 3 servicios montan `/mnt/boveda:/app/boveda` (share SMB de `D:\Boveda` en Windows, montado por CIFS en el host — `project/scripts/setup-boveda-cifs-homelab.sh`), con `VAULT_ROOT`/`JARVIS_BOVEDA_PATH` apuntando ahí. `D:\Boveda` es la fuente de verdad real; `/mnt/boveda` **tiene que estar montado antes de** `docker-compose up` (Docker no monta CIFS solo, hace bind-mount de lo que ya exista en el host — si el mount está caído, el backend arranca contra una carpeta vacía). `project/app/vault/guard.py::ensure_vault_mounted()` falla fuerte en los 3 entrypoints si no encuentra el árbol PARA real, en vez de arrancar en silencio. Verificar mount: `mountpoint /mnt/boveda`; watchdog systemd si se cae: `systemctl status sgr-boveda-mount-watchdog.timer`.
 
 ### Conceptos clave
 
@@ -424,13 +426,18 @@ Diagnóstico: `docker run --rm sgr-app:latest python -c "import numpy"` → exit
 
 Los contenedores son volátiles; los datos viven en el host:
 
-* `~/project/database/` → SQLite `app.db` + `jarvis.db` + `chroma/` (ChromaDB)
-* `~/project/uploads/` → archivos subidos
-* `~/project/vault/` → notas Markdown de Jarvis (`RAW/`, `SEMANTIC/`, `DECISIONS/`, `PROJECTS/`, `PEOPLE/`)
+* `~/project/database/` → SQLite `app.db` + `jarvis.db` + `chroma/` (ChromaDB) — ambas son **índices**, la fuente de verdad de contenido está en `D:\Boveda` (ver más abajo).
+* `~/project/uploads/` → archivos subidos (legacy Bóveda; adjuntos nuevos van a `D:\Boveda\_adjuntos\`)
+* `/mnt/boveda` (montado por CIFS, no es un volumen Docker local) → `D:\Boveda` real, compartido desde Windows. `~/project/vault/` (notas Markdown locales de Jarvis, `RAW/`/`SEMANTIC/`/`DECISIONS/`/`PROJECTS/`/`PEOPLE/`) quedó **retirado** desde la fusión del 2026-09-15 — puede seguir existiendo en disco como resto viejo, pero ya no lo monta ningún servicio ni lo lee el código.
 
-Sobreviven reinicios y `docker compose up --build`.
+Sobreviven reinicios y `docker compose up --build`. `/mnt/boveda` sobrevive un reinicio del homelab solo si el mount CIFS se reconecta (watchdog systemd instalado, ver arriba) — si Windows tarda en levantar ICS tras un corte de luz, el mount puede tardar en volver.
 
 ### Wipe + reseed de `jarvis.db` con dataset de prueba (procedimiento, usado 2026-09-03)
+
+**Histórico — de antes de la fusión del 2026-09-15.** El `vault/` que este procedimiento wipea/
+reseedea es el que quedó retirado (ver "Persistencia" arriba); si hace falta un wipe de `jarvis.db`
+hoy, el contenido real vive en `D:\Boveda` vía `/mnt/boveda`, no acá — no ejecutar los pasos de
+`vault/RAW`/`vault/SEMANTIC`/etc. de abajo tal cual sin releer primero cómo cambió la arquitectura.
 
 Para reemplazar `jarvis.db`/`vault`/`chroma` reales por el dataset de prueba de
 `jarvis/cli/seed_test.py` sin perder los datos reales:

@@ -91,7 +91,20 @@ Modal Hábitos en `HabitosScreen`: `NuevoHabitoModal` (CTA TopBar `openHabitoMod
 
 ### Módulo Bóveda
 
-**Dominio:** árbol de `categorias` (`padre_id`) + `hojas` (`tipo`: texto | link | foto; `contenido`, `apuntes` HTML, geo, recordatorio, `icono`).
+**Desde 2026-09-15, `D:\Boveda` (archivos Markdown, estructura PARA) es la fuente de verdad —
+`categorias`/`hojas` en `app.db` son un índice reconstruible, sincronizado por `app/vault/sync.py`
+(lee/escribe frontmatter vía `app/vault/parser.py`/`markdown.py`, guard de arranque en
+`app/vault/guard.py`).** El contrato HTTP (`/categorias`, `/hojas`) no cambió — frontend y bot
+siguen igual. Detalle completo: `Cerebro/decisiones-implementacion.md` (2026-09-11) y
+`Cerebro/decisiones/` (Milestone 2). **`Boveda.md` describe el modelo viejo (pre-fusión) y está
+desactualizado en las partes que asumen `categorias`/`hojas` como fuente propia — no confiar en
+ese archivo para el modelo de datos actual.**
+
+**Dominio:** `categorias` (`padre_id`) refleja la jerarquía de carpetas de `D:\Boveda` (árbol PARA
++ dominios: Facultad, Carrera Profesional, Salud, Desarrollo Personal); `hojas` (`tipo`: texto |
+link | foto) refleja cada `.md` real, con columnas de vínculo (`vault_id`, `ruta`, `mtime`) además
+de `contenido`, `apuntes` HTML, geo, `icono` (estos 4 últimos opcionales en el frontmatter, no
+parte del contrato común — ver README de `D:\Boveda`).
 
 **Piezas clave:** `LeftPanel` (árbol + búsqueda), `NetworkGraph` (fuerza D3, datos desde store), `RightPanel` (detalle + TipTap), `CaptureModal` (autodetect `detectType.js`, Ctrl+Enter).
 
@@ -414,9 +427,15 @@ project/
 │   ├── main.py              # TODAS las rutas HTTP (Bóveda + Finanzas + Agenda + Hábitos)
 │   ├── config.py            # DEBUG, DB_PATH, límites
 │   ├── semantic.py          # RAG: ChromaDB + embeddings Ollama (index/delete/search hojas)
+│   ├── vault/               # Fusión Bóveda-Jarvis (2026-09-15) — D:\Boveda es la fuente real
+│   │   ├── guard.py         # ensure_vault_mounted() — falla fuerte si VAULT_ROOT no tiene el árbol PARA
+│   │   ├── parser.py        # Parseo de frontmatter YAML
+│   │   ├── sync.py          # Reconcilia D:\Boveda -> categorias/hojas en app.db
+│   │   ├── writer.py        # categorias/hojas -> escribe/mueve el .md real
+│   │   └── markdown.py      # Conversión HTML (TipTap) <-> Markdown limpio
 │   └── db/
 │       ├── database.py      # init_db, seeds (_seed_finanzas, _seed_agenda, _seed_habitos), migrations
-│       └── crud.py          # SQL Bóveda + Finanzas + Agenda + Hábitos
+│       └── crud.py          # SQL Bóveda (índice, ver app/vault/) + Finanzas + Agenda + Hábitos
 ├── frontend/src/
 │   ├── App.jsx              # Router + fetch inicial + modales
 │   ├── store/useStore.js    # Estado global (Bóveda + Finanzas + Agenda + Hábitos)

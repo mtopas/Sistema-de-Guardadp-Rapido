@@ -249,8 +249,16 @@ en Windows aunque el explorador de archivos la muestre igual.
 
 ### Arquitectura Jarvis (resumen)
 
+**Fusión con la Bóveda de SGR (2026-09-11, desplegada 2026-09-15)**: `D:\Boveda` (compartida por
+SMB/CIFS al homelab) es la fuente de verdad en archivos — `jarvis.db` y `app.db` pasan a ser
+índices reconstruibles, no la fuente. Separación por autoría: contenido del usuario va al árbol
+PARA de `D:\Boveda`; síntesis de Jarvis (fichas de entidades/proyectos) va a `Boveda/Jarvis/`.
+Detalle completo en `Cerebro/decisiones-implementacion.md` (entrada `2026-09-11`) y
+`Cerebro/decisiones/`. Esto invierte varias afirmaciones de `jarvis-spec.html` — leer esa entrada
+antes de tocar `jarvis/vault/`, `jarvis/db/`, o `project/app/vault/`.
+
 - Proceso Python separado (worker) hace polling a `jarvis.db`; sin Redis/Celery
-- DB Jarvis: `project/database/jarvis.db` (separada de `app.db` de SGR)
+- DB Jarvis: `project/database/jarvis.db` (índice reconstruible desde `D:\Boveda`, no la fuente)
 - Todo llamado LLM va via **LiteLLM** — nunca openai.* ni ollama.* directamente
 - Modelos via LiteLLM: GPT-5.4 mini (razonamiento externo) + gemma3:12b (extracción local — ganador del bake-off 2026-08-26 contra llama3.2:3b, ver `Cerebro/decisiones-implementacion.md`)
 - Embeddings: `nomic-embed-text` via Ollama

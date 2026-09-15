@@ -1,5 +1,15 @@
 # Bóveda — documentación técnica
 
+> ⚠️ **DESACTUALIZADO desde 2026-09-15.** Este documento describe el modelo pre-fusión, donde
+> `categorias`/`hojas` en `app.db` eran la fuente de verdad propia. Desde la fusión con `D:\Boveda`
+> (`Cerebro/decisiones-implementacion.md`, 2026-09-11), **`D:\Boveda` es la fuente real** —
+> `categorias`/`hojas` son un índice reconstruible (`project/app/vault/`). El contrato HTTP y el
+> comportamiento del frontend/bot descritos abajo siguen siendo válidos (no cambiaron); lo que ya
+> **no** es cierto es cualquier afirmación de que `categorias`/`hojas` son la fuente de datos
+> primaria, o que se puede mutar el modelo sin que se refleje en archivos reales. Ver
+> `project/README.md` (sección "Módulo Bóveda") para el resumen actualizado antes de asumir nada
+> de este archivo sobre el modelo de datos.
+
 Estado real del módulo Bóveda en SGR. Todo lo que está implementado y cómo funciona.
 Para roadmap, mejoras y features pendientes: **`Boveda-Roadmap.md`**.
 

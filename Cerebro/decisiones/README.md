@@ -31,3 +31,7 @@ Formato de cada nota: `## Decisión` / `## Por qué` / `## Alternativa descartad
 ### Preparación de infraestructura (checkpoint final, nada ejecutado todavía)
 
 - [2026-09-11-share-smb-boveda-homelab.md](2026-09-11-share-smb-boveda-homelab.md) — diseño y scripts del share SMB Windows↔homelab, con 2 riesgos abiertos para decidir antes de aplicar
+
+### Verificación post-deploy (2026-09-15)
+
+- [2026-09-15-agenda-authorship-ya-correcto.md](2026-09-15-agenda-authorship-ya-correcto.md) — `accept_proposal()` no seteaba `authorship` explícito para Agenda, pero el default de `capture_raw()` ya era el correcto; sin cambios de código

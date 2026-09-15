@@ -1,5 +1,103 @@
 # Estado Actual de Jarvis
-Última actualización: 2026-09-14
+Última actualización: 2026-09-15
+
+## Verificación real de la Ingestión de Agenda (0.3) post-fusión — sigue funcionando, sin cambios de código (2026-09-15)
+
+Tarea de verificación + hardening pedida explícitamente sobre algo ya desplegado (0.3, del
+2026-09-03/04), nunca re-probado desde que cambió tanto alrededor (fusión Jarvis+Bóveda,
+`authorship`, wipe de `jarvis.db`). **Conclusión: sigue funcionando de punta a punta, no hizo
+falta ningún fix de código.** Backup previo tomado en el homelab (`~/project/database/
+backup-pre-agenda-verify-20260915-070500/`, `jarvis.db`+`chroma`, contenido confirmado) antes de
+tocar nada real.
+
+**1. Wiring del sexto paso (`run_consolidation()`)**: confirmado por lectura de código que
+`jarvis.ingestion.agenda.run_agenda_ingestion()` sigue siendo el sexto paso, corre antes del
+séptimo (pregunta abierta) y `_nothing_to_report()` sigue mirando `summary["agenda_ingestion"]`
+correctamente — nada de esto se rompió con los pasos agregados después (auditoría, pregunta
+abierta, reporte diario). Confirmado además que el código real del homelab es **byte a byte
+idéntico** (sha256) al de este branch en los 5 archivos relevantes (`agenda.py`, `passive.py`,
+`writer.py`, `consolidation.py`, `memory/service.py`) — sin drift entre lo desplegado y el repo.
+
+**2. `authorship` en una entrada aceptada de Agenda — pregunta nueva del pedido, respondida sin
+tocar código**: `jarvis/captures/passive.py::accept_proposal()` llama `capture_raw()` **sin pasar
+`authorship`** para el caso `origin_source == "agenda_ingestion"` — usa el default `'user'` de
+`capture_raw()` (`jarvis/memory/service.py`), igual que cualquier otra captura explícita. Esto es
+lo correcto (mismo criterio que ya adelantaba el pedido): el contenido lo sintetiza una plantilla
+sin LLM a partir de un dato 100% del usuario (título/fecha de su propio evento), no es prosa
+interpretativa de Jarvis combinando fragmentos — `'jarvis_synthesis'` sigue siendo exclusivo de
+`audit/service.py::_apply_create()`, tal como quedó documentado en
+`Cerebro/decisiones/2026-09-11-jarvis-authorship-columna-nueva.md`. **No fue necesario ningún fix**
+— el código de 0.3 en `accept_proposal()` es anterior a que `authorship` existiera, pero al no
+pasar el parámetro cae en el default correcto por pura coincidencia de diseño (no por accidente:
+`capture_raw()` fue diseñado con `authorship='user'` como default seguro). Verificado también que
+`jarvis/vault/writer.py` rutea esa entrada a `00 - Sin categorizar/` con `origen: agenda` en el
+frontmatter (mapeo `_ORIGEN_DESDE_SOURCE["agenda"] = "agenda"`).
+
+**3. Prueba real de punta a punta contra el homelab real** (backend real, `jarvis.db` real vacío
+post-wipe, chat de Telegram real): forzada una corrida de `run_agenda_ingestion()` con la ventana
+ampliada a 90 días **solo para esta invocación** (parámetro de módulo pisado en el proceso, nunca
+persistido en `.env`/`docker-compose.yml` — la ventana real de producción sigue en 7 días) porque
+los únicos eventos reales que hay (16, exámenes de julio-agosto) caen fuera de la ventana default y
+no había actividad reciente. Resultado: **21 propuestas reales creadas sin errores**, las 21
+notificaciones de Telegram **llegaron de verdad** al chat real del usuario (confirmado por el
+usuario). Antes de esto hubo que pedirle al usuario que le mandara `/j` al bot — el wipe de
+`jarvis.db` del 11/09 había dejado `debug_chat_id` vacío (ni `JARVIS_TELEGRAM_CHAT_ID` ni policy
+guardada), así que **cualquier propuesta automática desde el wipe habría caído en silencio al
+canal `desktop`** en vez de avisar por Telegram — esto ya quedó resuelto en producción al recibir
+el `/j` real (queda una policy `debug_chat_id` nueva en `jarvis_policies`).
+
+Responder "No" a una propuesta por Telegram **sí rechazó de verdad** (`jarvis_capture_proposals`
+pasó a `REJECTED`, confirmado en DB) — pero la confirmación "Descartado." nunca le llegó al
+usuario: el contenedor `bot` tuvo una falla de DNS transitoria (`Temporary failure in name
+resolution` resolviendo `api.telegram.org`, ver traceback en `docker-compose logs bot`) justo al
+mandar la respuesta, ya resuelta sola minutos después (confirmado resolviendo el hostname de nuevo
+desde el contenedor). Las 3 respuestas siguientes del usuario ("Sí"/variantes) nunca se procesaron
+— ninguna quedó en `ACCEPTED`, las 20 propuestas restantes vencieron por timeout 30 min después sin
+que ninguna reacción quedara registrada; lo más probable es que el polling de Telegram también
+haya estado afectado por la misma falla de DNS y esos mensajes nunca llegaron a procesarse (no hay
+log de ellos en el contenedor `bot`). **No es un bug de la ingestión de Agenda ni de
+`passive.py`** — es una falla de red/DNS del contenedor, transitoria, fuera del alcance explícito
+de esta tarea (acotada a `agenda.py`/`passive.py`). Documentado como hallazgo, sin fix aplicado.
+
+**Dedup confirmado con datos reales**: una segunda corrida de `run_agenda_ingestion()` (misma
+ventana ampliada) sobre los mismos 21 eventos dio `proposed: 0` — ninguno se repropuso, ni los
+`EXPIRED` ni el `REJECTED`, confirmando que `_already_proposed()` dedupea contra
+`jarvis_capture_proposals` sin mirar status, tal como quedó documentado el 03/09. **Consecuencia
+real no discutida antes, hallazgo de esta sesión**: como el timeout de propuestas (`EXPIRED`)
+dedupea igual que un rechazo explícito, una propuesta de Agenda que el usuario simplemente no
+llegó a responder a tiempo **nunca se vuelve a proponer** — queda permanentemente descartada en
+silencio, igual que si hubiera dicho "no" a propósito. Puede ser el comportamiento correcto (mismo
+criterio conservador de "no floodear"), pero no es lo mismo que un rechazo deliberado y no está
+documentado como decisión consciente — queda anotado para revisar si el usuario lo considera un
+problema real.
+
+**No verificado con datos reales, sigue pendiente (no es un gap nuevo, es el mismo del 03/09)**:
+`_fetch_recent_completed_tasks()` contra tareas completadas reales — la Agenda real del usuario
+**no tiene ninguna tarea completada** en este momento (0 tareas en total, no solo fuera de
+ventana). Sin datos reales que forzar sin fabricarlos, este caso sigue solo probado con datos
+sintéticos (mismos 4 casos de borde del 03/09).
+
+**Camino de ACEPTAR con datos 100% reales de producción — no completado en esta sesión, a pedido
+explícito del usuario**: tras la falla de DNS, se le ofreció al usuario generar una propuesta
+fresca (tarea real marcada completada, o evento de prueba de 1 minuto) para probar
+`accept_proposal()` de punta a punta contra producción; eligió no forzarlo hoy. La lógica de
+`accept_proposal()`/`write_entry()` para el caso `agenda` quedó igual verificada por lectura de
+código (punto 2) y por la verificación en sandbox de Milestone 3 (`origen: agenda` ya probado ahí
+contra Ollama real, aunque no contra `jarvis.db` de producción) — pero el archivo `.md` real en
+`D:\Boveda\00 - Sin categorizar\` para una aceptación de Agenda de HOY, con el `jarvis.db` de
+producción actual, no se confirmó en esta sesión.
+
+**Backup y estado final**: `jarvis.db` real termina con 21 `jarvis_capture_proposals` de Agenda (20
+`EXPIRED` + 1 `REJECTED`, 0 `ACCEPTED`) y 1 `memory_entries` (de un `/j` de prueba del usuario, sin
+relación con Agenda — necesario para restablecer `debug_chat_id`). `integrity_check` OK. Backup
+pre-sesión intacto en `~/project/database/backup-pre-agenda-verify-20260915-070500/`. **No se tocó
+el share SMB, `docker-compose.yml`, ni se reinició ningún contenedor** — todo lo de arriba corrió
+contra los 3 contenedores ya corriendo (`RestartCount` sin cambios).
+
+Ver `Cerebro/decisiones/2026-09-15-agenda-authorship-ya-correcto.md` para el detalle de por qué no
+hizo falta tocar `passive.py`.
+
+---
 
 ## Riesgos del share SMB resueltos antes del deploy (2026-09-14)
 

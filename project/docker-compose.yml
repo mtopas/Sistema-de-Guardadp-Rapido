@@ -16,9 +16,17 @@
 # bot y worker usan network_mode: host (DNS/Internet vía ICS de Ubuntu). La API local del
 # bot y del worker es 127.0.0.1:8765 (puerto publicado del backend).
 #
-# jarvis.db, vault/ y database/chroma/ se acceden directo (SQLite + archivos) desde los
-# tres servicios (backend sirve /jarvis/*, bot maneja /j /jq /jdebug*, worker procesa el
-# inbox) -- mismo patrón que ya usa project/database/app.db entre backend y el resto.
+# jarvis.db y database/chroma/ se acceden directo desde los tres servicios (backend sirve
+# /jarvis/*, bot maneja /j /jq /jdebug*, worker procesa el inbox) -- mismo patrón que ya usa
+# project/database/app.db entre backend y el resto.
+#
+# /mnt/boveda (host) -- D:\Boveda compartido por SMB desde Windows, montado por CIFS en el
+# homelab (project/scripts/setup-boveda-cifs-homelab.sh) -- TIENE que estar montado ANTES de
+# "docker-compose up": Docker no monta CIFS solo, hace bind-mount de lo que ya exista en el
+# host. Si el mount está caído, /mnt/boveda es una carpeta vacía local y el backend arranca
+# contra un vault vacío -- por eso existe app/vault/guard.py::ensure_vault_mounted(), que
+# falla fuerte en los 3 entrypoints si no encuentra el árbol PARA real (Cerebro/decisiones/
+# 2026-09-11-share-smb-boveda-homelab.md, riesgo 1).
 
 services:
   backend:
@@ -38,15 +46,19 @@ services:
       # Fijo: ${OLLAMA_BASE_URL} en compose lee el .env del host y reinyecta localhost.
       OLLAMA_BASE_URL: http://192.168.137.1:11434
       JARVIS_DB_PATH: /app/database/jarvis.db
-      JARVIS_VAULT_PATH: /app/vault
       JARVIS_CHROMA_PATH: /app/database/chroma
+      VAULT_ROOT: /app/boveda
+      JARVIS_BOVEDA_PATH: /app/boveda
+      # JARVIS_SYNTH_PATH se deriva solo (JARVIS_BOVEDA_PATH/Jarvis) -- no es env var
+      # independiente, a propósito (jarvis/config.py). JARVIS_VAULT_PATH retirado: la
+      # fusión Bóveda-Jarvis (2026-09-11) reemplazó la raíz única por estas dos.
     dns:
       - 8.8.8.8
       - 1.1.1.1
     volumes:
       - ./database:/app/database
       - ./uploads:/app/uploads
-      - ./vault:/app/vault
+      - /mnt/boveda:/app/boveda
     restart: unless-stopped
 
   bot:
@@ -63,13 +75,14 @@ services:
       OLLAMA_TIMEOUT: "90"
       OLLAMA_WARMUP_TIMEOUT: "180"
       JARVIS_DB_PATH: /app/database/jarvis.db
-      JARVIS_VAULT_PATH: /app/vault
       JARVIS_CHROMA_PATH: /app/database/chroma
+      VAULT_ROOT: /app/boveda
+      JARVIS_BOVEDA_PATH: /app/boveda
     volumes:
       # Código del bot en vivo (sin rebuild por cada cambio en mybot/)
       - ./mybot:/app/mybot:ro
       - ./database:/app/database
-      - ./vault:/app/vault
+      - /mnt/boveda:/app/boveda
     depends_on:
       - backend
     restart: unless-stopped
@@ -86,11 +99,12 @@ services:
       OLLAMA_BASE_URL: http://192.168.137.1:11434
       OLLAMA_TIMEOUT: "90"
       JARVIS_DB_PATH: /app/database/jarvis.db
-      JARVIS_VAULT_PATH: /app/vault
       JARVIS_CHROMA_PATH: /app/database/chroma
+      VAULT_ROOT: /app/boveda
+      JARVIS_BOVEDA_PATH: /app/boveda
     volumes:
       - ./database:/app/database
-      - ./vault:/app/vault
+      - /mnt/boveda:/app/boveda
     depends_on:
       - backend
     restart: unless-stopped

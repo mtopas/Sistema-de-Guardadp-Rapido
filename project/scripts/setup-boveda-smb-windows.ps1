@@ -34,7 +34,7 @@ try {
     Write-Host "Creando usuario local '$MountUser' para el mount del homelab..."
     $securePassword = Read-Host "Contrasena para $MountUser (se pide una vez, no se guarda en este script)" -AsSecureString
     New-LocalUser -Name $MountUser -Password $securePassword -PasswordNeverExpires -UserMayNotChangePassword:$false `
-        -Description "Cuenta dedicada para el mount SMB del homelab a D:\Boveda -- no usar para login interactivo"
+        -Description "Cuenta dedicada para mount SMB del homelab"
     Write-Host "Usuario '$MountUser' creado."
 }
 

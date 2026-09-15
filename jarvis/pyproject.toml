@@ -31,6 +31,13 @@ dependencies = [
     # de SGR) porque jarvis se instala editable ahí, pero no estaba declarada
     # como dependencia propia del paquete jarvis.
     "requests>=2.28.0",
+    # jarvis/cli/backfill_vault_content.py parsea el frontmatter YAML de las
+    # notas reales de D:\Boveda (mismo formato que project/app/vault/parser.py,
+    # que ya declara PyYAML en project/requirements.txt) -- ya estaba
+    # instalado transitivamente en project/venv (chromadb/litellm lo arrastran)
+    # pero el script lo usa directo y no estaba declarado como dependencia
+    # propia del paquete jarvis (mismo criterio que requests arriba).
+    "pyyaml>=6.0",
 ]
 
 [tool.setuptools.packages.find]

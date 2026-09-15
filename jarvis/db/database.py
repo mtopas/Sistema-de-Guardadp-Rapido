@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 # Jarvis crea de entrada es su propio subárbol dentro de D:\Boveda; el árbol
 # PARA en sí (00 - Sin categorizar/, etc.) ya existe de antes, gestionado
 # del lado de la Bóveda (project/app/vault/), Jarvis no lo recrea.
-_SYNTH_SUBDIRS = ["Entidades", "Proyectos", "Sintesis"]
+_SYNTH_SUBDIRS = ["Entidades", "Proyectos", "Sintesis", "Agenda"]
 
 _MEMORY_ENTRIES_CREATE = re.search(
     r"CREATE TABLE IF NOT EXISTS memory_entries \(.*?\n\);", SCHEMA, re.DOTALL

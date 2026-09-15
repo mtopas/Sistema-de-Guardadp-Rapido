@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from jarvis.config import JARVIS_BOVEDA_PATH, JARVIS_SYNTH_PATH
+from jarvis.config import JARVIS_BOVEDA_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,23 @@ _ORIGEN_DESDE_SOURCE = {
 }
 
 _INBOX_REL = "00 - Sin categorizar"
+
+# Síntesis de patrones de Agenda (2026-09-15, ver Cerebro/decisiones-
+# implementacion.md) -- dos excepciones de destino, una por rama de
+# write_entry(). Contenido literal de Agenda (authorship='user',
+# source='agenda') NO es "sin categorizar" -- tiene categoría propia, al
+# mismo nivel que 00-05 y Jarvis/. _PARA_DEST_OVERRIDE mapea source ->
+# subcarpeta bajo JARVIS_BOVEDA_PATH; cualquier source sin entrada acá sigue
+# cayendo en _INBOX_REL (default de .get(), sin cambio de comportamiento
+# para telegram/desktop/migration).
+_PARA_DEST_OVERRIDE = {"agenda": "Agenda"}
+
+# Patrones sintetizados (authorship='jarvis_synthesis', source_id con
+# prefijo "agenda:patron:") van a Jarvis/Agenda/, no a Jarvis/Sintesis/
+# (fichas de entidad/proyecto de auditoría) -- mismo criterio de excepción
+# por prefijo, esta vez sobre source_id en vez de source (ver
+# jarvis/ingestion/agenda_patterns.py para el namespace de source_id).
+_SYNTH_DEST_OVERRIDE_PREFIXES = {"agenda:patron:": "Jarvis/Agenda"}
 
 
 def _slug(text: str) -> str:
@@ -141,11 +158,17 @@ def write_entry(entry: dict, title: str | None = None) -> str:
     filename = f"{entry_id[:8]}-{_slug(display_title)}.md"
 
     if is_synthesis:
-        vault_dir = JARVIS_SYNTH_PATH / "Sintesis"
-        rel_to_root = f"Jarvis/Sintesis/{filename}"
+        source_id = entry.get("source_id") or ""
+        dest_rel = next(
+            (v for p, v in _SYNTH_DEST_OVERRIDE_PREFIXES.items() if source_id.startswith(p)),
+            "Jarvis/Sintesis",
+        )
+        vault_dir = JARVIS_BOVEDA_PATH / dest_rel
+        rel_to_root = f"{dest_rel}/{filename}"
     else:
-        vault_dir = JARVIS_BOVEDA_PATH / _INBOX_REL
-        rel_to_root = f"{_INBOX_REL}/{filename}"
+        dest_rel = _PARA_DEST_OVERRIDE.get(entry.get("source") or "", _INBOX_REL)
+        vault_dir = JARVIS_BOVEDA_PATH / dest_rel
+        rel_to_root = f"{dest_rel}/{filename}"
 
     vault_dir.mkdir(parents=True, exist_ok=True)
     abs_path = vault_dir / filename

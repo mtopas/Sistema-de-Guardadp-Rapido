@@ -75,6 +75,14 @@ jarvis_capture_proposals (ver jarvis/db/schema.py) y se dedupea también
 contra esa tabla, cualquiera sea el status ya resuelto (incluye REJECTED) —
 mismo criterio que ya usa jarvis.audit.service._already_exists() (dedupea
 sin mirar status).
+
+Extensión (2026-09-15, ver Cerebro/decisiones-implementacion.md, "PROPUESTA...
+síntesis de patrones de Agenda"): eventos con se_repite=1 dejan de proponerse
+acá ocurrencia por ocurrencia (`_fetch_recent_events()`) -- lo recurrente lo
+cubre exclusivamente `jarvis/ingestion/agenda_patterns.py`, que sintetiza el
+patrón una sola vez a partir de `regla_repeticion` en vez de repetir la misma
+información cada semana. Este módulo queda exclusivo para eventos puntuales
+(se_repite=0) y tareas completadas (sin cambio, nunca tuvieron recurrencia).
 """
 import logging
 from datetime import date, datetime, timedelta, timezone
@@ -161,7 +169,18 @@ def _fetch_recent_events(local_now: datetime) -> list[dict]:
     )
     resp.raise_for_status()
     eventos = resp.json()
-    return [e for e in eventos if _event_already_ended(e, local_now)]
+    # Extensión de síntesis de patrones (ver Cerebro/decisiones-implementacion.md,
+    # 2026-09-15, sección 1): un evento con se_repite=1 ya NO se propone
+    # ocurrencia por ocurrencia acá -- proponer cada ocurrencia pasada de
+    # "MatDis lunes 9-11hs" sería la misma información repetida cada semana
+    # una vez que el patrón (jarvis/ingestion/agenda_patterns.py) ya la
+    # sintetiza una sola vez. 0.3 literal queda exclusivo para eventos
+    # puntuales y tareas completadas (las tareas no tienen recurrencia, ver
+    # jarvis_tareas -- no requieren cambio).
+    return [
+        e for e in eventos
+        if not e.get("se_repite") and _event_already_ended(e, local_now)
+    ]
 
 
 def _event_already_ended(evt: dict, local_now: datetime) -> bool:

@@ -11,6 +11,319 @@ Formato de cada entrada:
 
 ---
 
+## 2026-09-15 — PROPUESTA (sin implementar, pendiente de aprobación): síntesis de patrones de Agenda, distinta del contenido literal
+
+Contexto: 0.3 (`jarvis/ingestion/agenda.py`, ver entrada 2026-09-03 y verificación
+2026-09-15 más abajo) propone eventos/tareas evento por evento, casi textual. El
+usuario quiere además una capa de **síntesis de patrones** — horarios recurrentes,
+hábitos de vida inferidos de la Agenda (ej. "cursa MatDis los lunes 9-11hs",
+"entrena 3 días/semana", "va a la oficina cada 15 días") — con autoría Jarvis,
+mismo criterio que `Boveda/Jarvis/Entidades/`. Mismo formato que la propuesta de
+auditoría proactiva (31/08) y la de la fusión Bóveda-Jarvis (11/09): documento de
+diseño, sin código. Destinos físicos ya resueltos por el pedido, no se reabren:
+`Boveda/Jarvis/Agenda/` para patrones sintetizados, `D:\Boveda\Agenda\` (carpeta
+propia, al mismo nivel que `00-05` y `Jarvis/` — nunca más en
+`00 - Sin categorizar`) para contenido literal.
+
+Investigación previa contra el código real (no contra la spec): `jarvis/ingestion/agenda.py`
+completo, `project/app/db/crud.py` (schema real de `agenda_eventos`/`agenda_tareas`,
+`_expand_recurring()`, la ruta `GET /agenda/eventos` en `project/app/main.py`),
+`jarvis/vault/writer.py` (`write_entry()` post-fusión), `jarvis/audit/service.py`
+(`_apply_create()`, `_detect_entity_gaps()`, `_link_new_entry_to_targets()`),
+`jarvis/captures/passive.py` (`accept_proposal()`), `jarvis/worker/consolidation.py`
+completo, `jarvis/db/schema.py` (ambas tablas de propuestas), `Cerebro/estado-actual.md`
+(entradas 03/09 y 15/09 sobre Agenda) y `Cerebro/decisiones-implementacion.md`
+(entrada 2026-09-11, patrón de autoría/frontmatter).
+
+### 0) La pregunta que cambiaba todo el diseño: qué es `regla_repeticion`
+
+Confirmado leyendo `project/app/db/crud.py::_expand_recurring()` (líneas ~2091-2151)
+y la ruta `GET /agenda/eventos` (`project/app/main.py` ~1494-1507): **no es RRULE
+de iCal, es un JSON custom de SGR** — `{"frecuencia": "diario"|"semanal"|"mensual",
+"dias": [0..6], "hasta": "YYYY-MM-DD"}`. Consecuencia directa sobre el diseño:
+
+- **Para un evento con `se_repite=1`, el patrón YA está en el dato estructurado**
+  (`regla_repeticion` + hora de `fecha_inicio`/`fecha_fin` de una sola ocurrencia)
+  — no hace falta que ningún LLM lo infiera mirando ocurrencias sueltas. Es una
+  transformación directa: `{"frecuencia":"semanal","dias":[0]}` + horario de
+  `fecha_inicio` → "cursa MatDis los lunes 9-11hs". Cero llamadas a LLM.
+- **`regla_repeticion` no modela "cada N días"** (solo diario/semanal/mensual con
+  días fijos) — el ejemplo del usuario ("voy a la oficina cada 15 días") en la
+  práctica **no es una regla de repetición real** en el sistema; es un patrón que
+  solo se ve agrupando en el historial varios eventos con `se_repite=0` que
+  comparten título (y opcionalmente descripción/calendario). Para este caso sí
+  hace falta que un LLM mire el cluster de ocurrencias y proponga el patrón —
+  mismo mecanismo anti-alucinación que `_CREATE_PROMPT` de auditoría (sintetiza
+  solo con lo que ya está en los datos, nunca inventa; responde "SIN_DATOS" si no
+  alcanza).
+- `agenda_tareas` **no tiene ningún concepto de recurrencia** (confirmado en su
+  schema completo, `crud.py` ~2331-2447) — toda tarea es, por definición, puntual
+  a efectos de este diseño; nunca entra al camino de síntesis de patrones.
+
+Segundo hallazgo real que también cambia el diseño: la ruta `GET /agenda/eventos`
+**rellena `desde`/`hasta` con un default de ~1 mes atrás a ~2 meses adelante si el
+llamador no los manda** (`main.py` líneas 1499-1506) — nunca devuelve "todo el
+historial" por default. Para la síntesis de patrones basada en clustering (el caso
+"cada 15 días") hace falta pasar explícitamente un `desde` bien temprano (ej.
+`"2000-01-01"`, piso seguro para cualquier dato real de una agenda personal) y
+`hasta=hoy`. Para el caso de regla-directa, en cambio, **no hace falta historial
+en absoluto** — una sola ocurrencia (incluso una ventana default corta) ya trae
+`regla_repeticion` completa, porque es metadata estática del evento, no algo
+derivado de mirar ocurrencias pasadas.
+
+Riesgo real de la ventana amplia (verificado en `_expand_recurring()`): con
+`desde`/`hasta` ambos presentes, la ruta expande TODAS las ocurrencias de TODO
+evento con `se_repite=1` dentro del rango — un evento diario expandido sobre 20+
+años de historial generaría miles de filas en memoria. Mitigación de diseño:
+antes de clusterizar por título, descartar toda fila con `se_repite=1` (esas ya
+las cubre el camino de regla-directa, sin necesidad de historial) — el pool de
+clustering queda acotado a eventos puntuales reales, que es el volumen real bajo
+que ya tiene el usuario (16 eventos históricos totales, verificación 15/09).
+
+### 1) Relación con 0.3 (evento-por-evento): conviven, sin duplicar
+
+**Confirmado con el usuario** (no asumido): las ocurrencias de un evento con
+`se_repite=1` dejan de proponerse una por una en 0.3 — hoy `_fetch_recent_events()`
+trataría cada ocurrencia semanal de "MatDis lunes 9-11hs" como un candidato nuevo
+(source_key incluye `fecha_inicio`, ver docstring de `agenda.py` punto 3), lo cual
+sería literalmente la misma información repetida cada semana en Telegram una vez
+que además existe el patrón sintetizado una sola vez. Cambio concreto en
+`_fetch_recent_events()`: agregar `and not e.get("se_repite")` al filtro de
+`_event_already_ended()` (o un filtro separado antes), de modo que 0.3 queda
+exclusivamente para:
+- eventos puntuales (`se_repite=0`) — sin cambio de comportamiento, y
+- tareas completadas — sin cambio (no tienen recurrencia).
+
+Los eventos recurrentes (`se_repite=1`) pasan a cubrirse EXCLUSIVAMENTE por el
+camino de patrón (síntesis de regla directa, sección 0). No hay duplicación:
+contenido literal cubre lo puntual, patrón cubre lo recurrente estructurado, y el
+cluster inferido (LLM) cubre lo recurrente-mal-modelado. Los eventos puntuales que
+alimentan un cluster (`se_repite=0`, ej. cada visita suelta "Oficina") **siguen
+pasando por 0.3 normalmente** además de eventualmente alimentar un patrón — esto
+no es la misma duplicación que se acaba de cortar arriba: son dos granularidades
+distintas (la visita puntual del 3 de marzo vs. la observación agregada "cada ~15
+días"), no el mismo hecho repetido.
+
+### 2) Excepción de destino para contenido literal de Agenda
+
+`jarvis/vault/writer.py::write_entry()` decide destino hoy por un único eje
+binario (`entry["authorship"]`): `'user'` → árbol PARA, siempre a
+`_INBOX_REL = "00 - Sin categorizar"` (línea 147); `'jarvis_synthesis'` → siempre
+`Jarvis/Sintesis/` (línea 144). Contenido literal de Agenda (`source='agenda'`,
+`authorship='user'`, ya confirmado en la verificación 15/09) hoy cae en el primer
+caso — sin distinción, a la inbox genérica.
+
+**Diseño de la excepción** (generaliza el punto de decisión sin tocar el resto de
+la función): reemplazar el `else: vault_dir = ... _INBOX_REL` fijo por un pequeño
+mapa de excepciones por `source`, análogo al `_ORIGEN_DESDE_SOURCE` que ya existe
+en el mismo archivo para el frontmatter:
+
+```python
+_PARA_DEST_OVERRIDE = {"agenda": "Agenda"}  # source -> subcarpeta bajo JARVIS_BOVEDA_PATH
+
+...
+else:
+    dest_rel = _PARA_DEST_OVERRIDE.get(entry.get("source") or "", _INBOX_REL)
+    vault_dir = JARVIS_BOVEDA_PATH / dest_rel
+    rel_to_root = f"{dest_rel}/{filename}"
+```
+
+Mismo cambio en la rama de reescritura (`existing_vault_path` ya resuelto — no
+necesita el mapa, reusa el path ya asignado, sin cambios ahí). Efecto: contenido
+`source='agenda'` (autoría `user`) aterriza en `D:\Boveda\Agenda\`, carpeta nueva
+al mismo nivel que `00-05`/`Jarvis/` (se crea sola por `mkdir(parents=True,
+exist_ok=True)`, ya presente en la función); todo lo demás (`telegram`, `desktop`,
+`migration`) sigue exactamente igual, cayendo en `_INBOX_REL` por default del
+`.get()`. Cero cambio de comportamiento para lo no-Agenda.
+
+**Migración de contenido ya escrito**: la única entrada real aceptada de Agenda
+hasta ahora (verificación 15/09, un `/j` de prueba sin relación real de contenido)
+no aplica — no hay backlog real de `.md` de Agenda en `00 - Sin categorizar` para
+mover. Si llegara a haber alguno antes de implementar esto, es un `move_entry_file()`
+puntual, no parte de este diseño.
+
+### 3) Segunda excepción de destino: patrones sintetizados van a `Jarvis/Agenda/`, no a `Jarvis/Sintesis/`
+
+Mismo problema, un nivel más adentro: hoy TODO `authorship='jarvis_synthesis'` cae
+en la única subcarpeta hardcodeada `Jarvis/Sintesis/` (línea 144-145). El pedido
+es que los patrones de Agenda tengan su propia carpeta `Boveda/Jarvis/Agenda/`,
+separada de las fichas de entidades. Mismo mecanismo de excepción que el punto 2,
+esta vez sobre la rama `is_synthesis`, distinguiendo por prefijo de `source_id`
+(ver sección 4 — los patrones usan el namespace `agenda:patron:...`, nunca
+`audit:...`):
+
+```python
+_SYNTH_DEST_OVERRIDE_PREFIXES = {"agenda:patron:": "Jarvis/Agenda"}
+
+...
+if is_synthesis:
+    dest_rel = next(
+        (v for p, v in _SYNTH_DEST_OVERRIDE_PREFIXES.items()
+         if (entry.get("source_id") or "").startswith(p)),
+        "Jarvis/Sintesis",
+    )
+    vault_dir = JARVIS_BOVEDA_PATH / dest_rel
+    rel_to_root = f"{dest_rel}/{filename}"
+```
+
+No requiere ninguna columna nueva ni migración de schema — `source_id` ya es texto
+libre sin `CHECK` (se usa hoy para claves de dedup arbitrarias como
+`"agenda:evento:{id}:{fecha_inicio}"` o `"audit:{proposal_id}"`), así que
+namespacear un prefijo nuevo es gratis. El resto de `write_entry()` (frontmatter
+rico, wikilinks, reescritura por `vault_path` existente) no cambia.
+
+### 4) Gating: reusar `jarvis_capture_proposals`, no `jarvis_audit_proposals` — y por qué
+
+Evalué las dos tablas existentes contra lo que la síntesis de patrones necesita
+producir (una propuesta PENDING → si se acepta, UNA fila nueva en `memory_entries`
+con `authorship='jarvis_synthesis'`) y contra su FUENTE de datos real:
+
+- **`jarvis_audit_proposals` (acción `create`, la usada hoy para fichas de
+  entidad) NO encaja sin romper su contrato**: `_apply_create()`/`_detect_entity_gaps()`
+  (líneas 585-626, 1024-1045) toman `target_entry_ids` como una lista de
+  `memory_entries.id` YA EXISTENTES — `_link_new_entry_to_targets()` (línea 1167)
+  después los usa para copiar vínculos de entidades/proyectos desde esas entradas
+  a la nueva. Si `target_entry_ids` fueran claves de Agenda en vez de ids reales
+  de `memory_entries`, esa función buscaría vínculos de entradas que no existen y
+  no fallaría — silenciosamente no vincularía nada, un bug sutil, no un error
+  visible. Más grave todavía: el POOL de datos de origen para `create` es
+  `get_entries_for_entity()` — SOLO entradas que YA son `memory_entries` (es
+  decir, propuestas de Agenda que el usuario ya ACEPTÓ). La verificación real del
+  15/09 mostró 20 `EXPIRED` + 1 `REJECTED` + 0 `ACCEPTED` sobre 21 propuestas de
+  Agenda — si la síntesis de patrones dependiera de `memory_entries` como fuente,
+  hoy tendría **cero datos de dónde sintetizar**, aunque la Agenda real del
+  usuario tenga eventos de sobra. La síntesis TIENE que leer la Agenda real vía
+  la misma API HTTP de 0.3 (mismo blast radius, nunca `app.db` directo), no
+  memory_entries ya aceptados.
+- **`jarvis_capture_proposals` SÍ encaja, con una extensión mínima**: ya es
+  "propuesta PENDING que nace de una fuente externa (no de una conversación) y,
+  al aceptarse, produce exactamente una `memory_entries` nueva" — exactamente la
+  forma de una propuesta de patrón. Extensión necesaria, sin tocar ningún
+  `CHECK`: reusar `origin_source='agenda_ingestion'` (valor ya permitido, sin
+  migración) con un **namespace nuevo de `origin_source_key`**:
+  `"agenda:patron:evento:{evento_id}:{hash_contenido}"` (regla directa) /
+  `"agenda:patron:cluster:{slug_titulo}:{hash_contenido}"` (cluster inferido) —
+  paralelo al `"agenda:evento:..."`/`"agenda:tarea:..."` que ya usa 0.3, y el
+  `hash_contenido` (sha256 corto del texto del patrón) es lo que permite que un
+  patrón cambiado genere una clave nueva y no quede bloqueado por el dedup
+  existente de `_already_proposed()` (que dedupea sin mirar status — correcto
+  para "no repreguntar lo mismo", incorrecto si lo aplicáramos a un patrón que
+  cambió de verdad).
+- Cambio puntual en `accept_proposal()` (`jarvis/captures/passive.py`
+  líneas 293-337): dentro de la rama ya existente
+  `if proposal.get("origin_source") == "agenda_ingestion"`, agregar
+  `authorship = "jarvis_synthesis" if source_key.startswith("agenda:patron:") else "user"`
+  y pasar `authorship=authorship` a `capture_raw()` (hoy no lo pasa, cae en el
+  default `'user'` — correcto para 0.3 literal, incorrecto para patrones). Ningún
+  otro cambio a esa función. `capture_raw()` ya acepta `authorship` como
+  parámetro (línea 25 de `jarvis/memory/service.py`) — no requiere tocar esa
+  firma.
+- `type` de la `memory_entries` resultante: reusar `SEMANTIC` (el enum es
+  `RAW|SEMANTIC|DECISION|PROJECT|PEOPLE`, cerrado por `CHECK` — agregar un quinto
+  valor tipo `PATTERN` sería otra migración de la misma clase que ya se señaló
+  costosa en el addendum del 11/09). Un patrón de horario/hábito es
+  conceptualmente un hecho generalizado sobre el usuario — encaja en `SEMANTIC`
+  sin forzar nada, y evita la migración.
+
+Resultado: **cero tablas nuevas, cero columnas nuevas, cero `CHECK` tocados** —
+toda la extensión vive en namespacing de campos de texto libre ya existentes
+(`origin_source_key`, `source_id`) más una rama condicional de 2 líneas en
+`accept_proposal()`.
+
+### 5) Actualización de un patrón que cambió: reusar consolidación diaria, no construir un mecanismo nuevo
+
+El caso del usuario ("deja de entrenar los martes") es, en la forma en que ya lo
+resuelve el sistema, un `same_fact` de consolidación: dos `memory_entries`
+`SEMANTIC` `authorship='jarvis_synthesis'` vigentes (`valid_to IS NULL`) sobre el
+mismo hábito, contenido reformulado con el horario nuevo. `consolidation.py` YA
+compara por embeddings todo par vigente del mismo `(type, user_id)` con coseno >
+`JARVIS_CONSOLIDATION_SIMILARITY_THRESHOLD` (**0.70 hoy, no 0.92** — recalibrado
+el 26/08-31/08 con datos reales, ver esa entrada: un cambio real de domicilio dio
+0.748, un cambio de proveedor de hosting dio 0.839, ambos por encima de 0.70 y
+correctamente resueltos como `same_fact`, no `contradiction`). No voy a construir
+un campo de "supersede" nuevo para esto — sería una abstracción de más sobre un
+mecanismo que ya existe, ya fue recalibrado con evidencia real para exactamente
+esta clase de caso ("mismo hecho, cambió con el tiempo, reformulado"), y ya dispara
+`_propose_archive()` → propuesta gateada de `archive_superseded` a `04 - Archivo/`
+sin intervención nueva.
+
+Lo que SÍ dejo anotado como incertidumbre real, no una garantía: nunca se probó
+`_resolve_pair()` contra un par de frases sobre horarios/hábitos (números de
+días/horas en vez de nombres propios) — no hay evidencia de que el coseno de
+`nomic-embed-text` se comporte igual con ese tipo de contenido. Si en producción
+un patrón viejo y uno nuevo conviven más de un día sin que consolidación los
+detecte, la señal de que hace falta un mecanismo explícito de supersesión (un
+campo `supersedes_entry_id` en `jarvis_capture_proposals`, ALTER TABLE simple sin
+tocar ningún `CHECK`) es justamente esa — no lo construyo preventivo. Latencia
+aceptada mientras tanto: hasta 1 día (el patrón viejo y el nuevo conviven como
+"vigentes" hasta la próxima corrida diaria de consolidación), explícita, no
+oculta.
+
+### 6) Disparador y cadencia
+
+Mismo patrón que el resto del job (`should_run()`, sin thread propio) pero con un
+gate propio de 7 días DENTRO de la corrida diaria de `run_consolidation()` —
+mismo criterio textual del usuario ("un patrón de horario no cambia todos los
+días"). Nuevo `policy_type` en `jarvis_policies` (ej.
+`"agenda_pattern_synthesis_last_run"`), mismo mecanismo exacto que
+`_last_run_at()`/`_POLICY_LAST_RUN` pero con intervalo de 7 días en vez de 24h.
+Se agrega como séptimo/octavo paso de `run_consolidation()` (antes del chequeo de
+`quiet_day`, mismo motivo que la ingestión de Agenda: si propuso algo, no es un
+día "sin nada" — hay que sumarlo a `_nothing_to_report()`), gateado internamente:
+la función corre igual todos los días pero devuelve de inmediato si no pasaron 7
+días desde la última corrida real.
+
+Dentro de esa corrida semanal, dos sub-pasos:
+1. **Regla directa** (sin LLM): `GET /agenda/eventos` con la ventana default
+   (no hace falta historial, sección 0) filtrado a `se_repite=1`; por cada evento,
+   generar el texto de patrón por plantilla (sin LLM, mismo criterio que
+   `_event_content_and_question()` de 0.3 hoy) y proponer si el hash de contenido
+   cambió respecto al último propuesto (namespace `agenda:patron:evento:...`).
+2. **Cluster inferido** (con LLM, acotado): `GET /agenda/eventos` con
+   `desde="2000-01-01"` (o una constante de config equivalente) y `hasta=hoy`,
+   descartar `se_repite=1` (ya cubiertos arriba), agrupar por título normalizado
+   (+ opcionalmente lugar/calendario) vía código puro, quedarse con clusters de
+   **3 o más ocurrencias** (confirmado con el usuario), tope de
+   **3 clusters por corrida** enviados al LLM (mismo orden de magnitud que
+   `_ENTITY_CREATE_LIMIT=3`, mismo criterio de costo acotado), mismo prompt
+   anti-alucinación que `_CREATE_PROMPT` pero para intervalos temporales en vez
+   de biografías, con "SIN_DATOS" si no hay patrón real reconocible en las fechas.
+
+### 7) Costo real, no gratis
+
+- Regla directa: 1 llamada HTTP extra por semana (ventana angosta, sin expandir
+  significativamente), **0 llamadas a LLM** — es una transformación determinística
+  de datos ya estructurados.
+- Cluster inferido: 1 llamada HTTP con rango completo por semana (no por día —
+  evita repetir el escaneo completo del historial 7 veces por cada vez que
+  importa), clustering en Python puro (gratis), **máximo 3 llamadas a `call_reason`
+  por semana** (tope explícito) sin importar cuántos años de historial tenga la
+  Agenda — el costo NO escala con el volumen histórico, solo con la cantidad
+  (acotada) de clusters que superan el umbral en una corrida dada. Con el dataset
+  real actual (16 eventos históricos totales, verificación 15/09) el costo real
+  hoy es efectivamente cero.
+- Sin cambio de costo en la corrida diaria existente (`same_fact` de
+  consolidación ya corre sobre todo `memory_entries` vigente sin importar su
+  origen — los patrones aceptados simplemente se suman al pool que ya se
+  compara).
+
+### Preguntas hechas al usuario en esta sesión (resueltas)
+
+1. **¿Las ocurrencias de eventos recurrentes (`se_repite=1`) dejan de proponerse
+   una por una en 0.3 una vez que existe el patrón sintetizado, o se mantienen
+   ambas?** → **Recortar**: dejan de proponerse individualmente: 0.3 literal
+   queda para eventos puntuales y tareas; lo recurrente lo cubre exclusivamente
+   el patrón (ver sección 1).
+2. **¿Umbral mínimo de ocurrencias para que un cluster inferido (caso "cada 15
+   días") dispare síntesis por LLM?** → **3 ocurrencias** (ver sección 6).
+
+Estado: diseño propuesto, **sin implementar**, pendiente de aprobación del
+usuario. Ningún archivo de código tocado en esta sesión — solo lectura
+(`agenda.py`, `crud.py`, `writer.py`, `audit/service.py`, `passive.py`,
+`consolidation.py`, `schema.py`, `main.py`) y este documento.
+
+---
+
 ## 2026-09-11 — PROPUESTA APROBADA (diseño cerrado, sin implementar): fusión de Jarvis y Bóveda de SGR sobre `D:\Boveda` como fuente de verdad en archivos
 
 Contexto: el usuario quiere un "segundo cerebro" para toda su vida (facultad, carrera, salud,

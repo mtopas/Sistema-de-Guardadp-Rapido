@@ -47,6 +47,100 @@ necesita backup para esto — el script es read-only sobre los archivos, confirm
 
 ---
 
+## IMPLEMENTADO: síntesis de patrones de Agenda (2026-09-15)
+
+Implementa la propuesta aprobada el mismo día (ver entrada "Sesión de diseño..."
+más abajo y `Cerebro/decisiones-implementacion.md`, entrada
+"2026-09-15 — PROPUESTA...") — extiende 0.3 con una capa de síntesis de
+patrones (horarios recurrentes, hábitos inferidos), separada del contenido
+literal, con autoría Jarvis. Implementada tal cual el documento de diseño
+(mismo namespace de `origin_source_key`, mismas dos excepciones de destino en
+`write_entry()`, mismo mecanismo de gating vía `jarvis_capture_proposals`,
+sin mecanismo de supersesión nuevo).
+
+**Archivo nuevo**: `jarvis/ingestion/agenda_patterns.py` (dos caminos: regla
+directa sin LLM para `se_repite=1`, cluster inferido con LLM acotado para
+eventos puntuales que comparten título, ver docstring del módulo para el
+detalle completo). **Tocados**: `jarvis/ingestion/agenda.py` (filtro
+`se_repite` en `_fetch_recent_events()`), `jarvis/captures/passive.py`
+(`accept_proposal()` setea `authorship='jarvis_synthesis'` cuando
+`origin_source_key` empieza con `"agenda:patron:"`), `jarvis/vault/writer.py`
+(`_PARA_DEST_OVERRIDE` y `_SYNTH_DEST_OVERRIDE_PREFIXES`, dos excepciones de
+destino sin tocar el resto de `write_entry()`), `jarvis/worker/consolidation.py`
+(séptimo paso, gate semanal propio, sección nueva en el reporte diario,
+`_nothing_to_report()` actualizado), `jarvis/db/database.py` (`Agenda` agregado
+a `_SYNTH_SUBDIRS`), `jarvis/config.py` (4 variables nuevas, todas con default
+documentado). Sin cambios de frontend ni de schema SQL (cero tablas/columnas/
+`CHECK` nuevos, tal como preveía el diseño — namespacing de campos de texto
+libre ya existentes, `origin_source_key`/`source_id`).
+
+**Verificado con Ollama real contra un sandbox aislado** (nunca `jarvis.db`/
+`app.db`/`D:\Boveda` reales — backend de SGR real levantado contra un
+`app.db`/vault scratch nuevos en `%TEMP%`, puerto 8766, `JARVIS_DB_PATH`/
+`JARVIS_BOVEDA_PATH`/`JARVIS_CHROMA_PATH` apuntando al mismo scratch; **sin
+backup previo porque ninguna DB real fue tocada en ningún momento de esta
+sesión** — mismo criterio que toda verificación anterior contra sandbox, el
+backup aplica cuando se opera contra datos reales, no acá):
+
+- **Evento recurrente real** (`se_repite=1`, "MatDis" martes 09:00-11:00,
+  `regla_repeticion={"frecuencia":"semanal","dias":[1]}`): la ruta 0.3
+  (`run_agenda_ingestion()`) dejó de proponerlo -- `events_scanned=1` (solo el
+  evento de control puntual), confirmando que las ocurrencias recurrentes ya
+  NO se proponen una por una. `run_agenda_pattern_synthesis()` sí lo detectó y
+  sintetizó **sin LLM** el texto correcto: "MatDis: todos los martes
+  09:00-11:00hs" (día de la semana correctamente derivado de `dias:[1]`).
+- **Cluster de eventos puntuales** (3 eventos "Oficina", `se_repite=0`,
+  espaciados 15 días exactos en julio-agosto): detectado como cluster de 3+
+  ocurrencias, sintetizado por LLM real (Ollama, `gemma3:12b` vía fallback
+  local -- sin `OPENAI_API_KEY` en el sandbox) con el texto **"aproximadamente
+  cada 15 días"**, coincidiendo con el espaciado real de los datos sembrados
+  (ninguna alucinación: ni el nombre ni la cadencia fueron inventados).
+- **Destinos verificados en disco**: la captura literal aceptada
+  (`authorship='user'`, `source='agenda'`) escribió en `Agenda/*.md` (no en
+  `00 - Sin categorizar/`, que quedó vacía); ambos patrones aceptados
+  (`authorship='jarvis_synthesis'`) escribieron en `Jarvis/Agenda/*.md` (no en
+  `Jarvis/Sintesis/`, que también quedó vacía) con el frontmatter rico
+  completo (`confidence`/`origin_trust`/`valid_from`/`valid_to`/`source_id`).
+  `accept_proposal()` resolvió `authorship` correctamente en los 3 casos
+  (literal → `user`, ambos patrones → `jarvis_synthesis`) mirando el prefijo
+  de `origin_source_key`, exactamente como diseñado.
+- **Pipeline completo probado de punta a punta**: `process_entry()` real
+  (clasificación + extracción de entidades + embedding, todo contra Ollama
+  real) corrido sobre las 3 entradas aceptadas -- sin errores; el patrón
+  "Oficina" incluso ganó automáticamente su sección `## Vinculado a`
+  (wikilink a la entidad "Oficina" ya extraída), infraestructura reusada sin
+  cambios.
+- **Dedup/idempotencia**: segunda corrida de `run_agenda_ingestion()` dio
+  `proposed=0` (el evento de control ya estaba dedupeado); segunda corrida de
+  `run_agenda_pattern_synthesis()` el mismo día dio `ran=False` (gate semanal
+  propio, distinto del gate de 24h del resto de `run_consolidation()`,
+  funcionando).
+- `python -m py_compile` limpio en los 7 archivos tocados/nuevos, más un
+  `import` directo de los 6 módulos tocados (además del compile) para
+  descartar errores de import-time no detectables por `py_compile` solo.
+
+**No implementado a propósito, tal como especificaba el documento de diseño**:
+ningún campo `supersedes_entry_id` ni mecanismo de supersesión nuevo -- la
+actualización de un patrón que cambió queda a cargo de la consolidación diaria
+existente (`same_fact`, recalibrada a 0.70). Sigue sin probarse contra
+contenido real de horarios/hábitos en esta sesión (no se armó el escenario de
+"un patrón cambia de una corrida a la siguiente") -- la incertidumbre
+documentada en la propuesta sigue abierta, no se cerró acá a propósito (no era
+parte del alcance pedido).
+
+**Observación fuera de alcance, no tocada**: `project/app/vault/sync.py`
+(`_ROOTS_ESTRUCTURALES`) sincroniza genéricamente CUALQUIER carpeta bajo
+`VAULT_ROOT` -- confirmado que `Agenda/` se indexa sola como categoría no
+estructural (`estructural=0`) sin necesitar ningún cambio ahí. No verificado
+si el frontend (grafo de Bóveda) renderiza bien una categoría de primer nivel
+nueva fuera de `00-05` -- no era parte del pedido, queda para quien lo note en
+uso real.
+
+**No desplegado al homelab en esta sesión** -- paso aparte, a pedido explícito
+(mismo criterio que toda sesión de implementación anterior).
+
+---
+
 ## Sesión de diseño: síntesis de patrones de Agenda — propuesta sin implementar (2026-09-15)
 
 Pedido explícito de sesión de diseño (no código), mismo formato que la propuesta

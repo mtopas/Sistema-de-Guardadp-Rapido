@@ -24,7 +24,7 @@ bien casos claros de "same_fact", mientras que el externo sí; el volumen es
 bajo (~20 entradas/día) así que el costo es despreciable. Si ChromaDB no está
 disponible, se salta el paso 1 y sigue con el paso 2.
 
-Extendido con cuatro pasos más en la misma corrida (sin thread ni scheduling
+Extendido con cinco pasos más en la misma corrida (sin thread ni scheduling
 propio, mismo gating de should_run()): backfill de tags del catálogo (pieza
 D, `_backfill_catalog_tags()`), auditoría proactiva de memoria por bloques
 (`jarvis.audit.service.run_audit()`, huecos/contradicciones/duplicados/
@@ -32,9 +32,12 @@ conexiones/tags mal puestos, con propuestas por Telegram — ver
 Cerebro/decisiones-implementacion.md, 2026-08-31), ingestión automática desde
 la Agenda de SGR (`jarvis.ingestion.agenda.run_agenda_ingestion()`, 0.3 —
 lee eventos/tareas ya pasados vía la API HTTP local y propone capturas, ver
-Cerebro/decisiones-implementacion.md, 2026-09-03), y pregunta abierta
-exploratoria (`jarvis.audit.service.maybe_ask_open_question()`, dispara SOLO
-cuando `_nothing_to_report()` da True — ver Cerebro/decisiones-
+Cerebro/decisiones-implementacion.md, 2026-09-03), síntesis de patrones de
+Agenda (`jarvis.ingestion.agenda_patterns.run_agenda_pattern_synthesis()`,
+2026-09-15 — corre todos los días pero se auto-gatea internamente a una vez
+por semana, ver Cerebro/decisiones-implementacion.md, 2026-09-15), y pregunta
+abierta exploratoria (`jarvis.audit.service.maybe_ask_open_question()`,
+dispara SOLO cuando `_nothing_to_report()` da True — ver Cerebro/decisiones-
 implementacion.md, 2026-09-03).
 """
 import json
@@ -44,6 +47,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from jarvis.config import (
+    JARVIS_AGENDA_PATTERN_CLUSTER_MIN_OCCURRENCES,
     JARVIS_CONSOLIDATION_SIMILARITY_THRESHOLD,
     JARVIS_CONSOLIDATION_STALE_CONFIDENCE,
     JARVIS_CONSOLIDATION_STALE_DAYS,
@@ -94,6 +98,11 @@ def run_consolidation() -> dict:
         # Ingestión automática desde Agenda de SGR (0.3, mismo día) -- sexto
         # paso, ver jarvis/ingestion/agenda.py.
         "agenda_ingestion": None,
+        # Síntesis de patrones de Agenda (2026-09-15) -- séptimo paso, ver
+        # jarvis/ingestion/agenda_patterns.py. Corre todos los días pero se
+        # auto-gatea internamente a una vez por semana -- summary["ran"]
+        # queda en False (sin tocar el resto) las corridas que no le tocaba.
+        "agenda_patterns": None,
         # Pregunta abierta exploratoria (mismo día, 2026-09-03) -- quiet_day
         # queda registrado siempre (True/False), open_question solo se llena
         # si quiet_day fue True.
@@ -149,6 +158,22 @@ def run_consolidation() -> dict:
             summary["agenda_ingestion"] = run_agenda_ingestion(now)
         except Exception as exc:
             logger.exception("[consolidation] Ingestión de Agenda falló")
+            summary["errors"].append(str(exc))
+
+        # Síntesis de patrones de Agenda -- séptimo paso (2026-09-15, ver
+        # Cerebro/decisiones-implementacion.md, "PROPUESTA... síntesis de
+        # patrones de Agenda"). Corre TODOS los días como el resto del job,
+        # pero internamente se auto-gatea a una vez por semana
+        # (should_run_pattern_synthesis(), gate propio distinto del de 24h de
+        # arriba) -- "un patrón de horario no cambia todos los días". Mismo
+        # motivo que la ingestión literal para correr antes de quiet_day: si
+        # propuso algo, no es un día "sin nada".
+        try:
+            from jarvis.ingestion.agenda_patterns import run_agenda_pattern_synthesis
+
+            summary["agenda_patterns"] = run_agenda_pattern_synthesis(now)
+        except Exception as exc:
+            logger.exception("[consolidation] Síntesis de patrones de Agenda falló")
             summary["errors"].append(str(exc))
 
         # Pregunta abierta exploratoria -- séptimo paso, dispara SOLO si esta
@@ -600,10 +625,11 @@ def _backfill_catalog_tags(user_id: str = JARVIS_DEFAULT_USER) -> list[dict]:
 
 
 def _nothing_to_report(summary: dict) -> bool:
-    """True si esta corrida no tuvo NADA de las 5 categorías del reporte
+    """True si esta corrida no tuvo NADA de las 6 categorías del reporte
     diario (pairwise/stale/backfill de tags/hallazgos de auditoría/ingestión
-    de Agenda) -- gate para disparar la pregunta abierta exploratoria (ver
-    Cerebro/decisiones-implementacion.md, 2026-09-03).
+    de Agenda/síntesis de patrones de Agenda) -- gate para disparar la
+    pregunta abierta exploratoria (ver Cerebro/decisiones-implementacion.md,
+    2026-09-03).
 
     "Hallazgos de auditoría" se generaliza acá a
     summary["audit"]["proposed"] == 0 en vez de mirar solo
@@ -613,8 +639,11 @@ def _nothing_to_report(summary: dict) -> bool:
     ALGO ese día por CUALQUIER camino (incluido un hueco tipo A con 2+
     menciones), no es un día "sin nada" -- la pregunta abierta no debe
     competir por atención con una propuesta real ya generada. Mismo criterio
-    para la ingestión de Agenda (0.3, mismo día): si propuso algo, tampoco
-    es un día "sin nada".
+    para la ingestión de Agenda (0.3, mismo día) y para la síntesis de
+    patrones (2026-09-15, corre como mucho una vez por semana -- las
+    corridas en las que no le toca ni siquiera aportan a esta cuenta,
+    summary["agenda_patterns"]["ran"] queda en False y los contadores en 0):
+    si propusieron algo, tampoco es un día "sin nada".
     """
     if summary.get("pairwise_detail") or summary.get("stale_detail") or summary.get("tagged_detail"):
         return False
@@ -623,6 +652,9 @@ def _nothing_to_report(summary: dict) -> bool:
         return False
     agenda = summary.get("agenda_ingestion")
     if agenda and agenda.get("proposed", 0) > 0:
+        return False
+    patterns = summary.get("agenda_patterns")
+    if patterns and (patterns.get("rule_based_proposed", 0) > 0 or patterns.get("clusters_proposed", 0) > 0):
         return False
     return True
 
@@ -693,6 +725,8 @@ def _build_report_sections(summary: dict, entries: list[dict]) -> list[str]:
 
     sections.append(_section_agenda_ingestion(summary.get("agenda_ingestion")))
 
+    sections.append(_section_agenda_patterns(summary.get("agenda_patterns")))
+
     sections.append(_section_open_question(summary.get("quiet_day", False), summary.get("open_question")))
 
     if summary.get("errors"):
@@ -756,6 +790,31 @@ def _section_agenda_ingestion(agenda: dict | None) -> str:
     header = (
         f"🗓️ Ingestión de Agenda ({agenda.get('events_scanned', 0)} eventos, "
         f"{agenda.get('tasks_scanned', 0)} tareas completadas revisadas):"
+    )
+    if not proposed:
+        return f"{header} nada nuevo para proponer esta corrida."
+    lines = [header]
+    for d in proposed:
+        lines.append(f"  • {_short(d['content'])}")
+    return "\n".join(lines)
+
+
+def _section_agenda_patterns(patterns: dict | None) -> str:
+    """Sección "Síntesis de patrones de Agenda" del reporte diario (2026-09-15,
+    ver jarvis/ingestion/agenda_patterns.py) -- mismo criterio que el resto
+    del reporte: decir explícitamente qué pasó, nunca en silencio, incluido
+    el caso normal de "esta semana no le tocaba correr" (gate propio de 7
+    días, distinto del de 24h del resto del job).
+    """
+    if patterns is None:
+        return "🔁 Síntesis de patrones de Agenda: no corrió esta vez (ver errores abajo)."
+    if not patterns.get("ran"):
+        return "🔁 Síntesis de patrones de Agenda: no le tocaba esta corrida (gate semanal)."
+    proposed = patterns.get("proposed_detail") or []
+    header = (
+        f"🔁 Síntesis de patrones de Agenda "
+        f"({patterns.get('rule_based_scanned', 0)} eventos recurrentes, "
+        f"{patterns.get('clusters_scanned', 0)} clusters de {JARVIS_AGENDA_PATTERN_CLUSTER_MIN_OCCURRENCES}+ ocurrencias revisados):"
     )
     if not proposed:
         return f"{header} nada nuevo para proponer esta corrida."

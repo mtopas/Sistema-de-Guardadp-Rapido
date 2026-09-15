@@ -315,14 +315,27 @@ def accept_proposal(proposal_id: str, extra_text: str | None = None) -> str | No
     # (origin_source_key) en vez de "passive:{proposal_id}" -- así una
     # entrada ya aceptada también cuenta para el dedup de
     # jarvis/ingestion/agenda.py (chequea memory_entries.source_id).
+    #
+    # authorship (2026-09-15, síntesis de patrones de Agenda -- ver
+    # Cerebro/decisiones-implementacion.md): origin_source_key con prefijo
+    # "agenda:patron:" (jarvis/ingestion/agenda_patterns.py) es prosa/
+    # transformación que SINTETIZÓ Jarvis, no contenido literal que el
+    # usuario tipeó en su Agenda -- mismo criterio que
+    # jarvis/audit/service.py::_apply_create(), 'jarvis_synthesis' rutea a
+    # Boveda/Jarvis/ en vez del árbol PARA (jarvis/vault/writer.py). El resto
+    # de origin_source_key bajo "agenda_ingestion" (namespace "agenda:evento:.../
+    # agenda:tarea:...", contenido literal de 0.3) sigue en 'user', default de
+    # capture_raw() -- sin cambio de comportamiento para ese caso.
     if proposal.get("origin_source") == "agenda_ingestion":
         source = "agenda"
         origin_trust = "user.authenticated"
         source_id = proposal.get("origin_source_key") or f"passive:{proposal_id}"
+        authorship = "jarvis_synthesis" if source_id.startswith("agenda:patron:") else "user"
     else:
         source = proposal["channel"]
         origin_trust = "telegram.user" if proposal["channel"] == "telegram" else "user.authenticated"
         source_id = f"passive:{proposal_id}"
+        authorship = "user"
 
     entry_id = capture_raw(
         content=content,
@@ -332,6 +345,7 @@ def accept_proposal(proposal_id: str, extra_text: str | None = None) -> str | No
         origin_trust=origin_trust,
         user_id=proposal["user_id"],
         created_by="jarvis_proposal_accepted",
+        authorship=authorship,
     )
     _resolve_proposal(proposal_id, "ACCEPTED", entry_id)
     return entry_id

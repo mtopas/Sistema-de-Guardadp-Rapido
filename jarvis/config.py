@@ -216,6 +216,40 @@ JARVIS_SGR_API_BASE = os.getenv("API_BASE_URL", f"http://127.0.0.1:{_SGR_PORT}")
 # magnitud que JARVIS_AUDIT_RANDOM_COOLDOWN_DAYS.
 JARVIS_AGENDA_INGESTION_WINDOW_DAYS = int(os.getenv("JARVIS_AGENDA_INGESTION_WINDOW_DAYS", "7"))
 
+# ── Síntesis de patrones de Agenda (jarvis/ingestion/agenda_patterns.py) ────
+# Extensión de 0.3 -- ver Cerebro/decisiones-implementacion.md (2026-09-15,
+# "PROPUESTA... síntesis de patrones de Agenda"). Cadencia propia (semanal,
+# no diaria como el resto de run_consolidation()): "un patrón de horario no
+# cambia todos los días" (criterio del usuario en la propuesta aprobada).
+JARVIS_AGENDA_PATTERN_SYNTH_INTERVAL_DAYS = int(
+    os.getenv("JARVIS_AGENDA_PATTERN_SYNTH_INTERVAL_DAYS", "7")
+)
+# Piso de fecha para el escaneo de historial completo que necesita el
+# clustering por título (caso "cada 15 días", no modelado como regla de
+# repetición real -- ver sección 0 de la propuesta). GET /agenda/eventos
+# rellena desde/hasta con un default de ~1 mes atrás/~2 adelante si no se
+# pasan explícitos (confirmado en project/app/main.py) -- nunca "todo el
+# historial" por sí solo. "2000-01-01" es un piso seguro para cualquier dato
+# real de una agenda personal, sin tener que conocer la fecha real de la
+# primera fila.
+JARVIS_AGENDA_PATTERN_HISTORY_START = os.getenv(
+    "JARVIS_AGENDA_PATTERN_HISTORY_START", "2000-01-01"
+)
+# Ocurrencias mínimas del mismo título (eventos puntuales, se_repite=0) antes
+# de que un cluster se le mande al LLM para proponer patrón -- confirmado con
+# el usuario en la sesión de diseño (2026-09-15): 3, evita proponer patrón
+# sobre una coincidencia de 2 eventos con el mismo nombre.
+JARVIS_AGENDA_PATTERN_CLUSTER_MIN_OCCURRENCES = int(
+    os.getenv("JARVIS_AGENDA_PATTERN_CLUSTER_MIN_OCCURRENCES", "3")
+)
+# Tope de llamadas a call_reason() por corrida para el camino de clustering
+# -- mismo orden de magnitud que _ENTITY_CREATE_LIMIT de auditoría (jarvis/
+# audit/service.py). El costo NO escala con el volumen histórico gracias a
+# este tope, solo con la cantidad (acotada) de clusters nuevos por corrida.
+JARVIS_AGENDA_PATTERN_CLUSTER_LLM_LIMIT = int(
+    os.getenv("JARVIS_AGENDA_PATTERN_CLUSTER_LLM_LIMIT", "3")
+)
+
 # ── Health del worker (jarvis/worker/heartbeat.py) ───────────────────────────
 # El worker escribe un heartbeat cada JARVIS_WORKER_POLL_INTERVAL segundos.
 # worker_alive = True si el último heartbeat es más reciente que

@@ -35,3 +35,4 @@ Formato de cada nota: `## Decisión` / `## Por qué` / `## Alternativa descartad
 ### Verificación post-deploy (2026-09-15)
 
 - [2026-09-15-agenda-authorship-ya-correcto.md](2026-09-15-agenda-authorship-ya-correcto.md) — `accept_proposal()` no seteaba `authorship` explícito para Agenda, pero el default de `capture_raw()` ya era el correcto; sin cambios de código
+- [2026-09-15-backfill-boveda-a-memoria-jarvis.md](2026-09-15-backfill-boveda-a-memoria-jarvis.md) — `jarvis/cli/backfill_vault_content.py`: ingesta a `memory_entries` de las 71 notas ya existentes en `D:\Boveda` (id reusado del frontmatter, alcance 00-04 excluyendo Basura/Jarvis, pipeline de clasificación real, `origin_trust='user.authenticated'`, idempotente, sin costo de budget); verificado en scratch, no corrido contra el homelab real

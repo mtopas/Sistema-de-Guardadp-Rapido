@@ -10,18 +10,15 @@ Ninguno de estos ítems está implementado. Se registran acá para no perderlos 
 la conversación que armó/desplegó `D:\Boveda`. Promover a `decisiones-implementacion.md` cuando
 se retome cada uno.
 
-1. **Jarvis no ingiere el contenido ya existente de `D:\Boveda` en su propia memoria.**
-   La fusión (Milestone 3) solo conectó el camino de **escritura** hacia adelante (contenido nuevo
-   del usuario → árbol PARA; síntesis de Jarvis → `Boveda/Jarvis/`). Las 65 notas ya migradas
-   (vault de Obsidian + hojas de SGR) **nunca pasaron por el pipeline de captura de Jarvis** —
-   no hay `memory_entries` ni embeddings de Jarvis para ese contenido. Confirmado en vivo
-   (2026-09-15): preguntarle a Jarvis por Telegram sobre contenido real de la Bóveda no funciona
-   vía la memoria propia de Jarvis. Lo que sí funciona (sin confirmar del todo, a revisar):
-   `_gather_boveda()` en `mybot/assistant.py` usa el RAG propio de SGR (`emb.search()` sobre
-   `hojas`, `app/semantic.py`), que sí debería tener el contenido real porque `hojas` ahora refleja
-   `D:\Boveda`. Pendiente: decidir si hace falta un backfill real de Jarvis sobre el contenido
-   existente, o si alcanza con que las preguntas sobre Bóveda siempre ruteen al RAG de SGR y no al
-   de Jarvis (son dos sistemas de memoria distintos, cada uno con su propio índice).
+1. ~~**Jarvis no ingiere el contenido ya existente de `D:\Boveda` en su propia memoria.**~~
+   **Implementado y verificado en scratch, 2026-09-15** — `jarvis/cli/backfill_vault_content.py`,
+   ver `Cerebro/estado-actual.md` (entrada del mismo día) y
+   `Cerebro/decisiones/2026-09-15-backfill-boveda-a-memoria-jarvis.md`. Falta solo correrlo contra
+   el homelab real (paso aparte, explícito). La pregunta que quedó abierta ("¿alcanza con que las
+   preguntas sobre Bóveda ruteen al RAG de SGR en vez de al de Jarvis?") sigue sin resolver — ahora
+   ambos caminos tienen contenido real, pero no se decidió si `mybot/assistant.py::_gather_boveda()`
+   (RAG de SGR) y el RAG propio de Jarvis (`jarvis/retriever/`) deberían unificarse, mantenerse
+   separados a propósito, o preferir uno sobre el otro según el tipo de pregunta.
 2. **Triage automático del Inbox** — el worker sugiriendo por Telegram dónde archivar lo que queda
    en `00 - Sin categorizar/`. Se diseñó y se aprobó en la conversación original, nunca entró en el
    alcance de ningún milestone implementado.

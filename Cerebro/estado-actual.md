@@ -1,6 +1,88 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-15
 
+## IMPLEMENTADO (verificado en scratch, no corrido contra el homelab): backfill del contenido ya existente de `D:\Boveda` a `memory_entries` (2026-09-15)
+
+Cierra el ítem 1 de `Cerebro/PROXIMAMENTE.md` ("Pendiente real tras el deploy de la fusión
+Bóveda-Jarvis"): las 71 notas que ya vivían en `D:\Boveda` (57 del vault viejo de Obsidian + 8
+hojas reales de SGR + 6 manuales — recontadas hoy, más que el "65+" original) nunca habían pasado
+por el pipeline de captura de Jarvis — confirmado en vivo que `memory_entries` seguía en 0 filas
+pese a la fusión ya desplegada.
+
+**Script nuevo**: `jarvis/cli/backfill_vault_content.py`. Distinto de `jarvis/cli/migrate_boveda.py`
+(migra filas de `app.db` y CREA archivos nuevos): acá el contenido YA ES un archivo real en
+`D:\Boveda` — el script nunca escribe, mueve ni renombra esos archivos, solo crea filas de índice
+(`memory_entries` + entidades/tags/proyectos + embeddings) que apuntan al archivo real vía
+`vault_path`. Reusa el `id` del frontmatter de cada nota como `memory_entries.id` (trazabilidad
+real archivo↔fila) y pasa cada nota por el mismo pipeline de clasificación/extracción que una
+captura nueva (`call_classify()`/`extract_entities()`/`link_entities_for_entry()`/
+`link_tags_for_entry()`/`link_project_for_entry()`, todo con el modelo LOCAL vía LiteLLM/Ollama —
+sin costo de `JARVIS_DAILY_BUDGET_USD`), salvo `write_entry()` (el `.md` ya existe). Alcance:
+`00 - Sin categorizar`/`01 - Proyectos`/`02 - Areas`/`03 - Recursos`/`04 - Archivo` — excluye
+`05 - Basura` (candidatos a borrar, no memoria) y `Boveda/Jarvis/` (salida propia de Jarvis).
+`source='migration'`, `authorship='user'`, `origin_trust='user.authenticated'`. Idempotente por
+`id` ya existente en `memory_entries` (no por `content_hash`). Detalle completo de las 7 decisiones
+de diseño en `Cerebro/decisiones/2026-09-15-backfill-boveda-a-memoria-jarvis.md`.
+
+**Verificado con datos y modelos reales, nunca contra el homelab ni contra `D:\Boveda` real**:
+copia de scratch de las 71 notas reales (`D:\Boveda` original sin tocar, confirmado por mtime al
+terminar) + `jarvis.db`/`chroma` de scratch, Ollama real (`gemma3:12b` + `nomic-embed-text`).
+`--dry-run` primero (71 candidatas, no creó `jarvis.db`). Corrida real `--limit 5` seguida de la
+corrida completa: 66 ingeridas + 5 reconocidas como ya existentes (0 duplicados, confirma
+idempotencia real, no solo diseñada) → 71 `memory_entries` totales (48 en `03 - Recursos`, 14 en
+`00 - Sin categorizar`, 9 en `04 - Archivo`), 65 entidades y 3 proyectos creados/vinculados desde
+cero, 45 tags en el catálogo, 0 `vault_path`/`embedded_at` nulos. Confirmado por mtime que los 71
+archivos de la Bóveda de scratch no cambiaron en ningún momento de la corrida (que llevó más de una
+hora de wall-clock, ~20-40s/nota sin GPU) — lo único nuevo en disco fue
+`Boveda/Jarvis/Entidades/`+`Proyectos/` (síntesis, no el árbol del usuario). **Pregunta real a
+Jarvis contra el scratch** (`jarvis.query.service.query()`, RAG completo) — "¿Qué apuntes tengo
+sobre el libro El Alquimista?" — recuperó como primera fuente el `id` real del frontmatter de esa
+nota y respondió con datos correctos y reales del archivo (autor, fecha de finalización, puntaje,
+sin apuntes tomados): confirma que Jarvis ahora sí encuentra contexto de contenido migrado, que
+antes de este backfill no podía ver.
+
+**No corrido contra el homelab real** — paso aparte, explícito, a pedido de la tarea. Antes de
+correrlo ahí: backup de `jarvis.db`/`chroma` reales (mismo patrón de siempre). `D:\Boveda` en sí no
+necesita backup para esto — el script es read-only sobre los archivos, confirmado con mtime.
+
+---
+
+## Sesión de diseño: síntesis de patrones de Agenda — propuesta sin implementar (2026-09-15)
+
+Pedido explícito de sesión de diseño (no código), mismo formato que la propuesta
+de auditoría proactiva (31/08) y la fusión Bóveda-Jarvis (11/09): extender 0.3
+(que hoy solo propone eventos/tareas literal, evento por evento) con una capa de
+**síntesis de patrones** (horarios recurrentes, hábitos inferidos de la Agenda,
+ej. "cursa MatDis los lunes 9-11hs", "entrena 3 días/semana") con autoría Jarvis.
+Documento completo en `Cerebro/decisiones-implementacion.md`, entrada
+"2026-09-15 — PROPUESTA (sin implementar...)".
+
+**Hallazgo central que definió el diseño**: `agenda_eventos.regla_repeticion` es
+un JSON custom de SGR (`{"frecuencia","dias","hasta"}`, no RRULE) — para un
+evento con `se_repite=1` el patrón YA está en el dato estructurado, sintetizarlo
+es una transformación directa sin LLM. Solo el caso NO modelado como repetición
+real (ej. "voy a la oficina cada 15 días", inferido agrupando eventos sueltos por
+título) necesita que un LLM mire el cluster y proponga el patrón, mismo criterio
+anti-alucinación que `_CREATE_PROMPT` de auditoría.
+
+**Decisiones de la propuesta** (detalle completo en decisiones-implementacion.md):
+0.3 literal deja de proponer ocurrencias de eventos recurrentes una por una
+(confirmado con el usuario) — queda exclusivo para eventos puntuales y tareas;
+dos excepciones de destino nuevas en `write_entry()` (`D:\Boveda\Agenda\` para
+contenido literal, `Boveda/Jarvis/Agenda/` para patrones), ambas sin tocar ningún
+`CHECK` de schema; gating reusa `jarvis_capture_proposals` (no
+`jarvis_audit_proposals` — su `target_entry_ids` depende de `memory_entries` ya
+aceptados, y hoy son casi todos `EXPIRED`/`REJECTED`, fuente de datos insuficiente)
+namespaceando `origin_source_key` bajo `agenda:patron:...`; actualización de un
+patrón que cambió reusa la consolidación diaria existente (`same_fact`,
+recalibrada a umbral 0.70 el 26/08-31/08) en vez de un mecanismo nuevo de
+supersesión; cadencia semanal propia (no diaria) dentro de `run_consolidation()`.
+
+**Sin implementar** — pendiente de aprobación explícita antes de tocar código,
+mismo criterio que toda propuesta de diseño anterior.
+
+---
+
 ## Verificación real de la Ingestión de Agenda (0.3) post-fusión — sigue funcionando, sin cambios de código (2026-09-15)
 
 Tarea de verificación + hardening pedida explícitamente sobre algo ya desplegado (0.3, del

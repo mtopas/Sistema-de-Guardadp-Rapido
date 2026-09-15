@@ -9,9 +9,17 @@ carpeta a "Todos"/Everyone. Pide la contrasena de forma interactiva (Read-Host -
 nunca la dejes en texto plano en este archivo.
 #>
 
+$ErrorActionPreference = "Stop"
+
 $ShareName = "Boveda"
 $SharePath = "D:\Boveda"
 $MountUser = "sgr-homelab"
+
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)
+if (-not $isAdmin) {
+    Write-Error "Esta consola NO esta corriendo como administrador -- New-LocalUser/New-SmbShare van a fallar. Cerra esta ventana y abri PowerShell con 'Ejecutar como administrador', despues volve a correr este script."
+    exit 1
+}
 
 if (-not (Test-Path $SharePath)) {
     Write-Error "No existe $SharePath -- abortando."
@@ -19,24 +27,30 @@ if (-not (Test-Path $SharePath)) {
 }
 
 # Crear el usuario dedicado si no existe
-$existingUser = Get-LocalUser -Name $MountUser -ErrorAction SilentlyContinue
-if (-not $existingUser) {
+try {
+    $existingUser = Get-LocalUser -Name $MountUser -ErrorAction Stop
+    Write-Host "Usuario '$MountUser' ya existe, no se toca la contrasena."
+} catch {
     Write-Host "Creando usuario local '$MountUser' para el mount del homelab..."
     $securePassword = Read-Host "Contrasena para $MountUser (se pide una vez, no se guarda en este script)" -AsSecureString
     New-LocalUser -Name $MountUser -Password $securePassword -PasswordNeverExpires -UserMayNotChangePassword:$false `
         -Description "Cuenta dedicada para el mount SMB del homelab a D:\Boveda -- no usar para login interactivo"
-} else {
-    Write-Host "Usuario '$MountUser' ya existe, no se toca la contrasena."
+    Write-Host "Usuario '$MountUser' creado."
 }
 
 # Compartir la carpeta si no esta compartida ya
-$existingShare = Get-SmbShare -Name $ShareName -ErrorAction SilentlyContinue
-if ($existingShare) {
+try {
+    $existingShare = Get-SmbShare -Name $ShareName -ErrorAction Stop
     Write-Host "El share '$ShareName' ya existe -- no se recrea. Revisa permisos manualmente si haces falta."
-} else {
+} catch {
     New-SmbShare -Name $ShareName -Path $SharePath -FullAccess $MountUser
     Write-Host "Share '$ShareName' creado en $SharePath, acceso completo solo para $MountUser."
 }
+
+# Confirmacion real, no asumida -- si esto falla, el script para aca (ErrorActionPreference Stop)
+# y NO llega al mensaje de "Listo" de mas abajo.
+Get-SmbShare -Name $ShareName -ErrorAction Stop | Out-Null
+Get-LocalUser -Name $MountUser -ErrorAction Stop | Out-Null
 
 # Confirmar que el firewall de Windows permite SMB entrante desde la red del homelab
 $fwRule = Get-NetFirewallRule -DisplayGroup "File and Printer Sharing" -ErrorAction SilentlyContinue | Where-Object { $_.Enabled -eq "True" }

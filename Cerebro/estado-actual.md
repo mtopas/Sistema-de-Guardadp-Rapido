@@ -1,5 +1,38 @@
 # Estado Actual de Jarvis
-Última actualización: 2026-09-15
+Última actualización: 2026-09-16
+
+## FIX: `/categorias` y `/hojas` devolvían 500 en cada request — Bóveda "sin notas" (2026-09-16)
+
+El usuario reportó "¿está bien que en la Bóveda no vea notas?". No era normal: dos bugs
+superpuestos en la sincronización en vivo (`project/app/vault/sync.py`,
+`sincronizar_vault()`, llamada en cada `GET /categorias`/`GET /hojas`) hacían que el
+endpoint crasheara siempre con 500, apenas después de crear el repo git privado de
+`D:\Boveda` (ver entrada `2026-09-16` de `decisiones-implementacion.md` si existe, o el commit
+`e5698d6`):
+
+1. `.git/` nunca se excluyó del escaneo del vault — sus subcarpetas internas
+   (`.git/objects/xx`) se indexaban como categorías reales: 127 de 153 filas de
+   `categorias` en la homelab eran basura de git.
+2. Causa raíz real: el re-scan generaba `ruta` con `str(rel)` (separador nativo del SO,
+   `\` en Windows), pero la columna ya estaba poblada con `/` desde Milestone 1. Ninguna
+   categoría anidada volvía a matchear contra las rutas existentes en ningún sync
+   posterior → todo el árbol PARA real quedaba marcado "borrado del disco" → el DELETE
+   fallaba con `FOREIGN KEY constraint failed` en cuanto una hoja todavía la referenciaba
+   (que siempre pasaba con contenido real). Confirmado en vivo con un print de debug
+   temporal antes de arreglarlo — no se asumió, se verificó contra la DB real.
+
+Fix: `rel.as_posix()` en vez de `str(rel)` en `sync.py` (categorías y notas), mismo
+patrón corregido en `crud.py` (`_bajo_prefijo`, `crear_categoria`, rename de categoría,
+que generaban rutas con `os.sep` en vez de `/`); `.git` sumado a `_DIRS_EXCLUIDOS`; borrado
+de categorías ahora ordenado por profundidad descendente (hijas antes que padres).
+
+**Desplegado y verificado en el homelab** (no solo local): backup de `app.db` antes de
+tocar nada, `scp` de los dos archivos (el tar-pipe falló en silencio para `project/app`
+en sesiones anteriores — no confiar en él para esa ruta), `docker build` + `docker-compose
+up -d --no-build`, `RestartCount=0` en los 3 contenedores. Confirmado contra el `app.db`
+real de producción: `categorias` 153→26 (limpieza de basura de git), `hojas` se mantiene
+en **136 — cero pérdida de datos**, `PRAGMA integrity_check` → `ok`. Commit `e5698d6`,
+pusheado a `origin/master`.
 
 ## IMPLEMENTADO: triage automático del Inbox (`00 - Sin categorizar/`) (2026-09-15)
 

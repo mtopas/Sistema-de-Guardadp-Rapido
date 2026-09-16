@@ -331,6 +331,12 @@ Al arrancar: healthcheck `GET /habitos` con backoff exponencial (1→2→4→8 s
 
 Sin bugs P0 abiertos.
 
+### Bugs resueltos (septiembre 2026)
+
+| Bug | Fix |
+|-----|-----|
+| `/hoy`, `/dia`, `/semana`, `/revision` no mostraban eventos con hora del día pedido (comparación de texto: `"...T15:00:00" <= "2026-09-16"` da falso) | `agenda_obtener_eventos()`/`agenda_resumen_semana()` (`crud.py`) normalizan `fecha_hasta`/`hasta` a fin de día (`T23:59:59.999999`) cuando llega sin hora — mismo fix ya aplicado antes en `jarvis/browse/service.py` (`date_to`), reaparecido acá sin portar |
+
 ### Bugs resueltos (mayo 2026)
 
 | Bug | Fix |

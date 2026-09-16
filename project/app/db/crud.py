@@ -2157,6 +2157,15 @@ def agenda_obtener_eventos(
 ) -> list:
     conn = get_connection()
     cursor = conn.cursor()
+    # fecha_inicio se compara como texto (formato "YYYY-MM-DDTHH:MM:SS") -- un
+    # fecha_hasta "pelado" (solo fecha, sin hora, ej. "2026-09-16") queda
+    # lexicográficamente MENOR que cualquier timestamp de ese mismo día con
+    # hora ("2026-09-16T15:00:00" > "2026-09-16"), así que "<= fecha_hasta"
+    # excluía TODOS los eventos del día con hora asignada -- mismo bug ya
+    # encontrado y arreglado en jarvis/browse/service.py (date_to), se
+    # normaliza acá con el mismo criterio.
+    if fecha_hasta and "T" not in fecha_hasta:
+        fecha_hasta = f"{fecha_hasta}T23:59:59.999999"
     # Fetch all recurring events regardless of start date so expansion can cover the range
     query = """
         SELECT e.id, e.titulo, e.descripcion, e.fecha_inicio, e.fecha_fin,
@@ -2531,6 +2540,11 @@ def agenda_eliminar_horario_facultad(hf_id: int) -> bool:
 
 def agenda_resumen_semana(desde: str, hasta: str) -> dict:
     """Resumen semanal para /revision del bot y tab Revisión."""
+    # Mismo bug/fix que agenda_obtener_eventos(): un "hasta" pelado (sin hora)
+    # queda por debajo de cualquier fecha_inicio con hora de ese mismo día en
+    # la comparación de texto -- normalizado a fin de día.
+    if hasta and "T" not in hasta:
+        hasta = f"{hasta}T23:59:59.999999"
     conn = get_connection()
     cursor = conn.cursor()
 

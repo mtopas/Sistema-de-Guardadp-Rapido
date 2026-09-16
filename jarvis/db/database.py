@@ -214,6 +214,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     _migrate_audit_proposals_status(conn)
     _migrate_audit_proposals_action_type(conn)
     _migrate_audit_proposals_archive_superseded(conn)
+    _migrate_audit_proposals_triage_move(conn)
 
     # Ingestión automática (0.3, Agenda de SGR -- ver Cerebro/decisiones-
     # implementacion.md, 2026-09-03). Columnas nuevas en jarvis_capture_proposals:
@@ -483,6 +484,70 @@ def _audit_proposals_archive_superseded_present(conn: sqlite3.Connection) -> boo
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'jarvis_audit_proposals'"
     ).fetchone()
     return row is None or "'archive_superseded'" in row["sql"]
+
+
+def _migrate_audit_proposals_triage_move(conn: sqlite3.Connection) -> None:
+    """Agrega 'triage_move' al CHECK(action_type IN (...)) de
+    jarvis_audit_proposals -- triage automático del Inbox (Cerebro/decisiones-
+    implementacion.md, 2026-09-15, "PROPUESTA... triage automático del Inbox
+    (00 - Sin categorizar/)"). Undécimo action_type: cuando
+    jarvis/ingestion/inbox_triage.py clasifica una nota vieja y sustanciosa
+    del inbox como lista para archivar en una de las 8 rutas fijas de
+    Área/Recurso x dominio, propone (gateado, Telegram/desktop) mover el .md
+    a ese destino -- nunca la mueve sola. A diferencia de
+    'archive_superseded' (destino fijo `04 - Archivo/`), acá el destino es
+    variable y viaja en payload["dest_dir_rel"] -- ver
+    jarvis/audit/service.py::_apply_triage_move()/propose_triage_move().
+
+    Mismo approach que las otras migraciones de action_type/status de esta
+    tabla (rebuild completo bajo nombre temporal, detección vía
+    sqlite_master.sql, misma carrera benigna tolerada) -- función separada
+    por el mismo motivo que las anteriores ya documentan: cada CHECK se
+    agrega en un momento distinto, una futura migración de cualquiera no debe
+    depender de tocar las otras.
+    """
+    if _audit_proposals_triage_move_present(conn):
+        return
+
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.execute("DROP TABLE IF EXISTS jarvis_audit_proposals_new")
+        conn.execute(
+            _AUDIT_PROPOSALS_CREATE.replace(
+                "CREATE TABLE IF NOT EXISTS jarvis_audit_proposals (",
+                "CREATE TABLE jarvis_audit_proposals_new (",
+                1,
+            )
+        )
+        cols = [row["name"] for row in conn.execute("PRAGMA table_info(jarvis_audit_proposals)")]
+        col_list = ", ".join(cols)
+        conn.execute(
+            f"INSERT INTO jarvis_audit_proposals_new ({col_list}) "
+            f"SELECT {col_list} FROM jarvis_audit_proposals"
+        )
+        conn.execute("DROP TABLE jarvis_audit_proposals")
+        conn.execute("ALTER TABLE jarvis_audit_proposals_new RENAME TO jarvis_audit_proposals")
+        conn.executescript(SCHEMA)  # recrea índices
+        conn.commit()
+    except sqlite3.OperationalError as exc:
+        conn.rollback()
+        if _audit_proposals_triage_move_present(conn):
+            logger.warning(
+                "[jarvis.db] _migrate_audit_proposals_triage_move: carrera "
+                "con otro proceso arrancando en simultáneo (%s), pero el "
+                "esquema ya quedó migrado -- se ignora.", exc,
+            )
+            return
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+
+
+def _audit_proposals_triage_move_present(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'jarvis_audit_proposals'"
+    ).fetchone()
+    return row is None or "'triage_move'" in row["sql"]
 
 
 def _migrate_memory_entries_source(conn: sqlite3.Connection) -> None:

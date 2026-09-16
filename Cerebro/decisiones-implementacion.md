@@ -11,6 +11,193 @@ Formato de cada entrada:
 
 ---
 
+## 2026-09-15 — PROPUESTA (sin implementar, pendiente de aprobación): triage automático del Inbox (`00 - Sin categorizar/`)
+
+Contexto: `00 - Sin categorizar/` es el inbox del árbol PARA — pero por diseño explícito
+(ver entrada 2026-09-11 de la fusión) también es donde viven a propósito "ideas sueltas
+hasta que germinan". El usuario quiere que el worker de Jarvis, corriendo por su cuenta,
+sugiera por Telegram dónde archivar una nota que ya parece lista, sin moverla nunca solo
+— mismo espíritu gateado que el resto de las propuestas de auditoría. Mismo formato que
+las propuestas anteriores (auditoría proactiva 31/08, síntesis de patrones de Agenda
+15/09): documento de diseño, sin código.
+
+**Investigación previa (pista de la tarea): ¿es literalmente `archive_superseded`
+generalizado?** Respuesta corta: el *primitivo* de mover archivo sí es 100% reusable
+tal cual; la *capa de propuesta* que lo dispara, no — hace falta una nueva, con su
+propio `action_type`. Detalle:
+
+- `jarvis/vault/writer.py::move_entry_file(vault_rel_path, dest_dir_rel)` ya es
+  completamente genérico — `dest_dir_rel` es un string libre (`JARVIS_BOVEDA_PATH /
+  dest_dir_rel`), no hay ningún hardcode a `04 - Archivo/` ahí adentro. Ya funciona sin
+  tocarlo para un destino anidado tipo `"02 - Areas/Facultad"` (`Path` con `/` interno
+  se resuelve bien en Windows). **Este es el mecanismo que hay que reusar tal cual, cero
+  cambios** — coincide con la pista de la tarea: no hace falta una tercera forma de
+  mover archivos.
+- Lo que SÍ es angosto es la capa de arriba: `_apply_archive_superseded()` (destino
+  fijo `"04 - Archivo"`, sin parámetro de destino) y `propose_archive_superseded()`
+  (payload `None`, la pregunta es genérica — "¿la archivo?", no necesita nombrar un
+  destino porque solo hay uno posible). Triage necesita cargar el destino sugerido
+  en el `payload` (ya es `TEXT` JSON libre en `jarvis_audit_proposals`, sin migración de
+  columna) y una pregunta que lo nombre explícitamente.
+- El disparador también es distinto en naturaleza: `archive_superseded` nace de un
+  juicio ya hecho en SQL puro (`same_fact`/stale por edad, sin LLM) sobre pares de
+  `memory_entries`. Triage necesita clasificar contenido — mismo tipo de tarea que
+  `_synthesize_entity_summary()`/`_CREATE_PROMPT` (huecos de entidad), no que
+  `_resolve_pair()`. Por forma, el disparador de triage se parece más al camino
+  "create" (LLM + criterio anti-alucinación explícito) que al camino "archive_superseded"
+  (SQL puro); solo el movimiento final de archivo comparte código con este último.
+
+**Conclusión de diseño**: reusar `move_entry_file()` sin tocarlo; reusar la tabla
+`jarvis_audit_proposals` (mismo ciclo PENDING→ACCEPTED/REJECTED/EXPIRED, mismo
+`resolve_individual_reply()`); pero sí hace falta un `action_type` nuevo (ver punto 4,
+respuesta explícita a "si necesita uno nuevo, decilo, no lo escondas": **sí hace
+falta**, `triage_move` — undécimo valor del `CHECK`, misma migración de schema que ya
+costó agregar `open_question` y `archive_superseded`, mismo patrón exacto de
+`_migrate_audit_proposals_archive_superseded()`).
+
+### 1. Señal "listo para clasificar" vs. "idea cruda a propósito" — sin cerrar, recomendación marcada
+
+Mirado contra el inbox real (`D:\Boveda\00 - Sin categorizar\`, ver punto 5): ni edad
+sola ni longitud sola separan bien los dos casos. Ejemplos reales que lo prueban:
+- 7 notas cortitas (~350 bytes, "reel de Instagram", del 10/09) — clip suelto, exactamente
+  el caso "puede vivir ahí indefinidamente a propósito" que describe la estructura PARA.
+- 7 documentos largos (14–53 KB, `idea_01`...`idea_05`, "Plan de aprendizaje...",
+  "Ideas para hacer un Portafolio") del 15/09 — desarrollados y sustanciosos, pero uno se
+  llama literalmente `idea_04_jarvis_segundo_cerebro - EN PROCESO.md`: el propio usuario
+  marca en el nombre que sigue en desarrollo activo. Longitud sola NO es señal de "listo".
+- 3 archivos casi duplicados (`Si.md`/`Sí.md`/`S í.md`, ~170 bytes cada uno, mismo minuto
+  del 15/09) — ruido de captura (probablemente respuestas de Telegram mal enrutadas como
+  nota nueva), ni idea germinando ni nota lista: un tercer caso que ninguna de las dos
+  señales cubre bien.
+
+**Recomendación (no decisión cerrada)**: combinar dos señales, ninguna sola alcanza —
+(a) antigüedad de la **última edición** (no de creación) sin tocar, con un umbral
+conservador (sugiero 21–30 días, más laxo que los 7 días de agenda/auditoría porque acá
+el costo de un falso positivo es más alto — se le ofrece mover algo que el usuario
+todavía está germinando) — el caso `idea_04 - EN PROCESO` ya queda afuera solo por esto,
+sin necesitar leer el nombre; y (b) un piso de contenido sustancial (sugiero reusar
+`_MAX_FRAGMENT_CHARS`-como-referencia, ~300–500 caracteres, ya usado en el módulo como
+"fragmento con sustancia") para no proponerle destino a un clip de una línea que el
+usuario obviamente guardó tal cual a propósito. Ninguna de las dos cierra el caso de
+ruido tipo `Si.md` — eso probablemente necesita su propio chequeo trivial (contenido
+casi vacío o duplicado exacto de otro archivo reciente), más parecido al disparador de
+`delete` por contenido vacío que ya existe en auditoría que a una señal de triage nueva.
+**Sin dato real todavía de cuántos falsos positivos genera cualquiera de estos umbrales**
+— quedan como default conservador a ajustar con uso real, no a tunear a ciegas ahora
+(mismo criterio que "documentar antes de tunear": elegir un default razonable, no
+recalibrar sin señal real del usuario).
+
+### 2. Destino exacto — dominio + Área/Recurso, con el mismo gate anti-alucinación de `create`
+
+Un LLM (mismo prompt-shape que `_CREATE_PROMPT`, con la misma cláusula de escape) lee el
+contenido completo de la nota candidata y elige **una** de las rutas exactas permitidas,
+nunca inventa una carpeta fuera de la lista:
+
+```
+02 - Areas/Facultad | 02 - Areas/Carrera Profesional | 02 - Areas/Salud |
+02 - Areas/Desarrollo Personal | 03 - Recursos/Facultad | 03 - Recursos/Carrera Profesional |
+03 - Recursos/Salud | 03 - Recursos/Desarrollo Personal
+```
+o `NO_SE` si no hay señal suficiente para el dominio o para Área-vs-Recurso — mismo
+criterio exacto que `SIN_DATOS` en `_synthesize_entity_summary()` (no forzar una carpeta
+por no dejar la propuesta vacía). Área = algo vigente/activo ahora; Recurso = referencia/
+consulta, no acción actual — el LLM decide ese eje también, con la misma salida de
+escape si no está claro.
+
+**Recorte explícito de alcance, recomendado**: dejar `01 - Proyectos/` **fuera** de esta
+primera versión. A diferencia de Áreas/Recursos (8 destinos fijos, enumerables), Proyectos
+se organiza por nombre de proyecto — un conjunto abierto, no una lista cerrada. Proponer
+un destino ahí exigiría o inventar un nombre de carpeta nuevo (riesgo real de
+alucinación/fragmentación — dos carpetas para "el mismo" proyecto con nombres distintos)
+o hacer *fuzzy matching* contra `memory_projects` (mecanismo que no existe hoy para esto
+y es una pieza de diseño aparte, no trivial). Con Áreas/Recursos alcanza para la mayoría
+del inbox real observado (ver punto 5) y mantiene el enum cerrado. **Marcado como
+recomendación, no cierre** — si el usuario prefiere incluir Proyectos desde el día uno,
+es una extensión de alcance real, no un ajuste menor.
+
+### 3. Cadencia y disparador
+
+**Recomendación: semanal, gate propio dentro de `run_consolidation()`** (mismo patrón que
+`run_agenda_pattern_synthesis()` — variable de policy propia tipo
+`JARVIS_INBOX_TRIAGE_INTERVAL_DAYS`, default 7 — en vez del gate diario de 24h que usa
+`should_run()`), no la cadencia semanal-y-diaria mezclada de auditoría. Justificación de
+costo, mismo criterio ya usado para justificar la cadencia semanal de patrones de Agenda:
+con un umbral de antigüedad de 21–30 días sin tocar (punto 1), el conjunto de candidatos
+casi no cambia de un día a otro — correr esto todos los días re-escanearía casi las
+mismas notas sin información nueva, gastando llamados de LLM (uno por candidata, mismo
+orden de magnitud que `_CREATE_PROMPT`) sin beneficio. Cap explícito por corrida
+(recomiendo `_INBOX_TRIAGE_LIMIT = 3–5`, mismo criterio que `_ENTITY_CREATE_LIMIT=3` de
+huecos de entidad) para no generar una ráfaga de propuestas de golpe la primera vez que
+corra sobre un inbox ya con backlog.
+
+### 4. Gating
+
+**Reusa `jarvis_audit_proposals`, con un `action_type` nuevo: `triage_move`** — respuesta
+explícita a la pregunta de la tarea, sin esconderlo: esto **es** una migración de schema
+nueva (undécimo valor del `CHECK`), mismo costo exacto que agregar `open_question` u
+`archive_superseded` (`_migrate_audit_proposals_action_type()` /
+`_migrate_audit_proposals_archive_superseded()` en `jarvis/db/database.py` son la
+plantilla literal a copiar). Se reusa la tabla, el ciclo PENDING/ACCEPTED/REJECTED/EXPIRED,
+`create_proposal()`/`accept_proposal()`/`reject_proposal()`/`expire_stale_proposals()` tal
+cual. `_apply_triage_move()` nueva (paralela a `_apply_archive_superseded()`, pero lee
+`payload["dest_dir_rel"]` en vez de un destino fijo) y una entrada nueva en
+`resolve_individual_reply()`/`_resolve_with_new_info()` — **punto abierto real, sin
+cerrar**: hoy esa función agrupa `flag_contradiction`/`flag_connection`/`merge`/
+`archive_superseded` bajo un mismo comportamiento para texto libre que no es "sí" ni "no"
+limpio (crea una entrada nueva aparte, nunca mueve nada — `_resolve_as_new_entry()`). Mi
+recomendación es que `triage_move` entre en ese mismo grupo (una respuesta de texto libre
+tipo "no, eso va a Salud" NO debería intentar parsearse a una ruta e intentar mover con esa
+inferencia — mismo riesgo de alucinación que dejar que el LLM invente rutas fuera del
+enum) — pero no lo doy como decisión cerrada porque no es autoevidente que perder esa
+corrección específica sea lo que el usuario quiere.
+
+### 5. Volumen real — el dato que más pesa en si esto vale la pena ahora
+
+`D:\Boveda\00 - Sin categorizar\` tiene hoy **17 notas reales** (18 archivos `.md`
+contando `README.md`, que no cuenta). De esas 17: 7 son clips cortos del 10/09 (~350
+bytes, candidatas naturales a "quedarse ahí a propósito"), 7 son documentos largos y
+desarrollados del 15/09 (14–53 KB, incluido el explícitamente marcado "EN PROCESO"), y 3
+son ruido casi-duplicado del mismo minuto del 15/09 (`Si.md`/`Sí.md`/`S í.md`).
+
+**Hallazgo que cambia la urgencia real**: toda la Bóveda fusionada tiene apenas ~5 días de
+vida (migración del 2026-09-10/11, ver entrada de esa fecha) — **ningún archivo del
+inbox tiene más de 5 días sin tocar**. Con cualquier umbral de antigüedad razonable para
+la señal del punto 1 (21–30 días), **cero notas calificarían hoy como candidatas** — el
+inbox real no tiene todavía ningún caso de "algo viejo y desarrollado que quedó
+olvidado sin archivar", que es exactamente el problema que esta feature busca resolver.
+Los 17 archivos actuales son en su mayoría contenido reciente y activo (parte incluso
+"EN PROCESO" a propósito), no backlog abandonado.
+
+**Recomendación derivada, marcada como tal**: el volumen real de hoy no justifica
+construir esto ya — no porque el diseño esté mal, sino porque no hay backlog real contra
+el cual demostrar que funciona bien (ni para calibrar el umbral del punto 1 con casos
+reales, ni para justificar el costo semanal de LLM de la cadencia del punto 3). Alternativa
+más barata a considerar mientras tanto: una función tipo `list_isolated_entries()` (SQL
+puro, sin LLM, sin propuesta, expuesta a Explorar bajo demanda) que solo *liste* notas del
+inbox por antigüedad sin tocar, sin sugerir destino — deja que el usuario decida si
+"vale la pena" mirar la lista, sin gastar ningún llamado de LLM hasta que el backlog real
+exista. Esto **no** está en el pedido original y es una sugerencia mía, no una decisión.
+
+**Preguntas que quedan explícitamente sin resolver, para que el usuario las revise antes
+de que otra sesión implemente:**
+1. ¿El umbral de antigüedad (21–30 días) y el piso de contenido (~300–500 caracteres) del
+   punto 1 son razonables, o el usuario tiene un criterio propio más preciso de qué hace
+   que una idea "ya germinó"?
+2. ¿Dejar `01 - Proyectos/` fuera del alcance de esta primera versión (punto 2) es
+   aceptable, o el usuario lo quiere incluido desde el día uno pese al riesgo de
+   fragmentación de nombres?
+3. ¿Una respuesta de texto libre nombrando una carpeta distinta a la sugerida (punto 4)
+   debería intentar re-dirigir el movimiento, o preferís el criterio conservador (no
+   mover, solo guardar la corrección como nota aparte, igual que `archive_superseded`)?
+4. Dado el hallazgo del punto 5 (cero candidatas reales hoy por la edad de la Bóveda),
+   ¿preferís construir esto ya para que esté listo cuando el backlog exista, o esperar
+   unas semanas de uso real y revisar con datos reales de qué tipo de "olvido" ocurre de
+   verdad?
+
+Estado: propuesta de diseño, sin implementar. Ningún archivo de código tocado.
+
+---
+
 ## 2026-09-15 — PROPUESTA (sin implementar, pendiente de aprobación): síntesis de patrones de Agenda, distinta del contenido literal
 
 Contexto: 0.3 (`jarvis/ingestion/agenda.py`, ver entrada 2026-09-03 y verificación

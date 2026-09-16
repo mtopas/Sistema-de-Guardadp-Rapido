@@ -1010,6 +1010,8 @@ def accept_proposal(proposal_id: str, reply_text: str | None = None) -> dict | N
         _apply_retag(target_ids, payload, proposal["user_id"])
     elif action_type == "archive_superseded":
         _apply_archive_superseded(target_ids)
+    elif action_type == "triage_move":
+        _apply_triage_move(target_ids, payload)
 
     # Vinculación determinística a las entidades del hallazgo (no solo a las
     # que el texto de la entrada nueva mencione) -- ver Cerebro/decisiones-
@@ -1144,6 +1146,54 @@ def propose_archive_superseded(
     )
 
 
+def _apply_triage_move(target_ids: list[str], payload: dict) -> None:
+    """Mueve el .md de una nota del inbox (`00 - Sin categorizar/`) al
+    destino sugerido por el LLM -- triage automático del Inbox (Cerebro/
+    decisiones-implementacion.md, 2026-09-15). Paralela a
+    _apply_archive_superseded(), pero lee `payload["dest_dir_rel"]` en vez de
+    un destino fijo -- ver jarvis/ingestion/inbox_triage.py para las 8 rutas
+    exactas permitidas. Nunca aplica sola (llega acá solo vía
+    accept_proposal(), gateada); solo aplica a contenido del usuario
+    (authorship='user') -- las notas del inbox siempre lo son (write_entry()
+    nunca rutea síntesis de Jarvis a `00 - Sin categorizar/`), se chequea
+    igual por simetría defensiva con _apply_archive_superseded().
+    """
+    from jarvis.memory.service import get_entry, update_entry
+    from jarvis.vault.writer import move_entry_file
+
+    entry_id = target_ids[0]
+    entry = get_entry(entry_id)
+    if not entry or entry.get("authorship") == "jarvis_synthesis":
+        return
+    vault_path = entry.get("vault_path")
+    dest_dir_rel = (payload or {}).get("dest_dir_rel")
+    if not vault_path or not dest_dir_rel:
+        return
+    new_path = move_entry_file(vault_path, dest_dir_rel)
+    if new_path:
+        update_entry(entry_id, vault_path=new_path)
+
+
+def propose_triage_move(
+    entry_id: str, dest_dir_rel: str, channel: str, channel_id, user_id: str
+) -> str | None:
+    """Crea la propuesta gateada para mover una nota del inbox a su destino
+    sugerido -- llamada desde jarvis/ingestion/inbox_triage.py tras la
+    clasificación por LLM. A diferencia de archive_superseded (un único
+    destino posible, la pregunta no necesita nombrarlo), acá la pregunta SÍ
+    nombra el destino explícito -- pedido explícito de la propuesta aprobada
+    (ver Cerebro/decisiones-implementacion.md, 2026-09-15).
+    """
+    payload = {"dest_dir_rel": dest_dir_rel}
+    question = (
+        f'🧠 Esta nota del inbox parece lista para archivar en "{dest_dir_rel}". '
+        f"¿La muevo?"
+    )
+    return create_proposal(
+        "triage_move", [entry_id], payload, question, channel, channel_id, user_id,
+    )
+
+
 # ── Vinculación determinística a las entidades del hallazgo ─────────────────
 # Ver Cerebro/decisiones-implementacion.md, 2026-08-31, punto 4.
 
@@ -1258,9 +1308,19 @@ def _resolve_with_new_info(proposal: dict, texto: str) -> dict:
         return _resolve_retag_with_new_info(proposal, texto)
     if action_type == "delete":
         return _resolve_delete_with_new_info(proposal, texto)
-    if action_type in ("flag_contradiction", "flag_connection", "merge", "archive_superseded"):
+    if action_type in (
+        "flag_contradiction", "flag_connection", "merge",
+        "archive_superseded", "triage_move",
+    ):
+        # triage_move (2026-09-15, ver Cerebro/decisiones-implementacion.md,
+        # punto 4 de la propuesta): una respuesta de texto libre que nombra
+        # otro destino ("no, eso va a Salud") NO se parsea para redirigir el
+        # movimiento -- mismo riesgo de alucinación que dejar que el LLM
+        # invente una ruta fuera del enum de 8 permitidas. Se guarda la
+        # corrección como entrada nueva aparte, igual que archive_superseded,
+        # sin mover nada con esa inferencia.
         return _resolve_as_new_entry(proposal, texto)
-    # Defensivo -- no debería pasar con los 8 action_type conocidos del CHECK.
+    # Defensivo -- no debería pasar con los 11 action_type conocidos del CHECK.
     reject_proposal(proposal["id"])
     return {"outcome": "rejected", "entry_id": None}
 

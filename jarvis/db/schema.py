@@ -268,9 +268,10 @@ CREATE INDEX IF NOT EXISTS idx_jcp_channel ON jarvis_capture_proposals(channel, 
 -- ver Cerebro/decisiones-implementacion.md, 2026-08-31). Distinta de
 -- jarvis_capture_proposals a propósito: captura pasiva siempre crea contenido
 -- nuevo a partir de una conversación; audit actúa sobre memory_entries ya
--- existentes con 8 tipos de acción, algunos con dos entry_ids target.
+-- existentes con 11 tipos de acción, algunos con dos entry_ids target.
 -- action_type: create|clarify|flag_contradiction|flag_connection|merge|edit|
--- delete|retag|open_question. payload/target_entry_ids van serializados como
+-- delete|retag|open_question|archive_superseded|triage_move. payload/
+-- target_entry_ids van serializados como
 -- JSON (mismo criterio que memory_entries.tags). Ninguna acción se aplica sin
 -- pasar por este ciclo PENDING -> ACCEPTED/REJECTED/EXPIRED.
 -- open_question (2026-09-03, ver Cerebro/decisiones-implementacion.md):
@@ -287,7 +288,7 @@ CREATE TABLE IF NOT EXISTS jarvis_audit_proposals (
                       CHECK (action_type IN (
                           'create','clarify','flag_contradiction',
                           'flag_connection','merge','edit','delete','retag',
-                          'open_question','archive_superseded'
+                          'open_question','archive_superseded','triage_move'
                       )),
     target_entry_ids  TEXT NOT NULL,
     payload           TEXT,

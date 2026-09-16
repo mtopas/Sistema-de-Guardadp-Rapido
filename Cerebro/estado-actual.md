@@ -1,6 +1,117 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-15
 
+## IMPLEMENTADO: triage automático del Inbox (`00 - Sin categorizar/`) (2026-09-15)
+
+Implementa la propuesta aprobada el mismo día (ver Cerebro/decisiones-implementacion.md,
+entrada "2026-09-15 — PROPUESTA... triage automático del Inbox (00 - Sin categorizar/)")
+tal cual quedó especificada, incluidas las 4 recomendaciones que el documento marcaba
+"no cerradas" — confirmadas por el usuario al aprobar la implementación completa, no
+reabiertas: (1) señal "listo para clasificar" = antigüedad de última EDICIÓN (mtime real
+en disco) 21+ días + piso de contenido ~400 caracteres, sin chequeo de duplicados nuevo
+(el piso de contenido ya descarta gratis el ruido casi-vacío tipo Si.md/Sí.md/S í.md);
+(2) `01 - Proyectos/` queda fuera de esta versión, solo los 8 destinos fijos de
+Área/Recurso x dominio (Facultad/Carrera Profesional/Salud/Desarrollo Personal); (3) una
+respuesta de texto libre nombrando otro destino NO redirige el movimiento — mismo
+criterio conservador que `archive_superseded`, se guarda como entrada nueva aparte; (4)
+se implementó ya aunque el inbox real de `D:\Boveda` diera 0 candidatas bajo estos
+umbrales (Bóveda con apenas días de vida) — verificado con datos sintéticos, no con el
+inbox real, tal como anticipaba la propuesta.
+
+**Archivo nuevo**: `jarvis/ingestion/inbox_triage.py` — selección de candidatas (SQL +
+mtime real de archivo, `_select_candidates()`), clasificación por LLM con gate
+anti-alucinación (`_classify_destination()`, mismo shape que `_CREATE_PROMPT` de
+auditoría: una de las 8 rutas exactas o `NO_SE`, nunca inventa carpeta), y orquestación
+con gate semanal propio (`should_run_inbox_triage()`/`run_inbox_triage()`, mismo
+mecanismo que `agenda_patterns.py`). **Tocados**: `jarvis/audit/service.py`
+(`_apply_triage_move()` paralela a `_apply_archive_superseded()` pero con
+`payload["dest_dir_rel"]` variable; `propose_triage_move()`; rama nueva en
+`accept_proposal()`; `triage_move` agregado al grupo conservador de
+`_resolve_with_new_info()` junto a `archive_superseded`), `jarvis/db/schema.py` +
+`jarvis/db/database.py` (`triage_move` — undécimo `action_type` de
+`jarvis_audit_proposals`, migración `_migrate_audit_proposals_triage_move()` copiada
+literal del patrón de `_migrate_audit_proposals_archive_superseded()`), `jarvis/config.py`
+(4 variables nuevas: `JARVIS_INBOX_TRIAGE_INTERVAL_DAYS`=7,
+`JARVIS_INBOX_TRIAGE_MIN_AGE_DAYS`=21, `JARVIS_INBOX_TRIAGE_MIN_CONTENT_CHARS`=400,
+`JARVIS_INBOX_TRIAGE_LIMIT`=4), `jarvis/worker/consolidation.py` (octavo paso, sección de
+reporte diario `_section_inbox_triage()`, `_nothing_to_report()` actualizado). `jarvis/vault/writer.py::move_entry_file()`
+se reusó **sin ningún cambio** — ya era 100% genérico (`dest_dir_rel` es un string libre),
+confirmado antes de escribir código.
+
+**Verificado con Ollama real (`gemma3:12b` vía LiteLLM, `JARVIS_REASON_MODEL` apuntado a
+Ollama para esta verificación — evita gastar la API real de OpenAI que sí está
+configurada en `project/.env`) contra un sandbox aislado** (`jarvis.db`/`D:\Boveda` de
+scratch, nunca los reales para la parte funcional):
+- 4 notas sintéticas viejas (25-40 días) y sustanciosas (~850-1150 caracteres), una por
+  dominio real (Facultad, Carrera Profesional, Salud, Desarrollo Personal) → las 4
+  clasificadas correctamente a su ruta exacta (`02 - Areas/<dominio>` en los 4 casos, el
+  contenido de cada una describía algo vigente/activo).
+- 1 nota de ruido real (`Si.md`, 2 bytes, mismo caso que encontró la sesión de diseño) →
+  descartada por el piso de contenido ANTES de llegar al LLM (cero llamadas gastadas).
+- 1 nota reciente (2 días) pero larga → descartada por el umbral de antigüedad antes del
+  LLM, confirmando que "sustancioso" solo no alcanza si es reciente.
+- 1 nota deliberadamente sin dominio (receta de pan casero) → primera iteración del
+  prompt la clasificó igual en "Desarrollo Personal" (hallazgo real: `gemma3:12b`, un
+  modelo local de 12B, tiende a forzar una clasificación en vez de admitir incertidumbre);
+  se reforzó `_TRIAGE_PROMPT` con ejemplos explícitos de qué es "ajeno a los 4 dominios" y
+  la instrucción de que `NO_SE` "no es un fallback raro, es la respuesta correcta" — tras
+  el ajuste, la misma nota de receta dio `NO_SE` de forma consistente (confirmado en 2
+  corridas), y un probe aparte con contenido de clima/auto/números sueltos confirmó 2/3
+  `NO_SE` reales (el tercer caso, una lista de números sin contexto, siguió forzándose a
+  "Desarrollo Personal" — límite real del modelo local, documentado, no arreglado más allá
+  de esto: en producción el modelo de razonamiento por default es GPT-4o-mini vía
+  LiteLLM, más capaz, y el local solo es el fallback de presupuesto agotado/sin red).
+- **Nunca inventó una carpeta fuera de las 8 permitidas** en ninguna corrida — cada
+  respuesta que no fue un match exacto contra el enum se trató como "sin dato" (mismo
+  código para `NO_SE` real o cualquier respuesta no reconocida), nunca como error a
+  reintentar.
+- `accept_proposal()` sobre una propuesta `triage_move` real movió el `.md` de verdad del
+  inbox a `02 - Areas/Salud/` (confirmado en disco, `vault_path` actualizado en SQLite, el
+  archivo dejó de existir en el inbox).
+- Respuesta de texto libre nombrando otro destino ("no, en realidad esto va a Salud")
+  sobre una propuesta `triage_move` **no movió nada** — quedó `RESOLVED_WITH_NEW_INFO`,
+  el archivo original siguió intacto en el inbox, se creó una entrada nueva aparte con el
+  texto tal cual lo escribió el usuario (mismo comportamiento que `archive_superseded`).
+- Gate semanal: segunda corrida el mismo día no corrió (`ran=False`); forzando el
+  `jarvis_policies` a 8 días atrás, la corrida siguiente sí corrió y NO repropuso las 3
+  entradas que ya tenían una propuesta (PENDING o RESOLVED_WITH_NEW_INFO) de la corrida
+  anterior — ninguna entrada terminó con más de una propuesta `triage_move` entre las dos
+  corridas. La nota de receta (sin propuesta, por ser NO_SE) sí se reevaluó de nuevo en la
+  segunda corrida y volvió a dar NO_SE — comportamiento esperado, mismo criterio que
+  `_process_entity_gaps()` (SIN_DATOS no se cachea, solo una propuesta ya creada dedupea).
+- `python -m py_compile` + `import` directo de los 7 archivos tocados/nuevos, sin errores.
+
+**Verificado que correr el paso nuevo contra el `jarvis.db`/`D:\Boveda` REALES no rompe
+nada** (backup previo tomado y confirmado por hash:
+`project/database/backup-pre-inbox-triage-verify-20260915-220132/jarvis.db`+`chroma/`):
+el inbox real (`D:\Boveda\00 - Sin categorizar\`, 16 notas reales) tiene hoy máximo 5 días
+de antigüedad de edición (confirmado por mtime real, ninguna nota real llega a los 21 días
+del umbral) — `run_inbox_triage()` corrió limpio contra los datos reales: `ran=True`,
+`candidates_scanned=0`, `proposed=0`, sin errores, `PRAGMA integrity_check` OK, cero
+archivos tocados en `D:\Boveda` (confirmado por `find -newermt` antes/después), cero
+llamadas a LLM (no hizo falta, no había candidatas). Esto es lo esperado, no un bug — es
+exactamente el hallazgo ya documentado en la propuesta aprobada (punto 5: "cero notas
+calificarían hoy"). La migración de schema (`triage_move` en el `CHECK` de
+`jarvis_audit_proposals`) sí quedó aplicada de forma permanente en el `jarvis.db` real
+(mismo criterio que toda migración anterior — es idempotente y hubiera corrido igual en
+el próximo arranque de cualquier proceso de Jarvis); se borró manualmente la única fila de
+`jarvis_policies` (`inbox_triage_last_run`) que esta verificación había dejado, para no
+dejar el reloj del gate semanal corriendo en producción antes de que el usuario decida
+desplegar esto de verdad.
+
+**Hallazgo fuera de alcance, no tocado**: `AUDIT_ACTION_LABELS` en
+`project/frontend/src/components/jarvis/JarvisBrowsePanel.jsx` no tiene entrada para
+`archive_superseded` (gap preexistente, de la sesión del 11/09) ni para `triage_move`
+(nuevo) — el panel cae al fallback de mostrar el `action_type` crudo en vez de una
+etiqueta linda. No se tocó el frontend en esta sesión (fuera del alcance pedido); queda
+para quien lo note en uso real, mismo criterio que el gap preexistente de
+`archive_superseded`.
+
+**No desplegado al homelab, sin commit/push** — paso aparte, a pedido explícito de la
+tarea (el orquestador revisa el resultado y decide cuándo commitear/desplegar).
+
+---
+
 ## Fix: reporte diario de auditoría sin listar el contenido de cada entrada revisada (2026-09-15)
 
 Pedido del usuario: el reporte diario (`build_audit_report_text()`, `jarvis/audit/service.py`)

@@ -250,6 +250,37 @@ JARVIS_AGENDA_PATTERN_CLUSTER_LLM_LIMIT = int(
     os.getenv("JARVIS_AGENDA_PATTERN_CLUSTER_LLM_LIMIT", "3")
 )
 
+# ── Triage automático del Inbox (jarvis/ingestion/inbox_triage.py) ──────────
+# Ver Cerebro/decisiones-implementacion.md (2026-09-15, "PROPUESTA... triage
+# automático del Inbox (00 - Sin categorizar/)", aprobada con las 4
+# recomendaciones marcadas "no cerradas" confirmadas tal cual). Cadencia
+# semanal propia, mismo criterio de costo que la síntesis de patrones de
+# Agenda: con el umbral de antigüedad de abajo, el conjunto de candidatas
+# casi no cambia de un día a otro.
+JARVIS_INBOX_TRIAGE_INTERVAL_DAYS = int(os.getenv("JARVIS_INBOX_TRIAGE_INTERVAL_DAYS", "7"))
+# Antigüedad mínima (días) desde la última edición del ARCHIVO en disco (no
+# de memory_entries -- D:\Boveda es la fuente de verdad tras la fusión del
+# 2026-09-11, jarvis.db es un índice reconstruible) antes de que una nota del
+# inbox sea candidata a triage. Umbral conservador recomendado en la
+# propuesta (21-30 días, más laxo que los 7 de agenda/auditoría) porque acá
+# el costo de un falso positivo es más alto: se le ofrece mover algo que el
+# usuario puede estar germinando a propósito.
+JARVIS_INBOX_TRIAGE_MIN_AGE_DAYS = int(os.getenv("JARVIS_INBOX_TRIAGE_MIN_AGE_DAYS", "21"))
+# Piso de contenido (caracteres, sobre content_processed/content_raw ya
+# strip()eado) para no proponerle destino a un clip corto que el usuario
+# guardó tal cual a propósito -- mismo orden de magnitud que
+# _MAX_FRAGMENT_CHARS de auditoría (jarvis/audit/service.py). El ruido
+# casi-vacío/duplicado (ej. Si.md/Sí.md/S í.md, ~170 bytes cada uno) queda
+# afuera GRATIS con este mismo piso -- a propósito no hay un chequeo de
+# duplicados nuevo (ver la propuesta: "usa el mismo criterio de contenido
+# vacío que ya dispara delete en auditoría").
+JARVIS_INBOX_TRIAGE_MIN_CONTENT_CHARS = int(os.getenv("JARVIS_INBOX_TRIAGE_MIN_CONTENT_CHARS", "400"))
+# Tope de propuestas por corrida -- mismo criterio de costo acotado que
+# _ENTITY_CREATE_LIMIT (auditoría) / JARVIS_AGENDA_PATTERN_CLUSTER_LLM_LIMIT
+# (patrones de Agenda): evita una ráfaga de propuestas de golpe la primera
+# vez que corre sobre un inbox con backlog.
+JARVIS_INBOX_TRIAGE_LIMIT = int(os.getenv("JARVIS_INBOX_TRIAGE_LIMIT", "4"))
+
 # ── Health del worker (jarvis/worker/heartbeat.py) ───────────────────────────
 # El worker escribe un heartbeat cada JARVIS_WORKER_POLL_INTERVAL segundos.
 # worker_alive = True si el último heartbeat es más reciente que

@@ -35,10 +35,14 @@ lee eventos/tareas ya pasados vía la API HTTP local y propone capturas, ver
 Cerebro/decisiones-implementacion.md, 2026-09-03), síntesis de patrones de
 Agenda (`jarvis.ingestion.agenda_patterns.run_agenda_pattern_synthesis()`,
 2026-09-15 — corre todos los días pero se auto-gatea internamente a una vez
-por semana, ver Cerebro/decisiones-implementacion.md, 2026-09-15), y pregunta
-abierta exploratoria (`jarvis.audit.service.maybe_ask_open_question()`,
-dispara SOLO cuando `_nothing_to_report()` da True — ver Cerebro/decisiones-
-implementacion.md, 2026-09-03).
+por semana, ver Cerebro/decisiones-implementacion.md, 2026-09-15), triage
+automático del Inbox (`jarvis.ingestion.inbox_triage.run_inbox_triage()`,
+2026-09-15 — mismo patrón de auto-gating semanal que la síntesis de patrones
+de Agenda, ver Cerebro/decisiones-implementacion.md, "PROPUESTA... triage
+automático del Inbox"), y pregunta abierta exploratoria
+(`jarvis.audit.service.maybe_ask_open_question()`, dispara SOLO cuando
+`_nothing_to_report()` da True — ver Cerebro/decisiones-implementacion.md,
+2026-09-03).
 """
 import json
 import logging
@@ -103,6 +107,11 @@ def run_consolidation() -> dict:
         # auto-gatea internamente a una vez por semana -- summary["ran"]
         # queda en False (sin tocar el resto) las corridas que no le tocaba.
         "agenda_patterns": None,
+        # Triage automático del Inbox (2026-09-15) -- octavo paso, ver
+        # jarvis/ingestion/inbox_triage.py. Mismo patrón de auto-gating
+        # semanal que agenda_patterns -- summary["ran"] queda en False las
+        # corridas que no le tocaba.
+        "inbox_triage": None,
         # Pregunta abierta exploratoria (mismo día, 2026-09-03) -- quiet_day
         # queda registrado siempre (True/False), open_question solo se llena
         # si quiet_day fue True.
@@ -174,6 +183,23 @@ def run_consolidation() -> dict:
             summary["agenda_patterns"] = run_agenda_pattern_synthesis(now)
         except Exception as exc:
             logger.exception("[consolidation] Síntesis de patrones de Agenda falló")
+            summary["errors"].append(str(exc))
+
+        # Triage automático del Inbox -- octavo paso (2026-09-15, ver
+        # Cerebro/decisiones-implementacion.md, "PROPUESTA... triage
+        # automático del Inbox (00 - Sin categorizar/)"). Corre TODOS los
+        # días como el resto del job, pero se auto-gatea internamente a una
+        # vez por semana (should_run_inbox_triage(), gate propio -- mismo
+        # criterio que la síntesis de patrones de Agenda: con el umbral de
+        # antigüedad de 21+ días, el conjunto de candidatas casi no cambia de
+        # un día a otro). Corre antes de quiet_day: si propuso algo, no es un
+        # día "sin nada".
+        try:
+            from jarvis.ingestion.inbox_triage import run_inbox_triage
+
+            summary["inbox_triage"] = run_inbox_triage(now)
+        except Exception as exc:
+            logger.exception("[consolidation] Triage automático del Inbox falló")
             summary["errors"].append(str(exc))
 
         # Pregunta abierta exploratoria -- séptimo paso, dispara SOLO si esta
@@ -625,11 +651,11 @@ def _backfill_catalog_tags(user_id: str = JARVIS_DEFAULT_USER) -> list[dict]:
 
 
 def _nothing_to_report(summary: dict) -> bool:
-    """True si esta corrida no tuvo NADA de las 6 categorías del reporte
+    """True si esta corrida no tuvo NADA de las 7 categorías del reporte
     diario (pairwise/stale/backfill de tags/hallazgos de auditoría/ingestión
-    de Agenda/síntesis de patrones de Agenda) -- gate para disparar la
-    pregunta abierta exploratoria (ver Cerebro/decisiones-implementacion.md,
-    2026-09-03).
+    de Agenda/síntesis de patrones de Agenda/triage del Inbox) -- gate para
+    disparar la pregunta abierta exploratoria (ver Cerebro/decisiones-
+    implementacion.md, 2026-09-03).
 
     "Hallazgos de auditoría" se generaliza acá a
     summary["audit"]["proposed"] == 0 en vez de mirar solo
@@ -655,6 +681,9 @@ def _nothing_to_report(summary: dict) -> bool:
         return False
     patterns = summary.get("agenda_patterns")
     if patterns and (patterns.get("rule_based_proposed", 0) > 0 or patterns.get("clusters_proposed", 0) > 0):
+        return False
+    triage = summary.get("inbox_triage")
+    if triage and triage.get("proposed", 0) > 0:
         return False
     return True
 
@@ -726,6 +755,8 @@ def _build_report_sections(summary: dict, entries: list[dict]) -> list[str]:
     sections.append(_section_agenda_ingestion(summary.get("agenda_ingestion")))
 
     sections.append(_section_agenda_patterns(summary.get("agenda_patterns")))
+
+    sections.append(_section_inbox_triage(summary.get("inbox_triage")))
 
     sections.append(_section_open_question(summary.get("quiet_day", False), summary.get("open_question")))
 
@@ -821,6 +852,27 @@ def _section_agenda_patterns(patterns: dict | None) -> str:
     lines = [header]
     for d in proposed:
         lines.append(f"  • {_short(d['content'])}")
+    return "\n".join(lines)
+
+
+def _section_inbox_triage(triage: dict | None) -> str:
+    """Sección "Triage del Inbox" del reporte diario (2026-09-15, ver
+    jarvis/ingestion/inbox_triage.py) -- mismo criterio que el resto del
+    reporte: decir explícitamente qué pasó, nunca en silencio, incluido el
+    caso normal de "esta semana no le tocaba correr" (gate propio de 7 días,
+    distinto del de 24h del resto del job).
+    """
+    if triage is None:
+        return "🗂️ Triage del Inbox: no corrió esta vez (ver errores abajo)."
+    if not triage.get("ran"):
+        return "🗂️ Triage del Inbox: no le tocaba esta corrida (gate semanal)."
+    proposed = triage.get("proposed_detail") or []
+    header = f"🗂️ Triage del Inbox ({triage.get('candidates_scanned', 0)} candidatas revisadas):"
+    if not proposed:
+        return f"{header} nada nuevo para proponer esta corrida."
+    lines = [header]
+    for d in proposed:
+        lines.append(f"  • {_short(d['content'])} → {d['dest']}")
     return "\n".join(lines)
 
 

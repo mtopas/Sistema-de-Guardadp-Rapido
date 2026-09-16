@@ -1,6 +1,38 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-16
 
+## FIX: chat de Jarvis en el `.exe` nunca tuvo memoria real — dos bugs de empaquetado (2026-09-16)
+
+Reportado por el usuario como "el chat de SGR no tiene contexto" / "¿qué sabés de mí?" →
+"no sé mucho de vos". Dos bugs de packaging superpuestos, ambos exclusivos del `.exe`
+(Docker/homelab no los tiene, ahí no hay PyInstaller de por medio):
+
+1. `jarvis/config.py` calculaba `_BASE` con `Path(__file__).parent.parent`, que dentro del
+   bundle de PyInstaller (onedir) resuelve a `dist/SGR/_internal/`, no al repo real. El `.exe`
+   creaba en silencio `jarvis.db` y `Boveda/` fantasma, vacías, dentro del bundle —
+   completamente desconectadas de los datos reales. Mismo problema que `app/paths.py` ya
+   resuelve para `app.db`; se replicó ese criterio. Panel "Tipos de memoria" pasó de `{}` a
+   los conteos reales. Commit `3ae9882`.
+2. Con los datos reales ya accesibles, el chat seguía sin memoria: `retrieve()`
+   (`jarvis/retriever/retriever.py`) fallaba en cada llamada con `No module named
+   'chromadb.api.rust'` (confirmado con log de debug) y degradaba en silencio al fallback de
+   keywords en SQLite — que no matchea nada para preguntas genéricas. Causa: chromadb importa
+   submódulos propios de forma dinámica (`chromadb.api.rust`, `chromadb.telemetry.product.
+   posthog`) que el análisis estático de PyInstaller no sigue, más `chromadb_rust_bindings`
+   (bindings Rust del cliente, un `.pyd` compilado) como paquete aparte no detectado. Se agregó
+   `collect_submodules("chromadb")` + `"chromadb_rust_bindings"` a `hiddenimports` en
+   `project/sgr.spec`. Commit `44399e9`.
+
+Verificado end-to-end con el `.exe` recompilado: una pregunta genérica ("qué sabés de mí")
+pasó de `context_count: 0` / "no tengo memoria" a `context_count: 5` con una respuesta real
+basada en las entradas de `jarvis.db`. **Nota**: el contenido real de `project/database/
+jarvis.db` local (no el del homelab) resultó ser, en su totalidad, data sintética de pruebas
+de cuando se construyó Jarvis (agosto 2026) — no memoria real del usuario. Pendiente:
+borrar esas entradas de prueba y los 2 proyectos ("Jarvis", "Homelab") que generaron, con
+confirmación explícita del usuario (bloqueado una vez por el clasificador de auto-mode al
+tratarse de un borrado irreversible; ya hay backup en `project/database/backups/
+pre-limpieza-test-projects-<timestamp>/`).
+
 ## FIX: `/categorias` y `/hojas` devolvían 500 en cada request — Bóveda "sin notas" (2026-09-16)
 
 El usuario reportó "¿está bien que en la Bóveda no vea notas?". No era normal: dos bugs

@@ -18,6 +18,8 @@ STEP_AGENDA_CHOOSE_CALENDARIO  = "agenda_choose_calendario"
 STEP_HABITO_NOTA               = "habito_nota"
 STEP_AYER_VALOR                = "ayer_valor"
 STEP_PLANIFICAR_NUEVA_TAREA    = "planificar_nueva_tarea"
+STEP_AGENDA_TAREA_PENDING      = "agenda_tarea_pending"
+STEP_AGENDA_EVENTO_PENDING     = "agenda_evento_pending"
 
 HABITOS_CACHE_TTL = 60  # segundos
 
@@ -144,8 +146,8 @@ HELP_TEXT = """\
 /dia <fecha> — igual a /hoy para otro día (hoy/mañana/viernes/2026-05-25)
 /planificar — organiza el día: ve lo ocupado, los huecos libres y asigná tareas
 /asignar <letra o nombre> <HH:MM> — asigna tarea del último /planificar a una hora
-/tarea <texto> — nueva tarea; acepta fecha (mañana, viernes…)
-/evento <texto> — nuevo evento; reconoce hora (14:30), fecha, duración (2h)
+/tarea <texto> — nueva tarea; texto libre (fecha) o formato "nombre - descripción - fecha - hora - duración" (`/tarea` solo pide el formato)
+/evento <texto> — nuevo evento; texto libre (hora/fecha/duración) o formato "nombre - descripción - fecha - hora - duración" (`/evento` solo pide el formato)
 /pendientes — todas las tareas pendientes
 /semana — resumen de los próximos 7 días
 /bloquear <N> <HH:MM> — bloquea la tarea #N del último /hoy en esa hora
@@ -287,6 +289,79 @@ def _parse_fecha_simple(text: str) -> str:
     return today.isoformat()
 
 
+def _es_token_fecha(t: str) -> bool:
+    """True si `t` es un token de fecha reconocido por `_parse_fecha_simple`
+    (hoy/mañana/día de semana/YYYY-MM-DD) — a diferencia de `_parse_fecha_simple`,
+    NO defaultea a hoy para texto no reconocido; se usa para distinguir un campo
+    fecha de un campo descripción en el formato con guiones (ver `parse_formato_guion`).
+    """
+    t = t.strip().lower()
+    if not t:
+        return False
+    if t == "hoy":
+        return True
+    if re.match(r"ma[ñn]ana", t):
+        return True
+    if re.match(r"\d{4}-\d{2}-\d{2}", t):
+        return True
+    for day_name in _DIAS_ES:
+        if day_name in t:
+            return True
+    return False
+
+
+_HORA_TOKEN_RE = re.compile(r"^(\d{1,2}):(\d{2})$")
+_DURACION_TOKEN_RE = re.compile(r"^(\d+(?:\.\d+)?)\s*h(?:s|oras?)?$", re.IGNORECASE)
+
+
+def parse_formato_guion(texto: str) -> dict:
+    """
+    Parsea el formato compartido de /tarea y /evento:
+
+        "<nombre> - <descripción> - <fecha> - <hora> - <duración>"
+
+    Solo <nombre> es obligatorio. El resto se reconoce por CONTENIDO, no por
+    posición estricta -- así nunca hace falta dejar un guion vacío para saltear
+    un campo: hora → patrón HH:MM, duración → patrón Nh/N.Nh (mismo vocabulario
+    que `parse_duracion`), fecha → mismo vocabulario que `_parse_fecha_simple`
+    (hoy/mañana/día de semana/YYYY-MM-DD). El primer segmento que no matchea
+    ninguno de esos tres patrones se toma como descripción; segmentos extra sin
+    matchear se concatenan a la descripción.
+
+    Devuelve {"nombre", "descripcion", "fecha", "hora", "duracion"} -- todos
+    menos "nombre" pueden ser None. "duracion" es float (horas) o None.
+    """
+    partes = [p.strip() for p in texto.split(" - ")]
+    nombre = partes[0].strip()
+    resultado = {"nombre": nombre, "descripcion": None, "fecha": None,
+                 "hora": None, "duracion": None}
+
+    for segmento in partes[1:]:
+        if not segmento:
+            continue
+
+        m_hora = _HORA_TOKEN_RE.match(segmento)
+        if resultado["hora"] is None and m_hora:
+            resultado["hora"] = f"{int(m_hora.group(1)):02d}:{m_hora.group(2)}"
+            continue
+
+        m_dur = _DURACION_TOKEN_RE.match(segmento)
+        if resultado["duracion"] is None and m_dur:
+            resultado["duracion"] = float(m_dur.group(1))
+            continue
+
+        if resultado["fecha"] is None and _es_token_fecha(segmento):
+            resultado["fecha"] = _parse_fecha_simple(segmento)
+            continue
+
+        if resultado["descripcion"] is None:
+            resultado["descripcion"] = segmento
+        else:
+            resultado["descripcion"] += f" - {segmento}"
+
+    return resultado
+
+
 # ──────────────────────────────────────────────────────────────
 # Hábitos: lógica de racha y schedule (port de habitosUtils.js)
 # ──────────────────────────────────────────────────────────────
@@ -404,23 +479,33 @@ def _get_eventos_rango(api_base: str, desde: str, hasta: str):
     return r.json()
 
 
-def _post_tarea(api_base: str, titulo: str, lista_id: int, fecha_opcional=None):
+def _post_tarea(api_base: str, titulo: str, lista_id: int, fecha_opcional=None,
+                descripcion: str = None, hora_bloque: str = None,
+                duracion_estimada: int = None):
     body = {"titulo": titulo, "lista_id": lista_id}
     if fecha_opcional:
         body["fecha_opcional"] = fecha_opcional
+    if descripcion:
+        body["descripcion"] = descripcion
+    if hora_bloque:
+        body["hora_bloque"] = hora_bloque
+    if duracion_estimada:
+        body["duracion_estimada"] = duracion_estimada
     r = requests.post(f"{api_base}/agenda/tareas", json=body, timeout=15)
     r.raise_for_status()
     return r.json()
 
 
 def _post_evento(api_base: str, titulo: str, fecha_inicio: str,
-                 fecha_fin: str, calendario_id: int):
+                 fecha_fin: str, calendario_id: int, descripcion: str = None):
     body = {
         "titulo": titulo,
         "fecha_inicio": fecha_inicio,
         "fecha_fin": fecha_fin,
         "calendario_id": calendario_id,
     }
+    if descripcion:
+        body["descripcion"] = descripcion
     r = requests.post(f"{api_base}/agenda/eventos", json=body, timeout=15)
     r.raise_for_status()
     return r.json()
@@ -918,22 +1003,74 @@ async def cmd_dia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, parse_mode="Markdown", reply_markup=markup)
 
 
+_TAREA_USO_TEXT = (
+    "📋 *Uso de /tarea*\n\n"
+    "*Texto libre* (fecha en cualquier parte del texto):\n"
+    "`/tarea Comprar leche`\n"
+    "`/tarea Estudiar para mañana`\n\n"
+    "*Formato con guiones* — nombre - descripción - fecha - hora - duración "
+    "(solo el nombre es obligatorio; el resto en el orden que llegues):\n"
+    "`/tarea Entrenar - hoy - 12:00`\n"
+    "`/tarea Entrenar - Rutina de piernas - hoy - 12:00 - 1.5h`\n\n"
+    "Mandá el texto de la tarea en tu próximo mensaje."
+)
+
+_EVENTO_USO_TEXT = (
+    "🕐 *Uso de /evento*\n\n"
+    "*Texto libre* (hora/fecha/duración en cualquier parte del texto):\n"
+    "`/evento Dentista 10:30`\n"
+    "`/evento Reunión mañana 15:00 2h`\n\n"
+    "*Formato con guiones* — nombre - descripción - fecha - hora - duración "
+    "(solo el nombre es obligatorio; el resto en el orden que llegues):\n"
+    "`/evento Física 3 - hoy - 15:00 - 3h`\n"
+    "`/evento Reunión - Repaso de sprint - viernes - 10:00 - 1h`\n\n"
+    "Mandá el texto del evento en tu próximo mensaje."
+)
+
+
 async def cmd_tarea(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    api = context.bot_data.get("api_base", DEFAULT_API_BASE)
     raw = " ".join(context.args).strip() if context.args else ""
 
     if not raw:
-        await update.message.reply_text(
-            "Uso: /tarea <texto>\nEjemplos:\n"
-            "  /tarea Comprar leche\n"
-            "  /tarea Estudiar para mañana\n"
-            "  /tarea Reunión el viernes"
-        )
+        context.user_data["step"] = STEP_AGENDA_TAREA_PENDING
+        await update.message.reply_text(_TAREA_USO_TEXT, parse_mode="Markdown")
         return
 
-    fecha, _, _, titulo = parse_fecha_hora(raw)
+    await _crear_tarea_desde_texto(update, context, raw)
+
+
+async def _crear_tarea_desde_texto(update: Update, context: ContextTypes.DEFAULT_TYPE, raw: str):
+    """
+    Crea una tarea a partir de texto libre. Si `raw` contiene " - ", usa el
+    formato posicional compartido (`parse_formato_guion`); si no, mantiene el
+    comportamiento histórico de /tarea (solo reconoce fecha en el texto libre).
+    """
+    api = context.bot_data.get("api_base", DEFAULT_API_BASE)
+    hoy = _today_iso()
+
+    if " - " in raw:
+        campos = parse_formato_guion(raw)
+        titulo = campos["nombre"]
+        descripcion = campos["descripcion"]
+        fecha = campos["fecha"]
+        hora_bloque = campos["hora"]
+        duracion_estimada = round(campos["duracion"] * 60) if campos["duracion"] is not None else None
+        # Si se da hora sin fecha, el bloque de hoy es el default razonable
+        # (hora_bloque siempre necesita una fecha_opcional para ubicarse en la grilla).
+        if hora_bloque and not fecha:
+            fecha = hoy
+    else:
+        fecha, _, _, titulo = parse_fecha_hora(raw)
+        if not titulo:
+            titulo = raw.strip()
+        fecha = fecha if fecha != hoy else None
+        descripcion = None
+        hora_bloque = None
+        duracion_estimada = None
+
     if not titulo:
-        titulo = raw.strip()
+        await update.message.reply_text("El nombre de la tarea no puede estar vacío.")
+        return
 
     try:
         listas = _get_listas(api)
@@ -945,14 +1082,16 @@ async def cmd_tarea(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No hay listas creadas. Creá una desde la app.")
         return
 
-    hoy = _today_iso()
-    fecha_mostrar = f" para _{_fecha_display(fecha)}_" if fecha != hoy else ""
+    fecha_mostrar = f" para _{_fecha_display(fecha)}_" if fecha else ""
+    hora_mostrar = f" a las {hora_bloque}" if hora_bloque else ""
 
     if len(listas) == 1:
         try:
-            _post_tarea(api, titulo, listas[0]["id"], fecha_opcional=fecha if fecha != hoy else None)
+            _post_tarea(api, titulo, listas[0]["id"], fecha_opcional=fecha,
+                        descripcion=descripcion, hora_bloque=hora_bloque,
+                        duracion_estimada=duracion_estimada)
             await update.message.reply_text(
-                f"Tarea creada en *{listas[0]['nombre']}*{fecha_mostrar} ✓",
+                f"Tarea creada en *{listas[0]['nombre']}*{fecha_mostrar}{hora_mostrar} ✓",
                 parse_mode="Markdown"
             )
         except Exception as e:
@@ -961,7 +1100,10 @@ async def cmd_tarea(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     ud = context.user_data
     ud["agenda_draft_tarea"] = titulo
-    ud["agenda_tarea_fecha"] = fecha if fecha != hoy else None
+    ud["agenda_tarea_fecha"] = fecha
+    ud["agenda_draft_descripcion"] = descripcion
+    ud["agenda_draft_hora_bloque"] = hora_bloque
+    ud["agenda_draft_duracion_estimada"] = duracion_estimada
     ud["agenda_listas_cache"] = listas
     ud["step"] = STEP_AGENDA_CHOOSE_LISTA
     lines = ["¿En qué lista la agrego?"]
@@ -971,23 +1113,43 @@ async def cmd_tarea(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    api = context.bot_data.get("api_base", DEFAULT_API_BASE)
     raw = " ".join(context.args).strip() if context.args else ""
 
     if not raw:
-        await update.message.reply_text(
-            "Uso: /evento <texto>\nEjemplos:\n"
-            "  /evento Dentista 10:30\n"
-            "  /evento Reunión mañana 15:00 2h\n"
-            "  /evento Cumpleaños viernes"
-        )
+        context.user_data["step"] = STEP_AGENDA_EVENTO_PENDING
+        await update.message.reply_text(_EVENTO_USO_TEXT, parse_mode="Markdown")
         return
 
-    fecha, hora, duracion, titulo = parse_fecha_hora(raw)
-    if not titulo:
-        titulo = raw.strip()
+    await _crear_evento_desde_texto(update, context, raw)
 
-    hora = hora or "09:00"
+
+async def _crear_evento_desde_texto(update: Update, context: ContextTypes.DEFAULT_TYPE, raw: str):
+    """
+    Crea un evento a partir de texto libre. Si `raw` contiene " - ", usa el
+    formato posicional compartido (`parse_formato_guion`); si no, mantiene el
+    comportamiento histórico de /evento (reconoce hora/fecha/duración en
+    cualquier parte del texto libre).
+    """
+    api = context.bot_data.get("api_base", DEFAULT_API_BASE)
+
+    if " - " in raw:
+        campos = parse_formato_guion(raw)
+        titulo = campos["nombre"]
+        descripcion = campos["descripcion"]
+        fecha = campos["fecha"] or _today_iso()
+        hora = campos["hora"] or "09:00"
+        duracion = campos["duracion"] if campos["duracion"] is not None else 1.0
+    else:
+        fecha, hora, duracion, titulo = parse_fecha_hora(raw)
+        if not titulo:
+            titulo = raw.strip()
+        descripcion = None
+        hora = hora or "09:00"
+
+    if not titulo:
+        await update.message.reply_text("El nombre del evento no puede estar vacío.")
+        return
+
     dt_inicio = f"{fecha}T{hora}:00"
     fin_dt = datetime.strptime(dt_inicio, "%Y-%m-%dT%H:%M:%S") + timedelta(hours=duracion)
     dt_fin = fin_dt.strftime("%Y-%m-%dT%H:%M:%S")
@@ -1006,7 +1168,8 @@ async def cmd_evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(calendarios) > 1:
         ud = context.user_data
         ud["agenda_draft_evento"] = {
-            "titulo": titulo, "dt_inicio": dt_inicio, "dt_fin": dt_fin,
+            "titulo": titulo, "descripcion": descripcion,
+            "dt_inicio": dt_inicio, "dt_fin": dt_fin,
             "fecha": fecha, "hora": hora, "fin_hora": fin_dt.strftime("%H:%M"),
         }
         botones = [
@@ -1023,8 +1186,8 @@ async def cmd_evento(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Un solo calendario: crear directamente
     cal = calendarios[0]
     try:
-        _post_evento(api, titulo, dt_inicio, dt_fin, cal["id"])
-        dur_str = f" ({int(duracion)}h)" if duracion != 1.0 else ""
+        _post_evento(api, titulo, dt_inicio, dt_fin, cal["id"], descripcion=descripcion)
+        dur_str = f" ({duracion:g}h)" if duracion != 1.0 else ""
         await update.message.reply_text(
             f"Evento creado ✓\n"
             f"*{titulo}*\n"
@@ -1399,29 +1562,32 @@ async def handle_agenda_step(update: Update, context: ContextTypes.DEFAULT_TYPE,
         lista  = listas[choice - 1]
         titulo = ud.get("agenda_draft_tarea", "")
         fecha  = ud.get("agenda_tarea_fecha")
-        hoy    = _today_iso()
+        descripcion       = ud.get("agenda_draft_descripcion")
+        hora_bloque       = ud.get("agenda_draft_hora_bloque")
+        duracion_estimada = ud.get("agenda_draft_duracion_estimada")
         fecha_mostrar = f" para _{_fecha_display(fecha)}_" if fecha else ""
+        hora_mostrar  = f" a las {hora_bloque}" if hora_bloque else ""
         try:
-            _post_tarea(api, titulo, lista["id"], fecha_opcional=fecha)
+            _post_tarea(api, titulo, lista["id"], fecha_opcional=fecha,
+                        descripcion=descripcion, hora_bloque=hora_bloque,
+                        duracion_estimada=duracion_estimada)
             await update.message.reply_text(
-                f"Tarea creada en *{lista['nombre']}*{fecha_mostrar} ✓",
+                f"Tarea creada en *{lista['nombre']}*{fecha_mostrar}{hora_mostrar} ✓",
                 parse_mode="Markdown"
             )
         except Exception as e:
             await update.message.reply_text(f"No pude crear la tarea: {e}")
-        # Si vino de /planificar, también asignar hora_bloque
-        hora_bloque = ud.get("agenda_draft_hora_bloque")
-        if hora_bloque:
-            try:
-                r = requests.get(f"{api}/agenda/tareas", params={"pendientes": "true"}, timeout=15)
-                r.raise_for_status()
-                todas = r.json()
-                match = next((t for t in todas if t["titulo"].strip() == titulo.strip()), None)
-                if match:
-                    _patch_tarea_bloque(api, match["id"], hora_bloque, _today_iso())
-            except Exception:
-                pass
         ud.clear()
+        return True
+
+    if step == STEP_AGENDA_TAREA_PENDING:
+        ud.pop("step", None)
+        await _crear_tarea_desde_texto(update, context, texto.strip())
+        return True
+
+    if step == STEP_AGENDA_EVENTO_PENDING:
+        ud.pop("step", None)
+        await _crear_evento_desde_texto(update, context, texto.strip())
         return True
 
     if step == STEP_HABITO_NOTA:
@@ -1827,7 +1993,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             calendarios = _get_calendarios(api)
             cal_nombre  = next((c["nombre"] for c in calendarios if c["id"] == cal_id), "")
-            _post_evento(api, draft["titulo"], draft["dt_inicio"], draft["dt_fin"], cal_id)
+            _post_evento(api, draft["titulo"], draft["dt_inicio"], draft["dt_fin"], cal_id,
+                        descripcion=draft.get("descripcion"))
             await query.edit_message_text(
                 f"Evento creado ✓\n*{draft['titulo']}*\n"
                 f"{_fecha_display(draft['fecha'])}  {draft['hora']} – {draft['fin_hora']}\n"

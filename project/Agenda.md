@@ -242,8 +242,8 @@ Al arrancar: healthcheck `GET /habitos` con backoff exponencial (1→2→4→8 s
 | `/cancel` | Limpia `user_data` y cancela flujo | — |
 | `/hoy` | Eventos + tareas + hábitos de hoy; botones completar tareas | `GET /agenda/eventos`, `GET /agenda/tareas`, `GET /habitos`, `GET /habitos/registros` |
 | `/dia <fecha>` | Igual a `/hoy` para cualquier día (hoy/mañana/viernes/2026-05-25) | ídem sin hábitos |
-| `/tarea <texto>` | Crea tarea; parsea fecha del texto; si hay >1 lista pide selección | `GET /agenda/listas`, `POST /agenda/tareas` |
-| `/evento <texto>` | Crea evento; reconoce `HH:MM`, fecha, duración (`2h`); selección de calendario si >1 | `GET /agenda/calendarios`, `POST /agenda/eventos` |
+| `/tarea <texto>` | Crea tarea; texto libre (parsea fecha) o formato con guiones (ver abajo); si hay >1 lista pide selección; sin argumentos pide el formato y espera el próximo mensaje | `GET /agenda/listas`, `POST /agenda/tareas` |
+| `/evento <texto>` | Crea evento; texto libre (reconoce `HH:MM`, fecha, duración `2h` en cualquier parte) o formato con guiones (ver abajo); selección de calendario si >1; sin argumentos pide el formato y espera el próximo mensaje | `GET /agenda/calendarios`, `POST /agenda/eventos` |
 | `/pendientes [lista]` | Todas las tareas pendientes con lista y fecha; botones completar. Filtro opcional por nombre de lista (case-insensitive, substring). | `GET /agenda/tareas?pendientes=true` |
 | `/semana` | Resumen 7 días con nombre de lista en cada tarea | `GET /agenda/eventos`, `GET /agenda/tareas` |
 | `/bloquear <N> <HH:MM>` | Time blocking: bloquea la tarea #N del último `/hoy` | `PATCH /agenda/tareas/{id}` |
@@ -284,7 +284,7 @@ Al arrancar: healthcheck `GET /habitos` con backoff exponencial (1→2→4→8 s
 
 ### Parsers
 
-**`parse_fecha_hora(text)`** — extrae fecha, hora y duración:
+**`parse_fecha_hora(text)`** — extrae fecha, hora y duración de texto libre (modo histórico, sigue vigente cuando el texto no tiene `" - "`):
 - **Hora:** patrón `HH:MM` — default `09:00`.
 - **Fecha:** `hoy`, `mañana`, nombre de día de semana → próxima ocurrencia. Default: hoy.
 - **Duración:** patrón `Nh`/`Nhoras` — default 1h.
@@ -295,6 +295,24 @@ Al arrancar: healthcheck `GET /habitos` con backoff exponencial (1→2→4→8 s
 /evento Cumpleaños viernes     → próx. viernes, 09:00–10:00
 /tarea Estudiar para mañana    → tarea con fecha_opcional = mañana
 ```
+
+**Formato compartido con guiones (`/tarea` y `/evento`, septiembre 2026)** — `parse_formato_guion(text)`:
+
+```
+<nombre> - <descripción> - <fecha> - <hora> - <duración>
+```
+
+- Separador exacto `" - "` (espacio-guion-espacio) — no rompe con guiones que sean parte del texto (p. ej. "Auto-evaluación").
+- Solo `nombre` es obligatorio. El resto se reconoce **por contenido**, no por posición estricta: hora → patrón `HH:MM`; duración → patrón `Nh`/`N.Nh` (mismo vocabulario que `parse_duracion`); fecha → mismo vocabulario que `_parse_fecha_simple` (hoy/mañana/día de semana/`YYYY-MM-DD`, vía `_es_token_fecha`). El primer segmento que no matchea ninguno de esos tres patrones se toma como **descripción**; nunca hace falta un guion vacío para saltear un campo.
+- `/evento` usa este formato solo si el texto contiene `" - "`; si no, cae al `parse_fecha_hora` de texto libre de siempre (no se rompió nada del comportamiento previo). `/tarea` antes solo aceptaba fecha simple sin guiones — con guiones es la única forma de darle hora/duración a una tarea en una sola línea.
+- Ejemplos:
+  ```
+  /tarea Entrenar - hoy - 12:00                              → nombre, fecha, hora (sin descripción/duración)
+  /tarea Entrenar - Rutina de piernas - hoy - 12:00 - 1.5h    → los 5 campos
+  /evento Física 3 - hoy - 15:00 - 3h                         → nombre, fecha, hora, duración (sin descripción)
+  ```
+- Tarea con `hora` (vía guiones) mapea a `hora_bloque` + `duracion_estimada` (minutos) de una vez en el `POST /agenda/tareas` de creación (sin fecha explícita, se asume hoy si hay hora); `descripcion` va al campo homónimo. Evento con guiones también pasa `descripcion` en el `POST /agenda/eventos`.
+- **`/tarea` o `/evento` sin argumentos:** responde con las dos formas de uso (texto libre + formato con guiones) y guarda un paso conversacional (`STEP_AGENDA_TAREA_PENDING` / `STEP_AGENDA_EVENTO_PENDING`, resuelto en `handle_agenda_step`) — el próximo mensaje de texto del usuario se toma como el argumento del comando, sin repetir `/tarea`/`/evento`. Estos dos pasos están en `_AGENDA_FINANZAS_STEPS` (`mybot/bot.py`) para que un pendiente de Jarvis abierto en paralelo no se coma la respuesta.
 
 **`_fuzzy_match_habito(nombre, habitos)`** — match exacto → contiene → por palabras.
 
@@ -316,6 +334,8 @@ Al arrancar: healthcheck `GET /habitos` con backoff exponencial (1→2→4→8 s
 | `agenda_choose_lista` | `/tarea` con >1 lista: espera número |
 | `agenda_choose_calendario` | (vía inline keyboard, no texto) |
 | `STEP_HABITO_NOTA` | Tras marcar hábito ✓/½: espera texto de nota o "no"/"skip" para omitir |
+| `STEP_AGENDA_TAREA_PENDING` | `/tarea` sin argumentos: espera el próximo mensaje como texto de la tarea (libre o con guiones) |
+| `STEP_AGENDA_EVENTO_PENDING` | `/evento` sin argumentos: espera el próximo mensaje como texto del evento (libre o con guiones) |
 
 `/cancel` limpia `user_data` en cualquier momento desde cualquier flujo (Bóveda o Agenda).
 

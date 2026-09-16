@@ -360,6 +360,8 @@ network:
   ethernets:
     enp0s7:
       dhcp4: no
+      dhcp6: no
+      accept-ra: no
       addresses:
         - 192.168.137.10/24
       routes:
@@ -373,6 +375,16 @@ network:
 ```
 
 Aplicar: `sudo netplan apply`
+
+**`accept-ra: no` (2026-09-16):** sin `dhcp6` explícito en el yaml, networkd igual
+levantaba un cliente DHCPv6 porque acepta Router Advertisements por default
+(`accept-ra` sin especificar = `yes`), y el ICS de Windows manda RAs con la
+flag "managed" pidiendo DHCPv6 -- pero ICS no tiene un servidor DHCPv6 real
+detrás, así que el cliente reintentaba para siempre y llenaba journalctl de
+"DHCPv6 lease lost" cada ~60-70s (ver Cerebro/estado-actual.md). `dhcp6: no`
+solo no alcanza porque el problema es el RA disparando el cliente, no el
+flag de netplan; hace falta `accept-ra: no` para que networkd ni siquiera
+escuche esos anuncios.
 
 **IPs históricas:** `192.168.0.10` (bridge, ya no existe) · `192.168.137.93` (transitoria ICS) · **`192.168.137.10`** (definitiva con netplan).
 

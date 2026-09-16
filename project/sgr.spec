@@ -4,7 +4,7 @@
 
 import sys
 from pathlib import Path
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 block_cipher = None
 ROOT = Path(SPECPATH)
@@ -50,6 +50,20 @@ hiddenimports = [
     "tiktoken_ext",
     "tiktoken_ext.openai_public",
 ]
+# chromadb importa varios de sus propios submódulos de forma dinámica/lazy
+# (chromadb.api.rust, chromadb.telemetry.product.posthog, etc.) -- el análisis
+# estático de PyInstaller no los sigue, así que quedaban afuera del bundle.
+# Bug real encontrado el 2026-09-16 (ver Cerebro/estado-actual.md): en el
+# .exe, retrieve() (jarvis/retriever/retriever.py) fallaba SIEMPRE con
+# "No module named 'chromadb.api.rust'" y degradaba en silencio a un
+# fallback de keywords en SQLite -- la búsqueda semántica del chat de Jarvis
+# nunca funcionó en el .exe empaquetado, aunque jarvis.db/chroma tuvieran
+# datos reales. collect_submodules cubre los .py lazy-importados;
+# chromadb_rust_bindings es un paquete aparte con un .pyd compilado (bindings
+# Rust del cliente de ChromaDB) que también hay que declarar explícito para
+# que PyInstaller seleccione el binario, no solo el .py que lo importa.
+hiddenimports += collect_submodules("chromadb")
+hiddenimports += ["chromadb_rust_bindings"]
 
 a = Analysis(
     ["run_sgr.py"],

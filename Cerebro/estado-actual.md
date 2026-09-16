@@ -1,6 +1,21 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-15
 
+## Fix: reporte diario de auditoría sin listar el contenido de cada entrada revisada (2026-09-15)
+
+Pedido del usuario: el reporte diario (`build_audit_report_text()`, `jarvis/audit/service.py`)
+listaba contenido+tags de cada entrada de los bloques por tag y random (`_entry_lines()`, hasta
+`JARVIS_AUDIT_BLOCK_SIZE`×2 = hasta 20 entradas) todos los días, haya hallazgos o no — con la
+Bóveda real indexada (74+ notas, muchas largas) el mensaje se volvía larguísimo. Se sacó el
+listado de contenido; queda solo el conteo ("Bloque por tag X (N entradas)") y la sección de
+hallazgos (que sigue con el detalle completo cuando SÍ hay algo que reportar). `_entry_lines()`
+se eliminó (quedaba sin uso). El detalle de qué entrada puntual se revisó sigue disponible en
+`jarvis_policies.consolidation_run` (el JSON completo no cambió, solo el texto renderizado a
+Telegram). Verificado con un caso de prueba: mensaje de ~220 caracteres en vez de varios miles.
+Deploy al homelab: pendiente, a la espera de confirmación.
+
+---
+
 ## IMPLEMENTADO (verificado en scratch, no corrido contra el homelab): backfill del contenido ya existente de `D:\Boveda` a `memory_entries` (2026-09-15)
 
 Cierra el ítem 1 de `Cerebro/PROXIMAMENTE.md` ("Pendiente real tras el deploy de la fusión

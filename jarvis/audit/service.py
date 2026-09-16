@@ -744,18 +744,24 @@ def build_audit_report_text(summary: dict) -> str:
     tag_name = summary.get("tag_block_name")
     tag_entries = summary.get("tag_block_entries") or []
     if tag_name:
-        header = f"Bloque por tag {tag_name} ({len(tag_entries)} entradas):"
+        header = f"Bloque por tag {tag_name} ({len(tag_entries)} entradas)"
     else:
         header = "Bloque por tag: no había ningún tag con entradas vigentes para revisar."
-    parts.append("\n".join([header] + _entry_lines(tag_entries)))
+    # 2026-09-15: se sacó el listado de contenido+tags de cada entrada
+    # (_entry_lines()) -- con la Bóveda real indexada (74+ notas) el reporte
+    # se volvía larguísimo todos los días, haya hallazgos o no. Se mantiene el
+    # conteo y los hallazgos (lo que de verdad importa); el detalle de qué
+    # entrada puntual se revisó sigue disponible en jarvis_policies.
+    # consolidation_run (el JSON completo, incluye tag_block_entries/
+    # random_block_entries) para quien lo necesite después. Pedido explícito
+    # del usuario, ver Cerebro/decisiones-implementacion.md.
+    parts.append(header)
     parts.append(_findings_section(
         "Hallazgos del bloque por tag", summary.get("tag_block_findings") or [], len(tag_entries)
     ))
 
     random_entries = summary.get("random_block_entries") or []
-    parts.append("\n".join(
-        [f"Bloque random ({len(random_entries)} entradas):"] + _entry_lines(random_entries)
-    ))
+    parts.append(f"Bloque random ({len(random_entries)} entradas)")
     parts.append(_findings_section(
         "Hallazgos del bloque random", summary.get("random_block_findings") or [], len(random_entries)
     ))
@@ -776,10 +782,6 @@ def build_audit_report_text(summary: dict) -> str:
         parts.append("\n".join(lines))
 
     return "\n\n".join(parts)
-
-
-def _entry_lines(entries: list[dict]) -> list[str]:
-    return [f"  • {e['content']} — {', '.join(e['tags']) or 'sin tags'}" for e in entries]
 
 
 def _findings_section(title: str, findings: list[dict], n_entries: int) -> str:

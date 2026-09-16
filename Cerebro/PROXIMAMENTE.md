@@ -11,14 +11,12 @@ la conversación que armó/desplegó `D:\Boveda`. Promover a `decisiones-impleme
 se retome cada uno.
 
 1. ~~**Jarvis no ingiere el contenido ya existente de `D:\Boveda` en su propia memoria.**~~
-   **Implementado y verificado en scratch, 2026-09-15** — `jarvis/cli/backfill_vault_content.py`,
-   ver `Cerebro/estado-actual.md` (entrada del mismo día) y
-   `Cerebro/decisiones/2026-09-15-backfill-boveda-a-memoria-jarvis.md`. Falta solo correrlo contra
-   el homelab real (paso aparte, explícito). La pregunta que quedó abierta ("¿alcanza con que las
-   preguntas sobre Bóveda ruteen al RAG de SGR en vez de al de Jarvis?") sigue sin resolver — ahora
-   ambos caminos tienen contenido real, pero no se decidió si `mybot/assistant.py::_gather_boveda()`
-   (RAG de SGR) y el RAG propio de Jarvis (`jarvis/retriever/`) deberían unificarse, mantenerse
-   separados a propósito, o preferir uno sobre el otro según el tipo de pregunta.
+   **Implementado y corrido contra el homelab real, 2026-09-15** — `jarvis/cli/backfill_vault_content.py`,
+   74 notas reales indexadas, confirmado con una consulta real a Jarvis citando fuentes reales.
+   Ver `Cerebro/estado-actual.md`. Sigue sin resolver la pregunta de fondo: no se decidió si
+   `mybot/assistant.py::_gather_boveda()` (RAG de SGR) y el RAG propio de Jarvis
+   (`jarvis/retriever/`) deberían unificarse, mantenerse separados a propósito, o preferir uno sobre
+   el otro según el tipo de pregunta — hoy conviven sin ninguna regla que los distinga.
 2. **Triage automático del Inbox** — el worker sugiriendo por Telegram dónde archivar lo que queda
    en `00 - Sin categorizar/`. Se diseñó y se aprobó en la conversación original, nunca entró en el
    alcance de ningún milestone implementado.
@@ -35,12 +33,11 @@ se retome cada uno.
 6. **Grafo/relaciones al estilo Obsidian en SGR** — extender `NetworkGraph.jsx` con aristas por
    `[[wikilinks]]` reales (no solo jerarquía de categorías), backlinks, hover preview. Deferred
    desde el principio del diseño, a propósito — ítem de roadmap propio, no bloqueante.
-7. **Fixes de empaquetado del `.exe` (tiktoken_ext, datos de litellm) sin portar a `master`** —
-   se arreglaron en `feature/boveda-jarvis-fusion` (commit `6ee6c77`) porque aparecieron
-   recompilando ahí, pero `master` probablemente tiene el mismo bug latente (nadie reconstruyó el
-   `.exe` desde que `jarvis.api.router` quedó en la cadena de imports). No confirmado ni portado.
-8. **Merge de `feature/boveda-jarvis-fusion` a `master`** — pendiente de que el usuario confirme el
-   testeo de punta a punta (captura por Telegram, pregunta a Jarvis, `sgr-abrir.ps1`).
+7. ~~**Fixes de empaquetado del `.exe`**~~ **Confirmado y recompilado desde `master`, 2026-09-15**
+   — build limpio sin el error de `tiktoken_ext` (la causa real era compilar con el Python global en
+   vez de `project/venv`, no un bug del propio fix).
+8. ~~**Merge de `feature/boveda-jarvis-fusion` a `master`**~~ **Hecho, 2026-09-15** — fast-forward,
+   sin conflictos, pusheado a `origin/master`.
 
 ---
 

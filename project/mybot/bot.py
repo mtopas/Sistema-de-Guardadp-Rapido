@@ -55,6 +55,24 @@ STEP_CHOOSE_CATEGORY        = "choose_category"   # legacy; not used with inline
 STEP_CHOOSE_CATEGORY_INLINE = "choose_category_inline"
 STEP_NEW_CATEGORY_NAME      = "new_category_name"
 
+# Pasos explícitos y acotados de Agenda/Finanzas (ver ah.handle_agenda_step y
+# fh.handle_finanzas_step). Mientras uno de estos está activo, la respuesta
+# del usuario le pertenece a ESE flujo, no a un pendiente de Jarvis
+# (aclaración/propuesta pasiva/auditoría) que pueda haber quedado abierto en
+# paralelo -- bug real: /tarea con el picker de listas abierto + una
+# aclaración de Jarvis pendiente en el mismo chat hacía que el "1" del
+# usuario lo consumiera Jarvis en vez del picker, y la tarea nunca se creaba.
+_AGENDA_FINANZAS_STEPS = frozenset({
+    ah.STEP_AGENDA_CHOOSE_LISTA,
+    ah.STEP_AGENDA_CHOOSE_CALENDARIO,
+    ah.STEP_HABITO_NOTA,
+    ah.STEP_AYER_VALOR,
+    ah.STEP_PLANIFICAR_NUEVA_TAREA,
+    fh.STEP_FIN_MONTO,
+    fh.STEP_FIN_DESC,
+    fh.STEP_FIN_CAT_TEXT,
+})
+
 URL_REGEX = re.compile(r"https?://\S+", re.IGNORECASE)
 
 # ──────────────────────────────────────────────────────────────
@@ -662,15 +680,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     _register_chat_id(context.bot_data, msg.chat.id)
 
-    # Jarvis: aclaración pendiente tiene prioridad absoluta -- si no, la
-    # respuesta a "¿Por qué...?" se interpretaría como una hoja nueva de
-    # la Bóveda.
-    if await jh.handle_pending_clarification(update, context):
-        return
-    if await jh.handle_pending_passive_proposal(update, context):
-        return
-    if await jh.handle_pending_audit_proposal(update, context):
-        return
+    ud   = context.user_data
+    step = ud.get("step")
+
+    # Jarvis: aclaración pendiente tiene prioridad absoluta sobre texto libre
+    # -- si no, la respuesta a "¿Por qué...?" se interpretaría como una hoja
+    # nueva de la Bóveda. Pero si ya hay un paso explícito y acotado de
+    # Agenda/Finanzas en curso (picker de listas, monto/descripción de un
+    # movimiento, etc.), ESE paso tiene prioridad: el mensaje es la respuesta
+    # a esa pregunta puntual, no a un pendiente de Jarvis que haya quedado
+    # abierto en paralelo (ver _AGENDA_FINANZAS_STEPS).
+    if step not in _AGENDA_FINANZAS_STEPS:
+        if await jh.handle_pending_clarification(update, context):
+            return
+        if await jh.handle_pending_passive_proposal(update, context):
+            return
+        if await jh.handle_pending_audit_proposal(update, context):
+            return
 
     # Extraer texto del forward si es un forward
     texto = None
@@ -684,9 +710,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if texto is None:
         return
-
-    ud   = context.user_data
-    step = ud.get("step")
 
     # Menú inline de Bóveda: no bloquea el LLM — texto nuevo = re-clasificar
     if step == STEP_CHOOSE_CATEGORY_INLINE:

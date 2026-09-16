@@ -38,6 +38,16 @@ En el homelab: `OLLAMA_BASE_URL=http://192.168.137.1:11434` (Ollama corre en el 
 
 ## Flujo de un mensaje de texto
 
+> **Nota (2026-09-16):** este diagrama no muestra los 3 chequeos de Jarvis
+> (`jh.handle_pending_clarification` / `handle_pending_passive_proposal` /
+> `handle_pending_audit_proposal`) que en `bot.py::handle_message` corren
+> ANTES que todo lo de acá — existen para no confundir la respuesta a una
+> aclaración/propuesta pendiente de Jarvis con una hoja nueva de Bóveda.
+> Desde el fix de esa fecha, si ya hay un **step explícito de Agenda o
+> Finanzas activo** (`_AGENDA_FINANZAS_STEPS` en `bot.py`), esos 3 chequeos
+> de Jarvis se saltean y el mensaje va directo al step. Ver "Incidentes
+> conocidos" más abajo.
+
 ```
 Usuario envía texto
   │
@@ -273,3 +283,61 @@ Cuando `action == "question"` el router lo detecta y actualmente responde con un
 
 - Indexar hojas de la Bóveda con `nomic-embed-text` en ChromaDB
 - Al recibir `consulta_boveda`, buscar chunks relevantes y pasarlos como contexto a `chat()`
+
+---
+
+## Incidentes conocidos
+
+### 2026-09-16 — Jarvis interceptaba respuestas a steps de Agenda/Finanzas (tarea perdida)
+
+**Síntoma real:** `/tarea Entrenar ; 12:00, hoy, 1.5h` mostró el picker de listas ("1. Tareas
+diarias..."); el usuario respondió `1`; Jarvis lo interceptó ("✅ Guardé tu aclaración como
+información nueva") y la tarea nunca se creó (`/hoy` después: "Sin tareas pendientes"). La
+respuesta quedó guardada en `memory_entries` (`jarvis.db`) como entrada `RAW` con contenido
+`"Entrenar"` (id `427c287c…`) — **no se borró ni se movió**; recrear la tarea a mano.
+
+**Causa raíz:** en `bot.py::handle_message()`, los 3 chequeos de pendientes de Jarvis
+(`jh.handle_pending_clarification`, `handle_pending_passive_proposal`,
+`handle_pending_audit_proposal`) corrían **incondicionalmente antes** que
+`ah.handle_agenda_step()` / `fh.handle_finanzas_step()`, sin mirar si `context.user_data["step"]`
+ya estaba en medio de un flujo explícito y acotado de Agenda/Finanzas (picker de listas, paso de
+monto/descripción de un movimiento, etc.). Ninguno de los tres handlers de Jarvis mira el `step`
+activo — solo chequean si hay *algo* pendiente para ese chat, en `context.user_data`
+(`jarvis_clarification`, con timeout de 180s vía `JobQueue`) o en la DB de Jarvis por canal
+(propuestas pasivas y de auditoría, sin relación con el `step` del bot).
+
+**Mecanismo confirmado del pendiente concurrente:** el mensaje que vio el usuario
+("Guardé tu aclaración como información nueva") es el de `_resolve_individual_audit_proposal()`
+con outcome `resolved_with_new_info` — o sea que interceptó una **propuesta de auditoría
+individual** (`jarvis.audit.service`, generada por el auditor proactivo de memoria, 0.2 Slice 4),
+no una aclaración de captura (`/j` o pasiva). Estas propuestas viven en la tabla
+`jarvis_audit_proposals`, scopeadas por canal, sin relación con `context.user_data`, y solo
+expiran vía `expire_stale_proposals()` — corrida periódicamente por `jarvis/worker/main.py`, con
+`JARVIS_AUDIT_PROPOSAL_TIMEOUT_MINUTES=1440` (24h) por default (`jarvis/config.py`). Es decir: es
+perfectamente normal que una propuesta de auditoría quede pendiente varias horas (p.ej. de una
+corrida nocturna del auditor) y siga viva cuando el usuario arranca un flujo de Agenda/Finanzas
+sin relación — no hace falta ningún otro bug para que coincidan.
+
+No se encontró en el `jarvis.db` local de este checkout ninguna entrada con `source='telegram'`
+ni con el id reportado — es esperable si esa DB es una copia sincronizada más vieja que el
+incidente (ver `project/SYNC-WINDOWS.md`), no la DB real donde ocurrió. No se identificaron otras
+entradas con el mismo patrón de fuga por no tener acceso a esa DB real.
+
+**Hallazgo colateral (no arreglado, fuera de alcance de este fix):**
+`jh._clarification_timeout()` (el callback de `JobQueue` a los 180s de una aclaración de `/j` sin
+respuesta) nunca limpia `context.user_data["jarvis_clarification"]` — solo tiene `job.data`
+(el job se programa con `chat_id=`, no `user_id=`, así que no puede tocar `user_data`; ver su
+propio docstring). Si el usuario no responde a tiempo, la captura se guarda igual sin razón, pero
+la bandera de "aclaración pendiente" queda viva en `user_data` indefinidamente y el *próximo*
+mensaje de texto de ese usuario —sea lo que sea— se interpreta como la "razón" tardía y genera una
+entrada duplicada. Distinto del mecanismo confirmado arriba (que fue vía auditoría, no vía esta
+aclaración), pero es la misma familia de bug y vale la pena revisarlo aparte.
+
+**Fix:** `bot.py` ahora salta los 3 chequeos de Jarvis cuando `context.user_data["step"]` es uno
+de los pasos explícitos de Agenda/Finanzas (`_AGENDA_FINANZAS_STEPS`: picker de lista/calendario,
+nota de hábito, valor de ayer, nueva tarea desde `/planificar`, monto/descripción/categoría de
+movimiento). El caso protegido original (texto libre sin ningún step activo respondiendo a una
+aclaración de DECISION) sigue funcionando igual — verificado con un harness que carga la versión
+pre-fix (HEAD) y la versión con el fix del mismo `handle_message()`, mockeando los entry points de
+Jarvis/Agenda/Finanzas (sin tocar `jarvis.db`/`app.db` reales): reproduce el bug en HEAD, confirma
+el fix, y confirma que el caso protegido no cambió en ninguna de las dos versiones.

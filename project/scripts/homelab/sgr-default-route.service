@@ -6,8 +6,11 @@ Documentation=file:///home/mtopas/project/scripts/homelab/ensure-default-route.s
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/sgr-ensure-default-route
-# networkd puede quedar en failed; reconfigure intenta reaplicar netplan/networkd
-ExecStartPost=-/bin/bash -c 'networkctl reconfigure enp0s7 >/dev/null 2>&1 || true'
+# El reconfigure condicional (solo si networkd no está "configured") ahora
+# vive DENTRO del script -- ver ensure-default-route.sh, fix 2026-09-16.
+# Antes corría acá sin condición en cada tick del timer (cada 60s, siempre),
+# forzando un ciclo DHCP nuevo constantemente ("DHCPv6 lease lost" en
+# journalctl) sin relación con si hacía falta o no.
 
 [Install]
 WantedBy=multi-user.target

@@ -1,7 +1,33 @@
 import os
+import sys
 from pathlib import Path
 
-_BASE = Path(__file__).parent.parent / "project"
+
+def _resolve_project_dir() -> Path:
+    """`project/` real, sea dev o `.exe` empaquetado (PyInstaller onedir).
+
+    Bug real encontrado el 2026-09-16 investigando por qué el panel "Tipos
+    de memoria" del `.exe` mostraba todo en 0 pese a que `jarvis.db` real
+    tenía entradas: `Path(__file__).parent.parent` resuelve, dentro del
+    bundle, a `dist/SGR/_internal` (donde vive el .py empaquetado), no al
+    repo real -- así que `JARVIS_DB_PATH`/`JARVIS_BOVEDA_PATH` apuntaban a
+    una `jarvis.db` y una carpeta `Boveda/` fantasma dentro del bundle,
+    vacías, creadas en el primer arranque y nunca vinculadas a los datos
+    reales. `app/paths.py::_find_repo_data_root()` ya resuelve esto mismo
+    para `app.db` (Bóveda/Finanzas/Agenda/Hábitos); se replica el mismo
+    criterio acá en vez de importarlo, para no acoplar `jarvis/` a
+    `project/app/` (jarvis debe poder correr standalone, ver
+    `jarvis/worker/main.py`).
+    """
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).resolve().parent  # project/dist/SGR
+        for base in (exe_dir.parent.parent, exe_dir.parent.parent.parent):
+            if (base / "database").is_dir():
+                return base
+    return Path(__file__).resolve().parent.parent / "project"
+
+
+_BASE = _resolve_project_dir()
 
 # Carga project/.env antes de leer cualquier os.getenv() de este módulo.
 # Bug real encontrado probando el worker standalone (`python -m

@@ -34,7 +34,10 @@ def _extraer_tags(contenido: str, apuntes_html: Optional[str]) -> list:
 
 
 def _bajo_prefijo(ruta: str, prefijo: str) -> bool:
-    return ruta == prefijo or ruta.startswith(prefijo + os.sep)
+    # "/" siempre, nunca os.sep -- `ruta` se guarda con posix-style forward
+    # slash (ver app/vault/sync.py, fix 2026-09-16); en Windows os.sep es
+    # "\", así que esta comparación nunca matcheaba una categoría hija real.
+    return ruta == prefijo or ruta.startswith(prefijo + "/")
 
 
 def _extraer_upload_filename(contenido: Optional[str], apuntes_html: Optional[str]) -> Optional[str]:
@@ -150,7 +153,10 @@ def crear_categoria(
 
     nombre_limpio = nombre.strip()
     carpeta = vault_writer.sanitize_nombre(nombre_limpio)
-    ruta = str(Path(padre_ruta) / carpeta) if padre_ruta else carpeta
+    # .as_posix(), no str() -- mismo fix que app/vault/sync.py (2026-09-16):
+    # str(Path(...)) usa el separador nativo del SO ("\" en Windows) aunque
+    # padre_ruta ya venga en formato posix desde la DB.
+    ruta = (Path(padre_ruta) / carpeta).as_posix() if padre_ruta else carpeta
     cursor.execute("SELECT 1 FROM categorias WHERE ruta = ?", (ruta,))
     if cursor.fetchone() is not None or (VAULT_ROOT / ruta).exists():
         conn.close()
@@ -634,7 +640,8 @@ def actualizar_categoria(categoria_id: int, campos: dict) -> Optional[dict]:
                     return None
                 padre_ruta = prow[0]
             carpeta = vault_writer.sanitize_nombre(nuevo_nombre)
-            ruta_nueva = str(Path(padre_ruta) / carpeta) if padre_ruta else carpeta
+            # .as_posix() -- mismo fix que crear_categoria()/app/vault/sync.py
+            ruta_nueva = (Path(padre_ruta) / carpeta).as_posix() if padre_ruta else carpeta
             if ruta_nueva != ruta_actual:
                 cursor.execute("SELECT 1 FROM categorias WHERE ruta = ? AND id != ?", (ruta_nueva, categoria_id))
                 if cursor.fetchone() is not None:

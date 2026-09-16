@@ -21,6 +21,15 @@ from app.vault.markdown import markdown_a_html, construir_apuntes_html_foto
 logger = logging.getLogger("vault_sync")
 
 _ADJUNTOS_DIR = "_adjuntos"
+# 2026-09-16: D:\Boveda pasó a tener un repo git propio (ver Cerebro/
+# estado-actual.md, creación del repo privado de la Bóveda) -- .git/ nunca
+# se excluyó del escaneo, así que sus cientos de subcarpetas internas
+# (.git/objects/xx, uno por prefijo hex) se indexaban como si fueran
+# categorías reales de la Bóveda. Cuando git reorganiza esos objetos (gc,
+# packing), el DELETE de categorías desaparecidas rompía con
+# "FOREIGN KEY constraint failed" -- causa real del bug "la Bóveda no
+# muestra notas" (toda la API de categorías/hojas 500-eaba en cada request).
+_DIRS_EXCLUIDOS = {_ADJUNTOS_DIR, ".git"}
 _ROOTS_ESTRUCTURALES = {
     "00 - Sin categorizar", "01 - Proyectos", "02 - Areas",
     "03 - Recursos", "04 - Archivo", "05 - Basura",
@@ -43,10 +52,14 @@ def _nombre_desde_carpeta(nombre_carpeta: str) -> str:
     return _PREFIJO_NUMERICO_RE.sub("", nombre_carpeta).strip() or nombre_carpeta
 
 
+def _dentro_de_excluido(rel_parts: tuple[str, ...]) -> bool:
+    return any(part in _DIRS_EXCLUIDOS for part in rel_parts)
+
+
 def _iter_carpetas(vault_root: Path):
     carpetas = [
         p for p in vault_root.rglob("*")
-        if p.is_dir() and p.name != _ADJUNTOS_DIR and _ADJUNTOS_DIR not in p.relative_to(vault_root).parts
+        if p.is_dir() and not _dentro_de_excluido(p.relative_to(vault_root).parts)
     ]
     carpetas.sort(key=lambda p: len(p.relative_to(vault_root).parts))
     return carpetas
@@ -56,7 +69,7 @@ def _iter_notas(vault_root: Path):
     for path in sorted(vault_root.rglob("*.md")):
         if path.name.lower() == "readme.md":
             continue
-        if _ADJUNTOS_DIR in path.relative_to(vault_root).parts:
+        if _dentro_de_excluido(path.relative_to(vault_root).parts):
             continue
         yield path
 
@@ -99,10 +112,24 @@ def sincronizar_vault(vault_root: Path, conn: sqlite3.Connection) -> dict:
 
     for carpeta in _iter_carpetas(vault_root):
         rel = carpeta.relative_to(vault_root)
-        rel_str = str(rel)
+        # .as_posix() (siempre "/"), NUNCA str(rel) (separador nativo del SO --
+        # "\" en Windows). Bug real encontrado y confirmado en vivo el
+        # 2026-09-16: `ruta` ya estaba guardada en la DB con "/" desde que se
+        # pobló originalmente (Milestone 1), pero este re-scan generaba "\" --
+        # ninguna categoría anidada volvía a matchear contra `existentes` en
+        # ningún sync posterior. Efecto doble: (1) cada categoría real se
+        # reinsertaba como "nueva" con ruta en backslash (nunca llegaba a
+        # persistir porque el punto 2 abortaba la transacción antes del
+        # commit), y (2) TODA categoría anidada real quedaba marcada como
+        # "ya no está en disco" -> encolada para borrar -> `IntegrityError:
+        # FOREIGN KEY constraint failed` en cuanto una hoja o categoría hija
+        # todavía la referenciaba. Esto explicaba el bug real reportado por
+        # el usuario ("no veo notas en la Bóveda") -- /categorias y /hojas
+        # devolvían 500 en cada request.
+        rel_str = rel.as_posix()
         rutas_vistas.add(rel_str)
         nombre = _nombre_desde_carpeta(carpeta.name)
-        padre_ruta = str(rel.parent) if rel.parent != Path(".") else None
+        padre_ruta = rel.parent.as_posix() if rel.parent != Path(".") else None
         padre_id = ruta_a_id.get(padre_ruta) if padre_ruta else None
         estructural = 1 if _es_estructural(rel) else 0
 
@@ -128,7 +155,7 @@ def sincronizar_vault(vault_root: Path, conn: sqlite3.Connection) -> dict:
 
     for path in _iter_notas(vault_root):
         rel = path.relative_to(vault_root)
-        rel_str = str(rel)
+        rel_str = rel.as_posix()  # mismo fix que arriba -- nunca str(rel)
         st = path.stat()
 
         try:
@@ -198,11 +225,20 @@ def sincronizar_vault(vault_root: Path, conn: sqlite3.Connection) -> dict:
         cursor.execute(f"DELETE FROM hojas WHERE id IN ({placeholders})", ids_hojas_borrar)
         stats["notas_borradas"] = len(ids_hojas_borrar)
 
-    rutas_categoria_borrar = [r for r in existentes if r not in rutas_vistas]
-    if rutas_categoria_borrar:
-        placeholders = ",".join("?" * len(rutas_categoria_borrar))
-        cursor.execute(f"DELETE FROM categorias WHERE ruta IN ({placeholders})", rutas_categoria_borrar)
-        stats["carpetas_borradas"] = len(rutas_categoria_borrar)
+    # Hijas antes que padres: si se borra/reorganiza un subárbol entero fuera
+    # de la app, un DELETE de una sola sentencia con todas las rutas mezcladas
+    # puede intentar borrar el padre mientras una hija (en el mismo lote,
+    # pendiente de procesar) todavía lo referencia via padre_id -> IntegrityError
+    # (FOREIGN KEY constraint failed). Mismo criterio "padres antes que hijos"
+    # que ya usa el upsert de arriba, invertido para el borrado.
+    rutas_categoria_borrar = sorted(
+        (r for r in existentes if r not in rutas_vistas),
+        key=lambda r: r.count("/") + r.count("\\"),
+        reverse=True,
+    )
+    for ruta in rutas_categoria_borrar:
+        cursor.execute("DELETE FROM categorias WHERE ruta = ?", (ruta,))
+    stats["carpetas_borradas"] = len(rutas_categoria_borrar)
 
     conn.commit()
     return stats

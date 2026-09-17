@@ -6,7 +6,6 @@
 project/venv/
 project/.venv/
 project/frontend/node_modules/
-project/frontend/dist/
 project/database/
 project/uploads/
 project/dist/

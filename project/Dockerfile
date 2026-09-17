@@ -35,6 +35,12 @@ RUN python -m pip install --no-cache-dir -e ./jarvis
 COPY project/app ./app
 COPY project/mybot ./mybot
 
+# Frontend build (project/frontend/dist) -- generado a mano con `npm run build` antes de
+# `docker build`, no se buildea dentro de la imagen (no hay Node acá). Sirve la UI completa
+# en :8765 además de la API -- antes el homelab solo exponía la API (ver CLAUDE.md, "única
+# pieza online" quedó desactualizado desde que esto se agregó, 2026-09-17).
+COPY project/frontend/dist ./frontend/dist
+
 ENV SGR_DATA_DIR=/app
 
 EXPOSE 8765

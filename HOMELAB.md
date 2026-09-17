@@ -190,6 +190,68 @@ copies `database/` explícitamente.
 
 ---
 
+### Deploy del frontend al homelab (manual, no automático — 2026-09-17)
+
+Hasta el 2026-09-17 el homelab **no** servía la interfaz web — el `Dockerfile` solo copiaba
+`project/app` y `project/mybot` a la imagen, nunca `project/frontend`. `GET /` devolvía
+`{"message": "Run 'npm run build' inside frontend/ to serve the UI here."}` (el fallback de
+`app/main.py::read_root()` cuando `DIST_DIR` no existe). Esto quedó resuelto para poder usar
+SGR completo desde afuera de casa (ver sección "Acceso remoto" más abajo), pero **a propósito
+sigue siendo un paso manual** — no hay build de Node dentro de la imagen Docker (el
+`Dockerfile` es solo Python), así que cada cambio al frontend que quieras ver reflejado en el
+homelab necesita repetir estos 3 pasos:
+
+**1. Buildear localmente (Windows, con Node instalado):**
+
+```powershell
+cd D:\Sistema-de-Guardadp-Rapido\project\frontend
+npm run build   # genera project/frontend/dist/ -- VITE_API_URL sin setear = fetches relativos,
+                 # correcto para servir index.html y API desde el mismo origen/puerto
+```
+
+**2. Copiar el build + el `Dockerfile` (que ahora sí copia `frontend/dist`):**
+
+```powershell
+cd D:\Sistema-de-Guardadp-Rapido
+scp project/Dockerfile mtopas@192.168.137.10:~/project/Dockerfile
+scp -r project/frontend/dist mtopas@192.168.137.10:~/project/frontend/dist
+```
+
+**3. Rebuild + reiniciar** (mismos comandos que "Actualizar código en el servidor" arriba):
+
+```bash
+ssh mtopas@192.168.137.10
+cd ~/project
+docker build --network=host -t sgr-app:latest -f Dockerfile ..
+docker-compose up -d --no-build
+```
+
+**Importante — `.dockerignore` está en `~`, NO en `~/project/`.** El build context de
+`docker-compose.yml` es `..` relativo a `project/docker-compose.yml` — en el gabinete eso
+resuelve a `~` (el directorio que tiene `~/project` y `~/jarvis` como hermanos), así que
+Docker busca `.dockerignore` en `~/.dockerignore`, no en `~/project/.dockerignore`. Hay un
+`~/project/.dockerignore` viejo (15/07) que **no hace nada** — quedó de un intento anterior,
+inofensivo pero confuso, se puede ignorar. Esto corrige la instrucción de más abajo
+("Docker sin DNS") que decía copiar `.dockerignore` a `~/project/` — si volvés a tocar ese
+archivo, copialo a `~/` directo:
+
+```powershell
+scp .dockerignore mtopas@192.168.137.10:~/.dockerignore
+```
+
+`project/frontend/dist/` se sacó del `.dockerignore` (tanto local como en el gabinete) para
+que el `COPY project/frontend/dist ./frontend/dist` del `Dockerfile` encuentre algo — si el
+build falla con el `dist/` vacío o inexistente en la imagen, revisar que esa línea siga
+ausente en ambos `.dockerignore`.
+
+**Verificar que quedó bien:**
+
+```bash
+curl -s http://127.0.0.1:8765/ | head -c 100   # debe empezar con <!DOCTYPE html>, no con {"message"...
+```
+
+---
+
 ### Docker — gestión diaria (en el gabinete)
 
 Sin `sudo` (grupo `docker`):
@@ -229,11 +291,48 @@ Sin `sudo` (grupo `docker`):
 | :--- | :--- |
 | API SGR | `http://192.168.137.10:8765` |
 | Swagger | `http://192.168.137.10:8765/docs` |
-| Frontend (si servís `dist`) | mismo host `:8765` |
+| Frontend | mismo host `:8765` (sirve `dist/` desde 2026-09-17 — ver "Deploy del frontend" arriba) |
 
 En dev en Windows: Vite `:5173` → API local `:8765` (sandbox con `dev-start.ps1`).
 
 Opcional: Vite apuntando al homelab → `VITE_API_URL=http://192.168.137.10:8765` en `frontend/.env.local`.
+
+---
+
+### Acceso remoto (Tailscale, 2026-09-17)
+
+Objetivo: usar SGR completo (no solo el bot de Telegram) desde afuera de casa, sin exponer
+`:8765` a Internet ni depender de port-forwarding (la red ya es doble NAT — Router → PC
+Windows ICS → gabinete — ver "Infraestructura y red" más abajo, port-forwarding clásico sería
+frágil encima de eso). SGR no tiene login propio, así que exponerlo directo a Internet sin
+autenticación no era aceptable — Tailscale resuelve esto sin necesitar agregarle auth a SGR:
+solo los dispositivos logueados con la cuenta Tailscale del usuario pueden llegar al gabinete,
+nada queda público.
+
+**Instalado en el gabinete:**
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up --hostname=gabinete-sgr
+```
+
+El segundo comando imprime una URL de auth (`https://login.tailscale.com/a/...`) — se aprueba
+una vez desde cualquier dispositivo ya logueado en la misma cuenta Tailscale (celular o PC).
+
+**Hostname/IP del gabinete en el tailnet:** `gabinete-sgr` → `100.117.86.117` (IP de Tailscale,
+estable, no depende de la red física). Ver la IP actual con `tailscale ip -4` en el gabinete, o
+`tailscale status` para ver los demás dispositivos del tailnet.
+
+**Uso:** con el cliente Tailscale corriendo en el dispositivo remoto (laptop, celular — ya
+logueados con la misma cuenta), abrir `http://100.117.86.117:8765` en el navegador — sirve SGR
+completo (Bóveda/Finanzas/Agenda/Hábitos), igual que estar en la red de casa. No hace falta
+VPN adicional, port-forwarding, ni DDNS.
+
+**No instalado:** ningún watchdog systemd para el servicio `tailscaled` (se reinicia solo con
+el resto del sistema, pero no hay verificación activa de que el tailnet siga up tras un corte
+de luz/reboot, mismo tipo de riesgo que ya cubren los watchdogs de red/mount documentados en
+"Fijar la config" más abajo — no se armó uno equivalente para Tailscale en esta sesión, queda
+pendiente si se vuelve un problema real).
 
 ---
 
@@ -498,7 +597,12 @@ En el gabinete **no hay salida a Internet durante `docker build`** (contenedor a
 cd D:\Sistema-de-Guardadp-Rapido\project
 .\scripts\prepare-docker-wheelhouse.ps1
 scp -r .\wheelhouse mtopas@192.168.137.10:~/project/
-scp .\Dockerfile .\docker-compose.yml .dockerignore mtopas@192.168.137.10:~/project/
+scp .\Dockerfile .\docker-compose.yml mtopas@192.168.137.10:~/project/
+# .dockerignore va en ~ (raíz del build context), NO en ~/project/ -- ver
+# "Deploy del frontend al homelab" más arriba (corregido 2026-09-17, error real
+# en versiones previas de esta guía):
+cd D:\Sistema-de-Guardadp-Rapido
+scp .dockerignore mtopas@192.168.137.10:~/.dockerignore
 ```
 
 En el gabinete:

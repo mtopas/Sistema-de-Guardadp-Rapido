@@ -32,12 +32,21 @@ npm run dev      # :5173 — API_URL en src/config.js (default http://127.0.0.1:
 npm run build    # → frontend/dist
 ```
 
-### Telegram Bot (única pieza "online")
+### Telegram Bot
 
 ```bash
 cd project
 python mybot/bot.py   # TELEGRAM_BOT_TOKEN en .env — API en :8765 (API_BASE_URL)
 ```
+
+### Acceso remoto (Tailscale, 2026-09-17)
+
+El homelab (`192.168.137.10:8765`) corre 24/7 y **desde el 2026-09-17 sirve la UI completa**
+además de la API — ya no es "solo el bot online" (ver `HOMELAB.md`, sección "Acceso remoto").
+Con Tailscale instalado en el gabinete (`gabinete-sgr`) y en tus dispositivos, `http://<IP
+Tailscale del gabinete>:8765` abre SGR completo desde cualquier red, sin exponer nada a
+Internet. El frontend del homelab **no se buildea solo** — hay que repetir build+deploy manual
+cada vez que cambia (ver `HOMELAB.md`).
 
 ### Puertos (local)
 

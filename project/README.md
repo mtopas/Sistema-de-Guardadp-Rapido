@@ -2,7 +2,7 @@
 
 # SGR — `project/`
 
-Aplicación local full-stack (español) para capturar conocimiento (**Bóveda**), llevar finanzas personales (**Finanzas**), gestionar tiempo y tareas (**Agenda**) y construir hábitos (**Hábitos**). SQLite + API propia; UI React. Casi todo corre **offline** en la máquina del usuario. Lo único pensado como online es el **bot de Telegram** (`mybot/`), que llama al mismo REST.
+Aplicación local full-stack (español) para capturar conocimiento (**Bóveda**), llevar finanzas personales (**Finanzas**), gestionar tiempo y tareas (**Agenda**) y construir hábitos (**Hábitos**). SQLite + API propia; UI React. Corre offline en la máquina del usuario (`.exe` Windows) o 24/7 en el homelab (Docker) — el homelab expone el **bot de Telegram** y, desde 2026-09-17, también la UI completa vía Tailscale (acceso remoto sin exponer nada a Internet, ver `../HOMELAB.md`, sección "Acceso remoto").
 
 **Licencia:** MIT + Commons Clause — uso personal y modificación libres; uso comercial requiere permiso. Ver `../LICENSE`.
 

@@ -11,6 +11,51 @@ Formato de cada entrada:
 
 ---
 
+## 2026-09-16 — Reversión parcial: pares "different" ya no se listan en detalle en el reporte de consolidación (vuelven a un conteo)
+
+Contexto: la entrada del 2026-09-03 ("Reporte diario completo de
+consolidación por Telegram") decidió listar en el reporte TODO par que
+cruzara el umbral de similitud y llegara al LLM, con o sin consecuencia
+-- incluido el veredicto "different" (temas distintos, ninguna mutación
+en la DB). El pedido explícito en su momento fue "sin excepción... con
+detalle completo".
+
+Hallazgo real (2026-09-16): un reporte guardado por el usuario desde
+Telegram (consolidado manualmente en un .txt) resultó tener 37 partes,
+~26KB, donde el 100% de los pares comparados esa corrida dieron veredicto
+"different" -- cero acciones reales (ningún same_fact, ninguna
+contradiction), el reporte entero era ruido sin ninguna señal.
+
+Decisión: revertir la parte de la decisión del 3/9 que listaba TODOS los
+pares -- de ahora en más, la sección de pares del reporte
+(_section_pairwise() en jarvis/worker/consolidation.py) solo lista en
+detalle los pares con acción real (same_fact -> entrada marcada obsoleta;
+contradiction -> confianza reducida + conflicto logueado, incluida la
+subrama "contradicción ya logueada en una corrida anterior" -- sigue
+siendo un ítem pendiente real, no ruido). Los pares "different" (o
+veredicto no reconocido) se reducen a una sola línea de conteo: "Sin
+acción (el modelo los juzgó contenidos distintos): N".
+
+Se descartaron dos alternativas que el usuario evaluó explícitamente:
+- Bajar el umbral de similitud (_SIMILARITY_THRESHOLD) para que lleguen
+  menos pares al LLM: descartado, no toca el problema real (el umbral ya
+  está calibrado) y arriesga perder same_fact/contradiction reales.
+- Mover el detalle completo de los "different" a un archivo aparte en
+  D:\Boveda\Jarvis\ en vez de perderlo: descartado, el usuario no
+  necesita ese detalle en absoluto para los pares sin acción -- un
+  conteo alcanza. (El detalle completo de TODOS los pares, incluidos los
+  "different", se sigue persistiendo sin cambios en
+  jarvis_policies.consolidation_run vía _record_run() -- no se pierde
+  información, solo se deja de mandar por Telegram.)
+
+Cambio de código: solo _section_pairwise() (jarvis/worker/
+consolidation.py, ~línea 781) -- separa summary["pairwise_detail"] en
+dos grupos usando el campo "relation" ya existente en cada dict
+(same_fact/contradiction -> detalle completo igual que antes;
+different/no reconocido -> solo cuenta). _resolve_pair() y la
+construcción de summary no cambiaron -- el filtro es puramente de
+presentación en el reporte de Telegram.
+
 ## 2026-09-15 — PROPUESTA (sin implementar, pendiente de aprobación): triage automático del Inbox (`00 - Sin categorizar/`)
 
 Contexto: `00 - Sin categorizar/` es el inbox del árbol PARA — pero por diseño explícito

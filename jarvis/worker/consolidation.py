@@ -374,9 +374,16 @@ def _resolve_pair(entry_a: dict, entry_b: dict, similarity: float, summary: dict
 
     # Detalle para el reporte diario de Telegram (ver Cerebro/decisiones-
     # implementacion.md, 2026-09-03) -- se completa "action" según la rama
-    # que siga abajo y se agrega SIEMPRE a summary, incluida "different"
-    # (nunca solo los pares con acción real): el pedido explícito era listar
-    # todo par que cruzó el umbral y llegó al LLM, con o sin consecuencia.
+    # que siga abajo y se agrega SIEMPRE a summary["pairwise_detail"],
+    # incluida "different" (nunca solo los pares con acción real): el
+    # pedido explícito era listar todo par que cruzó el umbral y llegó al
+    # LLM, con o sin consecuencia. Eso sigue siendo cierto para la
+    # RECOLECCIÓN de datos acá (no cambia -- _record_run() sigue
+    # persistiendo el historial completo en jarvis_policies). Lo que
+    # cambió (ver Cerebro/decisiones-implementacion.md, 2026-09-16) es
+    # que _section_pairwise() ahora filtra qué se LISTA en detalle en el
+    # texto del reporte de Telegram: los "different" (sin acción real)
+    # se reducen a un conteo, no se listan uno por uno.
     detail = {
         "content_a": _short(content_a), "content_b": _short(content_b),
         "tags_a": get_tags_for_entry(entry_a["id"]), "tags_b": get_tags_for_entry(entry_b["id"]),
@@ -781,13 +788,17 @@ def _section_analyzed(entries: list[dict]) -> str:
 def _section_pairwise(detail: list[dict]) -> str:
     if not detail:
         return f"Pares comparados (similitud > {_SIMILARITY_THRESHOLD:.2f}): ninguno esta corrida."
+    con_accion = [d for d in detail if d["relation"] in ("same_fact", "contradiction")]
+    sin_accion = len(detail) - len(con_accion)
     lines = [f"Pares comparados (similitud > {_SIMILARITY_THRESHOLD:.2f}, {len(detail)}):"]
-    for d in detail:
+    for d in con_accion:
         lines.append(
             f"  • [A] {d['content_a']} {', '.join(d['tags_a']) or 'sin tags'} / "
             f"[B] {d['content_b']} {', '.join(d['tags_b']) or 'sin tags'}\n"
             f"    sim={d['similarity']:.3f} — veredicto: {d['relation']} — {d['action']}"
         )
+    if sin_accion:
+        lines.append(f"  • Sin acción (el modelo los juzgó contenidos distintos): {sin_accion}")
     return "\n".join(lines)
 
 

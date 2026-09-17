@@ -216,6 +216,44 @@ def _migrate(conn: sqlite3.Connection) -> None:
     _migrate_audit_proposals_archive_superseded(conn)
     _migrate_audit_proposals_triage_move(conn)
 
+    # Throttle de propuestas de auditoría (Cerebro/decisiones-implementacion.md,
+    # 2026-09-17): pushed_at nullable, sin CHECK -- no hace falta el rebuild
+    # completo que sí exigen los CHECK de action_type/status de esta tabla.
+    _add_column_if_missing(conn, "jarvis_audit_proposals", "pushed_at", "pushed_at DATETIME")
+
+    # Backfill: toda fila PENDING preexistente cuyo action_type NUNCA pasó por
+    # el throttle (flag_contradiction/flag_connection -- van en un mensaje
+    # agrupado -- y open_question -- nunca se pushea individual) ya fue
+    # entregada al usuario en el momento de crearse, bajo el código viejo (antes
+    # de esta columna, TODO se pusheaba de inmediato). Se backfillea pushed_at=
+    # created_at para esas SOLO -- no expirarían nunca si se dejaran en NULL,
+    # porque nada las va a marcar "pushed" después del hecho (no pasan por
+    # push_next_audit_batch()). Las filas PENDING preexistentes de los 8
+    # action_types SÍ throttleados (create/clarify/merge/edit/delete/retag/
+    # archive_superseded/triage_move) se dejan deliberadamente en NULL: bajo el
+    # código viejo también fueron entregadas de inmediato al crearse, pero acá
+    # SÍ hay un mecanismo (push_next_audit_batch(), FIFO por created_at) que las
+    # va a recoger y reenviar una vez -- se acepta ese reenvío único como
+    # consecuencia razonable de no poder reconstruir retroactivamente "cuándo
+    # se vio" con el dato que hay (mismo criterio pedido explícitamente: no
+    # expirar nada que no conste como mandado bajo la nueva definición).
+    # Idempotente (solo toca WHERE pushed_at IS NULL) -- se puede correr en
+    # cada arranque sin guardas extra, mismo patrón que el backfill de FTS.
+    # Mantener sincronizada con _QUEUED_INDIVIDUAL_ACTION_TYPES de
+    # jarvis/audit/service.py (no se importa desde acá para evitar el ciclo:
+    # jarvis/audit/service.py ya importa de jarvis/db/database.py).
+    _queued_audit_action_types_sql = (
+        "'create','clarify','merge','edit','delete','retag',"
+        "'archive_superseded','triage_move'"
+    )
+    conn.execute(
+        f"""UPDATE jarvis_audit_proposals
+            SET pushed_at = created_at
+            WHERE pushed_at IS NULL
+              AND action_type NOT IN ({_queued_audit_action_types_sql})"""
+    )
+    conn.commit()
+
     # Ingestión automática (0.3, Agenda de SGR -- ver Cerebro/decisiones-
     # implementacion.md, 2026-09-03). Columnas nuevas en jarvis_capture_proposals:
     # nullable/con default, sin rebuild -- ver el comentario del schema.

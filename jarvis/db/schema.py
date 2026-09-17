@@ -282,6 +282,13 @@ CREATE INDEX IF NOT EXISTS idx_jcp_channel ON jarvis_capture_proposals(channel, 
 -- bajo el mismo action_type. target_entry_ids puede ser '[]' (JSON array
 -- vacío, NOT NULL sigue satisfecho) para la variante "pregunta de arranque"
 -- sin ninguna entrada concreta de la que colgarla.
+-- pushed_at (2026-09-17, ver Cerebro/decisiones-implementacion.md): NULL =
+-- todavía en la cola de throttle, sin entregar al usuario. No-NULL = ya se
+-- le mandó (Telegram) o, para canal 'desktop'/tipos agrupados/open_question,
+-- se considera "entregada" de entrada (ver jarvis/audit/service.py,
+-- _initial_pushed_at()). expire_stale_proposals() cuenta el timeout desde
+-- ACÁ, no desde created_at -- una propuesta que el usuario nunca vio no
+-- puede expirar.
 CREATE TABLE IF NOT EXISTS jarvis_audit_proposals (
     id                TEXT PRIMARY KEY,
     action_type       TEXT NOT NULL
@@ -303,7 +310,8 @@ CREATE TABLE IF NOT EXISTS jarvis_audit_proposals (
     entry_id          TEXT REFERENCES memory_entries(id) ON DELETE SET NULL,
     user_id           TEXT NOT NULL DEFAULT 'default',
     created_at        DATETIME NOT NULL DEFAULT (datetime('now','utc')),
-    resolved_at       DATETIME
+    resolved_at       DATETIME,
+    pushed_at         DATETIME
 );
 
 CREATE INDEX IF NOT EXISTS idx_jap_status ON jarvis_audit_proposals(status);

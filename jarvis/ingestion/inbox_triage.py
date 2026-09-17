@@ -328,7 +328,7 @@ def _process_candidate(candidate: dict, channel: str, chat_id, summary: dict) ->
         })
         return
 
-    from jarvis.audit.service import get_proposal, propose_triage_move
+    from jarvis.audit.service import propose_triage_move
 
     pid = propose_triage_move(entry_id, dest, channel, chat_id, JARVIS_DEFAULT_USER)
     if not pid:
@@ -346,27 +346,16 @@ def _process_candidate(candidate: dict, channel: str, chat_id, summary: dict) ->
         "content": _short(content), "dest": dest, "age_days": candidate["age_days"],
     })
 
-    if channel == "telegram" and chat_id:
-        proposal = get_proposal(pid)
-        question = proposal["question"] if proposal else (
-            f'🧠 Esta nota del inbox parece lista para archivar en "{dest}". ¿La muevo?'
-        )
-        _notify_telegram(chat_id, question, content)
-
-
-def _notify_telegram(chat_id: str, question: str, content: str) -> None:
-    from jarvis.notify.telegram import send_telegram_message
-
-    try:
-        send_telegram_message(
-            chat_id,
-            f"{question}\n\n{_short(content, 300)}\n\n"
-            "Respondé sí/no (o agregá una aclaración en tu respuesta).",
-        )
-    except Exception as exc:
-        logger.warning(
-            "[jarvis.ingestion.inbox_triage] Aviso de propuesta a Telegram falló: %s", exc
-        )
+    # 2026-09-17 (Cerebro/decisiones-implementacion.md): antes acá se
+    # avisaba por Telegram de inmediato, una por candidata -- eso duplicaba
+    # el push ahora que create_proposal()/propose_triage_move() encola esta
+    # propuesta (pushed_at=NULL, action_type='triage_move' está en
+    # _QUEUED_INDIVIDUAL_ACTION_TYPES de jarvis/audit/service.py) para que
+    # la entregue push_next_audit_batch() respetando el throttle. Si este
+    # run procesa varias candidatas en la misma corrida semanal, ya no se
+    # mandan todas juntas -- salen de a una (o dos, según
+    # JARVIS_AUDIT_PUSH_BATCH_SIZE) como el resto de las propuestas de
+    # auditoría.
 
 
 def _short(content: str, n: int = 140) -> str:

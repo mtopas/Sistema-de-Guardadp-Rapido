@@ -11,6 +11,164 @@ Formato de cada entrada:
 
 ---
 
+## 2026-09-17 — Throttle de propuestas de auditoría (evitar ráfagas de Telegram)
+
+Contexto: el usuario reportó (2026-09-16/17) haber recibido ráfagas de propuestas de
+auditoría (`jarvis_audit_proposals`) como mensajes de Telegram individuales, uno atrás de
+otro sin límite -- un caso concreto: 3 propuestas `archive_superseded`/`triage_move` con
+~1 minuto de diferencia entre sí, sumado al reporte diario completo (`jarvis/notify/
+telegram.py::send_report()`, que puede partirse en hasta 37 mensajes) el mismo rato. El
+resultado: el usuario empezó a ignorar todo, incluidas las propuestas que sí necesitaban
+una respuesta suya. Confirmado en producción: las 7 propuestas de auditoría creadas hasta
+ahora expiraron TODAS sin que el usuario respondiera ninguna -- 0 de 7 aceptadas o
+rechazadas -- porque `expire_stale_proposals()` basaba el vencimiento de 24h en
+`created_at` (cuándo se insertó la fila), no en si la propuesta fue efectivamente
+ENTREGADA. Pedido explícito: que le lleguen "de a una o dos a la vez".
+
+Hallazgo adicional durante el diseño (no estaba en el reporte original del usuario):
+`_push_created()` (`jarvis/audit/service.py`) no era la única vía de ráfaga --
+`jarvis/ingestion/inbox_triage.py::_process_candidate()` pusheaba cada propuesta
+`triage_move` de inmediato por su cuenta (`_notify_telegram()`), en un loop por candidata
+del triage semanal del inbox, con clasificación LLM de por medio entre una y otra (encaja
+con el patrón "~1 minuto de diferencia"). Y al revés: `archive_superseded`
+(`propose_archive_superseded()`, llamada desde `jarvis/worker/consolidation.py::
+_propose_archive()`) no se pusheaba a Telegram por NINGÚN camino en el código -- solo
+aparecía como texto en el reporte diario, sin ninguna forma de aceptar/rechazar por chat.
+
+Decisión:
+1. Columna nueva `jarvis_audit_proposals.pushed_at` (`DATETIME`, nullable, sin `CHECK` --
+   no exige el rebuild completo que sí piden los `CHECK` de `action_type`/`status` de esta
+   tabla). `NULL` = todavía en la cola de throttle, sin entregar. No-`NULL` = entregada.
+2. El throttle aplica SOLO a 8 `action_type` "individuales" -- `create`, `clarify`, `merge`,
+   `edit`, `delete`, `retag`, `archive_superseded`, `triage_move` -- y solo en canal
+   `telegram` (`_QUEUED_INDIVIDUAL_ACTION_TYPES`, `jarvis/audit/service.py`). Quedan AFUERA
+   del throttle (`pushed_at` se setea de inmediato al crearse, `_initial_pushed_at()`):
+   - Canal `desktop`: pull vía polling del frontend (`GET /jarvis/audit-proposals`), no hay
+     ráfaga de notificaciones que evitar.
+   - `flag_contradiction`/`flag_connection`: ya van agrupadas en UN solo mensaje de Telegram
+     (`build_grouped_message()`) sin importar cuántas haya -- no reproducen el problema de
+     "muchos mensajes separados", throttlearlas agregaría complejidad sin beneficio real.
+   - `open_question`: regla previa sin cambios, nunca se pushea individual, va embebida en
+     el reporte diario.
+3. `expire_stale_proposals()` re-basado: el cutoff de `JARVIS_AUDIT_PROPOSAL_TIMEOUT_MINUTES`
+   ahora se cuenta desde `pushed_at`, no desde `created_at`. Una fila con `pushed_at IS NULL`
+   nunca matchea el `WHERE` y por lo tanto nunca expira -- correcto, el usuario ni la vio.
+4. Migración/backfill (`jarvis/db/database.py::_migrate()`): además de agregar la columna,
+   toda fila `PENDING` preexistente cuyo `action_type` NO es uno de los 8 throttleados
+   (es decir, `flag_contradiction`/`flag_connection`/`open_question`) se backfillea con
+   `pushed_at = created_at`, porque bajo el código viejo esas SIEMPRE se entregaron de
+   inmediato al crearse y nada las va a marcar "pushed" retroactivamente después de esto.
+   Las filas `PENDING` preexistentes de los 8 tipos throttleados se dejan A PROPÓSITO en
+   `pushed_at = NULL`: también fueron entregadas de inmediato bajo el código viejo, pero acá
+   SÍ hay un mecanismo nuevo (`push_next_audit_batch()`, FIFO por `created_at`) que las va a
+   recoger y reenviar una vez más al desplegar este cambio. Se acepta ese reenvío único
+   como consecuencia razonable de no poder reconstruir retroactivamente "cuándo lo vio el
+   usuario" con el dato disponible -- alternativa descartada: backfillear `pushed_at=
+   created_at` también para estos 8 tipos, lo que evitaría el reenvío pero arriesgaría
+   dejar sin responder (y ahora sin reintento) exactamente las mismas 7 propuestas que
+   motivaron este cambio si alguna seguía viva al momento del deploy.
+5. Tamaño de lote (`JARVIS_AUDIT_PUSH_BATCH_SIZE`, default `1`, env-configurable): lectura
+   más estricta de "una o dos a la vez" -- 1 por defecto, subible a 2 sin tocar código si
+   hace falta más caudal. Se descartó hardcodear 2 directamente porque el pedido era
+   ambiguo entre ambos números y la variable de entorno resuelve la ambigüedad sin
+   comprometerse a una lectura en el código.
+6. Cadencia -- opción (b) del análisis: `push_next_audit_batch()` solo avanza la cola de un
+   chat cuando NO queda ninguna propuesta individual ya entregada y todavía sin resolver
+   (`status='PENDING' AND pushed_at IS NOT NULL`) para ese `channel_id`. Se descartó la
+   opción (a) (mandar hasta N nuevas en cada `run_audit()` diario sin importar si las
+   anteriores se resolvieron) porque reproduce exactamente el problema original: el
+   usuario puede acumular preguntas sin contestar mientras el sistema le sigue mandando
+   más cada día. Con (b), el total de "esperando tu respuesta" nunca supera
+   `JARVIS_AUDIT_PUSH_BATCH_SIZE`, y la expiración de 24h (punto 3) actúa como salvavidas
+   si el usuario ignora una pushed y nunca contesta -- una vez expira, deja de contar como
+   "sin resolver" y la cola avanza sola.
+7. Orden de la cola: FIFO por `created_at` (lo más viejo primero) -- sin razón real para
+   otra cosa, no hay campo de prioridad en el schema que lo justifique.
+8. Disparo de "mandar la próxima tanda": en CADA tick ocioso del loop del worker
+   (`jarvis/worker/main.py::_maybe_run_passive_capture()`, corre cada
+   `JARVIS_WORKER_POLL_INTERVAL` -- 5s por default -- cuando no hay nada `PENDING` en
+   `inbox_queue`), mismo lugar donde ya corre `expire_stale_audit_proposals()`. Se
+   descartó atarlo solo a la corrida diaria de `run_audit()` porque el caso de uso real es
+   "contesté a la mañana, quiero que la siguiente me llegue pronto, no mañana" -- esperar a
+   la corrida diaria (~24h de gate) sería peor experiencia que el problema que se está
+   arreglando. El costo extra es mínimo: un `SELECT` barato más por tick, misma clase de
+   costo que el sweep de vencimiento que ya corre ahí. No es infraestructura nueva (no hay
+   cron/thread/Redis nuevo) -- reusa el polling que ya existe, respetando la restricción de
+   Jarvis 0.1 de no agregar piezas pesadas. Tampoco es una violación nueva del invariante
+   "el worker no hace requests externos": el worker YA manda mensajes de Telegram desde
+   este mismo proceso hoy (`_push_created()`), esto solo mueve CUÁNDO se dispara ese envío
+   ya existente, no agrega una clase de operación nueva. `run_audit()` además llama a
+   `push_next_audit_batch()` una vez al final de su propia corrida, para que el primer
+   lote de una corrida recién terminada salga sin esperar el próximo tick (mejora menor,
+   no imprescindible dado que el poll default es de 5s).
+9. `_already_exists()` (dedup por `action_type` + `target_entry_ids`) no cambia -- sigue
+   siendo ajeno a `status`/`pushed_at`, exactamente como antes.
+10. `list_pending_proposals()`, `list_grouped_pending()`,
+    `get_pending_individual_proposal_for_channel()` agregan `AND pushed_at IS NOT NULL` --
+    ninguna de las tres debe ofrecer aceptar/rechazar (ni al frontend `/jarvis/
+    audit-proposals`, ni al parser de respuestas libres de Telegram) algo que el usuario
+    todavía no vio.
+11. `jarvis/ingestion/inbox_triage.py::_process_candidate()` pierde su push directo
+    (`_notify_telegram()`, borrada) -- `triage_move` ahora fluye por el mismo mecanismo de
+    cola que el resto, evitando el doble envío que hubiera resultado de dejar el push
+    viejo en pie sobre una fila que además va a quedar encolada.
+12. Efecto colateral sin cambios de código en `jarvis/worker/consolidation.py`:
+    `propose_archive_superseded()` ya pasaba por `create_proposal()`, así que con este
+    cambio esas propuestas (hasta ahora silenciosas -- nunca se pusheaban a Telegram por
+    ningún camino, solo aparecían como texto en el reporte diario) empiezan a entregarse
+    solas por la cola, sin tocar `_propose_archive()` para nada.
+
+Diferencia con spec: no aplica -- ajuste de comportamiento sobre un mecanismo ya
+implementado en 0.2 (auditoría proactiva, entrada 2026-08-31), no una pieza nueva de la
+spec original.
+
+Impacto: `jarvis/db/schema.py` (columna `pushed_at`), `jarvis/db/database.py`
+(`_migrate()`, backfill), `jarvis/config.py` (`JARVIS_AUDIT_PUSH_BATCH_SIZE`),
+`jarvis/audit/service.py` (`_QUEUED_INDIVIDUAL_ACTION_TYPES`, `_initial_pushed_at()`,
+`create_proposal()`, `expire_stale_proposals()`, `list_pending_proposals()`,
+`list_grouped_pending()`, `get_pending_individual_proposal_for_channel()`,
+`_push_created()`, `push_next_audit_batch()`, `_mark_pushed()`, `run_audit()`),
+`jarvis/worker/main.py` (`_maybe_run_passive_capture()`), `jarvis/ingestion/
+inbox_triage.py` (`_process_candidate()`, se borra `_notify_telegram()`).
+
+Verificado: dos scripts standalone en el scratchpad de la sesión (nunca commiteados,
+borrados junto con sus DBs de scratch al terminar) -- no hay tests automatizados en
+`jarvis/` (confirmado: solo existe `jarvis/cli/seed_test.py`, un seeder de datos de
+prueba, no una suite de tests).
+
+1. `verify_audit_throttle.py`, contra una `jarvis.db` de scratch aislada (`JARVIS_DB_PATH`
+   apuntado a `%TEMP%\jarvis_verify_throttle.db`, creada desde cero por `init_db()`),
+   `send_telegram_message` parcheado (sin red real). Los 5 casos dieron OK:
+   - `_initial_pushed_at()`: `desktop`→entrega inmediata, `telegram`+`create`→`None` (cola),
+     `telegram`+`flag_contradiction`→entrega inmediata, `telegram`+`open_question`→entrega
+     inmediata.
+   - `create_proposal()`: `telegram`+`create` deja `pushed_at IS NULL`; `desktop`+`create`
+     deja `pushed_at` seteado.
+   - `push_next_audit_batch()`: con 3 propuestas `clarify` encoladas (`created_at`
+     escalonado), el primer llamado empuja exactamente 1 (la más vieja, FIFO), manda 1
+     mensaje real (mockeado); un segundo llamado sin resolver la anterior no empuja nada
+     (`outstanding` bloquea el avance); tras `reject_proposal()` de la primera, el tercer
+     llamado sí avanza a la siguiente.
+   - `expire_stale_proposals()`: una fila con `created_at` de hace 2 días y `pushed_at IS
+     NULL` NO expira; una fila con `pushed_at` de hace 2 días SÍ expira a `EXPIRED`.
+   - `list_pending_proposals()`/`get_pending_individual_proposal_for_channel()`: ninguna
+     fila con `pushed_at IS NULL` aparece en sus resultados.
+2. `verify_audit_throttle_migration.py`, contra una segunda `jarvis.db` de scratch creada
+   a mano con el `CREATE TABLE jarvis_audit_proposals` PRE-cambio (sin columna `pushed_at`,
+   copiado literal del schema anterior a este edit) más dos filas `PENDING` insertadas
+   directo por SQL con `created_at` de hace 2 días: una `flag_contradiction`, una `create`.
+   Al importar `jarvis.db.database` apuntando `JARVIS_DB_PATH` a esa DB y llamar
+   `init_db()` (dispara `_migrate()`, incluido el backfill nuevo): la fila
+   `flag_contradiction` terminó con `pushed_at == created_at` (backfill aplicado, tipo NO
+   throttleado); la fila `create` terminó con `pushed_at IS NULL` (dejada en cola a
+   propósito, tipo SÍ throttleado). Ambos asserts pasaron.
+
+Ambos scripts y sus dos DBs de scratch (`%TEMP%\jarvis_verify_throttle.db`,
+`%TEMP%\jarvis_verify_throttle_migration.db`) se borraron al terminar -- nunca tocaron
+`jarvis.db`/`D:\Boveda` reales en ningún momento.
+
+---
+
 ## 2026-09-16 — Reversión parcial: pares "different" ya no se listan en detalle en el reporte de consolidación (vuelven a un conteo)
 
 Contexto: la entrada del 2026-09-03 ("Reporte diario completo de

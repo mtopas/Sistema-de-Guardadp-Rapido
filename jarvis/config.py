@@ -212,6 +212,13 @@ JARVIS_AUDIT_RANDOM_COOLDOWN_DAYS = int(os.getenv("JARVIS_AUDIT_RANDOM_COOLDOWN_
 JARVIS_AUDIT_PROPOSAL_TIMEOUT_MINUTES = int(
     os.getenv("JARVIS_AUDIT_PROPOSAL_TIMEOUT_MINUTES", "1440")
 )
+# Cuántas propuestas de auditoría INDIVIDUALES (no las agrupadas flag_*, no
+# open_question) se empujan por Telegram de una vez cuando no queda ninguna
+# sin resolver para ese chat -- throttle anti-ráfaga (Cerebro/decisiones-
+# implementacion.md, 2026-09-17). 1 por default: lectura más estricta del
+# pedido "de a una o dos a la vez"; subir a 2 vía env si hace falta más
+# caudal, sin tocar código.
+JARVIS_AUDIT_PUSH_BATCH_SIZE = int(os.getenv("JARVIS_AUDIT_PUSH_BATCH_SIZE", "1"))
 
 # ── Pregunta abierta exploratoria (jarvis/audit/service.py) ──────────────────
 # Quinto paso de run_consolidation() -- dispara SOLO cuando la corrida no tuvo

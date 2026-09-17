@@ -1,5 +1,21 @@
 # Estado Actual de Jarvis
-Última actualización: 2026-09-16
+Última actualización: 2026-09-17
+
+## IMPLEMENTADO: throttle de propuestas de auditoría (evitar ráfagas de Telegram) (2026-09-17)
+
+Propuestas individuales de auditoría (`create`/`clarify`/`merge`/`edit`/`delete`/`retag`/
+`archive_superseded`/`triage_move`) ya no se mandan todas de golpe por Telegram -- se
+encolan (`jarvis_audit_proposals.pushed_at` nuevo, `NULL` = en cola) y salen de a
+`JARVIS_AUDIT_PUSH_BATCH_SIZE` (default 1, env-configurable) por vez, solo cuando no queda
+ninguna sin resolver para ese chat (`push_next_audit_batch()`, disparado en cada tick
+ocioso del worker + al final de `run_audit()`). La expiración de 24h ahora cuenta desde
+`pushed_at`, no `created_at` -- una propuesta nunca entregada no puede vencer. De paso se
+sacó el push directo duplicado que tenía `inbox_triage.py::_process_candidate()` para
+`triage_move`. Detalle completo, decisiones y verificación (2 scripts de scratch, 5 casos
++ 1 caso de migración/backfill, todos OK) en `Cerebro/decisiones-implementacion.md`,
+entrada `2026-09-17`. Archivos tocados: `jarvis/db/schema.py`, `jarvis/db/database.py`,
+`jarvis/config.py`, `jarvis/audit/service.py`, `jarvis/worker/main.py`, `jarvis/ingestion/
+inbox_triage.py`. Sin commitear -- queda a cargo del orquestador de la sesión.
 
 ## FIX: chat de Jarvis en el `.exe` nunca tuvo memoria real — dos bugs de empaquetado (2026-09-16)
 

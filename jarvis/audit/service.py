@@ -97,6 +97,7 @@ from datetime import datetime, timedelta, timezone
 from jarvis.config import (
     JARVIS_AUDIT_BLOCK_SIZE,
     JARVIS_AUDIT_PROPOSAL_TIMEOUT_MINUTES,
+    JARVIS_AUDIT_PUSH_BATCH_SIZE,
     JARVIS_AUDIT_RANDOM_COOLDOWN_DAYS,
     JARVIS_DEFAULT_USER,
     JARVIS_OPEN_QUESTION_COOLDOWN_DAYS,
@@ -110,6 +111,20 @@ logger = logging.getLogger(__name__)
 
 _ENTITY_CREATE_LIMIT = 3
 _MAX_FRAGMENT_CHARS = 500
+
+# Throttle de propuestas de auditoría (Cerebro/decisiones-implementacion.md,
+# 2026-09-17): estos 8 action_types son los únicos que se encolan (pushed_at
+# NULL al crearse, canal telegram) y avanzan de a JARVIS_AUDIT_PUSH_BATCH_SIZE
+# por vez. flag_contradiction/flag_connection quedan afuera a propósito (van
+# en UN solo mensaje agrupado vía build_grouped_message() -- ya no son una
+# ráfaga de mensajes separados, no hace falta throttlearlos) y open_question
+# también queda afuera (nunca se pushea individual, va embebido en el
+# reporte diario -- regla previa, sin cambios). MANTENER SINCRONIZADO con el
+# backfill de jarvis/db/database.py::_migrate().
+_QUEUED_INDIVIDUAL_ACTION_TYPES = frozenset({
+    "create", "clarify", "merge", "edit", "delete", "retag",
+    "archive_superseded", "triage_move",
+})
 
 _LOCAL_PREFIX_RE = re.compile(r"^\s*\[modo local\]\s*", re.IGNORECASE)
 _NUM_RE = re.compile(r"\d+")
@@ -194,6 +209,13 @@ def run_audit(now: datetime | None = None) -> dict:
             _push_created(created_ids, channel, chat_id, user_id)
         except Exception as exc:
             logger.exception("[audit] Error empujando propuestas a Telegram")
+            summary["errors"].append(str(exc))
+
+    if channel == "telegram" and chat_id:
+        try:
+            push_next_audit_batch(channel, chat_id, user_id)
+        except Exception as exc:
+            logger.exception("[audit] Error empujando el próximo lote de la cola de auditoría")
             summary["errors"].append(str(exc))
 
     logger.info(
@@ -818,6 +840,23 @@ def _already_exists(action_type: str, target_entry_ids: list[str]) -> bool:
         conn.close()
 
 
+def _initial_pushed_at(action_type: str, channel: str, now_iso: str) -> str | None:
+    """None si la propuesta debe esperar en la cola de throttle (recién se
+    entrega cuando push_next_audit_batch() la levante); now_iso si se la
+    considera "entregada" de entrada -- canal 'desktop' (polling, no hay
+    ráfaga que evitar: el frontend la trae cuando el usuario abre la
+    pantalla), flag_contradiction/flag_connection (van agrupadas en un solo
+    mensaje, nunca individuales -- ver _push_created()) y open_question
+    (nunca se pushea sola, va embebida en el reporte diario -- regla previa
+    sin cambios). Ver Cerebro/decisiones-implementacion.md, 2026-09-17.
+    """
+    if channel != "telegram":
+        return now_iso
+    if action_type not in _QUEUED_INDIVIDUAL_ACTION_TYPES:
+        return now_iso
+    return None
+
+
 def create_proposal(
     action_type: str,
     target_entry_ids: list[str],
@@ -829,20 +868,25 @@ def create_proposal(
 ) -> str | None:
     """Crea una jarvis_audit_proposals PENDING. Devuelve None (sin crear
     nada) si ya existe una propuesta para esta acción+entradas -- dedup.
+    pushed_at queda NULL (en cola) o se setea de inmediato según
+    _initial_pushed_at() -- ver Cerebro/decisiones-implementacion.md,
+    2026-09-17. No afecta el dedup: _already_exists() sigue mirando solo
+    (action_type, target_entry_ids), ajeno a pushed_at/status.
     """
     if _already_exists(action_type, target_entry_ids):
         return None
 
     proposal_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
+    pushed_at = _initial_pushed_at(action_type, channel, now)
     conn = get_connection()
     try:
         with conn:
             conn.execute(
                 """INSERT INTO jarvis_audit_proposals
                     (id, action_type, target_entry_ids, payload, question,
-                     channel, channel_id, status, user_id, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)""",
+                     channel, channel_id, status, user_id, created_at, pushed_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?)""",
                 (
                     proposal_id,
                     action_type,
@@ -853,6 +897,7 @@ def create_proposal(
                     str(channel_id) if channel_id is not None else None,
                     user_id,
                     now,
+                    pushed_at,
                 ),
             )
         return proposal_id
@@ -879,6 +924,7 @@ def list_pending_proposals(user_id: str = JARVIS_DEFAULT_USER, channel: str | No
             rows = conn.execute(
                 """SELECT * FROM jarvis_audit_proposals
                    WHERE user_id = ? AND channel = ? AND status = 'PENDING'
+                     AND pushed_at IS NOT NULL
                    ORDER BY created_at DESC""",
                 (user_id, channel),
             ).fetchall()
@@ -886,6 +932,7 @@ def list_pending_proposals(user_id: str = JARVIS_DEFAULT_USER, channel: str | No
             rows = conn.execute(
                 """SELECT * FROM jarvis_audit_proposals
                    WHERE user_id = ? AND status = 'PENDING'
+                     AND pushed_at IS NOT NULL
                    ORDER BY created_at DESC""",
                 (user_id,),
             ).fetchall()
@@ -928,6 +975,7 @@ def get_pending_individual_proposal_for_channel(channel: str, channel_id, user_i
             """SELECT * FROM jarvis_audit_proposals
                WHERE channel = ? AND channel_id = ? AND user_id = ? AND status = 'PENDING'
                  AND action_type NOT IN ('flag_contradiction','flag_connection')
+                 AND pushed_at IS NOT NULL
                ORDER BY created_at ASC LIMIT 1""",
             (channel, str(channel_id), user_id),
         ).fetchone()
@@ -945,6 +993,13 @@ def reject_proposal(proposal_id: str) -> bool:
 
 
 def expire_stale_proposals(now: datetime | None = None) -> int:
+    """Expira PENDING con más de JARVIS_AUDIT_PROPOSAL_TIMEOUT_MINUTES desde
+    que se LE MANDÓ al usuario (pushed_at), no desde que se creó -- ver
+    Cerebro/decisiones-implementacion.md, 2026-09-17. Una fila con
+    pushed_at IS NULL (todavía en la cola de throttle) nunca matchea el
+    WHERE de abajo y por lo tanto nunca expira -- correcto: el usuario ni
+    la vio, no tiene sentido que se le venza.
+    """
     now = now or datetime.now(timezone.utc)
     cutoff = (now - timedelta(minutes=JARVIS_AUDIT_PROPOSAL_TIMEOUT_MINUTES)).isoformat()
     conn = get_connection()
@@ -953,7 +1008,7 @@ def expire_stale_proposals(now: datetime | None = None) -> int:
             cur = conn.execute(
                 """UPDATE jarvis_audit_proposals
                    SET status = 'EXPIRED', resolved_at = ?
-                   WHERE status = 'PENDING' AND created_at <= ?""",
+                   WHERE status = 'PENDING' AND pushed_at IS NOT NULL AND pushed_at <= ?""",
                 (now.isoformat(), cutoff),
             )
             return cur.rowcount
@@ -1644,6 +1699,7 @@ def list_grouped_pending(channel: str, channel_id, user_id: str = JARVIS_DEFAULT
             """SELECT * FROM jarvis_audit_proposals
                WHERE channel = ? AND channel_id = ? AND user_id = ? AND status = 'PENDING'
                  AND action_type IN ('flag_contradiction','flag_connection')
+                 AND pushed_at IS NOT NULL
                ORDER BY created_at ASC""",
             (channel, str(channel_id), user_id),
         ).fetchall()
@@ -1712,24 +1768,100 @@ def _parse_grouped_reply(lowered: str, n_pending: int) -> tuple[set, set]:
     return accept_nums, reject_nums
 
 
-def _push_created(created_ids: list[str], channel: str, chat_id, user_id: str) -> None:
+def push_next_audit_batch(channel: str, channel_id, user_id: str = JARVIS_DEFAULT_USER) -> list[str]:
+    """Empuja el próximo lote (hasta JARVIS_AUDIT_PUSH_BATCH_SIZE) de la cola
+    de propuestas individuales de auditoría (_QUEUED_INDIVIDUAL_ACTION_TYPES)
+    para este chat -- SOLO si no queda ninguna sin resolver todavía (ninguna
+    PENDING ya entregada, pushed_at IS NOT NULL, de esos 8 tipos, para este
+    channel_id). FIFO por created_at. No toca flag_contradiction/
+    flag_connection (esas van por _push_created()/list_grouped_pending(), un
+    solo mensaje agrupado, ya no throttleado) ni open_question (nunca se
+    pushea individual). Devuelve los ids efectivamente empujados (puede ser
+    []). Llamado desde run_audit() (una vez al final, para que el primer
+    lote de una corrida nueva salga sin esperar el próximo tick) y desde
+    jarvis/worker/main.py::_maybe_run_passive_capture() (cada tick ocioso
+    del loop, ~JARVIS_WORKER_POLL_INTERVAL -- es la vía real de "la próxima
+    llega poco después de que contestaste la anterior", ver Cerebro/
+    decisiones-implementacion.md, 2026-09-17 para el trade-off vs. esperar
+    a la corrida diaria).
+
+    No es un job que pueda tumbar nada más si falla feo (a diferencia de
+    run_audit()) -- igual se llama siempre dentro de un try/except en los
+    call sites, mismo criterio defensivo del resto del worker.
+    """
+    if channel != "telegram" or not channel_id:
+        return []
+
+    placeholders = ",".join("?" * len(_QUEUED_INDIVIDUAL_ACTION_TYPES))
+    conn = get_connection()
+    try:
+        outstanding = conn.execute(
+            f"""SELECT 1 FROM jarvis_audit_proposals
+                WHERE channel = ? AND channel_id = ? AND user_id = ?
+                  AND status = 'PENDING' AND pushed_at IS NOT NULL
+                  AND action_type IN ({placeholders})
+                LIMIT 1""",
+            (channel, str(channel_id), user_id, *_QUEUED_INDIVIDUAL_ACTION_TYPES),
+        ).fetchone()
+        if outstanding:
+            return []
+
+        rows = conn.execute(
+            f"""SELECT * FROM jarvis_audit_proposals
+                WHERE channel = ? AND channel_id = ? AND user_id = ?
+                  AND status = 'PENDING' AND pushed_at IS NULL
+                  AND action_type IN ({placeholders})
+                ORDER BY created_at ASC LIMIT ?""",
+            (channel, str(channel_id), user_id, *_QUEUED_INDIVIDUAL_ACTION_TYPES,
+             JARVIS_AUDIT_PUSH_BATCH_SIZE),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    if not rows:
+        return []
+
     from jarvis.notify.telegram import send_telegram_message
 
-    individual, has_grouped = [], False
-    for pid in created_ids:
-        p = get_proposal(pid)
-        if not p:
-            continue
-        if p["action_type"] in ("flag_contradiction", "flag_connection"):
-            has_grouped = True
-        else:
-            individual.append(p)
-
-    for p in individual:
+    now_iso = datetime.now(timezone.utc).isoformat()
+    pushed_ids = []
+    for row in rows:
         send_telegram_message(
-            chat_id, p["question"] + "\n\nRespondé sí/no (o agregá una aclaración)."
+            channel_id, row["question"] + "\n\nRespondé sí/no (o agregá una aclaración)."
         )
+        _mark_pushed(row["id"], now_iso)
+        pushed_ids.append(row["id"])
+    return pushed_ids
 
+
+def _mark_pushed(proposal_id: str, now_iso: str) -> None:
+    conn = get_connection()
+    try:
+        with conn:
+            conn.execute(
+                "UPDATE jarvis_audit_proposals SET pushed_at = ? WHERE id = ? AND pushed_at IS NULL",
+                (now_iso, proposal_id),
+            )
+    finally:
+        conn.close()
+
+
+def _push_created(created_ids: list[str], channel: str, chat_id, user_id: str) -> None:
+    """Pushea de inmediato SOLO lo agrupado (flag_contradiction/
+    flag_connection -- un único mensaje combinado, ver build_grouped_message()).
+    Los 8 action_types individuales throttleados (ver
+    _QUEUED_INDIVIDUAL_ACTION_TYPES) NO se mandan acá -- quedan pushed_at=NULL
+    desde create_proposal() y los levanta push_next_audit_batch(), llamado
+    aparte (run_audit() lo llama una vez al final; el loop del worker lo
+    reintenta en cada tick ocioso). Ver Cerebro/decisiones-implementacion.md,
+    2026-09-17.
+    """
+    from jarvis.notify.telegram import send_telegram_message
+
+    has_grouped = any(
+        (p := get_proposal(pid)) and p["action_type"] in ("flag_contradiction", "flag_connection")
+        for pid in created_ids
+    )
     if has_grouped:
         pending_group = list_grouped_pending(channel, chat_id, user_id)
         if pending_group:

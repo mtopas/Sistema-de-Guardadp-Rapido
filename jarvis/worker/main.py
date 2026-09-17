@@ -12,10 +12,14 @@ import threading
 import time
 from datetime import datetime, timezone
 
-from jarvis.audit.service import expire_stale_proposals as expire_stale_audit_proposals
+from jarvis.audit.service import (
+    expire_stale_proposals as expire_stale_audit_proposals,
+    push_next_audit_batch,
+)
 from jarvis.captures.passive import expire_stale_proposals, scan_and_propose
 from jarvis.config import (
     JARVIS_BOVEDA_PATH,
+    JARVIS_DEFAULT_USER,
     JARVIS_PASSIVE_CAPTURE_ENABLED,
     JARVIS_WORKER_POLL_INTERVAL,
 )
@@ -146,6 +150,25 @@ def _maybe_run_passive_capture() -> None:
                 logger.info("[worker] Auditoría: %d propuesta(s) expirada(s)", expired_audit)
         except Exception:
             logger.exception("[worker] Sweep de vencimiento de auditoría falló")
+
+        # Empuja el próximo lote de la cola de propuestas de auditoría
+        # (jarvis.audit.service) -- mismo tick ocioso, mismo motivo que el
+        # sweep de vencimiento de arriba (no hay job_queue entre procesos).
+        # Es lo que hace que "contesté a la mañana" -> "la próxima llega
+        # poco después" en vez de recién al otro día en la corrida de
+        # auditoría -- ver Cerebro/decisiones-implementacion.md, 2026-09-17.
+        try:
+            from jarvis.debug.service import get_debug_chat_id
+
+            chat_id = get_debug_chat_id()
+            if chat_id:
+                pushed = push_next_audit_batch("telegram", chat_id, JARVIS_DEFAULT_USER)
+                if pushed:
+                    logger.info(
+                        "[worker] Auditoría: %d propuesta(s) empujada(s) de la cola", len(pushed)
+                    )
+        except Exception:
+            logger.exception("[worker] Empuje de cola de auditoría falló")
 
     _passive_thread = threading.Thread(target=_run, name="jarvis-passive-capture", daemon=True)
     _passive_thread.start()

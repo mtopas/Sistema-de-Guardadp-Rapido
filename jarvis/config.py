@@ -192,6 +192,14 @@ JARVIS_PASSIVE_CAPTURE_INACTIVITY_MINUTES = int(
 JARVIS_PASSIVE_PROPOSAL_TIMEOUT_MINUTES = int(
     os.getenv("JARVIS_PASSIVE_PROPOSAL_TIMEOUT_MINUTES", "30")
 )
+# Cuántas propuestas de jarvis_capture_proposals (passive_capture +
+# agenda_ingestion, incluidos los patrones de agenda_patterns.py) se empujan
+# por Telegram de una vez cuando no queda ninguna sin resolver para ese chat
+# -- mismo throttle anti-ráfaga que jarvis/audit/service.py (Cerebro/
+# decisiones-implementacion.md, 2026-09-17), namespace propio (NO se reusa
+# JARVIS_AUDIT_PUSH_BATCH_SIZE -- son colas independientes, con volumen y
+# naturaleza distintos). 1 por default, subible vía env sin tocar código.
+JARVIS_CAPTURE_PUSH_BATCH_SIZE = int(os.getenv("JARVIS_CAPTURE_PUSH_BATCH_SIZE", "1"))
 
 # ── Auditoría proactiva de memoria (jarvis/audit/service.py) ─────────────────
 # Cuarto paso de run_consolidation() -- ver Cerebro/decisiones-implementacion.md

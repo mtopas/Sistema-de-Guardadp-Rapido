@@ -154,6 +154,22 @@ def run_agenda_ingestion(now: datetime | None = None) -> dict:
         logger.warning("[jarvis.ingestion.agenda] No se pudo leer /agenda/tareas: %s", exc)
         summary["errors"].append(f"tareas: {exc}")
 
+    # Empuja el próximo lote de la cola de propuestas de captura (throttle,
+    # ver Cerebro/decisiones-implementacion.md, 2026-09-17) -- al final de la
+    # corrida, para que el primer lote de propuestas recién creadas (o algo
+    # que ya estaba en cola de una corrida anterior) salga sin esperar el
+    # próximo tick ocioso del worker. Mismo criterio que run_audit().
+    if channel == "telegram" and chat_id:
+        try:
+            from jarvis.captures.passive import push_next_capture_batch
+
+            push_next_capture_batch(channel, chat_id, JARVIS_DEFAULT_USER)
+        except Exception as exc:
+            logger.exception(
+                "[jarvis.ingestion.agenda] Error empujando el próximo lote de la cola de captura"
+            )
+            summary["errors"].append(str(exc))
+
     return summary
 
 
@@ -257,7 +273,7 @@ def _propose_event(evt: dict, channel: str, chat_id: str | None, summary: dict) 
     if _already_proposed(source_key):
         return False
     content, question = _event_content_and_question(evt)
-    _create_and_notify(source_key, content, question, channel, chat_id, summary)
+    _create_proposal(source_key, content, question, channel, chat_id, summary)
     return True
 
 
@@ -266,11 +282,11 @@ def _propose_task(t: dict, channel: str, chat_id: str | None, summary: dict) -> 
     if _already_proposed(source_key):
         return False
     content, question = _task_content_and_question(t)
-    _create_and_notify(source_key, content, question, channel, chat_id, summary)
+    _create_proposal(source_key, content, question, channel, chat_id, summary)
     return True
 
 
-def _create_and_notify(
+def _create_proposal(
     source_key: str, content: str, question: str,
     channel: str, chat_id: str | None, summary: dict,
 ) -> None:
@@ -287,20 +303,16 @@ def _create_and_notify(
         origin_source_key=source_key,
     )
     summary["proposed_detail"].append({"content": content, "question": question})
-    if channel == "telegram" and chat_id:
-        _notify_telegram(chat_id, question, content)
-
-
-def _notify_telegram(chat_id: str, question: str, content: str) -> None:
-    from jarvis.notify.telegram import send_telegram_message
-
-    try:
-        send_telegram_message(
-            chat_id,
-            f"🗓️ {question}\n\n{content}\n\nRespondé sí/no (o agregá una aclaración en tu respuesta).",
-        )
-    except Exception as exc:
-        logger.warning("[jarvis.ingestion.agenda] Aviso de propuesta a Telegram falló: %s", exc)
+    # 2026-09-17 (Cerebro/decisiones-implementacion.md): antes acá se avisaba
+    # por Telegram de inmediato, evento/tarea por evento/tarea -- confirmado
+    # como una de las ráfagas reales de producción (21 propuestas de Agenda
+    # terminaron 20 EXPIRED + 1 REJECTED + 0 ACCEPTED, ninguna resuelta a
+    # tiempo, ver Cerebro/decisiones/... y el comentario histórico en
+    # jarvis/ingestion/agenda_patterns.py). create_proposal() ahora encola
+    # esta propuesta (pushed_at=NULL para canal telegram) para que la
+    # entregue jarvis.captures.passive.push_next_capture_batch() respetando
+    # JARVIS_CAPTURE_PUSH_BATCH_SIZE -- mismo criterio ya aplicado el mismo
+    # día a triage_move en jarvis/ingestion/inbox_triage.py.
 
 
 # ── Contenido/pregunta sintetizados (sin LLM -- datos ya estructurados) ─────

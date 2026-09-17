@@ -266,6 +266,37 @@ def _migrate(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(
         conn, "jarvis_capture_proposals", "origin_source_key", "origin_source_key TEXT"
     )
+
+    # Throttle de propuestas de captura (Cerebro/decisiones-implementacion.md,
+    # 2026-09-17) -- mismo patrón aplicado el mismo día a jarvis_audit_proposals
+    # (ver arriba), acá sobre la tabla hermana. pushed_at nullable, sin CHECK --
+    # no hace falta ningún rebuild.
+    _add_column_if_missing(conn, "jarvis_capture_proposals", "pushed_at", "pushed_at DATETIME")
+
+    # Backfill: a diferencia de audit (11 action_types, 8 throttleados), acá
+    # no hay ninguna distinción por tipo -- el criterio es solo el canal. Toda
+    # fila PENDING preexistente de canal 'telegram' se deja a propósito en
+    # NULL: bajo el código viejo también fue entregada de inmediato al
+    # crearse, pero acá SÍ hay un mecanismo nuevo (push_next_capture_batch(),
+    # FIFO por created_at) que la va a recoger y reenviar una vez al
+    # desplegar esto -- mismo trade-off aceptado que en audit (no se puede
+    # reconstruir retroactivamente "cuándo se vio" con el dato disponible).
+    # Toda fila PENDING preexistente de canal 'desktop' (pull vía polling,
+    # nunca tuvo ráfaga que evitar) se backfillea con pushed_at=created_at --
+    # ya se consideraba entregada bajo el código viejo. En producción no hay
+    # ninguna fila PENDING hoy en esta tabla (las 21 propuestas reales de
+    # Agenda son 20 EXPIRED + 1 REJECTED, 0 PENDING) -- este backfill no tiene
+    # trabajo real que hacer ahí, pero tiene que ser código correcto para
+    # cualquier otra instalación (dev local, etc.) que sí tenga algo PENDING
+    # al momento del deploy. Idempotente (solo toca WHERE pushed_at IS NULL),
+    # mismo patrón que el resto de los backfills de esta función.
+    conn.execute(
+        """UPDATE jarvis_capture_proposals
+           SET pushed_at = created_at
+           WHERE pushed_at IS NULL AND status = 'PENDING' AND channel = 'desktop'"""
+    )
+    conn.commit()
+
     _migrate_memory_entries_source(conn)
 
 

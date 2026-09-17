@@ -53,11 +53,17 @@ en silencio"):
      construye uno acá (_TRUST_RANK), con web.untrusted estrictamente el más
      bajo (coincide con el nombre) y los dos orígenes de usuario directo
      empatados arriba.
-  5. Cuando hay varias propuestas individuales (no agrupadas) PENDING para
+  5. [SUPERADO 2026-09-17, ver más abajo y Cerebro/decisiones-implementacion.md]
+     Cuando hay varias propuestas individuales (no agrupadas) PENDING para
      el mismo chat a la vez, una respuesta de texto libre en Telegram
-     resuelve la más VIEJA primero (FIFO) -- el documento asumía una sola
-     pendiente a la vez (mismo supuesto que ya tenía captura pasiva), sin
-     contemplar que un solo audit run puede generar varias de golpe.
+     resolvía la más VIEJA primero (FIFO) sin avisar -- el documento asumía
+     una sola pendiente a la vez (mismo supuesto que ya tenía captura
+     pasiva), sin contemplar que un solo audit run puede generar varias de
+     golpe. Esto era seguro en la práctica mientras JARVIS_AUDIT_PUSH_BATCH_SIZE
+     fuera 1 (nunca había 2+ PENDING+pushed a la vez), pero quedaba roto en
+     cuanto esa variable subía a 2+ -- ver la entrada de desambiguación
+     (2026-09-17) para el fix real: ya no se resuelve a ciegas, se pide al
+     usuario que aclare a cuál se refiere cuando hay 2+.
 
 Extensión 2026-08-31 ("respuestas de texto libre con información nueva",
 ver Cerebro/decisiones-implementacion.md): generaliza a las 7 acciones que
@@ -963,25 +969,67 @@ def list_proposals(user_id: str = JARVIS_DEFAULT_USER, status: str | None = None
         conn.close()
 
 
-def get_pending_individual_proposal_for_channel(channel: str, channel_id, user_id: str = JARVIS_DEFAULT_USER) -> dict | None:
-    """Próxima propuesta PENDING individual (no agrupada) para este chat, la
-    más vieja primero -- FIFO simple para cuando el mismo audit run generó
-    varias de golpe (ver nota 5 del docstring del módulo: el documento de
-    diseño no contemplaba más de una pendiente por chat a la vez).
+def list_pending_individual_proposals_for_channel(
+    channel: str, channel_id, user_id: str = JARVIS_DEFAULT_USER
+) -> list[dict]:
+    """Todas las propuestas PENDING individuales (no agrupadas) ya entregadas
+    para este chat, ASC por created_at (más vieja primero). Generaliza lo que
+    antes hacía get_pending_individual_proposal_for_channel() (LIMIT 1) --
+    necesario para poder desambiguar cuando hay 2+ pendientes a la vez, algo
+    que el diseño original no contemplaba (ver nota 5 del docstring del
+    módulo) y que se vuelve posible en cuanto JARVIS_AUDIT_PUSH_BATCH_SIZE
+    sube a 2+ (ver Cerebro/decisiones-implementacion.md, 2026-09-17, entrada
+    de desambiguación). Con el default (1) esta lista nunca tiene más de un
+    elemento -- el caso simple no cambia.
+
+    Usada por project/mybot/jarvis_handlers.py para decidir si puede resolver
+    directo (0 o 1 resultado) o si necesita pedirle al usuario que aclare a
+    cuál se refiere (2+ resultados) antes de aplicar resolve_individual_reply().
     """
     conn = get_connection()
     try:
-        row = conn.execute(
+        rows = conn.execute(
             """SELECT * FROM jarvis_audit_proposals
                WHERE channel = ? AND channel_id = ? AND user_id = ? AND status = 'PENDING'
                  AND action_type NOT IN ('flag_contradiction','flag_connection')
                  AND pushed_at IS NOT NULL
-               ORDER BY created_at ASC LIMIT 1""",
+               ORDER BY created_at ASC""",
             (channel, str(channel_id), user_id),
-        ).fetchone()
-        return dict(row) if row else None
+        ).fetchall()
+        return [dict(r) for r in rows]
     finally:
         conn.close()
+
+
+def get_pending_individual_proposal_for_channel(channel: str, channel_id, user_id: str = JARVIS_DEFAULT_USER) -> dict | None:
+    """La más vieja de las propuestas PENDING individuales (no agrupadas) para
+    este chat -- atajo para el caso simple (0 o 1 pendiente), delega en
+    list_pending_individual_proposals_for_channel(). Cuando hay 2+, el caller
+    debe usar la lista completa para desambiguar (ver esa función) en vez de
+    tomar esta ciegamente -- project/mybot/jarvis_handlers.py ya lo hace así.
+    """
+    pending = list_pending_individual_proposals_for_channel(channel, channel_id, user_id)
+    return pending[0] if pending else None
+
+
+def build_individual_disambiguation_message(proposals: list[dict]) -> str:
+    """Mensaje de desambiguación cuando hay 2+ propuestas individuales
+    PENDING para el mismo chat a la vez -- mismo criterio de UX que
+    build_grouped_message() (listar numeradas, pedir que conteste con el
+    número), adaptado: acá cada propuesta se resuelve con una respuesta de
+    texto libre real (no solo sí/no agrupado), así que se le pide al usuario
+    que anteponga el número a su respuesta real en vez de solo mandar números
+    sueltos. Ver Cerebro/decisiones-implementacion.md, 2026-09-17 (entrada de
+    desambiguación).
+    """
+    lines = ["🧠 Tenés más de una pregunta esperando tu respuesta -- decime a cuál te referís:"]
+    for i, p in enumerate(proposals, start=1):
+        lines.append(f"{i}) {p['question']}")
+    lines.append(
+        '\nRespondé empezando con el número (ej: "2 sí", "1: no", '
+        '"2 en realidad es sobre otra cosa").'
+    )
+    return "\n".join(lines)
 
 
 def reject_proposal(proposal_id: str) -> bool:
@@ -1825,10 +1873,24 @@ def push_next_audit_batch(channel: str, channel_id, user_id: str = JARVIS_DEFAUL
 
     now_iso = datetime.now(timezone.utc).isoformat()
     pushed_ids = []
-    for row in rows:
-        send_telegram_message(
-            channel_id, row["question"] + "\n\nRespondé sí/no (o agregá una aclaración)."
-        )
+    n = len(rows)
+    for idx, row in enumerate(rows, start=1):
+        # Numerar "N/M: " cuando el lote trae más de una (solo posible con
+        # JARVIS_AUDIT_PUSH_BATCH_SIZE >= 2) -- deja claro cuál es cuál desde
+        # el mensaje mismo, antes incluso de que el usuario tenga que
+        # responder (ver Cerebro/decisiones-implementacion.md, 2026-09-17,
+        # entrada de desambiguación). Con batch=1 (default) n siempre es 1 y
+        # esto no cambia nada del mensaje de siempre.
+        if n > 1:
+            text = (
+                f"{idx}/{n}: {row['question']}\n\n"
+                "Respondé sí/no (o agregá una aclaración). Como tenés más de "
+                "una pendiente, empezá tu respuesta con el número (ej: "
+                f'"{idx} sí").'
+            )
+        else:
+            text = row["question"] + "\n\nRespondé sí/no (o agregá una aclaración)."
+        send_telegram_message(channel_id, text)
         _mark_pushed(row["id"], now_iso)
         pushed_ids.append(row["id"])
     return pushed_ids

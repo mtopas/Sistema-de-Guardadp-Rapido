@@ -11,6 +11,313 @@ Formato de cada entrada:
 
 ---
 
+## 2026-09-17 — Desambiguación de respuesta libre cuando hay 2+ propuestas individuales pendientes (audit y capture)
+
+Contexto: las dos entradas de abajo (throttle de auditoría y throttle de captura, mismo día,
+misma sesión) dejaron un bug latente sin cerrar. Ambas prometían que `JARVIS_AUDIT_
+PUSH_BATCH_SIZE`/`JARVIS_CAPTURE_PUSH_BATCH_SIZE` eran "subibles a 2 sin tocar código" -- falso
+mientras este bug existiera: con batch size 1 nunca hay más de una PENDING+pushed por chat a la
+vez (la única forma de que coexistan 2+ es que `push_next_audit_batch()`/`push_next_capture_
+batch()` empujen 2+ en el mismo lote, algo que solo pasa con batch size >= 2 -- confirmado
+leyendo el `outstanding` check de ambas funciones: mientras quede una sin resolver, no avanzan).
+El código que interpreta una respuesta de texto libre no sabía cuál de las 2+ pendientes estaba
+contestando el usuario -- `project/mybot/jarvis_handlers.py::handle_pending_audit_proposal()`
+tenía un docstring explícito admitiéndolo ("el diseño original no contemplaba más de una
+pregunta individual pendiente a la vez") y aplicaba la respuesta a la más VIEJA
+(`jarvis.audit.service.get_pending_individual_proposal_for_channel()`, `ORDER BY created_at ASC
+LIMIT 1`); el módulo de captura (`jarvis.captures.passive.get_pending_proposal_for_channel()`)
+hacía lo mismo pero con `ORDER BY created_at DESC LIMIT 1` -- la MÁS RECIENTE. Confirmado leyendo
+ambas funciones: era una asimetría real entre los dos subsistemas, sin ninguna razón
+documentada, no una decisión deliberada.
+
+Decisión: en vez de inventar un mecanismo nuevo, se adaptó el patrón que el propio código ya
+usaba para el caso "agrupado" (`flag_contradiction`/`flag_connection`, `build_grouped_message()`/
+`resolve_grouped_reply()`/`_parse_grouped_reply()` en `jarvis/audit/service.py`): listar las
+pendientes numeradas y pedirle al usuario que conteste con el número. No se reusó tal cual
+(la analogía no encaja limpio) -- diferencias reales:
+1. El agrupado siempre manda TODAS las pendientes juntas en un solo mensaje-resumen y se
+   resuelve con solo números sueltos ("sí 1,3", "no 2") porque la única acción posible es
+   aceptar/rechazar un flag, sin contenido propio. El caso individual llega por lotes
+   throttleados (mensajes separados, cada uno con su propia pregunta) y cada propuesta se
+   resuelve con una respuesta de texto libre REAL (una aclaración, un "no" con motivo, etc. --
+   ver `resolve_individual_reply()`) -- un simple "3" no alcanza para saber qué contestar.
+   Por eso el formato de respuesta esperado acá es "`<número> <tu respuesta>`" (ej. "2 sí",
+   "1: no", "2 en realidad es sobre otra cosa"), no solo números.
+2. El agrupado numera según el orden de una función de listado (`list_grouped_pending()`) que ya
+   existía; para el caso individual hubo que agregar el equivalente
+   (`list_pending_individual_proposals_for_channel()` en audit,
+   `list_pending_proposals_for_channel()` en capture) -- antes solo existían las versiones
+   `get_..._for_channel()` que devolvían una sola (LIMIT 1).
+3. Se aprovechó a arreglar la asimetría ASC/DESC: con el mecanismo nuevo, cuál se tomaba "por
+   default" deja de importar (nunca se resuelve a ciegas ninguna de las dos) -- pero no había
+   ninguna razón real para mantener la asimetría en el caso simple (0/1 pendiente, donde el
+   orden es irrelevante de todos modos), así que se unificó a ASC en los dos subsistemas
+   (capture pasa de DESC a ASC, `list_pending_proposals_for_channel()`).
+
+Mecánica completa (audit y capture, idéntica salvo el nombre de las funciones):
+- `list_pending_individual_proposals_for_channel()` / `list_pending_proposals_for_channel()`
+  (nuevas) devuelven TODAS las PENDING+pushed (no agrupadas) para el chat, ASC. Las funciones
+  viejas `get_pending_individual_proposal_for_channel()` / `get_pending_proposal_for_channel()`
+  se mantienen como atajo (delegan en la lista, devuelven `[0]` o `None`) para no romper otros
+  callers, pero `project/mybot/jarvis_handlers.py` ya usa las nuevas listas.
+- `build_individual_disambiguation_message()` / `build_disambiguation_message()` (nuevas, una
+  por módulo) arman el mensaje numerado, mismo criterio visual que `build_grouped_message()`.
+- `project/mybot/jarvis_handlers.py`: `_parse_leading_number(texto, n_pending)` (nueva, compartida
+  entre `handle_pending_audit_proposal()` y `handle_pending_passive_proposal()`) extrae un número
+  inicial válido (1..n) de la respuesta; si no lo encuentra, NUNCA adivina -- manda el mensaje de
+  desambiguación y no resuelve nada. Con 0 o 1 pendiente el flujo es exactamente el de siempre
+  (sin este parseo de número de por medio) -- el caso simple (batch size 1, el default) no gana
+  ninguna fricción nueva, confirmado en la verificación.
+- `push_next_audit_batch()`/`push_next_capture_batch()`: cuando el lote empujado trae más de 1
+  (solo posible con batch size >= 2), cada mensaje de Telegram se numera con un prefijo `"N/M: "`
+  y agrega una línea pidiendo responder anteponiendo el número -- así el usuario ya sabe, desde
+  que le llegan los mensajes, que hay más de una viva y cómo distinguirlas, sin esperar a mandar
+  una respuesta ambigua primero. Con batch size 1 (default) el lote siempre trae 1, la
+  numeración nunca aparece -- mensaje idéntico al de siempre.
+- Precedencia sin cambios: en audit, si el texto trae dígitos Y hay un agrupado pendiente, se
+  intenta resolver como agrupado primero (comportamiento preexistente, documentado desde el
+  31/08 -- "dos formas de pendiente pueden coexistir"). Solo cuando no hay agrupado pendiente (o
+  el texto no tiene dígitos) se llega a la desambiguación individual nueva. Se dejó así a
+  propósito -- ambigüedad real entre "el 2 del agrupado" y "el 2 de la desambiguación
+  individual" si algún día coexisten los dos al mismo tiempo, mismo tipo de caso límite no
+  resuelto que ya existía antes de esta sesión (no introducido por este cambio), fuera del
+  alcance pedido.
+- `_already_exists()`/`_already_proposed()` (dedup) no se tocaron -- fuera de alcance explícito
+  de la tarea.
+
+Diferencia con spec: no aplica -- cierra un bug latente sobre un mecanismo de 0.2/0.3 ya
+implementado, no una pieza nueva de la spec original.
+
+Impacto: `jarvis/audit/service.py` (`list_pending_individual_proposals_for_channel()` nueva,
+`get_pending_individual_proposal_for_channel()` ahora delega en ella,
+`build_individual_disambiguation_message()` nueva, `push_next_audit_batch()` numera "N/M:" cuando
+`len(rows) > 1`, nota 5 del docstring del módulo marcada `[SUPERADO]`), `jarvis/captures/
+passive.py` (`list_pending_proposals_for_channel()` nueva -- ASC, reemplaza el DESC viejo,
+`get_pending_proposal_for_channel()` ahora delega en ella, `build_disambiguation_message()`
+nueva, `push_next_capture_batch()` numera "N/M:" cuando `len(rows) > 1`), `project/mybot/
+jarvis_handlers.py` (`_parse_leading_number()` nueva y compartida, `handle_pending_audit_
+proposal()` y `handle_pending_passive_proposal()` reescritos para usar las listas completas +
+desambiguar cuando hay 2+, `_resolve_passive_proposal()` nueva -- lógica de interpretación de
+`handle_pending_passive_proposal()` aislada en una función propia para poder reusarla tanto en
+el caso simple como tras resolver una desambiguación).
+
+Verificado: un script standalone en el scratchpad de la sesión (`verify_disambiguation.py`,
+nunca commiteado, borrado junto con su DB de scratch al terminar) contra una `jarvis.db` de
+scratch aislada (`JARVIS_DB_PATH`/`JARVIS_BOVEDA_PATH`/`JARVIS_CHROMA_PATH` apuntados a `%TEMP%`),
+`JARVIS_AUDIT_PUSH_BATCH_SIZE=2` y `JARVIS_CAPTURE_PUSH_BATCH_SIZE=2` forzados por env var (el
+escenario real que este fix tenía que cubrir), `send_telegram_message` parcheado (sin red real).
+No se llamó a ningún handler simulado con mocks livianos -- se invocaron los handlers REALES de
+`project/mybot/jarvis_handlers.py` (`handle_pending_audit_proposal()`/`handle_pending_passive_
+proposal()`) con un `Update`/`Message` fake mínimo (duck-typed: `.message.chat.id`, `.message.text`,
+`.message.reply_text()` async) para probar la ruta completa, no solo la capa de servicio.
+35 asserts, todos OK:
+- Audit: 3 propuestas `clarify` creadas → `push_next_audit_batch()` (batch=2) empuja exactamente
+  2 con prefijos `"1/2:"`/`"2/2:"` reales en el texto mandado a Telegram, deja la 3ª en cola; un
+  segundo push no avanza (outstanding); respuesta ambigua bare `"si"` con las 2 pendientes NO
+  resuelve ninguna (ambas siguen `PENDING`) y devuelve el mensaje de desambiguación real,
+  numerado, con el contenido real de las 2 preguntas; `"2 no"` resuelve específicamente la
+  propuesta #2 (`REJECTED`), la #1 queda intacta (`PENDING`) -- confirma que ya NO se aplica a
+  ciegas ni a la más vieja ni a la más reciente; con 1 sola pendiente restante, una respuesta
+  sin número se aplica DIRECTO (sin pedir desambiguación) -- el caso simple no se rompió; la 3ª
+  propuesta, empujada sola después, no lleva prefijo `"1/1:"` (numeración solo aparece con 2+ en
+  el mismo lote).
+- Capture: mismo patrón completo (3 propuestas `agenda_ingestion`/`agenda:patron:` → batch de 2
+  numerado → ambigüedad detectada y sin resolver → `"1 no"` resuelve específicamente la #1 →
+  única restante se resuelve directo) -- confirmado además que `list_pending_proposals_for_
+  channel()` devuelve `[c1, c2]` en orden de creación (ASC), no `[c2, c1]` como hubiera dado la
+  función vieja (DESC).
+- Caso simple explícito: 1 sola propuesta pendiente (audit) se resuelve directo sin pedir
+  número; sin ninguna propuesta pendiente, ambos handlers devuelven `False` (no consumen el
+  mensaje) -- sin regresión en ninguno de los dos casos base.
+
+No hay tests automatizados en `jarvis/` (mismo hallazgo que las dos sesiones de throttle de
+arriba). El script y su DB de scratch (`%TEMP%\jarvis_verify_disambiguation\`) se borraron al
+terminar -- nunca tocó `jarvis.db`/`D:\Boveda` reales. `python -m py_compile` limpio en los 3
+archivos tocados.
+
+**Confirma que "subible a 2 sin tocar código" (la promesa de las dos entradas de abajo) ES
+cierta ahora, en el sentido de que no hace falta tocar NADA MÁS aparte de lo que esta entrada ya
+agregó** -- el código de este repo, tal como queda después de esta sesión, ya soporta batch
+size 2+ sin ambigüedad. La promesa original (escrita antes de que este bug se detectara) seguía
+siendo válida como intención, pero dependía de este fix para ser verdad en la práctica.
+
+---
+
+## 2026-09-17 — Throttle de propuestas de captura (`jarvis_capture_proposals`), mismo patrón que auditoría aplicado a la tabla hermana
+
+Contexto: mismo día, misma sesión de trabajo que la entrada de abajo ("Throttle
+de propuestas de auditoría") -- ahí se arregló el patrón para
+`jarvis_audit_proposals`, pero el bug real y ya medido en producción estaba en
+`jarvis_capture_proposals` (usada por captura pasiva de conversación Y por la
+ingestión de Agenda), que **no** recibió el fix de ese momento. Confirmado en
+producción, sesión de verificación del 2026-09-15: de 21 propuestas reales de
+Agenda, **20 EXPIRED + 1 REJECTED + 0 ACCEPTED** -- ninguna, nunca, se resolvió
+a tiempo. El propio código ya documentaba el síntoma en un comentario de esa
+sesión (`jarvis/ingestion/agenda_patterns.py`, docstring del módulo: "usuario
+tiene hoy 20 EXPIRED + 1 REJECTED + 0 ACCEPTED sobre 21 propuestas de 0.3").
+Causa exacta: `jarvis/ingestion/agenda.py::_already_proposed()` dedupea por
+`source_key` sin importar status (mismo patrón que `_already_exists()` de
+audit) y el timeout de 30 min (`JARVIS_PASSIVE_PROPOSAL_TIMEOUT_MINUTES`) se
+contaba desde `created_at` puro -- pero acá el push a Telegram era inmediato,
+sin ningún límite, desde TRES call sites distintos:
+1. `jarvis/captures/passive.py::_review_conversation()` -- `create_proposal()`
+   propio del módulo (nombre igual, función DISTINTA a la de
+   `jarvis/audit/service.py` -- cuidado al importar) + `_notify_telegram_
+   proposal()` inmediato si `channel == "telegram"`.
+2. `jarvis/ingestion/agenda.py` -- su propia `_notify_telegram()`, un push por
+   evento/tarea propuesto.
+3. `jarvis/ingestion/agenda_patterns.py` -- su propia `_notify_telegram()`,
+   un push por patrón sintetizado.
+
+Decisión: aplicar el MISMO patrón de `pushed_at`/cola/lote que ya se construyó
+para `jarvis_audit_proposals` esa misma sesión, adaptado -- ver la entrada de
+abajo para la plantilla completa (razonamiento de cadencia, FIFO, disparo en
+cada tick ocioso del worker). Diferencias reales respecto al caso de
+auditoría:
+1. **Sin distinción de tipo/origen** -- `jarvis_audit_proposals` tenía 11
+   `action_type` con 8 throttleados y 3 exentos (agrupados/open_question);
+   `jarvis_capture_proposals` no tiene ese concepto (una propuesta acá es
+   siempre "¿guardo esto?"). El único eje de exención sigue siendo el canal:
+   `desktop` (pull vía polling) se entrega de inmediato igual que en audit;
+   `telegram` se encola, SIN excepciones de `origin_source` -- `passive_
+   capture`, `agenda_ingestion` y los patrones de `agenda_patterns.py`
+   (`origin_source_key` con prefijo `"agenda:patron:"`) van a la MISMA cola
+   por igual. `_initial_pushed_at(channel, now_iso)` (jarvis/captures/
+   passive.py) es por eso más simple que su homónima de audit (sin parámetro
+   `action_type`).
+2. **Namespace de config propio**: `JARVIS_CAPTURE_PUSH_BATCH_SIZE` (default
+   `1`, `jarvis/config.py`) -- NO se reusa `JARVIS_AUDIT_PUSH_BATCH_SIZE`, son
+   colas independientes con volumen y naturaleza distintos (audit es 11 tipos
+   de mutación sobre memoria ya existente; capture es siempre "¿guardo esto
+   nuevo?"). **Nota agregada el mismo día, después de detectar el problema**:
+   mismo comentario que la entrada de auditoría de abajo -- subir esto a 2+
+   revelaba una ambigüedad real en la interpretación de una respuesta de
+   texto libre con 2+ propuestas de captura pendientes a la vez (se aplicaba
+   a ciegas a la más RECIENTE acá, asimetría real con audit -- ver la entrada
+   de arriba, "Desambiguación de respuesta libre...", que también corrige
+   esa asimetría). Ya resuelto ahí; "sin tocar código" solo es completamente
+   cierto leyendo también esa entrada.
+3. **Backfill más simple que el de audit** (`jarvis/db/database.py::
+   _migrate()`): sin la partición en "8 tipos throttleados / 3 exentos" de
+   audit -- acá el criterio es solo el canal. Toda fila `PENDING`
+   preexistente de canal `telegram` se deja a propósito en `pushed_at=NULL`
+   (la cola nueva la recoge y reenvía una vez, mismo trade-off aceptado que
+   audit); toda fila `PENDING` preexistente de canal `desktop` se backfillea
+   con `pushed_at=created_at` (ya se consideraba entregada). Filas no-PENDING
+   (ACCEPTED/REJECTED/EXPIRED) no reciben backfill -- quedan con `pushed_at`
+   `NULL` para siempre, pero es inofensivo: ningún lector filtra por
+   `pushed_at` sin filtrar primero por `status='PENDING'`. En producción esta
+   tabla no tiene NINGUNA fila `PENDING` hoy (las 21 propuestas reales de
+   Agenda son 20 EXPIRED + 1 REJECTED) -- el backfill no tiene trabajo real
+   que hacer ahí, pero tiene que ser código correcto para cualquier otra
+   instalación (dev local, etc.) que sí tenga algo `PENDING` al momento del
+   deploy -- verificado con datos simulados, ver "Verificado" abajo.
+4. **Push al final de tres corridas, no solo una** -- `push_next_capture_
+   batch()` se llama al final de `scan_and_propose()` (passive.py),
+   `run_agenda_ingestion()` (agenda.py) Y `run_agenda_pattern_synthesis()`
+   (agenda_patterns.py), las tres fuentes que escriben en esta tabla -- a
+   diferencia de audit, que solo tiene un productor (`run_audit()`). Los tres
+   call sites usan el mismo `get_debug_chat_id()` (`jarvis.debug.service`)
+   que ya usaban `agenda.py`/`agenda_patterns.py` para su push directo viejo
+   -- confirmado leyendo el código, no asumido. **Divergencia real en
+   `scan_and_propose()`**: antes de este cambio, `_review_conversation()`
+   pusheaba al `channel_id` PROPIO de cada conversación (`conv["channel_
+   id"]`), no al `debug_chat_id` global -- son la misma cosa en la práctica
+   (sistema de un solo usuario, un solo chat de Telegram real), pero
+   conceptualmente son dos mecanismos distintos. Se optó por `get_debug_
+   chat_id()` para el push final de `scan_and_propose()` (mismo mecanismo que
+   `run_audit()`/las otras dos corridas de Agenda) en vez de iterar sobre los
+   `channel_id` distintos vistos en el scan, documentado explícitamente en el
+   comentario del código -- si en el futuro este sistema deja de ser de un
+   solo usuario/chat, este punto hay que revisarlo.
+5. Los tres `_notify_telegram()`/`_notify_telegram_proposal()` directos se
+   borraron (confirmado por grep que no tenían otros usos antes de borrar) --
+   `agenda.py`/`agenda_patterns.py` además renombraron su helper interno
+   `_create_and_notify()` a `_create_proposal()` (ya no notifica, el nombre
+   viejo mentía sobre lo que hace la función) -- deviación menor no pedida
+   explícitamente en la tarea original, hecha por higiene de código, mismo
+   criterio que "documentar antes de tunear" no aplica acá porque no es un
+   parámetro/heurística calibrado, es solo un nombre de función que había
+   quedado desactualizado.
+6. `_already_proposed()` de `jarvis/ingestion/agenda.py` (dedup por
+   `source_key` sin mirar status) **no se tocó** -- mismo criterio que se
+   dejó `_already_exists()` de audit sin tocar en la entrada de abajo. Una
+   consecuencia ya documentada el 2026-09-15 (ver `Cerebro/estado-actual.md`)
+   sigue vigente: las 20 propuestas `EXPIRED` reales de producción no se van
+   a re-proponer solas con este cambio -- el reseteo manual de esas filas
+   viejas en producción, si se decide hacerlo, queda a cargo del orquestador
+   de la sesión, fuera del alcance de esta tarea.
+
+Diferencia con spec: no aplica -- mismo ajuste de comportamiento que la
+entrada de abajo, sobre la tabla hermana.
+
+Impacto: `jarvis/db/schema.py` (columna `pushed_at` en `jarvis_capture_
+proposals`), `jarvis/db/database.py` (`_migrate()`, backfill nuevo),
+`jarvis/config.py` (`JARVIS_CAPTURE_PUSH_BATCH_SIZE`), `jarvis/captures/
+passive.py` (`_initial_pushed_at()`, `create_proposal()`, `expire_stale_
+proposals()`, `list_pending_proposals()`, `get_pending_proposal_for_
+channel()`, `push_next_capture_batch()`, `_mark_pushed()`, `_review_
+conversation()` pierde su push directo, `scan_and_propose()` gana el push
+final), `jarvis/ingestion/agenda.py` (`_create_and_notify()` renombrada a
+`_create_proposal()` sin push directo, `_notify_telegram()` borrada,
+`run_agenda_ingestion()` gana el push final), `jarvis/ingestion/agenda_
+patterns.py` (mismo tratamiento que agenda.py), `jarvis/worker/main.py`
+(`_maybe_run_passive_capture()` gana un segundo bloque try/except para
+`push_next_capture_batch()`, independiente del de auditoría).
+
+Verificado: dos scripts standalone en el scratchpad de la sesión (`verify_
+capture_throttle.py`, `verify_capture_throttle_migration.py` -- nunca
+commiteados, borrados junto con sus DBs de scratch al terminar), corridos con
+el intérprete real del venv del proyecto (`project/venv/Scripts/python.exe`,
+necesario para que `litellm`/el resto de las dependencias de `jarvis/audit/
+service.py` -- importado transitivamente por `jarvis/worker/main.py` --
+resuelvan; el Python global del entorno de esta sesión no tenía `litellm`
+instalado). No hay tests automatizados en `jarvis/` (confirmado, mismo hallazgo
+que la sesión de audit).
+
+1. `verify_capture_throttle.py`, contra una `jarvis.db` de scratch aislada
+   (`JARVIS_DB_PATH` apuntado a `%TEMP%\jarvis_verify_capture_throttle.db`,
+   creada desde cero por `init_db()`), `send_telegram_message` parcheado (sin
+   red real). Los 13 asserts dieron OK:
+   - `create_proposal()`: canal `telegram` deja `pushed_at IS NULL`; canal
+     `desktop` deja `pushed_at` seteado de inmediato.
+   - `push_next_capture_batch()`: con 3 propuestas encoladas (`created_at`
+     escalonado), el primer llamado empuja exactamente 1 (la más vieja,
+     FIFO), manda 1 mensaje real (mockeado); un segundo llamado sin resolver
+     la anterior no empuja nada (`outstanding` bloquea el avance); tras
+     `reject_proposal()` de la primera, el tercer llamado sí avanza a la
+     siguiente.
+   - `expire_stale_proposals()`: una fila con `created_at` de hace 2 días y
+     `pushed_at IS NULL` NO expira; una fila con `pushed_at` de hace 2 días SÍ
+     expira a `EXPIRED`.
+   - `list_pending_proposals()`/`get_pending_proposal_for_channel()`: una fila
+     con `pushed_at IS NULL` no aparece en ninguna de las dos; tras
+     `push_next_capture_batch()` levantarla, SÍ aparece en ambas.
+2. `verify_capture_throttle_migration.py`, contra una segunda `jarvis.db` de
+   scratch creada a mano con el `CREATE TABLE jarvis_capture_proposals`
+   PRE-cambio (sin columna `pushed_at`, copiado literal del schema anterior a
+   este edit) más 3 filas insertadas directo por SQL con `created_at` de hace
+   2 días: una `PENDING` de canal `telegram`, una `PENDING` de canal
+   `desktop`, y una `REJECTED` de canal `telegram` (para confirmar que el
+   backfill respeta "solo PENDING", no cualquier fila con `pushed_at` nulo).
+   Al importar `jarvis.db.database` apuntando `JARVIS_DB_PATH` a esa DB y
+   llamar `init_db()` (dispara `_migrate()`, incluido el backfill nuevo): la
+   fila `PENDING`+`telegram` terminó con `pushed_at IS NULL` (dejada en cola a
+   propósito); la fila `PENDING`+`desktop` terminó con `pushed_at ==
+   created_at` (backfill aplicado); la fila `REJECTED`+`telegram` terminó con
+   `pushed_at IS NULL` (no le tocaba backfill, no es `PENDING`, y es
+   inofensivo -- ningún lector la va a mostrar sin filtrar primero por
+   `status='PENDING'`). Los 3 asserts pasaron.
+
+Ambos scripts y sus dos DBs de scratch (`%TEMP%\jarvis_verify_capture_
+throttle.db`, `%TEMP%\jarvis_verify_capture_throttle_migration.db`, más sus
+archivos `-wal`/`-shm`) se borraron al terminar -- nunca tocaron `jarvis.db`/
+`D:\Boveda` reales en ningún momento. `python -m py_compile` limpio en los 6
+archivos tocados, más un `import` directo (vía el venv del proyecto) de todos
+ellos para descartar errores de import-time.
+
+---
+
 ## 2026-09-17 — Throttle de propuestas de auditoría (evitar ráfagas de Telegram)
 
 Contexto: el usuario reportó (2026-09-16/17) haber recibido ráfagas de propuestas de
@@ -72,6 +379,15 @@ Decisión:
    hace falta más caudal. Se descartó hardcodear 2 directamente porque el pedido era
    ambiguo entre ambos números y la variable de entorno resuelve la ambigüedad sin
    comprometerse a una lectura en el código.
+   **Nota agregada el mismo día, después de detectar el problema**: "sin tocar código" acá
+   describe el env var en sí (no hace falta un deploy de código nuevo para subirlo) -- pero
+   subir esto a 2+ SÍ revelaba una ambigüedad real y sin resolver en cómo se interpretaba una
+   respuesta de texto libre cuando quedaban 2+ propuestas individuales pendientes a la vez
+   (se aplicaba a ciegas a la más vieja, sin avisar). Ya está resuelto -- ver la entrada de
+   arriba, "Desambiguación de respuesta libre cuando hay 2+ propuestas individuales
+   pendientes (audit y capture)" -- pero quien lea esta entrada aislada debe saber que la
+   promesa de "sin tocar código" solo es completamente cierta leyendo también esa otra
+   entrada.
 6. Cadencia -- opción (b) del análisis: `push_next_audit_batch()` solo avanza la cola de un
    chat cuando NO queda ninguna propuesta individual ya entregada y todavía sin resolver
    (`status='PENDING' AND pushed_at IS NOT NULL`) para ese `channel_id`. Se descartó la

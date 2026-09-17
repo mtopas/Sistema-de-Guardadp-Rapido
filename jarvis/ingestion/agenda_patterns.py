@@ -180,6 +180,26 @@ def run_agenda_pattern_synthesis(now: datetime | None = None) -> dict:
         summary["errors"].append(f"cluster_inferido: {exc}")
 
     _record_run(now)
+
+    # Empuja el próximo lote de la cola de propuestas de captura (throttle,
+    # ver Cerebro/decisiones-implementacion.md, 2026-09-17) -- al final de la
+    # corrida, para que el primer lote de propuestas recién creadas (o algo
+    # que ya estaba en cola de una corrida anterior) salga sin esperar el
+    # próximo tick ocioso del worker. Mismo criterio que run_audit()/
+    # run_agenda_ingestion(). Si el gate semanal bloqueó esta corrida (return
+    # temprano de arriba), no hace falta empujar acá -- el tick ocioso del
+    # worker ya lo hace cada JARVIS_WORKER_POLL_INTERVAL de todos modos.
+    if channel == "telegram" and chat_id:
+        try:
+            from jarvis.captures.passive import push_next_capture_batch
+
+            push_next_capture_batch(channel, chat_id, JARVIS_DEFAULT_USER)
+        except Exception as exc:
+            logger.exception(
+                "[jarvis.ingestion.agenda_patterns] Error empujando el próximo lote de la cola de captura"
+            )
+            summary["errors"].append(str(exc))
+
     return summary
 
 
@@ -268,7 +288,7 @@ def _propose_rule_pattern(evt: dict, channel: str, chat_id: str | None, summary:
     if _already_proposed(source_key):
         return False
     question = f'¿Guardo este patrón que detecté en tu Agenda: "{texto}"?'
-    _create_and_notify(source_key, content, question, channel, chat_id, summary)
+    _create_proposal(source_key, content, question, channel, chat_id, summary)
     return True
 
 
@@ -376,7 +396,7 @@ def _propose_cluster_pattern(
         return False
     content = f"Patrón detectado en tu Agenda: {titulo} — {patron}"
     question = f'¿Guardo este patrón que detecté en tu Agenda: "{titulo}" — {patron}?'
-    _create_and_notify(source_key, content, question, channel, chat_id, summary)
+    _create_proposal(source_key, content, question, channel, chat_id, summary)
     return True
 
 
@@ -393,7 +413,7 @@ def _slug(text: str) -> str:
     return text[:48].strip("-") or "patron"
 
 
-def _create_and_notify(
+def _create_proposal(
     source_key: str, content: str, question: str,
     channel: str, chat_id: str | None, summary: dict,
 ) -> None:
@@ -410,22 +430,16 @@ def _create_and_notify(
         origin_source_key=source_key,
     )
     summary["proposed_detail"].append({"content": content, "question": question})
-    if channel == "telegram" and chat_id:
-        _notify_telegram(chat_id, question, content)
-
-
-def _notify_telegram(chat_id: str, question: str, content: str) -> None:
-    from jarvis.notify.telegram import send_telegram_message
-
-    try:
-        send_telegram_message(
-            chat_id,
-            f"🔁 {question}\n\n{content}\n\nRespondé sí/no (o agregá una aclaración en tu respuesta).",
-        )
-    except Exception as exc:
-        logger.warning(
-            "[jarvis.ingestion.agenda_patterns] Aviso de propuesta a Telegram falló: %s", exc
-        )
+    # 2026-09-17 (Cerebro/decisiones-implementacion.md): antes acá se avisaba
+    # por Telegram de inmediato, patrón por patrón -- una de las ráfagas
+    # reales confirmadas en producción (ver el hallazgo documentado arriba,
+    # "usuario tiene hoy 20 EXPIRED + 1 REJECTED + 0 ACCEPTED sobre 21
+    # propuestas de 0.3"). create_proposal() ahora encola esta propuesta
+    # (pushed_at=NULL para canal telegram) para que la entregue
+    # jarvis.captures.passive.push_next_capture_batch() respetando
+    # JARVIS_CAPTURE_PUSH_BATCH_SIZE -- mismo criterio ya aplicado el mismo
+    # día a triage_move en jarvis/ingestion/inbox_triage.py y acá mismo en
+    # jarvis/ingestion/agenda.py.
 
 
 # ── Gate semanal (mismo mecanismo que consolidation.py::_last_run_at()) ────

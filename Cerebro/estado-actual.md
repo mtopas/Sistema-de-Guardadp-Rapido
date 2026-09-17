@@ -1,6 +1,60 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-17
 
+## FIX: desambiguación de respuesta libre cuando hay 2+ propuestas individuales pendientes a la vez (audit y capture) (2026-09-17)
+
+Cierra un bug latente que dejaron las dos entradas de throttle de abajo (mismo día): con
+`JARVIS_AUDIT_PUSH_BATCH_SIZE`/`JARVIS_CAPTURE_PUSH_BATCH_SIZE` en su default (1) nunca importaba,
+pero subir cualquiera de los dos a 2+ (documentado ahí como "sin tocar código") podía dejar 2+
+propuestas individuales `PENDING`+pushed para el mismo chat a la vez, y el código que interpreta
+una respuesta de texto libre no sabía a cuál de las dos se refería -- aplicaba ciegamente a la
+más VIEJA en auditoría (`get_pending_individual_proposal_for_channel()`, FIFO) y a la más
+RECIENTE en captura (`get_pending_proposal_for_channel()`, asimetría real sin razón documentada,
+confirmada leyendo ambas funciones). Se adaptó el patrón que el propio código ya usaba para el
+caso agrupado (`flag_contradiction`/`flag_connection`: listar numeradas, pedir que conteste con
+el número) al caso individual: `list_pending_individual_proposals_for_channel()` (audit) /
+`list_pending_proposals_for_channel()` (capture, ahora ASC -- unifica la asimetría con audit) +
+`build_individual_disambiguation_message()` / `build_disambiguation_message()` arman el mensaje
+numerado; `project/mybot/jarvis_handlers.py::_parse_leading_number()` (nueva, compartida) exige
+que la respuesta ante 2+ pendientes empiece con el número ("2 sí", "1: no") -- si no lo trae, se
+manda el mensaje de desambiguación y NO se resuelve nada, nunca se adivina. `push_next_audit_
+batch()`/`push_next_capture_batch()` numeran cada mensaje `"N/M: "` cuando el lote empujado trae
+más de 1. Con batch size 1 (el default, sin cambios) el comportamiento es exactamente el de
+siempre -- el caso simple no gana fricción nueva. Verificado con un script de scratch que fuerza
+ambos batch size a 2 y llama a los handlers REALES del bot (no solo la capa de servicio): 35
+asserts OK, incluida la confirmación de que una respuesta ambigua ya NO resuelve ninguna de las
+2 pendientes (antes se hubiera aplicado a la equivocada) y que el número correcto resuelve la
+propuesta correcta. Detalle completo en `Cerebro/decisiones-implementacion.md`, entrada
+"2026-09-17 — Desambiguación de respuesta libre cuando hay 2+ propuestas individuales pendientes
+(audit y capture)". Archivos tocados: `jarvis/audit/service.py`, `jarvis/captures/passive.py`,
+`project/mybot/jarvis_handlers.py`. Sin commitear -- queda a cargo del orquestador de la sesión.
+
+## IMPLEMENTADO: throttle de propuestas de captura (`jarvis_capture_proposals`) -- mismo patrón que auditoría, aplicado a la tabla hermana (2026-09-17)
+
+Mismo día, mismo patrón que la entrada de abajo (auditoría), pero acá está el
+bug real ya medido en producción: 21 propuestas de Agenda dieron 20 EXPIRED +
+1 REJECTED + 0 ACCEPTED -- ninguna se resolvió a tiempo, porque el push a
+Telegram era inmediato y sin límite desde tres call sites (`jarvis/captures/
+passive.py::_review_conversation()`, `jarvis/ingestion/agenda.py`, `jarvis/
+ingestion/agenda_patterns.py`). Ahora se encola (`jarvis_capture_proposals.
+pushed_at` nuevo, `NULL` = en cola) y sale de a `JARVIS_CAPTURE_PUSH_BATCH_SIZE`
+(default 1) por vez vía `push_next_capture_batch()` (jarvis/captures/
+passive.py), disparado en cada tick ocioso del worker + al final de las tres
+corridas que escriben en esta tabla (`scan_and_propose()`, `run_agenda_
+ingestion()`, `run_agenda_pattern_synthesis()`). Sin distinción por
+`origin_source` -- passive_capture, agenda_ingestion y los patrones de
+`agenda_patterns.py` van a la misma cola. Expiración de 30 min ahora cuenta
+desde `pushed_at`, no `created_at`. `_already_proposed()` de agenda.py
+(dedup sin mirar status) no se tocó a propósito -- las 20 EXPIRED reales
+siguen sin re-proponerse solas. Detalle completo, decisiones y verificación
+(2 scripts de scratch, 16 casos entre ambos, todos OK) en `Cerebro/
+decisiones-implementacion.md`, entrada `2026-09-17` (la de arriba, "Throttle
+de propuestas de captura"). Archivos tocados: `jarvis/db/schema.py`,
+`jarvis/db/database.py`, `jarvis/config.py`, `jarvis/captures/passive.py`,
+`jarvis/ingestion/agenda.py`, `jarvis/ingestion/agenda_patterns.py`,
+`jarvis/worker/main.py`. Sin commitear -- queda a cargo del orquestador de la
+sesión.
+
 ## IMPLEMENTADO: throttle de propuestas de auditoría (evitar ráfagas de Telegram) (2026-09-17)
 
 Propuestas individuales de auditoría (`create`/`clarify`/`merge`/`edit`/`delete`/`retag`/

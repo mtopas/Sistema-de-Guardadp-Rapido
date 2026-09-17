@@ -258,7 +258,20 @@ CREATE TABLE IF NOT EXISTS jarvis_capture_proposals (
     -- de proponer de nuevo, cualquiera sea el status ya resuelto (incluye
     -- REJECTED -- una vez que el usuario dijo que no a un evento puntual, no
     -- se le vuelve a preguntar por el mismo).
-    origin_source_key TEXT
+    origin_source_key TEXT,
+    -- pushed_at (2026-09-17, ver Cerebro/decisiones-implementacion.md): mismo
+    -- throttle anti-ráfaga que jarvis_audit_proposals (columna hermana, ver
+    -- abajo), aplicado acá. NULL = todavía en la cola, sin entregar al
+    -- usuario. No-NULL = ya se le mandó (Telegram) o, para canal 'desktop'
+    -- (pull vía polling, sin ráfaga que evitar), se considera "entregada" de
+    -- entrada (ver jarvis/captures/passive.py, _initial_pushed_at()). A
+    -- diferencia de jarvis_audit_proposals, acá no hay ninguna excepción por
+    -- tipo/origen: passive_capture, agenda_ingestion y los patrones de
+    -- agenda_patterns.py (origin_source_key "agenda:patron:...") van todos a
+    -- la MISMA cola por canal telegram. expire_stale_proposals() cuenta el
+    -- timeout desde ACÁ, no desde created_at -- una propuesta que el usuario
+    -- nunca vio no puede expirar.
+    pushed_at         DATETIME
 );
 
 CREATE INDEX IF NOT EXISTS idx_jcp_status ON jarvis_capture_proposals(status);

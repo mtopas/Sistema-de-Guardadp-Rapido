@@ -12,6 +12,7 @@ Comandos registrados:
 """
 import asyncio
 import logging
+import re
 
 from telegram import Update
 from telegram.error import BadRequest
@@ -21,14 +22,16 @@ logger = logging.getLogger(__name__)
 
 try:
     from jarvis.audit.service import (
-        get_pending_individual_proposal_for_channel as _get_pending_individual_audit,
+        build_individual_disambiguation_message as _build_audit_disambiguation_message,
+        list_pending_individual_proposals_for_channel as _list_pending_individual_audit,
         resolve_grouped_reply as _resolve_audit_grouped_reply,
         resolve_individual_reply as _resolve_audit_individual_reply,
     )
     from jarvis.captures.clarification import infer_type_hint, needs_clarification
     from jarvis.captures.passive import (
         accept_proposal as _accept_passive_proposal,
-        get_pending_proposal_for_channel,
+        build_disambiguation_message as _build_capture_disambiguation_message,
+        list_pending_proposals_for_channel as _list_pending_capture,
         reject_proposal as _reject_passive_proposal,
     )
     from jarvis.db.database import init_db as _jarvis_init_db
@@ -230,6 +233,29 @@ async def handle_pending_clarification(update: Update, context: ContextTypes.DEF
 _NEGATIVE_PREFIXES = ("no", "n")
 _AFFIRMATIVE_PREFIXES = ("si", "sí", "yes", "y", "dale", "ok", "obvio")
 
+# Desambiguación de 2+ propuestas individuales pendientes a la vez (audit Y
+# capture -- ver Cerebro/decisiones-implementacion.md, 2026-09-17, entrada de
+# desambiguación). Con el default de ambos batch size (1) esto nunca importa
+# -- nunca hay más de una pendiente por chat, list_pending_*() siempre
+# devuelve 0 o 1 elemento. Compartido entre los dos subsistemas: ambos
+# esperan el mismo formato de respuesta ("2 sí", "1: no", "3) aclaración...").
+_LEADING_NUM_RE = re.compile(r"^\s*(\d{1,2})\s*[:\.\)\-]?\s*(.*)$", re.DOTALL)
+
+
+def _parse_leading_number(texto: str, n_pending: int) -> tuple[int | None, str]:
+    """Extrae un número inicial válido (1..n_pending) de una respuesta de
+    desambiguación. Devuelve (None, "") si el texto no arranca con un número
+    en rango -- el caller debe volver a pedir que aclare, nunca debe
+    adivinar a cuál de las pendientes se refiere.
+    """
+    m = _LEADING_NUM_RE.match(texto)
+    if not m:
+        return None, ""
+    n = int(m.group(1))
+    if n < 1 or n > n_pending:
+        return None, ""
+    return n, m.group(2).strip()
+
 
 async def handle_pending_passive_proposal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Consume la respuesta a una propuesta de captura pasiva pendiente (pieza C).
@@ -239,11 +265,12 @@ async def handle_pending_passive_proposal(update: Update, context: ContextTypes.
     esto?" se interpretaría como una hoja nueva de la Bóveda o una pregunta al
     router LLM. Devuelve True si consumió el mensaje.
 
-    Interpretación: "no"/variantes -> rechaza. "sí"/variantes cortas -> acepta
-    tal cual. Cualquier otro texto -> se toma como aclaración y se concatena
-    al contenido antes de guardar (mismo criterio que la aclaración de
-    DECISION: una respuesta de texto libre a una pregunta pendiente ES la
-    respuesta, no un mensaje nuevo sin relación).
+    Con el default JARVIS_CAPTURE_PUSH_BATCH_SIZE=1 hay a lo sumo una
+    pendiente por chat, y el comportamiento es el de siempre (interpreta
+    directo). Si hay 2+ (batch size subido a 2+, ver Cerebro/decisiones-
+    implementacion.md, 2026-09-17), en vez de aplicar la respuesta a ciegas a
+    la más vieja se le pide al usuario que aclare a cuál se refiere anteponiendo
+    el número (mismo criterio de UX que el flujo agrupado de auditoría).
     """
     if not _JARVIS_AVAILABLE:
         return False
@@ -253,11 +280,32 @@ async def handle_pending_passive_proposal(update: Update, context: ContextTypes.
         return False
 
     chat_id = msg.chat.id
-    proposal = get_pending_proposal_for_channel("telegram", chat_id)
-    if not proposal:
+    pending = _list_pending_capture("telegram", chat_id)
+    if not pending:
         return False
 
     texto = msg.text.strip()
+
+    if len(pending) == 1:
+        return await _resolve_passive_proposal(msg, pending[0], texto)
+
+    selection, remainder = _parse_leading_number(texto, len(pending))
+    if selection is None:
+        await msg.reply_text(_build_capture_disambiguation_message(pending))
+        return True
+    return await _resolve_passive_proposal(msg, pending[selection - 1], remainder or "sí")
+
+
+async def _resolve_passive_proposal(msg, proposal: dict, texto: str) -> bool:
+    """Interpretación: "no"/variantes -> rechaza. "sí"/variantes cortas ->
+    acepta tal cual. Cualquier otro texto -> se toma como aclaración y se
+    concatena al contenido antes de guardar (mismo criterio que la aclaración
+    de DECISION: una respuesta de texto libre a una pregunta pendiente ES la
+    respuesta, no un mensaje nuevo sin relación). Aislado de
+    handle_pending_passive_proposal() para poder reusarlo tanto en el caso
+    simple (0/1 pendiente) como tras resolver una desambiguación (2+
+    pendientes).
+    """
     lowered = texto.lower()
 
     if lowered in _NEGATIVE_PREFIXES or lowered.startswith("no "):
@@ -291,13 +339,19 @@ async def handle_pending_audit_proposal(update: Update, context: ContextTypes.DE
     texto libre. Devuelve True si consumió el mensaje.
 
     Dos formas de pendiente pueden coexistir en el mismo chat: individual
-    (una pregunta puntual -- create/clarify/merge/edit/delete/retag) y
-    agrupada (flag_contradiction/flag_connection, numeradas en un solo
-    mensaje-resumen). Si el texto trae números, se interpreta como respuesta
-    al agrupado; si no los trae y hay una individual pendiente, se resuelve
-    esa primero (la más vieja, FIFO -- ver la nota 5 del docstring de
-    jarvis/audit/service.py: el diseño original no contemplaba más de una
-    pregunta individual pendiente a la vez).
+    (una pregunta puntual -- create/clarify/merge/edit/delete/retag/
+    archive_superseded/triage_move) y agrupada (flag_contradiction/
+    flag_connection, numeradas en un solo mensaje-resumen). Si el texto trae
+    números, se interpreta como respuesta al agrupado primero (precedencia
+    sin cambios); si no hay agrupado pendiente y hay 1 individual, se
+    resuelve directo. Si hay 2+ individuales pendientes a la vez (posible
+    desde que JARVIS_AUDIT_PUSH_BATCH_SIZE es env-configurable a 2+ -- ver
+    Cerebro/decisiones-implementacion.md, 2026-09-17, entrada de
+    desambiguación), ya NO se resuelve a ciegas a la más vieja (FIFO, como
+    hacía antes -- ver nota 5, ahora superada, del docstring de
+    jarvis/audit/service.py): se le pide al usuario que aclare a cuál se
+    refiere anteponiendo el número, mismo criterio de UX que el flujo
+    agrupado.
     """
     if not _JARVIS_AVAILABLE:
         return False
@@ -310,18 +364,27 @@ async def handle_pending_audit_proposal(update: Update, context: ContextTypes.DE
     texto = msg.text.strip()
     has_digit = any(ch.isdigit() for ch in texto)
 
-    individual = _get_pending_individual_audit("telegram", chat_id)
+    individual_pending = _list_pending_individual_audit("telegram", chat_id)
 
-    if has_digit or not individual:
+    if has_digit or not individual_pending:
         result = _resolve_audit_grouped_reply("telegram", chat_id, texto)
         if not result.get("no_pending"):
             await msg.reply_text(_format_audit_grouped_result(result))
             return True
 
-    if not individual:
+    if not individual_pending:
         return False
 
-    return await _resolve_individual_audit_proposal(msg, individual, texto)
+    if len(individual_pending) == 1:
+        return await _resolve_individual_audit_proposal(msg, individual_pending[0], texto)
+
+    selection, remainder = _parse_leading_number(texto, len(individual_pending))
+    if selection is None:
+        await msg.reply_text(_build_audit_disambiguation_message(individual_pending))
+        return True
+    return await _resolve_individual_audit_proposal(
+        msg, individual_pending[selection - 1], remainder or "sí"
+    )
 
 
 async def _resolve_individual_audit_proposal(msg, proposal: dict, texto: str) -> bool:

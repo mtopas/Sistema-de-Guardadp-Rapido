@@ -16,7 +16,11 @@ from jarvis.audit.service import (
     expire_stale_proposals as expire_stale_audit_proposals,
     push_next_audit_batch,
 )
-from jarvis.captures.passive import expire_stale_proposals, scan_and_propose
+from jarvis.captures.passive import (
+    expire_stale_proposals,
+    push_next_capture_batch,
+    scan_and_propose,
+)
 from jarvis.config import (
     JARVIS_BOVEDA_PATH,
     JARVIS_DEFAULT_USER,
@@ -169,6 +173,26 @@ def _maybe_run_passive_capture() -> None:
                     )
         except Exception:
             logger.exception("[worker] Empuje de cola de auditoría falló")
+
+        # Empuja el próximo lote de la cola de propuestas de captura
+        # (jarvis.captures.passive) -- mismo tick ocioso, mismo motivo que el
+        # empuje de auditoría de arriba (no hay job_queue entre procesos).
+        # Aplica por igual a passive_capture y a agenda_ingestion (incluidos
+        # los patrones de agenda_patterns.py) -- tabla hermana de
+        # jarvis_audit_proposals, mismo throttle aplicado el mismo día, ver
+        # Cerebro/decisiones-implementacion.md, 2026-09-17.
+        try:
+            from jarvis.debug.service import get_debug_chat_id
+
+            chat_id = get_debug_chat_id()
+            if chat_id:
+                pushed = push_next_capture_batch("telegram", chat_id, JARVIS_DEFAULT_USER)
+                if pushed:
+                    logger.info(
+                        "[worker] Captura: %d propuesta(s) empujada(s) de la cola", len(pushed)
+                    )
+        except Exception:
+            logger.exception("[worker] Empuje de cola de captura falló")
 
     _passive_thread = threading.Thread(target=_run, name="jarvis-passive-capture", daemon=True)
     _passive_thread.start()

@@ -110,6 +110,98 @@ Restricción de alcance:
   - No debe hacer cambios en homelab, producción, ni CI sin autorización explícita.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+IV-A. PLANTILLA DE PROMPT PARA SESIÓN WORKER (listo para copiar)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+No armar el prompt de un worker (fork o sesión nueva) sin haber pulido el
+objetivo primero: qué se espera lograr (concreto, no "mejorar X" sino "que
+X haga Y cuando pasa Z"), qué queda explícitamente afuera, y cómo se va a
+verificar. Un prompt sobre un objetivo ambiguo produce trabajo que sale
+más caro de corregir después que preguntar dos veces ahora.
+
+Estructura fija (ajustar tamaño según la tarea, pero nunca omitir
+"Verificación esperada" ni "Al terminar"):
+
+  Contexto: <1-3 líneas — qué proyecto/módulo, por qué importa esta tarea,
+  qué se investigó/decidió ya y no hace falta re-derivar>.
+
+  ## Objetivo
+  <qué se espera lograr, concreto y acotado>
+
+  ## Fuera de alcance
+  <qué NO tocar / NO hacer>
+
+  ## Contexto previo relevante
+  <rutas exactas + qué dicen, o "ninguno encontrado" si no aplica.
+  Si toca Jarvis o el homelab: pegar la sección VI completa de este
+  archivo (restricciones técnicas) dentro del prompt del worker — una
+  sesión sin memoria de este chat no las conoce solo por estar acá>.
+
+  ## Reglas fijas de este repo
+  - No crear ramas nuevas sin pedirlo explícitamente (SGR trabaja
+    mayormente en master salvo aviso).
+  - No hacer git commit/push — eso lo maneja el orquestador, no el worker.
+  - Si el cambio toca algo que CLAUDE.md o project/README.md describen
+    como estado vigente, señalarlo en el reporte de cierre (el
+    orquestador decide si actualizar).
+
+  ## Verificación esperada
+  <tests a correr / script standalone contra DB real si no hay tests
+  automatizados (jarvis/ no tiene suite hoy) / prueba manual — explícito,
+  nunca "sin verificar" salvo que quede documentado como pendiente>.
+
+  ## Al terminar
+  Cerrá con el bloque de resumen del formato exacto de la sección IV-B de
+  este archivo, en texto plano en tu respuesta final (no como archivo
+  nuevo). Ese resumen se lo paso textual al orquestador.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+IV-B. FORMATO DE CIERRE QUE TODO WORKER DEBE DEVOLVER
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ### Resumen de sesión — <objetivo en una línea>
+
+  **Resultado:** hecho | parcial | bloqueado
+
+  **Qué se hizo:**
+  - <bullets concretos, archivo:línea cuando ayude>
+
+  **Diff real aplicado:** <si divergió de lo pedido, decirlo explícito y
+  por qué — no reportar el plan, reportar lo que quedó de verdad>
+
+  **Verificación:** <output real del script/tests corridos, o prueba
+  manual hecha — nunca "debería funcionar" sin haberlo corrido>
+
+  **Docs actualizados:** <Cerebro/estado-actual.md, decisiones-
+  implementacion.md, CLAUDE.md — cuáles, o "ninguno, motivo: ...">
+
+  **Bugs/hallazgos encontrados:** <aunque no se hayan corregido>
+
+  **Estado del working tree:** <archivos modificados, sin commitear salvo
+  que el orquestador haya pedido lo contrario>
+
+  **Pendientes / próximos pasos sugeridos:**
+  - <bullets>
+
+Si un worker devuelve un resumen que no sigue este formato, reconstruirlo
+a partir de lo que reportó en vez de rechazarlo — pero no confiar en una
+afirmación sin evidencia: si dice "archivo X modificado", confirmar con
+git diff/Read antes de darlo por bueno (ver sección VIII).
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+IV-C. REGISTRO INTERNO DE SESIONES LANZADAS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+A lo largo de la conversación, mantener (mencionarlo cuando sea útil, no
+hace falta un archivo aparte salvo en el handoff) una lista de:
+
+  - <objetivo corto> — prompt entregado | esperando resumen | verificado
+    → resultado en una línea, archivos tocados, si se desplegó
+
+Esto es lo que permite responder "¿qué falta?" sin que el usuario tenga
+que repetir el historial, y es la base del handoff (sección IX).
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 V. ACTUALIZACIÓN DE MEMORIA
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -175,8 +267,35 @@ IX. PREPARAR MIGRACIÓN A PRÓXIMO ORQUESTADOR
 Antes de migrar:
   1. Actualizar Cerebro/estado-actual.md.
   2. Registrar en Cerebro/decisiones-implementacion.md cualquier decisión nueva.
-  3. Crear Cerebro/Orquestrador/handoffs/GENERAL_HANDOFF_YYYY-MM-DD.md.
+  3. Crear Cerebro/Orquestrador/handoffs/GENERAL_HANDOFF_YYYY-MM-DD.md, con
+     al menos: registro de sesiones lanzadas (sección IV-C) de esta
+     conversación, qué quedó pendiente/bloqueado (con el motivo exacto si
+     fue un bloqueo de permisos u otra causa técnica, no solo "pendiente"),
+     y cualquier decisión de coordinación tomada que no haya ido a
+     decisiones-implementacion.md por ser táctica y no arquitectónica.
   4. Verificar que GENERAL_ORCHESTRATOR_BOOTSTRAP.txt no necesita cambios
      (solo cambia si cambió el rol, el protocolo o la estructura de memoria).
-  5. Dar al nuevo chat: este bootstrap + el handoff + los docs persistentes.
-  6. Pedirle que confirme que entiende el estado antes de empezar a operar.
+  5. Actualizar Cerebro/Orquestrador/Comienzo_General_nuevo.txt para que
+     apunte al handoff nuevo (reemplaza la fecha del handoff anterior).
+  6. Dar al nuevo chat: este bootstrap + el handoff + los docs persistentes.
+  7. Pedirle que confirme que entiende el estado antes de empezar a operar.
+
+Prompt de relevo (copiar el contenido actualizado de
+Comienzo_General_nuevo.txt tal cual, no reescribirlo de memoria):
+
+  '''
+  Sos el Chat General / Orquestador del proyecto SGR.
+  Lee en este orden antes de hacer cualquier otra cosa:
+
+  1. Cerebro/Orquestrador/GENERAL_ORCHESTRATOR_BOOTSTRAP.txt  ← tu rol y protocolo permanente
+  2. Cerebro/Orquestrador/handoffs/GENERAL_HANDOFF_<fecha>.md  ← estado de esta transición
+  3. Cerebro/estado-actual.md  ← qué está construido hoy
+
+  Después de leer los tres, confirmame en 3-4 bullets qué entendiste del estado actual
+  y preguntá si querés aclaraciones antes de operar.
+  No hagas nada más hasta que yo te indique.
+  '''
+
+No hace falta reescribir el rol completo en el prompt de relevo — el
+bootstrap ya lo tiene; el prompt de arranque solo necesita apuntar a los
+tres documentos y pedir confirmación de lectura.

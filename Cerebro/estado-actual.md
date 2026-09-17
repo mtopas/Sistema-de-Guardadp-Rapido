@@ -1,6 +1,47 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-17
 
+## FIX: auditoría + corrección de la conexión frontend↔backend↔DB de `/jarvis` (2026-09-17)
+
+Pedido del usuario tras reportar "la última vez que entré [a /jarvis] estaba todo en cero, no
+había entidades, tags, nada". Dos sesiones: una auditoría de solo lectura (fork) seguida de una
+de implementación (fork), ambas revisadas por el orquestador antes de commitear.
+
+**Hallazgo central (auditoría)**: las ~15 funciones `fetchJarvis*`/`switchJarvisChat` de
+`project/frontend/src/store/useStore.js` tenían `catch { /* noop */ }` sin ningún log -- un error
+real de backend (500, columna faltante, CORS, lo que sea) era visualmente indistinguible de
+"memoria vacía". Confirmado con datos reales sembrados en sandbox aislado (`:8767`) que el resto
+del wiring (endpoints, shape de JSON, mount→fetch→render en `JarvisScreen.jsx`/
+`JarvisBrowsePanel.jsx`) está bien conectado -- no era un bug de lógica, era la ausencia de
+diagnóstico lo que hacía indistinguibles los dos casos.
+
+**Causa concreta que explica el síntoma reportado**: a la `jarvis.db` LOCAL le faltaba la columna
+`pushed_at` que el código de throttle (implementado esta misma sesión, ver entradas de arriba/
+abajo del mismo día) ya daba por hecha en varias queries -- rompía `/jarvis/proposals` y
+`/jarvis/audit-proposals` con 500, invisibles por el bug de arriba. La migración
+(`_add_column_if_missing`, `jarvis/db/database.py`) ya existía y es correcta, solo nunca había
+corrido porque ningún proceso de Jarvis se reinició desde que se escribió ese código -- se
+autocorrigió al arrancar el backend real una vez.
+
+**Fix aplicado** (revisado diff real por el orquestador antes de commitear, commit `ab0a902`):
+mismo patrón `if (DEBUG) console.error('nombreFunción:', e)` que ya usa el resto de
+`useStore.js` (Bóveda/Finanzas), aplicado a los 15 catch silenciosos -- sin cambios de lógica ni
+UI nueva, solo diagnóstico. Verificado con `npm run build` limpio (1900 módulos, sin errores).
+
+**Limpieza de datos aplicada sobre `jarvis.db` LOCAL real** (backup previo en
+`project/database/backups/pre-limpieza-inbox-queue-20260917-121700/`): 18 filas huérfanas de
+`inbox_queue` (referenciaban las 22 `memory_entries` de prueba borradas más temprano en esta
+misma sesión, ver entrada de abajo) -- confirmado por query que las 18 eran 100% huérfanas antes
+de borrar, `PRAGMA integrity_check` → `ok`. `pushed_at` confirmado presente en
+`jarvis_audit_proposals`/`jarvis_capture_proposals` post-migración; `curl` real a
+`/jarvis/proposals` y `/jarvis/audit-proposals` → `200` con JSON válido (antes hubieran dado 500).
+
+**Hallazgo nuevo, no anticipado, fuera de alcance -- pendiente**: al arrancar el backend real para
+la migración, el log mostró un error preexistente al parsear el frontmatter YAML de una nota real
+de `D:\Boveda` (título con una URL sin comillas conteniendo `:` -- rompe el parseo YAML). No tumba
+el proceso (el parser degrada esa nota puntual), pero vale la pena que alguien la revise/corrija
+el archivo a mano en algún momento. No se tocó en esta sesión.
+
 ## LIMPIEZA: borradas las entradas sintéticas de prueba de la `jarvis.db` LOCAL (2026-09-17)
 
 Cierra el pendiente que había quedado anotado en `Cerebro/Orquestrador/handoffs/GENERAL_HANDOFF_2026-09-17.md`

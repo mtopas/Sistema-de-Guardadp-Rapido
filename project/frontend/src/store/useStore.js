@@ -1483,7 +1483,7 @@ export const useStore = create((set, get) => ({
       } else {
         await get().createJarvisChat()
       }
-    } catch { /* noop — offline, se reintenta en el próximo poll */ }
+    } catch (e) { if (DEBUG) console.error('fetchJarvisChats:', e) }
   },
 
   switchJarvisChat: async (chatId) => {
@@ -1496,7 +1496,7 @@ export const useStore = create((set, get) => ({
       // Historial persistido: sin `sources` (no se guardan por mensaje, solo
       // se muestran para respuestas recién generadas en esta sesión).
       set({ jarvisMessages: history.map(m => ({ role: m.role, content: m.content, created_at: m.created_at })) })
-    } catch { /* noop — el chat existe pero no se pudo traer su historial ahora */ }
+    } catch (e) { if (DEBUG) console.error('switchJarvisChat:', e) }
   },
 
   createJarvisChat: async (title = null) => {
@@ -1601,7 +1601,7 @@ export const useStore = create((set, get) => ({
       const res = await fetch(`${API_URL}/jarvis/inbox?limit=15`)
       if (!res.ok) throw new Error('not ok')
       set({ jarvisInbox: await res.json() })
-    } catch { /* noop */ }
+    } catch (e) { if (DEBUG) console.error('fetchJarvisInbox:', e) }
   },
 
   fetchJarvisBudget: async () => {
@@ -1609,7 +1609,7 @@ export const useStore = create((set, get) => ({
       const res = await fetch(`${API_URL}/jarvis/budget`)
       if (!res.ok) throw new Error('not ok')
       set({ jarvisBudget: await res.json() })
-    } catch { /* noop */ }
+    } catch (e) { if (DEBUG) console.error('fetchJarvisBudget:', e) }
   },
 
   fetchJarvisTypeCounts: async () => {
@@ -1617,7 +1617,7 @@ export const useStore = create((set, get) => ({
       const res = await fetch(`${API_URL}/jarvis/stats/types`)
       if (!res.ok) throw new Error('not ok')
       set({ jarvisTypeCounts: await res.json() })
-    } catch { /* noop */ }
+    } catch (e) { if (DEBUG) console.error('fetchJarvisTypeCounts:', e) }
   },
 
   fetchJarvisHealth: async () => {
@@ -1625,7 +1625,7 @@ export const useStore = create((set, get) => ({
       const res = await fetch(`${API_URL}/jarvis/health`)
       if (!res.ok) throw new Error('not ok')
       set({ jarvisHealth: await res.json() })
-    } catch { /* noop */ }
+    } catch (e) { if (DEBUG) console.error('fetchJarvisHealth:', e) }
   },
 
   fetchJarvisEvents: async () => {
@@ -1633,7 +1633,7 @@ export const useStore = create((set, get) => ({
       const res = await fetch(`${API_URL}/jarvis/events?limit=${get().jarvisEventsLimit}`)
       if (!res.ok) throw new Error('not ok')
       set({ jarvisEvents: await res.json() })
-    } catch { /* noop */ }
+    } catch (e) { if (DEBUG) console.error('fetchJarvisEvents:', e) }
   },
 
   // "El debug se cortó en mensajes viejos" (Mejoras_Jarvis.md) — el fetch usaba
@@ -1650,7 +1650,7 @@ export const useStore = create((set, get) => ({
       const res = await fetch(`${API_URL}/jarvis/entities`)
       if (!res.ok) throw new Error('not ok')
       set({ jarvisEntities: await res.json() })
-    } catch { /* noop */ }
+    } catch (e) { if (DEBUG) console.error('fetchJarvisEntities:', e) }
   },
 
   fetchJarvisProjects: async () => {
@@ -1658,7 +1658,7 @@ export const useStore = create((set, get) => ({
       const res = await fetch(`${API_URL}/jarvis/projects`)
       if (!res.ok) throw new Error('not ok')
       set({ jarvisProjects: await res.json() })
-    } catch { /* noop */ }
+    } catch (e) { if (DEBUG) console.error('fetchJarvisProjects:', e) }
   },
 
   // Detalle de una entrada de memoria — fuentes clickeables del chat
@@ -1707,7 +1707,7 @@ export const useStore = create((set, get) => ({
       const res = await fetch(`${API_URL}/jarvis/proposals`)
       if (!res.ok) throw new Error('not ok')
       set({ jarvisProposals: await res.json() })
-    } catch { /* noop */ }
+    } catch (e) { if (DEBUG) console.error('fetchJarvisProposals:', e) }
   },
 
   acceptJarvisProposal: async (proposalId, clarification = null) => {
@@ -1743,7 +1743,7 @@ export const useStore = create((set, get) => ({
       const res = await fetch(`${API_URL}/jarvis/tags`)
       if (!res.ok) throw new Error('not ok')
       set({ jarvisTags: await res.json() })
-    } catch { /* noop */ }
+    } catch (e) { if (DEBUG) console.error('fetchJarvisTags:', e) }
   },
 
   fetchJarvisBrowse: async (filters = {}) => {
@@ -1753,7 +1753,7 @@ export const useStore = create((set, get) => ({
       const res = await fetch(`${API_URL}/jarvis/browse?${params.toString()}`)
       if (!res.ok) throw new Error('not ok')
       set({ jarvisBrowseResults: await res.json() })
-    } catch { /* noop */ }
+    } catch (e) { if (DEBUG) console.error('fetchJarvisBrowse:', e) }
   },
 
   // Auditoría proactiva de memoria (jarvis.audit.service, ver Cerebro/
@@ -1765,7 +1765,7 @@ export const useStore = create((set, get) => ({
       const res = await fetch(`${API_URL}/jarvis/audit-proposals`)
       if (!res.ok) throw new Error('not ok')
       set({ jarvisAuditProposals: await res.json() })
-    } catch { /* noop */ }
+    } catch (e) { if (DEBUG) console.error('fetchJarvisAuditProposals:', e) }
   },
 
   // reply solo aplica a action_type='clarify' -- el backend lo ignora para el resto.
@@ -1800,7 +1800,7 @@ export const useStore = create((set, get) => ({
       const res = await fetch(`${API_URL}/jarvis/audit-proposals?status=all`)
       if (!res.ok) throw new Error('not ok')
       set({ jarvisAuditHistory: await res.json() })
-    } catch { /* noop */ }
+    } catch (e) { if (DEBUG) console.error('fetchJarvisAuditHistory:', e) }
   },
 
   // Hueco tipo B (entrada aislada, sin entidad ni proyecto) -- SQL puro, sin
@@ -1810,6 +1810,6 @@ export const useStore = create((set, get) => ({
       const res = await fetch(`${API_URL}/jarvis/audit-proposals/isolated`)
       if (!res.ok) throw new Error('not ok')
       set({ jarvisIsolatedEntries: await res.json() })
-    } catch { /* noop */ }
+    } catch (e) { if (DEBUG) console.error('fetchJarvisIsolatedEntries:', e) }
   },
 }))

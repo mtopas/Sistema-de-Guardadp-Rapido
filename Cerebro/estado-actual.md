@@ -1,6 +1,54 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-17
 
+## LIMPIEZA: borradas las entradas sintéticas de prueba de la `jarvis.db` LOCAL (2026-09-17)
+
+Cierra el pendiente que había quedado anotado en `Cerebro/Orquestrador/handoffs/GENERAL_HANDOFF_2026-09-17.md`
+tras el fix del `.exe` sin memoria (ver entrada de abajo, 2026-09-16): el contenido de
+`project/database/jarvis.db` **local** (no la del homelab) resultó ser, en su totalidad, data
+sintética sembrada en agosto 2026 para probar el motor de consolidación (pares diseñados para
+disparar `same_fact`/`contradiction`: "vivo en Madrid" / "me mudé a Buenos Aires", "100% remoto" /
+"100% presencial", un compañero ficticio "Martín Suárez", un proyecto ficticio "Quetzalcoatl-7",
+etc.) — nada de memoria real del usuario. El handoff decía "6 entradas de prueba + 2 proyectos
+huérfanos"; releyendo la DB real el conteo correcto era **22 `memory_entries`** (no 6 — el handoff
+quedó desactualizado) **+ 2 `memory_projects`** ("Jarvis", "Homelab", ambos `created_by=
+'jarvis_proposal_accepted'`, generados automáticamente a partir de las entradas de prueba).
+
+El borrado había quedado bloqueado en la sesión anterior por el clasificador de permisos de Bash
+de Claude Code (rechazaba el `DELETE` como "irreversible local destruction" pese a confirmación
+explícita del usuario en el chat) — se resolvió con confirmación explícita nueva del usuario en
+esta sesión, sin necesidad de tocar la configuración de permisos.
+
+**Verificado antes de borrar** (no se confió en el conteo del handoff): schema completo de las 6
+tablas involucradas (`memory_entries`, `memory_projects`, `memory_entry_projects`,
+`memory_entry_tags`, `memory_entry_entities`, `memory_entities`, `memory_tags`) leído directamente
+de `sqlite_master`; confirmado que `PRAGMA foreign_keys` está OFF por conexión (no cascadea solo,
+hay que borrar hijos antes que padres a mano); confirmado que `memory_entries_fts` tiene triggers
+(`trg_me_fts_delete`) que la sincronizan sola al borrar de `memory_entries` (no hizo falta tocarla
+a mano); confirmado por lectura de `jarvis/retriever/retriever.py` (`_load_entries()`) que dejar
+huérfanos los 22 vectores ya embebidos en ChromaDB no rompe ni filtra contenido borrado -- el
+retriever los descarta solo si no encuentra la fila en SQLite, así que no hizo falta tocar
+`database/chroma/` (queda como peso muerto cosmético, no antojado de limpiar).
+
+**Borrado ejecutado** (Python + `sqlite3`, sin CLI `sqlite3` disponible en el PATH): orden
+hijos→padres -- `memory_entry_projects` (9 filas) → `memory_entry_tags` (50) →
+`memory_entry_entities` (5) → `memory_entries` (22) → `memory_projects` (2). Con las 22 entradas
+ya afuera, las 3 entidades (`Martín Suárez`, `Jarvis`, `SQLite`) y las 19 tags quedaron con 0
+referencias -- se borraron también a pedido explícito del usuario, en un segundo paso separado
+(`DELETE ... WHERE id NOT IN (SELECT ... FROM tabla_junction)`). `PRAGMA integrity_check` → `ok`
+después de cada paso. Estado final: `memory_entries`, `memory_projects`, `memory_entities`,
+`memory_tags` en **0 filas** -- `jarvis.db` local queda sin ningún dato sintético ni real (limpia,
+lista para acumular memoria real del usuario desde cero).
+
+Backup previo (ya existía de la sesión anterior, confirmado íntegro antes de borrar por tamaño
+idéntico al `jarvis.db` real): `project/database/backups/pre-limpieza-test-projects-20260916-150059/`
+(`jarvis.db` + `chroma/`). No se tocó el `jarvis.db` del homelab (nunca tuvo esta data de prueba --
+la migración de agosto fue directo a local).
+
+**No commiteado a git** -- `jarvis.db` está gitignoreado (mismo criterio que `app.db`, ver
+`Cerebro/decisiones-implementacion.md`), el cambio no deja rastro en `git status`. Solo esta
+entrada de documentación se commitea.
+
 ## FIX: desambiguación de respuesta libre cuando hay 2+ propuestas individuales pendientes a la vez (audit y capture) (2026-09-17)
 
 Cierra un bug latente que dejaron las dos entradas de throttle de abajo (mismo día): con

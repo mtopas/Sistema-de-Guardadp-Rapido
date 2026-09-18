@@ -11,6 +11,64 @@ Formato de cada entrada:
 
 ---
 
+## 2026-09-17 — Ethernet 2 a Público bloquea Ollama para el homelab (diagnóstico + watchdog ampliado)
+
+Contexto: el usuario reportó ver "ERROR"/"RAW"/"NaNd" en el Inbox de Jarvis del frontend
+(nueva feature, servido desde el homelab vía Tailscale, ver más abajo la entrada de la fusión
+del frontend al homelab). Investigando esa fila concreta (una nota de Telegram sobre un
+parcial de Física 3, `entry_id=76e25999-3345-462e-b1e0-958fed449837`) aparecieron dos bugs
+independientes mezclados en la misma UI.
+
+Decisión/diagnóstico 1 (frontend, cosmético): `formatAge()` asumía que un timestamp sin
+sufijo `Z` no tenía info de timezone y le agregaba una a la fuerza — pero
+`jarvis/worker/processor.py::_set_status()` genera `updated_at` con
+`datetime.now(timezone.utc).isoformat()`, que da `...+00:00`, no `...Z`. Agregarle `Z` a eso
+produce `...+00:00Z`, fecha inválida → `NaN` → `"NaNd"`. Fix: detectar cualquier sufijo de
+timezone (`Z` u offset numérico) antes de decidir si hace falta agregar la `Z`.
+`project/frontend/src/utils/formatAge.js`.
+
+Decisión/diagnóstico 2 (infra, el real): el "ERROR" de esa fila era genuino — el worker había
+agotado sus 3 reintentos (`jarvis/worker/processor.py::_set_status()`, `final_status = "ERROR"
+if attempts >= 3 else "PENDING"`, sin reintento automático más allá de eso) con
+`litellm.APIConnectionError: Ollama_chatException - litellm.Timeout: Connection timed out
+after 120.0 seconds` en las 3. Verificado en vivo que **no era un problema de capacidad del
+modelo** (Ollama respondía instantáneo en `127.0.0.1:11434` desde la propia PC Windows) sino
+de **red**: el gabinete no podía conectar en absoluto a `192.168.137.1:11434` (timeout de
+conexión, `curl` exit 28, no rechazo) pese a que el `ping` a esa misma IP funcionaba bien.
+Causa raíz confirmada con `netsh advfirewall firewall show rule name=all`: `Ethernet 2` (el
+adaptador que conecta al gabinete vía ICS) estaba categorizado como red **Pública** en ese
+momento (`Get-NetConnectionProfile` lo confirmó), y Windows tenía una regla de Firewall
+autogenerada `ollama.exe` con `Action: Block, Direction: In, Profiles: Public` — que en
+Windows Firewall **gana sobre** las reglas explícitas `Allow` para el puerto 11434
+(`Ollama SGR Homelab`/`Ollama Homelab`, ambas ya correctamente configuradas) porque un Block
+siempre tiene prioridad sobre un Allow cuando ambos matchean el mismo tráfico, sin importar
+especificidad. Mismo bug de fondo que ya documentaba `HOMELAB.md` para el NAT ("tras un corte,
+Ethernet 2 a veces queda en perfil Public"), acá con un síntoma nuevo (Ollama, no NAT).
+
+Fix aplicado en vivo (confirmado, no solo teorizado): usuario corrió
+`project/scripts/Ensure-Ics.ps1` (ya hacía `Set-NetConnectionProfile -InterfaceAlias
+"Ethernet 2" -NetworkCategory Private`, sin cambios de código necesarios acá) → perfil pasó a
+Private → `curl` desde el gabinete a `192.168.137.1:11434` pasó de timeout de 6s a `HTTP 200`
+en 1.6ms → se resetéo la fila de `inbox_queue` a mano (`status=PENDING, attempts=0`, con backup
+previo de `jarvis.db` real del homelab) → el worker la reprocesó de punta a punta sin error,
+quedó `DONE`/`SEMANTIC` con el contenido real intacto.
+
+Decisión de watchdog: antes de esta sesión, `project/scripts/Install-IcsWatchdog.ps1` solo
+programaba `Ensure-Ics.ps1` **una vez al arrancar Windows** (`AtStartup +45s`) — si el perfil
+de red cambiaba con Windows ya corriendo (que es exactamente lo que pasó acá, la PC no se
+había reiniciado), nadie lo corregía hasta el próximo reboot. Se agregó un segundo trigger
+recurrente (`-RepetitionInterval 5 min -RepetitionDuration ([TimeSpan]::MaxValue)`) a la misma
+tarea programada `SGR-Ensure-ICS`, sin tocar `Ensure-Ics.ps1` (ya era idempotente — no hace
+nada si el perfil ya es Private). Mismo criterio que el watchdog systemd del lado Ubuntu
+(`sgr-ensure-default-route`, cada 60s).
+
+Impacto: `project/frontend/src/utils/formatAge.js` (fix), `project/scripts/
+Install-IcsWatchdog.ps1` (trigger recurrente nuevo), `HOMELAB.md` (sección "Windows — rearma
+NAT al arranque y cada 5 min" actualizada). `Ensure-Ics.ps1` sin cambios — el bug estaba en
+que se lo invocaba muy poco seguido, no en su lógica.
+
+---
+
 ## 2026-09-17 — Desambiguación de respuesta libre cuando hay 2+ propuestas individuales pendientes (audit y capture)
 
 Contexto: las dos entradas de abajo (throttle de auditoría y throttle de captura, mismo día,

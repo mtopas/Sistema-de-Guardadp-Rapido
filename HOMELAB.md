@@ -426,17 +426,29 @@ Eso instala:
 
 Verificar: `systemctl status sgr-default-route.timer` · `ip route` · `ping -c2 8.8.8.8`
 
-#### Windows — rearma NAT al arranque
+#### Windows — rearma NAT al arranque y cada 5 min (2026-09-17)
 
 PowerShell **como administrador**:
 
 ```powershell
 cd D:\Sistema-de-Guardadp-Rapido\project\scripts
-.\Install-IcsWatchdog.ps1   # tarea SGR-Ensure-ICS al startup (+45s)
+.\Install-IcsWatchdog.ps1   # tarea SGR-Ensure-ICS: al startup (+45s) Y cada 5 min de ahí en más
 .\Ensure-Ics.ps1            # NetNat + forwarding + 192.168.137.1 + perfil Private
 ```
 
 Tras cortes de luz, preferir **NetNat** (`Ensure-Ics.ps1` / `Enable-HomelabNat.ps1`) antes que ICS clásico: ICS suele quedar con `SharingEnabled=True` pero sin NAT real (síntoma: ping al gateway OK, `8.8.8.8` 100% loss; a veces `Ethernet 2` cae a `169.254.x`).
+
+**Por qué corre cada 5 min y no solo al boot (2026-09-17):** `Ethernet 2` puede caer a perfil
+**Público** con Windows ya corriendo, no solo al arrancar — visto en vivo: eso activa una regla
+de Firewall que Windows crea sola (`ollama.exe`, Block en perfil Público) y el homelab deja de
+poder llegar a Ollama (`192.168.137.1:11434`) aunque el ping al gateway siga andando bien —
+síntoma real: el worker de Jarvis tira `litellm.Timeout` a los 120s en cada nota que intenta
+procesar, consistente, no intermitente. `Ensure-Ics.ps1` ya corregía esto (fuerza el perfil de
+`Ethernet 2` de vuelta a Private) pero antes del 2026-09-17 la tarea programada solo lo corría
+una vez al boot — si el flip pasaba después, nadie lo arreglaba hasta el próximo reinicio. Ver
+`Cerebro/decisiones-implementacion.md`, entrada `2026-09-17 — Ethernet 2 a Público bloquea
+Ollama para el homelab` para el diagnóstico completo. Verificar que quedó corriendo:
+`Get-ScheduledTaskInfo -TaskName SGR-Ensure-ICS` (mirar `NextRunTime`).
 
 Si el enlace local se rompe (SSH timeout / IP APIPA):
 

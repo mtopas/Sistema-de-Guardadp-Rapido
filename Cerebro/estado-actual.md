@@ -1,6 +1,59 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-17
 
+## FIX: deploy gap real (`jarvis/worker/consolidation.py` 2 días desactualizado en el homelab) + mensaje ambiguo al confirmar propuestas (2026-09-17)
+
+Pedido del usuario tras recibir un reporte diario real de **37 mensajes de Telegram** (pegado a
+mano en `Consolidacion.txt`, ver ese archivo si sigue existiendo) y ver que responder "sí" horas
+después a una propuesta pendiente ("Robert Kiyosaki (2 menciones) — propuesta creada, esperando
+confirmación") mostró `"✅ Guardado — procesando… ID: e8ade661"` como si fuera contenido nuevo.
+
+**Diagnóstico 1 (el real) — no era un bug de código, era un deploy nunca terminado.** El commit
+`575179c` (2026-09-16, ver entrada de abajo "Fix: reporte diario...") ya arregla exactamente esto
+-- `_section_pairwise()` reduce los pares `different` a un conteo en vez de listarlos uno por
+uno. Confirmado con `docker exec project-worker-1 python3 -c "...inspect.getsource(...)"` que el
+contenedor real del homelab corría la versión **vieja** (sin el filtro). Hash-diff completo
+(sha256) de los ~100 archivos versionados de `jarvis/`+`project/app/`+`project/mybot/` entre el
+repo local y el homelab: **solo 5 diferían** -- 4 eran ruido CRLF/LF sin diferencia de contenido
+real (confirmado con `diff --strip-trailing-cr`), y el quinto (`jarvis/worker/consolidation.py`)
+tenía fecha de archivo **15/09 21:37** en el homelab, dos días antes del fix. Causa: una sesión
+anterior desplegó otros fixes de Jarvis del mismo período (`c2d959f`/`c8072cc`, confirmado por
+mtime `17/09 10:15` en varios archivos) con `scp` de archivos puntuales en vez del sync completo
+de `jarvis/` documentado en `HOMELAB.md` -- y se les pasó este archivo.
+
+**Diagnóstico 2 — el "sí" no era un bug, el mensaje sí.** Rastreado end-to-end: `e8ade661` es
+exactamente la entrada sintetizada al aceptar la propuesta `create` de la entidad Robert Kiyosaki
+(`status: ACCEPTED`, `authorship: jarvis_synthesis`, `source_id` trazable a la propuesta) --
+comportamiento correcto y esperado (aceptar un `create` siempre sintetiza una entrada nueva). El
+problema es que `project/mybot/jarvis_handlers.py` usaba el mismo texto genérico
+`"✅ Guardado — procesando…"` tanto para capturar contenido nuevo como para confirmar una
+propuesta ya existente -- indistinguibles para el usuario.
+
+**Fix aplicado** (sesión de implementación, fork, revisado por el orquestador antes de
+commitear -- commit `e8f1e14`): `_resolve_passive_proposal()` (línea ~327) y
+`_resolve_individual_audit_proposal()` (línea ~419) ahora dicen `"✅ Propuesta confirmada..."` en
+vez de `"✅ Guardado..."`. Las rutas de captura genuina (`_do_capture()` línea ~111,
+clarificación-con-razón línea ~223) no se tocaron -- ya decían algo distinto y correcto.
+Verificado con `python -m py_compile`; sin suite de tests automatizados para `mybot/` (confirmado,
+no asumido).
+
+**Deploy real, no solo commit**: re-sincronizado `jarvis/` completo (71 archivos, `tar | ssh`, no
+un parche de un archivo) al homelab, rebuild + restart de los 3 contenedores; hash-diff final
+tras el sync: **0 diferencias**. `jarvis_handlers.py` desplegado también (scp puntual +
+`docker-compose restart bot`, sin rebuild -- `./mybot` es bind-mount de solo lectura). Los 3
+contenedores confirmados sanos post-restart (logs sin errores nuevos, bot con polling de Telegram
+activo).
+
+**Decisión de coordinación para el futuro** (no arquitectónica, anotada para no repetir el
+error): al desplegar cualquier fix que toque `jarvis/`, usar siempre el sync completo por `tar`
+documentado en `HOMELAB.md` ("Actualizar código en el servidor"), nunca `scp` de archivos
+sueltos -- así fue exactamente como este archivo quedó 2 días atrás sin que nadie lo notara,
+hasta que produjo un reporte real de 37 mensajes.
+
+**Hallazgo nuevo, no investigado, fuera de alcance**: al reiniciar el `backend` para este deploy
+apareció en el log `[semantic] backfill omitido: UNIQUE constraint failed: hojas.ruta` -- no
+estaba en logs de sesiones anteriores de hoy, no se investigó (fuera del alcance de esta tarea).
+
 ## FIX: auditoría + corrección de la conexión frontend↔backend↔DB de `/jarvis` (2026-09-17)
 
 Pedido del usuario tras reportar "la última vez que entré [a /jarvis] estaba todo en cero, no

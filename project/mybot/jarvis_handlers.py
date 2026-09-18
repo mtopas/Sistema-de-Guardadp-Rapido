@@ -324,7 +324,7 @@ async def _resolve_passive_proposal(msg, proposal: dict, texto: str) -> bool:
     if entry_id:
         suffix = " con tu aclaración" if extra else ""
         await msg.reply_text(
-            f"✅ Guardado{suffix} — procesando…\n_ID: `{entry_id[:8]}`_", parse_mode="Markdown"
+            f"✅ Propuesta confirmada{suffix} — procesando…\n_ID: `{entry_id[:8]}`_", parse_mode="Markdown"
         )
     else:
         await msg.reply_text("❌ Esa propuesta ya no está disponible (venció o ya se resolvió).")
@@ -416,7 +416,7 @@ async def _resolve_individual_audit_proposal(msg, proposal: dict, texto: str) ->
             parse_mode="Markdown",
         )
     elif entry_id:
-        await msg.reply_text(f"✅ Guardado — procesando…\n_ID: `{entry_id[:8]}`_", parse_mode="Markdown")
+        await msg.reply_text(f"✅ Propuesta confirmada — procesando…\n_ID: `{entry_id[:8]}`_", parse_mode="Markdown")
     else:
         await msg.reply_text("✅ Confirmado.")
     return True

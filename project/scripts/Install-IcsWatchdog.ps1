@@ -34,9 +34,13 @@ $TriggerStartup.Delay = "PT45S"
 
 # Trigger 2: recurrente cada 5 min desde ahora, indefinidamente -- cubre un
 # flip de perfil de red que pase con Windows ya corriendo, no solo al boot.
+# [TimeSpan]::MaxValue desborda el schema XML de Task Scheduler (Duration
+# fuera de rango). El truco documentado para "repetir para siempre" es dejar
+# Repetition.Duration en string vacio -- Task Scheduler lo interpreta como
+# sin limite (a diferencia de 0, que directamente desactiva la repeticion).
 $TriggerRecurring = New-ScheduledTaskTrigger -Once -At (Get-Date) `
-    -RepetitionInterval (New-TimeSpan -Minutes 5) `
-    -RepetitionDuration ([TimeSpan]::MaxValue)
+    -RepetitionInterval (New-TimeSpan -Minutes 5)
+$TriggerRecurring.Repetition.Duration = ""
 
 $Principal = New-ScheduledTaskPrincipal `
     -UserId "SYSTEM" `
@@ -49,13 +53,18 @@ $Settings = New-ScheduledTaskSettingsSet `
     -StartWhenAvailable `
     -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
 
+# -ErrorAction Stop explicito: los cmdlets CDXML de ScheduledTasks no siempre
+# respetan $ErrorActionPreference a nivel de script (visto en vivo 2026-09-17:
+# un Duration invalido tiro un CimException a la consola pero el script siguio
+# igual e imprimio "instalada" con la tarea en realidad sin crearse).
 Register-ScheduledTask `
     -TaskName $TaskName `
     -Action $Action `
     -Trigger @($TriggerStartup, $TriggerRecurring) `
     -Principal $Principal `
     -Settings $Settings `
-    -Force | Out-Null
+    -Force `
+    -ErrorAction Stop | Out-Null
 
 # También dejar SharedAccess en Automatic Delayed
 Set-Service -Name SharedAccess -StartupType Automatic

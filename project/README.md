@@ -142,7 +142,7 @@ parte del contrato común — ver README de `D:\Boveda`).
 
 **Mes:** vista 6×7 + semana; toggle calendarios activos; click en celda → `EventoModal`.
 
-**Tareas:** listas con color; filtro pendientes/completadas/todas; detalle en panel derecho.
+**Tareas:** listas con color; filtro pendientes/completadas/todas; detalle en panel derecho. Toggle **Lista/Canvas** (`TareasTab.jsx`): vista Canvas muestra todas las listas a la vez como tarjetas (pineadas arriba, `agenda_listas.pinned`), con quick-add de tarea por tarjeta; "Sin fecha" (filtro virtual, no lista real) aparece como tarjeta de solo lectura sin pin ni quick-add.
 
 **Revisión:** selector de semana; completadas vs incompletas; vencidas +7 días; % tiempo planificado; distribución por calendario.
 

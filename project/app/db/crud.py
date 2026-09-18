@@ -2289,10 +2289,10 @@ def agenda_eliminar_evento(evt_id: int) -> bool:
 def agenda_obtener_listas() -> list:
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, nombre, color FROM agenda_listas ORDER BY id")
+    cursor.execute("SELECT id, nombre, color, pinned FROM agenda_listas ORDER BY id")
     rows = cursor.fetchall()
     conn.close()
-    return [{"id": r[0], "nombre": r[1], "color": r[2]} for r in rows]
+    return [{"id": r[0], "nombre": r[1], "color": r[2], "pinned": bool(r[3])} for r in rows]
 
 
 def agenda_crear_lista(nombre: str, color: str = "#7c3aed") -> dict:
@@ -2307,26 +2307,28 @@ def agenda_crear_lista(nombre: str, color: str = "#7c3aed") -> dict:
     conn.close()
     if DEBUG:
         print(f"agenda_crear_lista: id={lid} nombre={nombre}")
-    return {"id": lid, "nombre": nombre.strip(), "color": color}
+    return {"id": lid, "nombre": nombre.strip(), "color": color, "pinned": False}
 
 
-_LISTA_UPDATABLE = frozenset({"nombre", "color"})
+_LISTA_UPDATABLE = frozenset({"nombre", "color", "pinned"})
 
 
 def agenda_actualizar_lista(lista_id: int, campos: dict) -> Optional[dict]:
     safe = {k: v for k, v in campos.items() if k in _LISTA_UPDATABLE}
     if not safe:
         return None
+    if "pinned" in safe:
+        safe["pinned"] = 1 if safe["pinned"] else 0
     conn = get_connection()
     cursor = conn.cursor()
     sets = ", ".join(f"{k} = ?" for k in safe)
     vals = list(safe.values()) + [lista_id]
     cursor.execute(f"UPDATE agenda_listas SET {sets} WHERE id = ?", vals)
     conn.commit()
-    cursor.execute("SELECT id, nombre, color FROM agenda_listas WHERE id = ?", (lista_id,))
+    cursor.execute("SELECT id, nombre, color, pinned FROM agenda_listas WHERE id = ?", (lista_id,))
     row = cursor.fetchone()
     conn.close()
-    return {"id": row[0], "nombre": row[1], "color": row[2]} if row else None
+    return {"id": row[0], "nombre": row[1], "color": row[2], "pinned": bool(row[3])} if row else None
 
 
 def agenda_eliminar_lista(lista_id: int) -> bool:

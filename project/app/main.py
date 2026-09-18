@@ -1406,6 +1406,7 @@ class AgendaListaCreate(BaseModel):
 class AgendaListaPatch(BaseModel):
     nombre: Optional[str] = None
     color: Optional[str] = None
+    pinned: Optional[bool] = None
 
 class AgendaTareaCreate(BaseModel):
     titulo: str

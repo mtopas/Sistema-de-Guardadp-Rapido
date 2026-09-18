@@ -188,32 +188,51 @@ def sincronizar_vault(vault_root: Path, conn: sqlite3.Connection) -> dict:
             apuntes_html = markdown_a_html(md_apuntes)
         fecha_creado = nota.creado_en or parser.mtime_iso(path)
         fecha_actualizado = nota.actualizado_en or fecha_creado
-        categoria_ruta = str(rel.parent)
+        categoria_ruta = rel.parent.as_posix()  # nunca str(rel.parent), mismo motivo que arriba
         categoria_id = ruta_a_id.get(categoria_ruta)
         if categoria_id is None:
             logger.error("%s: carpeta %s sin categoría sincronizada -- se ignora", path, categoria_ruta)
             stats["notas_con_error"] += 1
             continue
 
-        vault_ids_vistos.add(nota.id)
-        cursor.execute(
-            """
-            INSERT INTO hojas
-                (contenido, fecha, categoria_id, tipo, apuntes, lugar, latitud, longitud,
-                 icono, fecha_actualizado, vault_id, ruta, mtime)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(vault_id) DO UPDATE SET
-                contenido=excluded.contenido, fecha=excluded.fecha, categoria_id=excluded.categoria_id,
-                tipo=excluded.tipo, apuntes=excluded.apuntes, lugar=excluded.lugar,
-                latitud=excluded.latitud, longitud=excluded.longitud, icono=excluded.icono,
-                fecha_actualizado=excluded.fecha_actualizado, ruta=excluded.ruta, mtime=excluded.mtime
-            """,
-            (
-                contenido, fecha_creado, categoria_id, tipo, apuntes_html,
-                nota.lugar, nota.latitud, nota.longitud, nota.icono,
-                fecha_actualizado, nota.id, rel_str, st.st_mtime,
-            ),
-        )
+        # try/except puntual (mismo patrón que los pasos de arriba, líneas ~161 y
+        # ~175): el ON CONFLICT de acá arriba solo cubre colisiones de `vault_id`,
+        # no de `ruta` -- una nota cuyo `id` cambió pero cuya ruta en disco ya
+        # estaba indexada con otro vault_id (ej. jarvis/vault/index_writer.py
+        # regenerando una ficha de entidad/proyecto) dispara `UNIQUE constraint
+        # failed: hojas.ruta`. Sin este try/except esa única nota tumbaba TODA
+        # la sincronización (bug real, ver Cerebro/decisiones-implementacion.md,
+        # 2026-09-18) -- con esto, se loguea y se sigue con el resto del vault.
+        try:
+            cursor.execute(
+                """
+                INSERT INTO hojas
+                    (contenido, fecha, categoria_id, tipo, apuntes, lugar, latitud, longitud,
+                     icono, fecha_actualizado, vault_id, ruta, mtime)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(vault_id) DO UPDATE SET
+                    contenido=excluded.contenido, fecha=excluded.fecha, categoria_id=excluded.categoria_id,
+                    tipo=excluded.tipo, apuntes=excluded.apuntes, lugar=excluded.lugar,
+                    latitud=excluded.latitud, longitud=excluded.longitud, icono=excluded.icono,
+                    fecha_actualizado=excluded.fecha_actualizado, ruta=excluded.ruta, mtime=excluded.mtime
+                """,
+                (
+                    contenido, fecha_creado, categoria_id, tipo, apuntes_html,
+                    nota.lugar, nota.latitud, nota.longitud, nota.icono,
+                    fecha_actualizado, nota.id, rel_str, st.st_mtime,
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            logger.error(
+                "%s: no se pudo upsertear (ruta=%s, vault_id=%s) -- %s -- se ignora esta nota",
+                path, rel_str, nota.id, exc,
+            )
+            stats["notas_con_error"] += 1
+            continue
+        else:
+            # Solo se marca "visto" si el upsert realmente se aplicó -- si falló,
+            # no debe salvar de un borrado a la fila vieja que quedó en conflicto.
+            vault_ids_vistos.add(nota.id)
         stats["notas"] += 1
 
     # --- Borrar lo que ya no existe en disco (borradas/renombradas fuera de la app) ---

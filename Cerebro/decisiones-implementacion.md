@@ -11,6 +11,55 @@ Formato de cada entrada:
 
 ---
 
+## 2026-09-18 — Bóveda entera vacía por colisión de `id` entre Jarvis (`index_writer.py`) y el sync de Bóveda
+
+Contexto: el usuario reportó que `http://100.117.86.117:8765` (acceso al homelab vía Tailscale,
+ver entrada del 17/09) mostraba la Bóveda completamente vacía. `GET /categorias`/`GET /hojas`
+devolvían 500. Diagnosticado en vivo contra el `app.db` real del homelab (con backup previo):
+`sqlite3.IntegrityError: UNIQUE constraint failed: hojas.ruta` dentro de
+`sincronizar_vault()` (`project/app/vault/sync.py`), reproducible en aislamiento total (sin
+concurrencia) -- no era un lock ni una carrera, era un dato genuinamente inconsistente.
+
+Causa raíz real: `jarvis/vault/index_writer.py` escribe las fichas de entidad/proyecto
+(`Jarvis/Entidades/*.md`, `Jarvis/Proyectos/*.md`) con `entity_id:`/`project_id:` en el
+frontmatter, pero **sin ningún campo `id:`**. `app/vault/parser.py::assign_missing_id()`, al
+sincronizar Bóveda, trata cualquier nota sin `id:` como "creada a mano" y le asigna un
+`uuid.uuid4()` random. Cada vez que Jarvis regeneraba una de estas fichas (ej. nueva mención de
+la entidad), el archivo perdía el `id` que Bóveda le había asignado la vez anterior -- el
+siguiente sync le asignaba OTRO uuid random, que chocaba contra la fila vieja en `hojas` (mismo
+`ruta`, `vault_id` distinto -- el `ON CONFLICT(vault_id)` del upsert no cubre colisiones de
+`ruta`). Ese `INSERT` no tenía try/except (a diferencia de los demás pasos de la misma función),
+así que una sola nota en este estado tumbaba **toda** la sincronización, no solo esa nota --
+por eso la Bóveda entera aparecía vacía.
+
+Caso real que lo disparó: `Jarvis/Entidades/9cb0f129-robert-kiyosaki.md`, la ficha de la entidad
+creada la noche del 17/09 (ver entrada "Ethernet 2..." del mismo día, sección del hallazgo
+`e8ade661`) -- se regeneró al menos una vez más y disparó la colisión.
+
+Decisión: dos fixes, ambos desplegados al homelab (deploy completo por `tar` de `jarvis/`, no un
+parche suelto -- mismo criterio ya establecido el 17/09 tras el incidente de
+`consolidation.py`):
+1. `index_writer.py` ahora escribe `id: {entity_id}` / `id: {project_id}` en el frontmatter --
+   mismo valor ya estable que `entity_id:`/`project_id:`, así `assign_missing_id()` nunca vuelve
+   a generar un uuid random para estos archivos.
+2. `sincronizar_vault()` envuelve el `INSERT`/upsert de `hojas` en `try/except
+   sqlite3.IntegrityError` (mismo patrón que los demás pasos de la función) -- una nota
+   problemática queda marcada como error y se loguea con su `ruta`/`vault_id`, el resto del vault
+   sigue sincronizando bien.
+
+De paso, mismo commit: `categoria_ruta = str(rel.parent)` en `sync.py` corregido a
+`.as_posix()` (inofensivo en Linux/homelab, rompía notas fuera de la raíz si se corría en
+Windows -- mismo bug de separador ya corregido en otras partes de este archivo el 16/09).
+
+Diferencia con spec: no aplica (bug de integración entre dos módulos ya existentes, no un
+cambio de diseño).
+
+Impacto: `jarvis/vault/index_writer.py`, `project/app/vault/sync.py`. Los archivos `.md` de
+entidades/proyectos ya existentes en `D:\Boveda` real que todavía no tengan `id:` se
+autocorrigen solos la próxima vez que Jarvis los regenere -- no hizo falta migrarlos a mano.
+
+---
+
 ## 2026-09-17 — Ethernet 2 a Público bloquea Ollama para el homelab (diagnóstico + watchdog ampliado)
 
 Contexto: el usuario reportó ver "ERROR"/"RAW"/"NaNd" en el Inbox de Jarvis del frontend

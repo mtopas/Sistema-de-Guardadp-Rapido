@@ -121,6 +121,12 @@ def sync_entity_note(entity_id: str) -> str | None:
         label = _ENTITY_TYPE_LABEL.get(entity["entity_type"], entity["entity_type"])
         frontmatter = (
             f"---\n"
+            # id estable = entity_id: sin esto, app/vault/parser.py::assign_missing_id()
+            # (Bóveda) le asigna un UUID random cada vez que este archivo se reescribe --
+            # el vault_id de la fila en `hojas` cambiaba en cada regeneración y chocaba
+            # contra la fila vieja (misma ruta, vault_id distinto) -- UNIQUE constraint
+            # failed: hojas.ruta. Ver Cerebro/decisiones-implementacion.md, 2026-09-18.
+            f"id: {entity['entity_id']}\n"
             f"entity_id: {entity['entity_id']}\n"
             f"entity_type: {entity['entity_type']}\n"
             f"aliases: [{', '.join(aliases)}]\n"
@@ -177,7 +183,8 @@ def sync_project_note(project_id: str) -> str | None:
         abs_path = JARVIS_SYNTH_PATH / "Proyectos" / f"{stem}.md"
         abs_path.parent.mkdir(parents=True, exist_ok=True)
 
-        frontmatter = f"---\nproject_id: {project['id']}\n---\n\n"
+        # id estable = project_id, mismo motivo que en sync_entity_note() arriba.
+        frontmatter = f"---\nid: {project['id']}\nproject_id: {project['id']}\n---\n\n"
         body = [f"# {project['name']}"]
         if project["description"]:
             body.append(f"\n{project['description']}\n")

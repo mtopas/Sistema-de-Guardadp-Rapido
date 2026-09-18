@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { X, Trash2, Plus } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
+import { AGENDA_COLORS } from '../../utils/agendaColors'
 
 const DIAS_ES = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
 
@@ -13,11 +14,14 @@ const inputStyle = {
   padding: '6px 10px',
   fontSize: 12,
   outline: 'none',
+  width: '100%',
+  boxSizing: 'border-box',
 }
 
 function HorarioRow({ hf, onDelete }) {
   return (
     <div className="flex items-center gap-3 px-3 py-2 rounded-lg panel-strong">
+      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: hf.color || '#059669' }} />
       <span className="text-[12px] w-16 shrink-0" style={{ color: 'var(--subtext)' }}>{DIAS_ES[hf.dia_semana]}</span>
       <span className="mono text-[11.5px] w-24 shrink-0" style={{ color: 'var(--text-2)' }}>
         {hf.hora_inicio} – {hf.hora_fin}
@@ -45,6 +49,7 @@ export default function HorarioFacultadModal({ onClose }) {
 
   const [form, setForm] = useState({
     dia_semana: 0, hora_inicio: '09:00', hora_fin: '11:00', materia: '', descripcion: '',
+    color: AGENDA_COLORS[0],
   })
   const [saving, setSaving] = useState(false)
 
@@ -67,7 +72,7 @@ export default function HorarioFacultadModal({ onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }}>
       <div
-        className="w-full max-w-lg rounded-2xl border shadow-2xl p-6"
+        className="w-full max-w-2xl rounded-2xl border shadow-2xl p-6"
         style={{ background: 'var(--panel-bg)', borderColor: 'var(--border)', maxHeight: '80vh', overflowY: 'auto' }}
       >
         <div className="flex items-center justify-between mb-5">
@@ -78,7 +83,7 @@ export default function HorarioFacultadModal({ onClose }) {
         {/* Add form */}
         <div className="panel-strong rounded-xl p-4 mb-5">
           <div className="grid grid-cols-2 gap-3 mb-3">
-            <div>
+            <div style={{ minWidth: 0 }}>
               <div className="text-[11px] mb-1" style={{ color: 'var(--subtext)' }}>{t(lang, 'agendaDiaSemana')}</div>
               <select
                 style={inputStyle}
@@ -88,7 +93,7 @@ export default function HorarioFacultadModal({ onClose }) {
                 {DIAS_ES.map((d, i) => <option key={i} value={i}>{d}</option>)}
               </select>
             </div>
-            <div>
+            <div style={{ minWidth: 0 }}>
               <div className="text-[11px] mb-1" style={{ color: 'var(--subtext)' }}>{t(lang, 'agendaMateria')}</div>
               <input
                 style={inputStyle}
@@ -99,15 +104,15 @@ export default function HorarioFacultadModal({ onClose }) {
             </div>
           </div>
           <div className="grid grid-cols-3 gap-3 mb-3">
-            <div>
+            <div style={{ minWidth: 0 }}>
               <div className="text-[11px] mb-1" style={{ color: 'var(--subtext)' }}>{t(lang, 'agendaHoraInicio')}</div>
               <input type="time" style={inputStyle} value={form.hora_inicio} onChange={e => setForm(f => ({ ...f, hora_inicio: e.target.value }))} />
             </div>
-            <div>
+            <div style={{ minWidth: 0 }}>
               <div className="text-[11px] mb-1" style={{ color: 'var(--subtext)' }}>{t(lang, 'agendaHoraFin')}</div>
               <input type="time" style={inputStyle} value={form.hora_fin} onChange={e => setForm(f => ({ ...f, hora_fin: e.target.value }))} />
             </div>
-            <div>
+            <div style={{ minWidth: 0 }}>
               <div className="text-[11px] mb-1" style={{ color: 'var(--subtext)' }}>{t(lang, 'agendaAula')}</div>
               <input
                 style={inputStyle}
@@ -115,6 +120,24 @@ export default function HorarioFacultadModal({ onClose }) {
                 onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))}
                 placeholder="Aula 3"
               />
+            </div>
+          </div>
+          <div className="mb-3">
+            <div className="text-[11px] mb-1" style={{ color: 'var(--subtext)' }}>{t(lang, 'agendaListaColor')}</div>
+            <div className="flex gap-2">
+              {AGENDA_COLORS.map(c => (
+                <div
+                  key={c}
+                  className="w-5 h-5 rounded-full cursor-pointer transition-transform"
+                  style={{
+                    background: c,
+                    outline: form.color === c ? `2px solid ${c}` : 'none',
+                    outlineOffset: 2,
+                    transform: form.color === c ? 'scale(1.15)' : 'scale(1)',
+                  }}
+                  onClick={() => setForm(f => ({ ...f, color: c }))}
+                />
+              ))}
             </div>
           </div>
           <button

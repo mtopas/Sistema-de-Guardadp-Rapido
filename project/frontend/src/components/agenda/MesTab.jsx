@@ -1,10 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, Edit2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Edit2, GraduationCap } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import { t } from '../../utils/i18n'
-import MiniCalendar from './MiniCalendar'
 import EventoModal from './EventoModal'
 import TareaModal from './TareaModal'
 import AgendaContextMenu from './AgendaContextMenu'
@@ -150,34 +149,14 @@ export default function MesTab() {
     byDate[d].push({ type: 'tarea', color: t.lista_color, item: t })
   })
 
-  // MiniCalendar event dots map
-  const miniEventDays = {}
-  Object.entries(byDate).forEach(([iso, entries]) => {
-    const [y, m, day] = iso.split('-').map(Number)
-    if (y === year && m - 1 === month) {
-      miniEventDays[day] = entries.slice(0, 3).map(e => e.color)
-    }
-  })
-
   const cells = buildMonthCells(year, month)
   const weekDays = vista === 'semana' ? buildWeekDays(year, month, weekOff) : []
 
   return (
+    <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
     <div className="flex flex-1 min-h-0 overflow-hidden">
       {/* Left panel */}
       <aside className="w-[260px] shrink-0 flex flex-col h-full overflow-y-auto panel-scroll border-r p-4" style={{ borderColor: 'var(--border)' }}>
-        <div className="panel-strong p-3 mb-4">
-          <MiniCalendar
-            year={year} month={month}
-            onMonthChange={goMonth}
-            eventDays={miniEventDays}
-            onDayClick={d => {
-              const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
-              setNewEvento({ fecha: iso })
-            }}
-          />
-        </div>
-
         <div className="flex items-center justify-between mb-2 px-1">
           <div className="label">{t(lang, 'agendaCalendarios')}</div>
           <button
@@ -271,6 +250,9 @@ export default function MesTab() {
                   ? `${year}-${String(month + 1).padStart(2, '0')}-${String(cell.d).padStart(2, '0')}`
                   : null
                 const entries = iso ? (byDate[iso] || []) : []
+                const facultadCell = iso
+                  ? agendaHorarioFacultad.filter(f => f.dia_semana === col && !(f.excepciones || []).includes(iso))
+                  : []
                 return (
                   <div
                     key={i}
@@ -283,7 +265,21 @@ export default function MesTab() {
                     }}
                     onClick={() => iso && setNewEvento({ fecha: iso })}
                   >
-                    <div className="flex justify-end mb-0.5">
+                    {facultadCell.length > 0 && (
+                      <div
+                        className="absolute top-0 left-0 right-0 h-[3px]"
+                        style={{ background: facultadCell.length === 1 ? facultadCell[0].color || '#059669' : 'linear-gradient(90deg, ' + facultadCell.map(f => f.color || '#059669').join(', ') + ')' }}
+                        title={facultadCell.map(f => `${f.materia} (${f.hora_inicio}-${f.hora_fin})`).join(' · ')}
+                      />
+                    )}
+                    <div className="flex items-center justify-between mb-0.5">
+                      {facultadCell.length > 0 ? (
+                        <GraduationCap
+                          size={11}
+                          style={{ color: facultadCell[0].color || '#059669' }}
+                          title={facultadCell.map(f => `${f.materia} (${f.hora_inicio}-${f.hora_fin})`).join(' · ')}
+                        />
+                      ) : <span />}
                       {isToday ? (
                         <div className="w-6 h-6 rounded-full grid place-items-center grad-bg text-white text-[11px] font-semibold tnum">
                           {cell.d}
@@ -402,7 +398,7 @@ export default function MesTab() {
                   {weekDays.map((d, ci) => {
                     const iso = toLocalISODate(d)
                     const dayEntries = byDate[iso] || []
-                    const facultadDia = agendaHorarioFacultad.filter(f => f.dia_semana === ci)
+                    const facultadDia = agendaHorarioFacultad.filter(f => f.dia_semana === ci && !(f.excepciones || []).includes(iso))
                     return (
                       <div key={ci} className="relative border-l" style={{ borderColor: 'var(--border)' }}>
                         {HOURS_SEMANA.map(h => (
@@ -414,9 +410,10 @@ export default function MesTab() {
                           const [eh, em] = f.hora_fin.split(':').map(Number)
                           const top    = ((sh * 60 + sm - 7 * 60) / 60) * 48
                           const height = Math.max(((eh * 60 + em - sh * 60 - sm) / 60) * 48, 16)
+                          const color = f.color || '#059669'
                           return (
                             <div key={j} className="absolute left-0 right-0 px-1 overflow-hidden"
-                              style={{ top, height, background: 'color-mix(in oklch, #059669 15%, transparent)', borderLeft: '2px solid #059669', opacity: 0.7 }}>
+                              style={{ top, height, background: `color-mix(in oklch, ${color} 15%, transparent)`, borderLeft: `2px solid ${color}`, opacity: 0.7 }}>
                               <span className="text-[9.5px] truncate block font-medium" style={{ color: 'var(--text)' }}>
                                 {f.materia}
                               </span>
@@ -451,67 +448,59 @@ export default function MesTab() {
           </div>
         )}
       </div>
+    </div>
 
-      {/* Right panel */}
-      <aside className="hidden xl:flex flex-col w-[260px] shrink-0 h-full overflow-y-auto panel-scroll border-l p-4" style={{ borderColor: 'var(--border)' }}>
+      {/* Franja debajo del calendario: detalle del seleccionado, o próximos eventos si no hay nada seleccionado */}
+      <div className="shrink-0 border-t overflow-x-auto panel-scroll" style={{ borderColor: 'var(--border)' }}>
         {selected ? (
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <div className="label">{selected.type === 'evento' ? t(lang, 'agendaEventoLabel') : t(lang, 'agendaTareaLabel')}</div>
-              <div className="flex items-center gap-1">
-                <button
-                  className="icon-btn"
-                  style={{ width: 22, height: 22 }}
-                  title={t(lang, 'agendaEditar')}
-                  onClick={() => setEditSelected(true)}
-                >
-                  <Edit2 size={11} />
-                </button>
-                <button className="icon-btn" style={{ width: 22, height: 22 }} onClick={() => { setSelected(null); setEditSelected(false) }}>
-                  ×
-                </button>
-              </div>
-            </div>
-            <div className="panel-strong p-3 rounded-xl">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="w-2 h-2 rounded-full" style={{ background: selected.color }} />
-                <span className="text-[13px] font-semibold">{selected.item.titulo}</span>
-              </div>
-              {selected.item.descripcion && (
-                <p className="text-[12px] mb-2" style={{ color: 'var(--subtext)' }}>{selected.item.descripcion}</p>
-              )}
+          <div className="flex items-center gap-3 px-4 py-2.5">
+            <div className="label shrink-0">{selected.type === 'evento' ? t(lang, 'agendaEventoLabel') : t(lang, 'agendaTareaLabel')}</div>
+            <div className="flex items-center gap-2 min-w-0 flex-1 panel-strong px-3 py-2 rounded-xl">
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: selected.color }} />
+              <span className="text-[13px] font-semibold truncate">{selected.item.titulo}</span>
               {selected.type === 'evento' && selected.item.fecha_inicio && (
-                <div className="mono text-[11px]" style={{ color: 'var(--subtext)' }}>
+                <span className="mono text-[11px] shrink-0" style={{ color: 'var(--subtext)' }}>
                   {selected.item.fecha_inicio.slice(0, 16).replace('T', ' · ')}
                   {selected.item.fecha_fin && ` → ${selected.item.fecha_fin.slice(11, 16)}`}
-                </div>
+                </span>
               )}
               {selected.type === 'tarea' && selected.item.fecha_opcional && (
-                <div className="mono text-[11px] mt-1" style={{ color: 'var(--subtext)' }}>
-                  {selected.item.fecha_opcional}
-                  {selected.item.hora_opcional && ` · ${selected.item.hora_opcional}`}
-                </div>
+                <span className="mono text-[11px] shrink-0" style={{ color: 'var(--subtext)' }}>
+                  {selected.item.fecha_opcional}{selected.item.hora_opcional && ` · ${selected.item.hora_opcional}`}
+                </span>
               )}
             </div>
+            <button
+              className="icon-btn shrink-0"
+              style={{ width: 22, height: 22 }}
+              title={t(lang, 'agendaEditar')}
+              onClick={() => setEditSelected(true)}
+            >
+              <Edit2 size={11} />
+            </button>
+            <button className="icon-btn shrink-0" style={{ width: 22, height: 22 }} onClick={() => { setSelected(null); setEditSelected(false) }}>
+              ×
+            </button>
           </div>
         ) : (
-          <div>
-            <div className="label mb-3">{t(lang, 'agendaProxEventos')}</div>
-            {agendaEventos.slice(0, 5).map(e => (
-              <div key={e.id} className="flex gap-2.5 px-2 py-2 rounded-lg hover:bg-[var(--surface)] cursor-pointer mb-1"
-                onClick={() => setSelected({ type: 'evento', color: e.calendario_color, item: e })}>
-                <span className="w-1 rounded-full shrink-0 self-stretch" style={{ background: e.calendario_color }} />
-                <div className="flex-1 min-w-0">
-                  <div className="text-[12px] font-medium truncate">{e.titulo}</div>
-                  <div className="text-[10.5px] mt-0.5 mono" style={{ color: 'var(--subtext)' }}>
+          <div className="flex items-center gap-3 px-4 py-2.5">
+            <div className="label shrink-0">{t(lang, 'agendaProxEventos')}</div>
+            <div className="flex gap-2 overflow-x-auto">
+              {agendaEventos.slice(0, 5).map(e => (
+                <div key={e.id}
+                  className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-[var(--surface)] cursor-pointer shrink-0 panel-strong"
+                  onClick={() => setSelected({ type: 'evento', color: e.calendario_color, item: e })}>
+                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: e.calendario_color }} />
+                  <span className="text-[12px] font-medium truncate max-w-[140px]">{e.titulo}</span>
+                  <span className="text-[10.5px] mono shrink-0" style={{ color: 'var(--subtext)' }}>
                     {e.fecha_inicio?.slice(0, 10)}
-                  </div>
+                  </span>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         )}
-      </aside>
+      </div>
 
       {newEvento && newEvento.tipo !== 'calendario' && (
         <EventoModal

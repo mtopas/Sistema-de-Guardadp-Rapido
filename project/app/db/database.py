@@ -223,6 +223,18 @@ def init_db():
         )
     """)
 
+    # "Eliminar por este día" (HOY) salta solo la ocurrencia de una fecha puntual,
+    # sin tocar el horario semanal fijo -- agenda_horario_facultad no tiene fechas,
+    # así que la excepción vive en tabla aparte en vez de mutar la fila del horario.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS agenda_horario_facultad_excepciones (
+            id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+            horario_facultad_id  INTEGER NOT NULL REFERENCES agenda_horario_facultad(id) ON DELETE CASCADE,
+            fecha                TEXT NOT NULL,
+            UNIQUE(horario_facultad_id, fecha)
+        )
+    """)
+
     # --- Hábitos tables ---
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS habitos (
@@ -667,6 +679,15 @@ def _apply_migrations(cursor):
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_eventos_inicio ON agenda_eventos(fecha_inicio)"
     )
+
+    # --- agenda_horario_facultad: color por materia ---
+    hf_cols = _get_columns(cursor, "agenda_horario_facultad")
+    if "color" not in hf_cols:
+        cursor.execute(
+            "ALTER TABLE agenda_horario_facultad ADD COLUMN color TEXT NOT NULL DEFAULT '#059669'"
+        )
+        if DEBUG:
+            print("migration: agenda_horario_facultad.color added")
 
     # --- hojas: índices de rendimiento ---
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_hojas_categoria ON hojas(categoria_id)")

@@ -4,10 +4,9 @@ import { Plus, Trash2, CheckCircle2, Circle, Edit2, X, Inbox } from 'lucide-reac
 const INBOX_ID = '__inbox__'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
+import { AGENDA_COLORS as COLORS } from '../../utils/agendaColors'
 import MiniCalendar from './MiniCalendar'
 import TareaModal from './TareaModal'
-
-const COLORS = ['#7c3aed', '#2563eb', '#059669', '#d97706', '#dc2626', '#ec4899', '#0891b2', '#65a30d']
 
 function ListaItem({ lista, isSelected, onClick, onDelete, onRename }) {
   const [editing, setEditing] = useState(false)
@@ -283,7 +282,7 @@ export default function TareasTab() {
             <button
               className="btn flex items-center gap-1.5 text-[12.5px]"
               onClick={() => setNewTareaOpen(true)}
-              disabled={!selectedListaId || selectedListaId === INBOX_ID}
+              disabled={!selectedListaId}
             >
               <Plus size={13} /> {t(lang, 'agendaTareaNueva')}
             </button>
@@ -376,7 +375,7 @@ export default function TareasTab() {
 
       {newTareaOpen && (
         <TareaModal
-          defaultListaId={selectedListaId}
+          defaultListaId={selectedListaId === INBOX_ID ? null : selectedListaId}
           onClose={() => setNewTareaOpen(false)}
         />
       )}

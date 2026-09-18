@@ -114,6 +114,7 @@ from app.db.crud import (
     agenda_crear_horario_facultad,
     agenda_actualizar_horario_facultad,
     agenda_eliminar_horario_facultad,
+    agenda_crear_horario_facultad_excepcion,
     agenda_resumen_semana,
     agenda_buscar,
     # Hábitos
@@ -1440,6 +1441,7 @@ class AgendaHorarioCreate(BaseModel):
     hora_fin: str
     materia: str
     descripcion: Optional[str] = None
+    color: Optional[str] = None
 
     @field_validator('hora_inicio', 'hora_fin', mode='before')
     @classmethod
@@ -1458,6 +1460,11 @@ class AgendaHorarioPatch(BaseModel):
     hora_fin: Optional[str] = None
     materia: Optional[str] = None
     descripcion: Optional[str] = None
+    color: Optional[str] = None
+
+
+class AgendaHorarioExcepcionCreate(BaseModel):
+    fecha: str
 
 
 # ---------------------------------------------------------------------------
@@ -1681,6 +1688,7 @@ def crear_agenda_horario(body: AgendaHorarioCreate):
         hora_fin=body.hora_fin,
         materia=body.materia,
         descripcion=body.descripcion,
+        color=body.color,
     )
 
 @app.patch("/agenda/horario-facultad/{hf_id}")
@@ -1696,6 +1704,13 @@ def eliminar_agenda_horario(hf_id: int):
     if not agenda_eliminar_horario_facultad(hf_id):
         raise HTTPException(status_code=404, detail="Horario no encontrado")
     return {"mensaje": "Horario eliminado"}
+
+@app.post("/agenda/horario-facultad/{hf_id}/excepciones")
+def crear_agenda_horario_excepcion(hf_id: int, body: AgendaHorarioExcepcionCreate):
+    result = agenda_crear_horario_facultad_excepcion(hf_id, body.fecha)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Horario no encontrado")
+    return result
 
 
 @app.get("/agenda/buscar")

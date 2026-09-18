@@ -2471,14 +2471,19 @@ def agenda_obtener_horario_facultad() -> list:
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        """SELECT id, dia_semana, hora_inicio, hora_fin, materia, descripcion
+        """SELECT id, dia_semana, hora_inicio, hora_fin, materia, descripcion, color
            FROM agenda_horario_facultad ORDER BY dia_semana, hora_inicio"""
     )
     rows = cursor.fetchall()
+    cursor.execute("SELECT horario_facultad_id, fecha FROM agenda_horario_facultad_excepciones")
+    excepciones_por_hf: dict[int, list] = {}
+    for hf_id, fecha in cursor.fetchall():
+        excepciones_por_hf.setdefault(hf_id, []).append(fecha)
     conn.close()
     return [
         {"id": r[0], "dia_semana": r[1], "hora_inicio": r[2],
-         "hora_fin": r[3], "materia": r[4], "descripcion": r[5]}
+         "hora_fin": r[3], "materia": r[4], "descripcion": r[5], "color": r[6],
+         "excepciones": excepciones_por_hf.get(r[0], [])}
         for r in rows
     ]
 
@@ -2489,14 +2494,16 @@ def agenda_crear_horario_facultad(
     hora_fin: str,
     materia: str,
     descripcion: Optional[str] = None,
+    color: Optional[str] = None,
 ) -> dict:
+    color = color or "#059669"
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
         """INSERT INTO agenda_horario_facultad
-           (dia_semana, hora_inicio, hora_fin, materia, descripcion)
-           VALUES (?, ?, ?, ?, ?)""",
-        (dia_semana, hora_inicio, hora_fin, materia.strip(), descripcion),
+           (dia_semana, hora_inicio, hora_fin, materia, descripcion, color)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (dia_semana, hora_inicio, hora_fin, materia.strip(), descripcion, color),
     )
     hid = cursor.lastrowid
     conn.commit()
@@ -2506,10 +2513,11 @@ def agenda_crear_horario_facultad(
     return {
         "id": hid, "dia_semana": dia_semana, "hora_inicio": hora_inicio,
         "hora_fin": hora_fin, "materia": materia.strip(), "descripcion": descripcion,
+        "color": color, "excepciones": [],
     }
 
 
-_HF_UPDATABLE = frozenset({"dia_semana", "hora_inicio", "hora_fin", "materia", "descripcion"})
+_HF_UPDATABLE = frozenset({"dia_semana", "hora_inicio", "hora_fin", "materia", "descripcion", "color"})
 
 
 def agenda_actualizar_horario_facultad(hf_id: int, campos: dict) -> Optional[dict]:
@@ -2523,16 +2531,41 @@ def agenda_actualizar_horario_facultad(hf_id: int, campos: dict) -> Optional[dic
     cursor.execute(f"UPDATE agenda_horario_facultad SET {sets} WHERE id = ?", vals)
     conn.commit()
     cursor.execute(
-        "SELECT id, dia_semana, hora_inicio, hora_fin, materia, descripcion FROM agenda_horario_facultad WHERE id = ?",
+        "SELECT id, dia_semana, hora_inicio, hora_fin, materia, descripcion, color FROM agenda_horario_facultad WHERE id = ?",
         (hf_id,),
     )
     row = cursor.fetchone()
-    conn.close()
-    return (
-        {"id": row[0], "dia_semana": row[1], "hora_inicio": row[2],
-         "hora_fin": row[3], "materia": row[4], "descripcion": row[5]}
-        if row else None
+    if not row:
+        conn.close()
+        return None
+    cursor.execute(
+        "SELECT fecha FROM agenda_horario_facultad_excepciones WHERE horario_facultad_id = ?", (hf_id,)
     )
+    excepciones = [r[0] for r in cursor.fetchall()]
+    conn.close()
+    return {
+        "id": row[0], "dia_semana": row[1], "hora_inicio": row[2],
+        "hora_fin": row[3], "materia": row[4], "descripcion": row[5], "color": row[6],
+        "excepciones": excepciones,
+    }
+
+
+def agenda_crear_horario_facultad_excepcion(hf_id: int, fecha: str) -> Optional[dict]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM agenda_horario_facultad WHERE id = ?", (hf_id,))
+    if not cursor.fetchone():
+        conn.close()
+        return None
+    cursor.execute(
+        "INSERT OR IGNORE INTO agenda_horario_facultad_excepciones (horario_facultad_id, fecha) VALUES (?, ?)",
+        (hf_id, fecha),
+    )
+    conn.commit()
+    conn.close()
+    if DEBUG:
+        print(f"agenda_crear_horario_facultad_excepcion: hf_id={hf_id} fecha={fecha}")
+    return {"horario_facultad_id": hf_id, "fecha": fecha}
 
 
 def agenda_eliminar_horario_facultad(hf_id: int) -> bool:

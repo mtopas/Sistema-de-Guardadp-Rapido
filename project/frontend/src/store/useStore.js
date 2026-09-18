@@ -997,6 +997,21 @@ export const useStore = create((set, get) => ({
     try { await fetch(`${API_URL}/agenda/horario-facultad/${id}`, { method: 'DELETE' }) } catch { /* noop */ }
   },
 
+  // "Eliminar por este día" en HOY -- saltea solo esa fecha, no borra el horario semanal.
+  addAgendaHorarioFacultadExcepcion: async (id, fecha) => {
+    set(s => ({
+      agendaHorarioFacultad: s.agendaHorarioFacultad.map(h =>
+        h.id === id ? { ...h, excepciones: [...(h.excepciones || []), fecha] } : h
+      ),
+    }))
+    try {
+      await fetch(`${API_URL}/agenda/horario-facultad/${id}/excepciones`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fecha }),
+      })
+    } catch { /* offline ok, ver comentario de arriba */ }
+  },
+
   // ---------------------------------------------------------------------------
   // Hábitos
   // ---------------------------------------------------------------------------

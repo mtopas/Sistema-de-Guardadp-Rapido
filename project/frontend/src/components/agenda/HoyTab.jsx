@@ -7,6 +7,8 @@ import { t } from '../../utils/i18n'
 const FIN_KEYWORDS = /pagar|cuota|vencimiento|cobro|débito|debito|transferir|tarjeta|impuesto|factura|alquiler|servicio|préstamo|prestamo/i
 import TareaModal from './TareaModal'
 import EventoModal from './EventoModal'
+import AgendaContextMenu from './AgendaContextMenu'
+import HorarioFacultadModal from './HorarioFacultadModal'
 import { buildRegistrosMap, isScheduled } from '../habitos/habitosUtils'
 import { toLocalISODate, HOURS, HOUR_HEIGHT, timeToMinutes, minutesToTop } from './agendaUtils'
 
@@ -53,6 +55,7 @@ export default function HoyTab() {
   const agendaTareas          = useStore(s => s.agendaTareas)
   const agendaEventos         = useStore(s => s.agendaEventos)
   const agendaHorarioFacultad = useStore(s => s.agendaHorarioFacultad)
+  const addAgendaHorarioFacultadExcepcion = useStore(s => s.addAgendaHorarioFacultadExcepcion)
   const addAgendaTarea        = useStore(s => s.addAgendaTarea)
   const updateAgendaTarea     = useStore(s => s.updateAgendaTarea)
   const fetchAgendaEventos    = useStore(s => s.fetchAgendaEventos)
@@ -80,6 +83,8 @@ export default function HoyTab() {
   const [quickTareaTitulo, setQuickTareaTitulo] = useState('')
   const [drawerOpen, setDrawerOpen]           = useState(false)
   const [completingIds, setCompletingIds]     = useState(new Set())
+  const [facultadContextMenu, setFacultadContextMenu] = useState(null) // { x, y, hf }
+  const [facultadModalOpen, setFacultadModalOpen]     = useState(false)
   const gridRef                               = useRef(null)
   const lastFetchedMonth                      = useRef(null)
 
@@ -164,8 +169,8 @@ export default function HoyTab() {
   )
 
   const facultadHoy = useMemo(() =>
-    agendaHorarioFacultad.filter(h => h.dia_semana === todayDow),
-    [agendaHorarioFacultad, todayDow]
+    agendaHorarioFacultad.filter(h => h.dia_semana === todayDow && !(h.excepciones || []).includes(viewISO)),
+    [agendaHorarioFacultad, todayDow, viewISO]
   )
 
   const registrosMap = useMemo(() => buildRegistrosMap(habitosRegistros), [habitosRegistros])
@@ -598,15 +603,17 @@ export default function HoyTab() {
               if (startMin === null || endMin === null) return null
               const top    = minutesToTop(startMin)
               const height = ((endMin - startMin) / 60) * HOUR_HEIGHT
+              const color = hf.color || '#059669'
               return (
                 <div
                   key={hf.id}
-                  className="absolute left-14 right-0 rounded-md flex items-start px-2 py-1 overflow-hidden pointer-events-none"
-                  style={{ top, height, background: 'color-mix(in oklch, #059669 10%, transparent)', borderLeft: '2px solid #059669', opacity: 0.55 }}
+                  className="absolute left-14 right-0 rounded-md flex items-start px-2 py-1 overflow-hidden cursor-pointer"
+                  style={{ top, height, background: `color-mix(in oklch, ${color} 10%, transparent)`, borderLeft: `2px solid ${color}`, opacity: 0.55 }}
+                  onClick={e => { e.stopPropagation(); setFacultadContextMenu({ x: e.clientX, y: e.clientY, hf }) }}
                 >
                   <div className="flex items-center gap-1">
-                    <GraduationCap size={10} style={{ color: '#059669' }} />
-                    <span className="text-[10px] truncate font-medium" style={{ color: '#059669' }}>{hf.materia}</span>
+                    <GraduationCap size={10} style={{ color }} />
+                    <span className="text-[10px] truncate font-medium" style={{ color }}>{hf.materia}</span>
                   </div>
                 </div>
               )
@@ -825,6 +832,23 @@ export default function HoyTab() {
       {editTarea && (
         <TareaModal tarea={editTarea} onClose={() => { setEditTarea(null); setSelectedItem(null); setDrawerOpen(false) }} />
       )}
+      {facultadContextMenu && (
+        <AgendaContextMenu
+          x={facultadContextMenu.x}
+          y={facultadContextMenu.y}
+          items={[
+            {
+              label: 'Eliminar por este día',
+              danger: true,
+              onClick: () => addAgendaHorarioFacultadExcepcion(facultadContextMenu.hf.id, viewISO),
+            },
+            { separator: true },
+            { label: 'Editar horarios de facultad', onClick: () => setFacultadModalOpen(true) },
+          ]}
+          onClose={() => setFacultadContextMenu(null)}
+        />
+      )}
+      {facultadModalOpen && <HorarioFacultadModal onClose={() => setFacultadModalOpen(false)} />}
     </div>
   )
 }

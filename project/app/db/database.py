@@ -194,7 +194,8 @@ def init_db():
         CREATE TABLE IF NOT EXISTS agenda_listas (
             id     INTEGER PRIMARY KEY AUTOINCREMENT,
             nombre TEXT NOT NULL,
-            color  TEXT NOT NULL DEFAULT '#7c3aed'
+            color  TEXT NOT NULL DEFAULT '#7c3aed',
+            pinned INTEGER NOT NULL DEFAULT 0
         )
     """)
 
@@ -674,6 +675,13 @@ def _apply_migrations(cursor):
             cursor.execute(f"UPDATE {tabla} SET actualizado_en = datetime('now') WHERE actualizado_en IS NULL")
             if DEBUG:
                 print(f"migration: {tabla}.actualizado_en added")
+
+    # --- agenda_listas: pinned (vista canvas, listas "pineadas" primero) ---
+    listas_cols = _get_columns(cursor, "agenda_listas")
+    if "pinned" not in listas_cols:
+        cursor.execute("ALTER TABLE agenda_listas ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
+        if DEBUG:
+            print("migration: agenda_listas.pinned added")
 
     # --- Index para eventos por fecha ---
     cursor.execute(

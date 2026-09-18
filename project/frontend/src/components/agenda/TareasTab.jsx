@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Plus, Trash2, CheckCircle2, Circle, Edit2, X, Inbox } from 'lucide-react'
+import { Plus, Trash2, CheckCircle2, Circle, Edit2, X, Inbox, List, LayoutGrid, Pin, PinOff } from 'lucide-react'
 
 const INBOX_ID = '__inbox__'
 import { useStore } from '../../store/useStore'
@@ -8,7 +8,7 @@ import { AGENDA_COLORS as COLORS } from '../../utils/agendaColors'
 import MiniCalendar from './MiniCalendar'
 import TareaModal from './TareaModal'
 
-function ListaItem({ lista, isSelected, onClick, onDelete, onRename }) {
+function ListaItem({ lista, isSelected, onClick, onDelete, onRename, onTogglePin }) {
   const [editing, setEditing] = useState(false)
   const [nombre, setNombre]   = useState(lista.nombre)
 
@@ -39,12 +39,16 @@ function ListaItem({ lista, isSelected, onClick, onDelete, onRename }) {
           {lista.nombre}
         </span>
       )}
-      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100">
-        <button className="icon-btn" style={{ width: 18, height: 18 }}
+      <div className={`flex items-center gap-0.5 ${lista.pinned ? '' : 'opacity-0 group-hover:opacity-100'}`}>
+        <button className="icon-btn" style={{ width: 18, height: 18, color: lista.pinned ? 'var(--accent)' : 'var(--mute)' }}
+          onClick={e => { e.stopPropagation(); onTogglePin(lista.id, !lista.pinned) }}>
+          {lista.pinned ? <Pin size={10} /> : <PinOff size={10} />}
+        </button>
+        <button className="icon-btn opacity-0 group-hover:opacity-100" style={{ width: 18, height: 18 }}
           onClick={e => { e.stopPropagation(); setEditing(true) }}>
           <Edit2 size={10} />
         </button>
-        <button className="icon-btn" style={{ width: 18, height: 18, color: 'var(--mute)' }}
+        <button className="icon-btn opacity-0 group-hover:opacity-100" style={{ width: 18, height: 18, color: 'var(--mute)' }}
           onClick={e => { e.stopPropagation(); onDelete(lista.id) }}>
           <Trash2 size={10} />
         </button>
@@ -109,6 +113,7 @@ export default function TareasTab() {
   const deleteAgendaLista = useStore(s => s.deleteAgendaLista)
   const updateAgendaTarea = useStore(s => s.updateAgendaTarea)
   const deleteAgendaTarea = useStore(s => s.deleteAgendaTarea)
+  const addAgendaTarea    = useStore(s => s.addAgendaTarea)
 
   const today = new Date()
   const [year, setYear]       = useState(today.getFullYear())
@@ -120,6 +125,7 @@ export default function TareasTab() {
   const [selectedColor, setSelectedColor]   = useState(COLORS[0])
   const [newTareaOpen, setNewTareaOpen]     = useState(false)
   const [editTarea, setEditTarea]           = useState(null)
+  const [viewMode, setViewMode]             = useState('lista') // 'lista' | 'canvas'
 
   const goMonth = (dir) => {
     let m = month + dir, y = year
@@ -157,8 +163,52 @@ export default function TareasTab() {
   }
   const inboxCount = agendaTareas.filter(t => !t.fecha_opcional && !t.completada).length
 
+  const viewToggle = (
+    <div className="flex items-center gap-1 p-1 rounded-xl border shrink-0" style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}>
+      {[['lista', List, 'agendaVistaLista'], ['canvas', LayoutGrid, 'agendaVistaCanvas']].map(([v, Icon, key]) => (
+        <button
+          key={v}
+          className="px-2.5 py-1 rounded-lg text-[11.5px] flex items-center gap-1.5 transition-all"
+          style={{
+            background: viewMode === v ? 'var(--bg)' : 'transparent',
+            color: viewMode === v ? 'var(--text)' : 'var(--subtext)',
+          }}
+          onClick={() => setViewMode(v)}
+        >
+          <Icon size={12} /> {t(lang, key)}
+        </button>
+      ))}
+    </div>
+  )
+
+  if (viewMode === 'canvas') {
+    return (
+      <>
+        <TareasCanvas
+          lang={lang}
+          agendaListas={agendaListas}
+          agendaTareas={agendaTareas}
+          viewToggle={viewToggle}
+          updateAgendaLista={updateAgendaLista}
+          updateAgendaTarea={updateAgendaTarea}
+          deleteAgendaTarea={deleteAgendaTarea}
+          addAgendaTarea={addAgendaTarea}
+          onOpenTarea={setEditTarea}
+        />
+        {editTarea && (
+          <TareaModal
+            tarea={editTarea}
+            onClose={() => setEditTarea(null)}
+          />
+        )}
+      </>
+    )
+  }
+
   return (
-    <div className="flex flex-1 min-h-0 overflow-hidden">
+    <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
+      <div className="px-4 pt-3">{viewToggle}</div>
+      <div className="flex flex-1 min-h-0 overflow-hidden">
       {/* Left panel: lists */}
       <aside className="w-[260px] shrink-0 flex flex-col h-full overflow-y-auto panel-scroll border-r p-4" style={{ borderColor: 'var(--border)' }}>
         <div className="panel-strong p-3 mb-4">
@@ -238,6 +288,7 @@ export default function TareasTab() {
                 deleteAgendaLista(id)
               }}
               onRename={(id, nombre) => updateAgendaLista(id, { nombre })}
+              onTogglePin={(id, pinned) => updateAgendaLista(id, { pinned })}
             />
           ))}
         </div>
@@ -379,6 +430,144 @@ export default function TareasTab() {
           onClose={() => setNewTareaOpen(false)}
         />
       )}
+      </div>
+    </div>
+  )
+}
+
+function TareasCanvas({
+  lang, agendaListas, agendaTareas, viewToggle,
+  updateAgendaLista, updateAgendaTarea, deleteAgendaTarea, addAgendaTarea, onOpenTarea,
+}) {
+  const pinnedListas = agendaListas.filter(l => l.pinned)
+  const otrasListas  = agendaListas.filter(l => !l.pinned)
+  const sinFechaTareas = agendaTareas.filter(t => !t.fecha_opcional && !t.completada)
+
+  return (
+    <div className="flex-1 min-h-0 overflow-y-auto panel-scroll p-4">
+      <div className="mb-4">{viewToggle}</div>
+
+      {pinnedListas.length > 0 && (
+        <div className="mb-5">
+          <div className="label mb-2 px-1">{t(lang, 'agendaPineadas')}</div>
+          <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
+            {pinnedListas.map(lista => (
+              <ListaCard
+                key={lista.id}
+                lista={lista}
+                tareas={agendaTareas.filter(t => t.lista_id === lista.id && !t.completada)}
+                onTogglePin={() => updateAgendaLista(lista.id, { pinned: false })}
+                onToggleTarea={tarea => updateAgendaTarea(tarea.id, { completada: !tarea.completada })}
+                onDeleteTarea={deleteAgendaTarea}
+                onOpenTarea={onOpenTarea}
+                onAddTarea={titulo => addAgendaTarea({ titulo, lista_id: lista.id })}
+                lang={lang}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div>
+        <div className="label mb-2 px-1">{pinnedListas.length > 0 ? t(lang, 'agendaOtrasListas') : t(lang, 'agendaGestionarListas')}</div>
+        <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
+          {otrasListas.map(lista => (
+            <ListaCard
+              key={lista.id}
+              lista={lista}
+              tareas={agendaTareas.filter(t => t.lista_id === lista.id && !t.completada)}
+              onTogglePin={() => updateAgendaLista(lista.id, { pinned: true })}
+              onToggleTarea={tarea => updateAgendaTarea(tarea.id, { completada: !tarea.completada })}
+              onDeleteTarea={deleteAgendaTarea}
+              onOpenTarea={onOpenTarea}
+              onAddTarea={titulo => addAgendaTarea({ titulo, lista_id: lista.id })}
+              lang={lang}
+            />
+          ))}
+          {/* "Sin fecha" -- filtro virtual entre listas, no una lista real: sin color propio,
+              sin pin (no hay fila de agenda_listas para persistirlo) y sin quick-add (no hay
+              un lista_id natural para una tarea creada desde acá, ver reporte de cierre). */}
+          <div className="panel-strong rounded-xl p-3 flex flex-col" style={{ maxHeight: 320 }}>
+            <div className="flex items-center gap-2 mb-2 shrink-0">
+              <Inbox size={13} style={{ color: 'var(--subtext)' }} />
+              <span className="text-[13px] font-medium flex-1 truncate" style={{ color: 'var(--text)' }}>
+                {t(lang, 'agendaSinFecha')}
+              </span>
+              <span className="mono text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: 'var(--surface)', color: 'var(--subtext)' }}>
+                {sinFechaTareas.length}
+              </span>
+            </div>
+            <div className="flex-1 overflow-y-auto panel-scroll flex flex-col gap-0.5">
+              {sinFechaTareas.length === 0 ? (
+                <div className="text-[12px] italic text-center mt-4" style={{ color: 'var(--subtext)' }}>
+                  {t(lang, 'agendaSinTareasPendientes')}
+                </div>
+              ) : sinFechaTareas.map(tarea => (
+                <TareaRow
+                  key={tarea.id}
+                  tarea={tarea}
+                  onToggle={tt => updateAgendaTarea(tt.id, { completada: !tt.completada })}
+                  onDelete={deleteAgendaTarea}
+                  onClick={() => onOpenTarea(tarea)}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ListaCard({ lista, tareas, onTogglePin, onToggleTarea, onDeleteTarea, onOpenTarea, onAddTarea, lang }) {
+  const [nuevoTitulo, setNuevoTitulo] = useState('')
+
+  const submit = () => {
+    if (!nuevoTitulo.trim()) return
+    onAddTarea(nuevoTitulo.trim())
+    setNuevoTitulo('')
+  }
+
+  return (
+    <div className="panel-strong rounded-xl p-3 flex flex-col" style={{ maxHeight: 320, borderTop: `3px solid ${lista.color}` }}>
+      <div className="flex items-center gap-2 mb-2 shrink-0">
+        <span className="w-3 h-3 rounded-full shrink-0" style={{ background: lista.color }} />
+        <span className="text-[13px] font-medium flex-1 truncate" style={{ color: 'var(--text)' }}>
+          {lista.nombre}
+        </span>
+        {tareas.length > 0 && (
+          <span className="mono text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: 'var(--surface)', color: 'var(--subtext)' }}>
+            {tareas.length}
+          </span>
+        )}
+        <button className="icon-btn" style={{ width: 18, height: 18, color: lista.pinned ? 'var(--accent)' : 'var(--mute)' }}
+          onClick={onTogglePin} title={t(lang, lista.pinned ? 'agendaDespinear' : 'agendaPinear')}>
+          {lista.pinned ? <Pin size={11} /> : <PinOff size={11} />}
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto panel-scroll flex flex-col gap-0.5">
+        {tareas.length === 0 ? (
+          <div className="text-[12px] italic text-center mt-4" style={{ color: 'var(--subtext)' }}>
+            {t(lang, 'agendaSinTareasPendientes')}
+          </div>
+        ) : tareas.map(tarea => (
+          <TareaRow
+            key={tarea.id}
+            tarea={tarea}
+            onToggle={onToggleTarea}
+            onDelete={onDeleteTarea}
+            onClick={() => onOpenTarea(tarea)}
+          />
+        ))}
+      </div>
+      <input
+        className="mt-2 shrink-0 w-full bg-transparent outline-none text-[12px] border-t pt-2"
+        style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+        placeholder={t(lang, 'agendaTareaRapida')}
+        value={nuevoTitulo}
+        onChange={e => setNuevoTitulo(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter') submit() }}
+      />
     </div>
   )
 }

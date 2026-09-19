@@ -31,7 +31,13 @@ VAULT_ROOT_SET_EXPLICITAMENTE = bool(os.environ.get("VAULT_ROOT"))
 VAULT_ROOT = Path(os.environ.get("VAULT_ROOT") or r"D:\Boveda")
 os.environ["VAULT_ROOT"] = str(VAULT_ROOT)
 
-TODAY = date(2026, 5, 26)
+TODAY = date.today()
+
+
+def month_at_offset(offset=0):
+    """Primer día del mes desplazado `offset` meses desde TODAY."""
+    month_index = TODAY.year * 12 + TODAY.month - 1 + offset
+    return date(month_index // 12, month_index % 12 + 1, 1)
 
 
 def connect():
@@ -123,8 +129,56 @@ def seed_boveda():
         ("01 - Proyectos/SGR", "Idea: CLI para SGR", ["ideas", "sgr"], "texto", None, 5,
          "Hacer una CLI en Python (typer o click) que permita capturar hojas y movimientos directamente "
          "desde la terminal, sin abrir el browser. Ideal para el flujo de trabajo en la terminal."),
+        ("01 - Proyectos/SGR", "Roadmap del próximo trimestre", ["sgr", "roadmap"], "texto", None, 2,
+         "## Prioridades\n\n1. Consolidar el sistema visual.\n2. Mejorar búsqueda y navegación.\n"
+         "3. Integrar Jarvis con Agenda.\n4. Preparar métricas de uso y rendimiento."),
+        ("01 - Proyectos/SGR", "Decisión: SQLite con WAL", ["sgr", "arquitectura", "decisiones"], "texto", None, 18,
+         "Se mantiene SQLite por simplicidad operativa y portabilidad. Activar WAL permite lecturas "
+         "concurrentes mientras el bot o el worker escriben. Revisar PostgreSQL solo si aparece una "
+         "necesidad real de múltiples escritores remotos."),
+        ("01 - Proyectos/HomeLab", "Runbook de backups", ["homelab", "backups"], "texto", None, 9,
+         "- Snapshot nocturno de volúmenes\n- Copia semanal fuera del host\n- Prueba de restauración mensual\n\n"
+         "La copia no cuenta como backup hasta verificar que puede restaurarse."),
+        ("01 - Proyectos/HomeLab", "Dashboard de servicios", ["homelab", "observabilidad"], "link",
+         "https://grafana.com/docs/", 14,
+         "Referencia para armar un tablero con disponibilidad, latencia, almacenamiento y estado de backups."),
+        ("01 - Proyectos/Portfolio", "Casos de estudio pendientes", ["portfolio", "diseño"], "texto", None, 11,
+         "Preparar casos breves de SGR, automatización del homelab y herramientas internas. Mostrar problema, "
+         "restricciones, decisiones y resultado; evitar una galería sin contexto."),
+        ("02 - Areas/Salud", "Chequeo anual", ["salud", "seguimiento"], "texto", None, 4,
+         "Pendientes: laboratorio, control clínico y revisión odontológica. Llevar resultados anteriores y "
+         "anotar preguntas antes del turno."),
+        ("02 - Areas/Salud", "Rutina de movilidad", ["salud", "entrenamiento"], "texto", None, 7,
+         "Rutina corta para días de escritorio:\n\n- Rotación torácica\n- Estiramiento de flexores\n"
+         "- Movilidad de tobillo\n- Dos minutos de caminata cada hora"),
+        ("02 - Areas/Finanzas personales", "Política del fondo de emergencia", ["finanzas", "ahorro"], "texto", None, 21,
+         "Objetivo: seis meses de gastos esenciales. Mantenerlo líquido y separado de inversiones de largo "
+         "plazo. Reponerlo antes de aumentar posiciones de riesgo."),
+        ("03 - Recursos/Diseño", "Sistema de color para dashboards", ["diseño", "ui"], "texto", None, 1,
+         "Usar el color para estado, jerarquía y pertenencia; no como decoración constante. Reservar los "
+         "acentos más saturados para acciones, selección y datos importantes."),
+        ("03 - Recursos/Diseño", "Referencia de accesibilidad WCAG", ["diseño", "accesibilidad"], "link",
+         "https://www.w3.org/WAI/WCAG22/quickref/", 25,
+         "Checklist para contraste, foco visible, navegación por teclado y etiquetas de controles."),
+        ("03 - Recursos/Inteligencia Artificial", "Notas sobre embeddings", ["ia", "embeddings"], "texto", None, 13,
+         "Los embeddings sirven para recuperar contenido semánticamente cercano. Conviene guardar metadata "
+         "de origen, fecha y categoría para combinar similitud con filtros estructurados."),
+        ("03 - Recursos/Cocina", "Pan rápido de sartén", ["recetas", "cocina"], "texto", None, 30,
+         "Harina, yogur, sal y polvo de hornear. Amasar apenas, dividir en cuatro y cocinar a fuego medio "
+         "hasta dorar ambos lados."),
+        ("04 - Archivo", "Retrospectiva del proyecto anterior", ["archivo", "retrospectiva"], "texto", None, 120,
+         "Funcionó bien definir entregas pequeñas y revisar semanalmente. Falló estimar integraciones sin "
+         "probar antes las APIs externas. Para el próximo proyecto: spike técnico temprano."),
+        ("04 - Archivo", "Checklist de mudanza completada", ["archivo", "checklist"], "texto", None, 180,
+         "Servicios transferidos, inventario cerrado y documentos digitalizados. Se archiva como referencia."),
         ("00 - Sin categorizar", "Contacto médico — Dra. González", ["salud"], "texto", None, 3,
          "Clínica San Martín, consultorio 4B. Tel: 011-4523-1234. Turnos por WhatsApp. Cobertura OSDE 210."),
+        ("00 - Sin categorizar", "Idea suelta: viaje al sur", ["ideas", "viajes"], "texto", None, 0,
+         "Comparar Bariloche, San Martín de los Andes y El Bolsón. Priorizar senderos, transporte sin auto y "
+         "alojamiento cerca del centro."),
+        ("00 - Sin categorizar", "Artículo para leer sobre bases locales", ["pendiente", "programacion"], "link",
+         "https://sqlite.org/whentouse.html", 1,
+         "Revisar criterios para elegir SQLite y anotar límites relevantes para aplicaciones personales."),
     ]
     for categoria_ruta, titulo, tags, tipo, url, dias, body_md in notas:
         nota(categoria_ruta, titulo, tags, body_md, tipo, url, dias)
@@ -188,9 +242,9 @@ def seed_finanzas(cursor):
     # explícitamente marcado como no alineado en CLAUDE.md) -- ya no.
     objetivos = [
         # nombre, meta, moneda, fecha_limite, cuota_mensual, fecha_creacion, color
-        ("Viaje a Europa",    4_500, "USD", "2027-06-01", 500,      "2026-01-15", "#38bdf8"),
-        ("Auto",           8_000_000, "ARS", "2027-12-01", 350_000, "2026-02-01", "#a78bfa"),
-        ("Fondo de reserva", 600_000, "ARS", None,         50_000,  "2025-10-01", "#34d399"),
+        ("Viaje a Europa",    4_500, "USD", (TODAY + timedelta(days=300)).isoformat(), 500,      (TODAY - timedelta(days=240)).isoformat(), "#38bdf8"),
+        ("Auto",           8_000_000, "ARS", (TODAY + timedelta(days=480)).isoformat(), 350_000, (TODAY - timedelta(days=210)).isoformat(), "#a78bfa"),
+        ("Fondo de reserva", 600_000, "ARS", None,                                      50_000,  (TODAY - timedelta(days=330)).isoformat(), "#34d399"),
     ]
     for nombre, meta, moneda, fecha_limite, cuota, fecha_creacion, color in objetivos:
         cursor.execute(
@@ -211,14 +265,14 @@ def seed_finanzas(cursor):
     configs = {
         "dolar_mep":               "1185.00",
         "dolar_oficial_compra":    "1050.00",
-        "dolar_actualizado_at":    "2026-05-24T10:00:00",
-        "dolar_oficial_updated_at":"2026-05-24T10:00:00",
+        "dolar_actualizado_at":    f"{(TODAY - timedelta(days=2)).isoformat()}T10:00:00",
+        "dolar_oficial_updated_at":f"{(TODAY - timedelta(days=2)).isoformat()}T10:00:00",
         "fire_aumento_aporte":     "1.15",
         "fire_rentabilidad_anual": "7.00",
         "fire_fecha_nacimiento":   "2000-04-15",
         "fire_aporte_inicial":     "50000",
         "fire_saldo_inicial":      "2800000",
-        "fire_inicio_mes":         "2026-01",
+        "fire_inicio_mes":         month_at_offset(-8).strftime("%Y-%m"),
         "fire_meta_usd":           "300000",
         "tasa_ahorro_objetivo":    "35",
         "fondo_emergencia_meta":   "1500000",
@@ -228,7 +282,7 @@ def seed_finanzas(cursor):
     for k, v in configs.items():
         cursor.execute("INSERT OR REPLACE INTO fin_config (clave, valor) VALUES (?,?)", (k, v))
 
-    # Movimientos — 6 meses (diciembre 2025 a mayo 2026)
+    # Movimientos — últimos 6 meses, siempre visibles respecto del día de ejecución.
     random.seed(42)
     movs = []
 
@@ -241,10 +295,9 @@ def seed_finanzas(cursor):
 
     # Ingresos recurrentes
     for mes_offset in range(6):
-        mes_date = date(2026, 5, 26) - timedelta(days=mes_offset * 30)
-        mes_str = mes_date.strftime("%Y-%m")
-        dia_cobro = f"{mes_str}-10"
-        mov(dia_cobro, 820_000, "income", "Sueldo mayo", "Banco Galicia", "Sueldo")
+        mes_date = month_at_offset(-mes_offset)
+        dia_cobro = mes_date.replace(day=10).isoformat()
+        mov(dia_cobro, 820_000, "income", f"Sueldo {mes_date.strftime('%m/%Y')}", "Banco Galicia", "Sueldo")
 
     # Gastos supermercado (semanales últimos 3 meses)
     super_montos = [18_500, 21_200, 15_800, 23_400, 19_600, 17_900, 22_100, 20_500, 24_300, 16_700, 18_200, 21_800]
@@ -344,12 +397,12 @@ def seed_finanzas(cursor):
     # Instrumentos
     instrumentos = [
         # tipo, ticker, sociedad, nombre, cantidad, costo_usd, tipo_cambio, precio_actual, entidad, capital_ars, tna, fecha_inicio, fecha_vencimiento, fecha
-        ("fci",       None,   "Balanz",  "FCI Money Market Balanz",    1_250_000, None, None, 1.00,    "Balanz",    1_250_000, None,   "2026-01-01", None,         "2026-01-01"),
-        ("fci",       None,   "Galicia", "FCI Renta Fija Galicia",     850_000,   None, None, 1.08,    "Galicia",   918_000,   None,   "2026-02-15", None,         "2026-02-15"),
-        ("plazo_fijo",None,   None,      "Plazo fijo Galicia 30 días", 500_000,   None, None, None,    "Galicia",   500_000,   98.0,   "2026-05-01", "2026-05-31", "2026-05-01"),
-        ("acciones",  "GGAL", None,      "Grupo Financiero Galicia",   80,        None, None, 9_200,   "BYMA",      None,      None,   "2025-11-10", None,         "2025-11-10"),
-        ("acciones",  "YPF",  None,      "YPF S.A.",                   50,        None, None, 28_500,  "BYMA",      None,      None,   "2025-12-20", None,         "2025-12-20"),
-        ("crypto",    "BTC",  None,      "Bitcoin",                    0.012,     38_500, 1185, None,  "Lemon",     None,      None,   "2026-03-10", None,         "2026-03-10"),
+        ("fci",       None,   "Balanz",  "FCI Money Market Balanz",    1_250_000, None, None, 1.00,    "Balanz",    1_250_000, None, (TODAY - timedelta(days=240)).isoformat(), None, (TODAY - timedelta(days=240)).isoformat()),
+        ("fci",       None,   "Galicia", "FCI Renta Fija Galicia",     850_000,   None, None, 1.08,    "Galicia",   918_000,   None, (TODAY - timedelta(days=180)).isoformat(), None, (TODAY - timedelta(days=180)).isoformat()),
+        ("plazo_fijo",None,   None,      "Plazo fijo Galicia 30 días", 500_000,   None, None, None,    "Galicia",   500_000,   98.0, (TODAY - timedelta(days=10)).isoformat(), (TODAY + timedelta(days=20)).isoformat(), (TODAY - timedelta(days=10)).isoformat()),
+        ("acciones",  "GGAL", None,      "Grupo Financiero Galicia",   80,        None, None, 9_200,   "BYMA",      None,      None, (TODAY - timedelta(days=300)).isoformat(), None, (TODAY - timedelta(days=300)).isoformat()),
+        ("acciones",  "YPF",  None,      "YPF S.A.",                   50,        None, None, 28_500,  "BYMA",      None,      None, (TODAY - timedelta(days=250)).isoformat(), None, (TODAY - timedelta(days=250)).isoformat()),
+        ("crypto",    "BTC",  None,      "Bitcoin",                    0.012,     38_500, 1185, None,  "Lemon",     None,      None, (TODAY - timedelta(days=160)).isoformat(), None, (TODAY - timedelta(days=160)).isoformat()),
     ]
     cursor.executemany(
         """INSERT INTO fin_instrumentos
@@ -385,17 +438,17 @@ def seed_finanzas(cursor):
         cursor.execute("INSERT OR REPLACE INTO fin_fire_filas (mes, ahorrado_override) VALUES (?,?)", (mes, override))
 
     # Inflación mensual (últimos 12 meses)
+    inflacion_valores = [2.8, 3.0, 3.7, 2.4, 2.3, 2.7, 2.4, 2.4, 3.5, 4.2, 4.0, 4.6]
     inflacion_data = [
-        ("2025-06", 4.6), ("2025-07", 4.0), ("2025-08", 4.2), ("2025-09", 3.5),
-        ("2025-10", 2.4), ("2025-11", 2.4), ("2025-12", 2.7), ("2026-01", 2.3),
-        ("2026-02", 2.4), ("2026-03", 3.7), ("2026-04", 3.0), ("2026-05", 2.8),
+        (month_at_offset(-offset).strftime("%Y-%m"), valor)
+        for offset, valor in enumerate(inflacion_valores)
     ]
     cursor.executemany("INSERT OR REPLACE INTO fin_inflacion (mes, inflacion) VALUES (?,?)", inflacion_data)
 
     # Notas del dashboard
     notas = [
-        ("Recordar renovar plazo fijo el 31/05. Evaluar si conviene letras o seguir en PF.",       TODAY.isoformat()),
-        ("Cuota del auto en junio: $38.500. Descontar del presupuesto mensual.",                   (TODAY - timedelta(days=5)).isoformat()),
+        ("Recordar renovar el plazo fijo al vencimiento. Evaluar si conviene letras o seguir en PF.", TODAY.isoformat()),
+        ("Cuota del auto del próximo mes: $38.500. Descontar del presupuesto mensual.",             (TODAY - timedelta(days=5)).isoformat()),
         ("Checar P&L de YPF — subió bastante. Pensar si tomar ganancias.",                        (TODAY - timedelta(days=10)).isoformat()),
     ]
     cursor.executemany("INSERT INTO fin_notas (contenido, fecha) VALUES (?,?)", notas)
@@ -419,54 +472,72 @@ def seed_agenda(cursor):
     cursor.executemany("INSERT INTO agenda_calendarios (id, nombre, color, activo) VALUES (?,?,?,?)", calendarios)
 
     # Eventos
+    eventos_count = 0
+
     def evento(titulo, desc, inicio, fin, todo_dia, cal_id, se_repite=0, regla=None):
+        nonlocal eventos_count
         cursor.execute(
             """INSERT INTO agenda_eventos
                (titulo, descripcion, fecha_inicio, fecha_fin, todo_el_dia, se_repite, regla_repeticion, calendario_id, creado_en, actualizado_en)
                VALUES (?,?,?,?,?,?,?,?,?,?)""",
             (titulo, desc, inicio, fin, todo_dia, se_repite, regla, cal_id, now_str, now_str)
         )
+        eventos_count += 1
 
-    # Eventos pasados (mayo)
+    def fecha_hora(offset_dias, hora):
+        return f"{(TODAY + timedelta(days=offset_dias)).isoformat()}T{hora}:00"
+
+    def fecha_completa(offset_dias):
+        return fecha_hora(offset_dias, "00:00")
+
+    # Eventos pasados cercanos, útiles para vista mensual y contexto.
     evento("Parcial Redes",           "Parcial integrador — aula 302",
-           "2026-05-15T10:00:00", "2026-05-15T12:00:00", 0, 2)
+           fecha_hora(-12, "10:00"), fecha_hora(-12, "12:00"), 0, 2)
     evento("Cena cumple Sofía",        "Restaurante Lo de Chicho, Palermo",
-           "2026-05-17T21:00:00", "2026-05-17T23:30:00", 0, 1)
+           fecha_hora(-10, "21:00"), fecha_hora(-10, "23:30"), 0, 1)
     evento("Entrega TP Algoritmos",    "Subir al campus virtual antes de las 23:59",
-           "2026-05-20T00:00:00", "2026-05-20T00:00:00", 1, 2)
+           fecha_completa(-7), fecha_completa(-7), 1, 2)
     evento("Turno odontólogo",         "Dr. Martínez — Av. Cabildo 2450",
-           "2026-05-22T15:30:00", "2026-05-22T16:30:00", 0, 3)
+           fecha_hora(-4, "15:30"), fecha_hora(-4, "16:30"), 0, 3)
 
-    # Eventos esta semana (25-31 mayo)
+    # Eventos de hoy y próximos días: mezcla de categorías, duraciones y estados.
     evento("Stand-up diario",          "Daily del equipo de trabajo",
-           f"{TODAY.isoformat()}T09:30:00", f"{TODAY.isoformat()}T09:50:00", 0, 4,
+           fecha_hora(0, "09:30"), fecha_hora(0, "09:50"), 0, 4,
            se_repite=1, regla=json.dumps({"tipo": "semanal", "dias": [1,2,3,4,5]}))
+    evento("Bloque de trabajo profundo", "Cerrar notificaciones y terminar el informe",
+           fecha_hora(0, "10:30"), fecha_hora(0, "12:30"), 0, 4)
+    evento("Almuerzo con Ana",         "Café del centro",
+           fecha_hora(0, "13:00"), fecha_hora(0, "14:00"), 0, 1)
+    evento("Revisión semanal",         "Repasar avances y preparar las prioridades de la próxima semana",
+           fecha_hora(0, "18:30"), fecha_hora(0, "19:15"), 0, 4)
     evento("Clase Redes",              "Profe: Ing. Rodríguez — Lab 201",
-           "2026-05-27T17:00:00", "2026-05-27T19:00:00", 0, 2)
+           fecha_hora(1, "17:00"), fecha_hora(1, "19:00"), 0, 2)
     evento("Clase Algoritmos",         "Profe: Lic. Gómez — Aula 115",
-           "2026-05-28T14:00:00", "2026-05-28T16:00:00", 0, 2)
+           fecha_hora(2, "14:00"), fecha_hora(2, "16:00"), 0, 2)
     evento("Review código con Marcos", "Revisar PR del módulo de notificaciones",
-           "2026-05-27T11:00:00", "2026-05-27T12:00:00", 0, 4)
+           fecha_hora(1, "11:00"), fecha_hora(1, "12:00"), 0, 4)
     evento("Gym — leg day",            None,
-           "2026-05-28T07:00:00", "2026-05-28T08:30:00", 0, 1)
+           fecha_hora(2, "07:00"), fecha_hora(2, "08:30"), 0, 1)
     evento("Asado casa de Lucas",      "Llevar algo para tomar",
-           "2026-05-30T14:00:00", "2026-05-30T20:00:00", 0, 1)
+           fecha_hora(4, "14:00"), fecha_hora(4, "20:00"), 0, 1)
     evento("Vencimiento tarjeta Galicia", "Pagar resumen — $142.300",
-           "2026-05-31T00:00:00", "2026-05-31T00:00:00", 1, 1)
+           fecha_completa(5), fecha_completa(5), 1, 1)
 
     # Eventos semana siguiente
     evento("Clase Redes",              "Profe: Ing. Rodríguez — Lab 201",
-           "2026-06-03T17:00:00", "2026-06-03T19:00:00", 0, 2)
+           fecha_hora(8, "17:00"), fecha_hora(8, "19:00"), 0, 2)
     evento("Clase Algoritmos",         "Profe: Lic. Gómez — Aula 115",
-           "2026-06-04T14:00:00", "2026-06-04T16:00:00", 0, 2)
+           fecha_hora(9, "14:00"), fecha_hora(9, "16:00"), 0, 2)
     evento("Turno médico clínica",     "Chequeo anual — Dr. Vega — Clínica San Martín",
-           "2026-06-05T10:00:00", "2026-06-05T11:00:00", 0, 3)
+           fecha_hora(10, "10:00"), fecha_hora(10, "11:00"), 0, 3)
     evento("Entrega proyecto final",   "Demo al product owner — preparar slides",
-           "2026-06-05T15:00:00", "2026-06-05T17:00:00", 0, 4)
+           fecha_hora(10, "15:00"), fecha_hora(10, "17:00"), 0, 4)
     evento("Cumpleaños papá",         "Cena familiar en casa",
-           "2026-06-07T20:00:00", "2026-06-07T23:00:00", 0, 1)
+           fecha_hora(12, "20:00"), fecha_hora(12, "23:00"), 0, 1)
     evento("1er parcial Algoritmos",   "Temas: grafos, árboles, DP",
-           "2026-06-10T10:00:00", "2026-06-10T12:00:00", 0, 2)
+           fecha_hora(15, "10:00"), fecha_hora(15, "12:00"), 0, 2)
+    evento("Escapada de fin de semana", "Reserva confirmada — llevar ropa de lluvia",
+           fecha_completa(20), fecha_completa(22), 1, 1)
 
     # Listas de tareas
     listas = [
@@ -478,23 +549,29 @@ def seed_agenda(cursor):
     ]
     cursor.executemany("INSERT INTO agenda_listas (id, nombre, color) VALUES (?,?,?)", listas)
 
+    tareas_count = 0
+
     def tarea(titulo, desc, fecha, hora, completada, lista_id, hora_bloque=None, duracion=None):
+        nonlocal tareas_count
         cursor.execute(
             """INSERT INTO agenda_tareas
                (titulo, descripcion, fecha_opcional, hora_opcional, hora_bloque, duracion_estimada, completada, lista_id, creado_en, actualizado_en)
                VALUES (?,?,?,?,?,?,?,?,?,?)""",
             (titulo, desc, fecha, hora, hora_bloque, duracion, completada, lista_id, now_str, now_str)
         )
+        tareas_count += 1
 
     # Tareas completadas
-    tarea("Enviar TP de Redes",          "Subir PDF al campus",     "2026-05-20", None, 1, 2)
-    tarea("Pagar servicio de internet",  None,                      "2026-05-22", None, 1, 1)
-    tarea("Comprar yerba y azúcar",      None,                      "2026-05-23", None, 1, 3)
-    tarea("Renovar gym",                 "Cuota mensual",           "2026-05-24", None, 1, 5)
+    tarea("Enviar TP de Redes",          "Subir PDF al campus",     (TODAY - timedelta(days=7)).isoformat(), None, 1, 2)
+    tarea("Pagar servicio de internet",  None,                      (TODAY - timedelta(days=5)).isoformat(), None, 1, 1)
+    tarea("Comprar yerba y azúcar",      None,                      (TODAY - timedelta(days=3)).isoformat(), None, 1, 3)
+    tarea("Renovar gym",                 "Cuota mensual",           (TODAY - timedelta(days=1)).isoformat(), None, 1, 5)
 
     # Tareas pendientes hoy / próximos días
+    tarea("Enviar comprobante pendiente", "Quedó atrasado desde esta semana", (TODAY - timedelta(days=2)).isoformat(), None, 0, 1)
     tarea("Estudiar grafos para el parcial", "Cap 22-24 Cormen",  TODAY.isoformat(), "10:00", 0, 2, "10:00", 120)
     tarea("Responder emails del trabajo",    None,                TODAY.isoformat(), "09:00", 0, 4, "09:00", 30)
+    tarea("Planificar el cierre del día",    "Revisar pendientes y elegir tres prioridades", TODAY.isoformat(), "18:00", 0, 4, "18:00", 30)
     tarea("Llamar a mamá",                  None,                TODAY.isoformat(), None,    0, 5)
     tarea("Actualizar CV",                  "Agregar proyecto SGR y experiencia freelance", (TODAY + timedelta(days=1)).isoformat(), None, 0, 5, None, 60)
     tarea("Preparar slides demo",           "Proyecto final trabajo — 5 slides máx", (TODAY + timedelta(days=2)).isoformat(), "14:00", 0, 4, "14:00", 90)
@@ -502,9 +579,9 @@ def seed_agenda(cursor):
     tarea("Leer cap. 5 Deep Work",          None,                (TODAY + timedelta(days=1)).isoformat(), "21:00", 0, 1, "21:00", 45)
     tarea("Resolver ejercicios DP",         "LeetCode: coin change, knapsack", (TODAY + timedelta(days=3)).isoformat(), "10:00", 0, 2, "10:00", 90)
     tarea("Comprar vino para asado",        None,                (TODAY + timedelta(days=4)).isoformat(), None, 0, 3)
-    tarea("Pagar tarjeta Galicia",          "$142.300 — vence 31/05", "2026-05-31", None, 0, 1)
+    tarea("Pagar tarjeta Galicia",          "$142.300 — vence esta semana", (TODAY + timedelta(days=5)).isoformat(), None, 0, 1)
     tarea("Reunión 1:1 con el lead",        "Preparar puntos a discutir", (TODAY + timedelta(days=7)).isoformat(), "11:00", 0, 4, "11:00", 60)
-    tarea("Rendir parcial Algoritmos",      "Llevar calculadora y libretas", "2026-06-10", "10:00", 0, 2)
+    tarea("Rendir parcial Algoritmos",      "Llevar calculadora y libretas", (TODAY + timedelta(days=15)).isoformat(), "10:00", 0, 2)
 
     # Horario facultad (lunes=1, martes=2, miércoles=3, jueves=4, viernes=5)
     # `color` no se pasa -- usa el default de schema (#059669) para las 4 materias.
@@ -519,7 +596,8 @@ def seed_agenda(cursor):
         horario
     )
 
-    print("Agenda: 4 calendarios, 16 eventos, 5 listas, 16 tareas, 4 materias facultad.")
+    print(f"Agenda: {len(calendarios)} calendarios, {eventos_count} eventos, "
+          f"{len(listas)} listas, {tareas_count} tareas, {len(horario)} materias facultad.")
 
 
 # ─── HÁBITOS ─────────────────────────────────────────────────────────────────
@@ -536,6 +614,9 @@ def seed_habitos(cursor):
         ("Journaling",           "Escribir 3 cosas del día + intención",    "#10b981", "Bienestar",           "diario",   None,              "21:30", 1),
         ("Correr",               "5k mínimo al aire libre",                 "#f97316", "Salud",               "semanal",  "[0,3,6]",         "06:30", 1),
         ("Sin redes sociales",   "No abrir Instagram/Twitter antes de las 12", "#06b6d4", "Productividad",   "diario",   None,              None,    1),
+        ("Tomar 2 litros de agua", "Registrar al completar la meta diaria", "#22d3ee", "Salud",             "diario",   None,              None,    1),
+        ("Practicar guitarra",   "Escalas, acordes o una canción completa", "#c084fc", "Creatividad",         "semanal",  "[2,5]",           "19:30", 1),
+        ("Planificar mañana",    "Elegir tres prioridades antes de cerrar el día", "#84cc16", "Productividad", "diario", None,           "20:45", 1),
     ]
     cursor.executemany(
         """INSERT INTO habitos (nombre, descripcion, color, categoria, frecuencia_tipo, dias_semana, hora, activo, creado_en)
@@ -611,6 +692,9 @@ if __name__ == "__main__":
               "project/scripts/dev-start.ps1) para no tocar tus notas reales.")
         exit(1)
 
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    VAULT_ROOT.mkdir(parents=True, exist_ok=True)
+
     # init_db() (no solo "el archivo existe") -- crea la DB si hace falta y
     # aplica TODAS las migraciones registradas hasta hoy, sin importar cuándo
     # se corrió el backend por última vez contra esta ruta. clear_all() de
@@ -627,6 +711,7 @@ if __name__ == "__main__":
     print("=== Seed demo SGR ===")
     print(f"DB_PATH    = {DB_PATH}")
     print(f"VAULT_ROOT = {VAULT_ROOT}")
+    print(f"TODAY      = {TODAY}")
     clear_all(cursor)
     seed_finanzas(cursor)
     seed_agenda(cursor)

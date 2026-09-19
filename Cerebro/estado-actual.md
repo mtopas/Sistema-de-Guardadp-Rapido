@@ -1,5 +1,34 @@
 # Estado Actual de Jarvis
-Última actualización: 2026-09-17
+Última actualización: 2026-09-19
+
+## CONFIRMADO: usuario verificó visualmente Horario Facultad + canvas de listas de Tareas (2026-09-19)
+
+Cierra el pendiente principal del handoff `GENERAL_HANDOFF_2026-09-19.md`: ninguna de las dos
+sesiones que implementaron estos features (Horario Facultad, commits `f9d6277`/`e597154`; canvas
+de listas de Tareas, commits `97b2a7f`/`e597154`) había podido verificar en navegador real (Chrome
+deshabilitado en ambas). El usuario confirmó en esta sesión, tras abrir el frontend local
+(`npm run dev`, :5173) él mismo, que "ambos cambios surtieron efecto" — sin reportar bugs
+visuales ni de layout. Ya no es un pendiente abierto.
+
+## HALLAZGO sin investigar: `UNIQUE constraint failed: hojas.ruta` para la ficha de Robert Kiyosaki reaparece (2026-09-19)
+
+Al levantar el backend local (`uvicorn`, puerto 8765) para esta sesión, el log de arranque de
+`sincronizar_vault()` mostró:
+
+```
+D:\Boveda\Jarvis\Entidades\9cb0f129-robert-kiyosaki.md: no se pudo upsertear
+(ruta=Jarvis/Entidades/9cb0f129-robert-kiyosaki.md, vault_id=940f431a-f36f-4e7a-b182-7eb1c6af97ec)
+-- UNIQUE constraint failed: hojas.ruta -- se ignora esta nota
+```
+
+Esto es exactamente el síntoma que el fix de `index_writer.py`/`sincronizar_vault()` del 19/09
+(commit `79787a3`) apuntaba a resolver, y que el handoff del mismo día marcó explícitamente como
+"probablemente resuelto... pero no se re-verificó explícitamente que el mensaje dejó de aparecer".
+**No se investigó la causa en esta sesión** — no está confirmado si es (a) una colisión nueva real
+(el fix no cubre este caso), o (b) una fila huérfana que ya quedó mal en el `app.db` LOCAL desde
+antes del fix y nunca se limpió (el fix corrige la generación de `id:` hacia adelante, no
+necesariamente filas ya duplicadas). No se tocó el `app.db` local ni el del homelab. Pendiente:
+diagnosticar antes de dar por cerrado el fix de Bóveda vacía del 19/09.
 
 ## FIX: deploy gap real (`jarvis/worker/consolidation.py` 2 días desactualizado en el homelab) + mensaje ambiguo al confirmar propuestas (2026-09-17)
 

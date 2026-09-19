@@ -4,6 +4,42 @@ Ideas anotadas para evaluar/diseñar más adelante — no aprobadas, no implemen
 
 ---
 
+## Ingestión de Agenda: que Jarvis también vea tareas pendientes a corto plazo, no solo completadas
+
+**Fecha:** 2026-09-19
+
+**Contexto:** el usuario preguntó por qué el reporte diario mostraba "1 tareas completadas
+revisadas" cuando hay otras tareas sin completar en su Agenda. Se investigó y confirmó (ver
+`Cerebro/decisiones-implementacion.md`, entrada `2026-09-19`) que **no es un bug** —
+`run_agenda_ingestion()` (`jarvis/ingestion/agenda.py`) excluye tareas pendientes a propósito
+desde el diseño original del 03/09: solo ingiere hechos ya cerrados (eventos pasados, tareas
+completadas), nunca el to-do abierto, que vive en Agenda misma.
+
+**Pedido nuevo del usuario**: quiere que Jarvis también tenga visibilidad de sus **tareas a corto
+plazo** (pendientes, no completadas) — no necesariamente para "recordarlas como hecho" igual que
+una tarea cerrada, sino para que el asistente sepa qué tiene por delante al conversar/responder
+(ej. si le preguntás "¿qué tengo pendiente esta semana?" o si el contexto de una respuesta debería
+tener en cuenta que hay un parcial por rendir).
+
+**Sin diseñar todavía — preguntas a resolver cuando se retome:**
+1. ¿Esto es una ingestión más (con su propia propuesta de captura, como las completadas) o algo
+   más liviano tipo "contexto de solo lectura" que el retriever consulte en vivo sin pasar por
+   `jarvis_capture_proposals` ni `memory_entries` (evitar duplicar el estado — la tarea YA vive en
+   Agenda, ¿hace falta una copia en la memoria de Jarvis?)?
+2. Si se guarda como memoria: ¿qué pasa cuando la tarea se completa o se borra después? Necesitaría
+   algún mecanismo de actualización/expiración que hoy no existe para este tipo de contenido
+   (`agenda_eventos`/`agenda_tareas` sí tienen estado vivo en `app.db`; una copia en `memory_entries`
+   quedaría desactualizada sola).
+3. Ventana de "corto plazo" — ¿cuántos días hacia adelante? `JARVIS_AGENDA_INGESTION_WINDOW_DAYS`
+   (hoy 7 días, hacia atrás) es el precedente más cercano, pero es para lo ya pasado, no para lo que
+   viene.
+4. Relación con el retriever (`jarvis/retriever/`) — si la idea final es "que el asistente lo sepa
+   al responder" más que "que quede en la memoria persistente", tal vez la solución correcta ni
+   siquiera pase por ingestión sino por sumar una consulta en vivo a `agenda_tareas`/`agenda_eventos`
+   como contexto adicional del chat, sin tocar `memory_entries` para nada.
+
+---
+
 ## Pendiente real tras el deploy de la fusión Bóveda-Jarvis (2026-09-15)
 
 Ninguno de estos ítems está implementado. Se registran acá para no perderlos — vivían solo en

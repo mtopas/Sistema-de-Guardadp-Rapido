@@ -1,18 +1,35 @@
-'''
+"""
 seed_demo.py — Rellena la base de datos con datos de demo realistas.
 Corre desde project/: python seed_demo.py
 
-ADVERTENCIA: borra todos los datos existentes antes de insertar.
+ADVERTENCIA: borra todos los datos existentes (DB + notas de Bóveda dentro de
+VAULT_ROOT) antes de insertar.
 
-ADVERTENCIA: ESTÁ DESACTUALIZADO
-
-import sqlite3
+DB_PATH / VAULT_ROOT respetan las variables de entorno del mismo nombre que ya
+usa el resto de la app (ver app/config.py) -- para sembrar sin tocar tus datos
+reales, seteá las dos a una carpeta/DB de scratch antes de correr esto (mismo
+patrón que project/scripts/dev-start.ps1, que arma exactamente ese sandbox).
+VAULT_ROOT NO tiene default silencioso a D:\\Boveda -- ver el chequeo en
+__main__ más abajo: sin la variable de entorno seteada explícitamente, el
+script se niega a arrancar en vez de escribir notas de prueba en tu vault real.
+"""
+import os
 import random
 import json
+import sqlite3
+import uuid
 from datetime import date, timedelta, datetime
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent / "database" / "app.db"
+# Resolver ANTES de importar nada de `app.*` -- app/config.py lee DB_PATH y
+# VAULT_ROOT de os.environ en el momento del import, así que setear las env
+# vars después ya no tendría efecto sobre esos módulos.
+DB_PATH = Path(os.environ.get("DB_PATH") or (Path(__file__).parent / "database" / "app.db"))
+os.environ["DB_PATH"] = str(DB_PATH)
+
+VAULT_ROOT_SET_EXPLICITAMENTE = bool(os.environ.get("VAULT_ROOT"))
+VAULT_ROOT = Path(os.environ.get("VAULT_ROOT") or r"D:\Boveda")
+os.environ["VAULT_ROOT"] = str(VAULT_ROOT)
 
 TODAY = date(2026, 5, 26)
 
@@ -24,13 +41,23 @@ def connect():
 
 
 def clear_all(cursor):
+    # Orden hijos->padres contra las FK reales de hoy (con PRAGMA foreign_keys=ON,
+    # SQLite las hace cumplir en serio -- este orden nunca se había probado
+    # porque todo el archivo era código muerto, ver docstring del módulo).
+    # fin_categorias.objetivo_id referencia fin_objetivos (sin CASCADE) -> hay
+    # que vaciar fin_categorias ANTES de fin_objetivos, no después como estaba.
+    # fin_transacciones_instrumento y agenda_horario_facultad_excepciones son
+    # tablas nuevas (schema actual) que el script original nunca conoció.
     tables = [
         "habitos_registros", "habitos",
-        "agenda_tareas", "agenda_eventos", "agenda_listas",
-        "agenda_calendarios", "agenda_horario_facultad",
-        "fin_movimientos", "fin_instrumentos", "fin_objetivos",
-        "fin_fire_filas", "fin_inflacion", "fin_notas",
-        "fin_config", "fin_categorias", "fin_cuentas",
+        "agenda_tareas",
+        "agenda_horario_facultad_excepciones", "agenda_horario_facultad",
+        "agenda_eventos", "agenda_listas", "agenda_calendarios",
+        "fin_transacciones_instrumento",
+        "fin_movimientos",
+        "fin_categorias", "fin_objetivos",
+        "fin_instrumentos", "fin_fire_filas", "fin_inflacion", "fin_notas",
+        "fin_config", "fin_cuentas",
         "hojas", "categorias",
     ]
     for t in tables:
@@ -40,105 +67,70 @@ def clear_all(cursor):
 
 
 # ─── BÓVEDA ──────────────────────────────────────────────────────────────────
+# Desde la fusión Bóveda-Jarvis (2026-09-11, ver Cerebro/decisiones-
+# implementacion.md), D:\Boveda (o VAULT_ROOT) es la fuente de verdad --
+# `categorias`/`hojas` en app.db son un ÍNDICE que app/vault/sync.py::
+# sincronizar_vault() reconstruye solo desde los archivos .md reales en cada
+# arranque del backend o GET /categorias|/hojas. Insertar filas de categorias/
+# hojas por SQL directo (como hacía la versión vieja de este script) se pierde
+# en el próximo sync -- por eso acá escribimos archivos .md reales con
+# app/vault/writer.py::crear_nota() (el mismo helper que usa POST /hojas) y
+# dejamos que el sync los indexe solo.
 
-def seed_boveda(cursor):
-    # Categorías (árbol 3 niveles)
-    cats = [
-        # (id, nombre, padre_id, icono)
-        (1,  "Desarrollo",        None, "💻"),
-        (2,  "Python",            1,    "🐍"),
-        (3,  "React",             1,    "⚛️"),
-        (4,  "DevOps",            1,    "🐳"),
-        (5,  "Lecturas",          None, "📚"),
-        (6,  "Libros",            5,    "📖"),
-        (7,  "Artículos",         5,    "🗞️"),
-        (8,  "Universidad",       None, "🎓"),
-        (9,  "Algoritmos",        8,    "🔢"),
-        (10, "Redes",             8,    "🌐"),
-        (11, "Finanzas personales", None, "💰"),
-        (12, "Ideas",             None, "💡"),
-        (13, "General",           None, "📁"),
+def seed_boveda():
+    from app.vault.guard import REQUIRED_SUBFOLDERS
+    from app.vault.writer import crear_nota
+
+    for carpeta in REQUIRED_SUBFOLDERS:
+        (VAULT_ROOT / carpeta).mkdir(parents=True, exist_ok=True)
+
+    def nota(categoria_ruta, titulo, tags, body_md, tipo="texto", url=None, dias_atras=0):
+        creado = (datetime.now() - timedelta(days=dias_atras)).astimezone().isoformat(timespec="seconds")
+        frontmatter = {
+            "id": str(uuid.uuid4()), "tipo": tipo,
+            "creado_en": creado, "actualizado_en": creado,
+            "origen": "manual", "tags": tags,
+        }
+        if tipo == "link" and url:
+            frontmatter["url"] = url
+        crear_nota(VAULT_ROOT, categoria_ruta, titulo, frontmatter, body_md)
+
+    notas = [
+        ("03 - Recursos/Programación", "FastAPI tips para producción", ["python", "fastapi"], "texto", None, 6,
+         "Usar `lifespan` en lugar de `on_startup`/`on_shutdown` para manejar recursos. "
+         "Siempre definir `response_model` explícito en los endpoints para evitar leaks de datos internos.\n\n"
+         "Middleware de logging: loguear request_id, tiempo de respuesta y status code en cada request."),
+        ("03 - Recursos/Programación", "Zustand vs Redux Toolkit", ["react", "frontend"], "texto", None, 8,
+         "Zustand gana en simplicidad: sin boilerplate, sin providers, el store es solo una función. "
+         "Redux Toolkit es mejor cuando el estado tiene lógica compleja o hacen falta devtools poderosos.\n\n"
+         "Para apps medianas como SGR, Zustand es la elección correcta."),
+        ("03 - Recursos/Programación", "Referencia de asyncio", ["python"], "link",
+         "https://docs.python.org/3/library/asyncio.html", 20,
+         "Referencia principal de asyncio. Las secciones de Tasks y Coroutines son las más útiles "
+         "para entender el modelo de concurrencia."),
+        ("02 - Areas/Desarrollo Personal", "Atomic Habits — James Clear", ["libros", "habitos"], "texto", None, 60,
+         "El sistema importa más que las metas. Las metas te llevan al resultado; el sistema te mantiene ahí.\n\n"
+         "Los 4 pasos: señal → antojo → respuesta → recompensa. Para romper un mal hábito, atacar la señal."),
+        ("02 - Areas/Desarrollo Personal", "Deep Work — Cal Newport", ["libros", "productividad"], "texto", None, 90,
+         "La capacidad de concentrarse sin distracción en tareas cognitivamente exigentes es cada vez más "
+         "rara y cada vez más valiosa.\n\nTécnicas útiles: time blocking, shutdown ritual, no redes en horario "
+         "de trabajo profundo."),
+        ("02 - Areas/Facultad", "Complejidad algorítmica — resumen", ["algoritmos", "facultad"], "texto", None, 15,
+         "Big O describe el peor caso:\n\n- O(1): acceso a array por índice\n- O(log n): búsqueda binaria\n"
+         "- O(n log n): mergesort, quicksort promedio\n- O(n²): bubble sort, selección"),
+        ("02 - Areas/Facultad", "Dijkstra en Python", ["algoritmos", "facultad"], "texto", None, 12,
+         "Implementación con heapq para grafos con pesos no negativos. Complejidad O((V+E) log V)."),
+        ("01 - Proyectos/SGR", "Idea: CLI para SGR", ["ideas", "sgr"], "texto", None, 5,
+         "Hacer una CLI en Python (typer o click) que permita capturar hojas y movimientos directamente "
+         "desde la terminal, sin abrir el browser. Ideal para el flujo de trabajo en la terminal."),
+        ("00 - Sin categorizar", "Contacto médico — Dra. González", ["salud"], "texto", None, 3,
+         "Clínica San Martín, consultorio 4B. Tel: 011-4523-1234. Turnos por WhatsApp. Cobertura OSDE 210."),
     ]
-    cursor.executemany(
-        "INSERT INTO categorias (id, nombre, padre_id, icono) VALUES (?,?,?,?)", cats
-    )
+    for categoria_ruta, titulo, tags, tipo, url, dias, body_md in notas:
+        nota(categoria_ruta, titulo, tags, body_md, tipo, url, dias)
 
-    hojas = [
-        # Python
-        ("FastAPI tips para producción", "2026-05-20", 2, "texto",
-         "<p>Usar <code>lifespan</code> en lugar de <code>on_startup</code>/<code>on_shutdown</code> para manejar recursos. Siempre definir <code>response_model</code> explícito en los endpoints para evitar leaks de datos internos.</p><p>Middleware de logging: loguear request_id, tiempo de respuesta y status code en cada request.</p>"),
-
-        ("async vs sync en FastAPI", "2026-05-15", 2, "texto",
-         "<p>Los endpoints <code>async def</code> corren en el event loop — no bloquear con operaciones sync lentas. Los <code>def</code> normales corren en un threadpool.</p><p>SQLite con <code>check_same_thread=False</code> es suficiente para un usuario; para multi-user usar connection pooling o async driver.</p>"),
-
-        ("https://docs.python.org/3/library/asyncio.html", "2026-04-10", 2, "link",
-         "<p>Referencia principal de asyncio. Las secciones de Tasks y Coroutines son las más útiles para entender el modelo de concurrencia.</p>"),
-
-        # React
-        ("Zustand vs Redux Toolkit", "2026-05-18", 3, "texto",
-         "<p>Zustand gana en simplicidad: sin boilerplate, sin providers, el store es solo una función. Redux Toolkit es mejor cuando el estado tiene lógica compleja o necesitás devtools poderosos.</p><p>Para apps medianas como SGR, Zustand es la elección correcta.</p>"),
-
-        ("Memoización en React: cuándo sí, cuándo no", "2026-05-10", 3, "texto",
-         "<p><code>useMemo</code> y <code>useCallback</code> tienen costo. Usarlos solo cuando el componente hijo es pesado de renderizar o cuando el cálculo es realmente costoso.</p><ul><li>useMemo: cálculos derivados de listas grandes</li><li>useCallback: funciones pasadas a componentes memoizados con React.memo</li></ul>"),
-
-        ("https://react.dev/reference/react/useCallback", "2026-04-22", 3, "link", None),
-
-        # DevOps
-        ("Docker multi-stage build para Python", "2026-05-22", 4, "texto",
-         "<p>Patrón: stage builder instala deps + compila; stage final copia solo lo necesario.</p><pre><code>FROM python:3.12-slim AS builder\nRUN pip install --user -r requirements.txt\n\nFROM python:3.12-slim\nCOPY --from=builder /root/.local /root/.local</code></pre>"),
-
-        ("nginx como reverse proxy para FastAPI", "2026-05-01", 4, "texto",
-         "<p>Configuración mínima para servir FastAPI detrás de nginx con WebSockets habilitados.</p>"),
-
-        # Libros
-        ("Atomic Habits — James Clear", "2026-03-15", 6, "texto",
-         "<p>El sistema importa más que las metas. Las metas te llevan al resultado; el sistema te mantiene ahí.</p><p>Los 4 pasos: señal → antojo → respuesta → recompensa. Para romper un mal hábito, atacar la señal. Para construir uno bueno, hacer la respuesta más obvia.</p><p><strong>Frase clave:</strong> No buscás tener el hábito, buscás ser el tipo de persona que tiene ese hábito.</p>"),
-
-        ("Deep Work — Cal Newport", "2026-02-20", 6, "texto",
-         "<p>La capacidad de concentrarse sin distracción en tareas cognitivamente exigentes es cada vez más rara y cada vez más valiosa.</p><p>Técnicas útiles: time blocking, shutdown ritual, no redes en horario de trabajo profundo.</p>"),
-
-        ("El inversor inteligente — Benjamin Graham", "2026-01-10", 6, "texto",
-         "<p>Distinción central: especulador vs inversor. El inversor analiza, el especulador predice.</p><p>Mr. Market: el mercado es un socio bipolar que te ofrece precios todos los días. No tenés que aceptarlos.</p>"),
-
-        # Artículos
-        ("https://martinfowler.com/articles/patterns-of-distributed-systems/", "2026-05-05", 7, "link",
-         "<p>Patrones de sistemas distribuidos. Muy útil para entender Raft, Paxos y otros protocolos de consenso antes de implementar cualquier cosa distribuida.</p>"),
-
-        ("https://newsletter.pragmaticengineer.com/", "2026-04-30", 7, "link",
-         "<p>Newsletter de The Pragmatic Engineer. Muy bueno para entender cómo trabajan los equipos de ingeniería en empresas grandes. Suscripto.</p>"),
-
-        # Algoritmos
-        ("Complejidad algorítmica — resumen", "2026-04-05", 9, "texto",
-         "<p>Big O describe el peor caso. Las notaciones más comunes:</p><ul><li>O(1): acceso a array por índice</li><li>O(log n): búsqueda binaria</li><li>O(n): recorrido lineal</li><li>O(n log n): mergesort, quicksort promedio</li><li>O(n²): bubble sort, selección</li></ul>"),
-
-        ("Dijkstra en Python", "2026-03-28", 9, "texto",
-         "<p>Implementación con heapq para grafos con pesos no negativos. Complejidad O((V+E) log V).</p>"),
-
-        # Ideas
-        ("Idea: CLI para SGR", "2026-05-23", 12, "texto",
-         "<p>Hacer una CLI en Python (typer o click) que permita capturar hojas y movimientos directamente desde la terminal, sin abrir el browser. Ideal para el flujo de trabajo en la terminal.</p>"),
-
-        ("Idea: widget de escritorio", "2026-04-18", 12, "texto",
-         "<p>Un widget en la barra de tareas de Windows que muestre el saldo actual y los hábitos pendientes del día. Podría ser un tray icon con Pystray.</p>"),
-
-        # Finanzas
-        ("Estrategia de ahorro en ARS", "2026-05-12", 11, "texto",
-         "<p>Con inflación alta, el objetivo es que el dinero no quede en caja de ahorro más de lo necesario. Flujo:</p><ol><li>Sueldo entra → reservar para gastos fijos del mes</li><li>El resto → FCI money market para liquidez diaria</li><li>Excedente mes siguiente → instrumentos de más plazo (letras, ON)</li></ol>"),
-
-        # General
-        ("Contacto médico — Dra. González", "2026-03-01", 13, "texto",
-         "<p>Clínica San Martín, consultorio 4B. Tel: 011-4523-1234. Turnos por WhatsApp. Cobertura OSDE 210.</p>"),
-    ]
-
-    for h in hojas:
-        contenido, fecha, cat_id, tipo, apuntes = h
-        cursor.execute(
-            """INSERT INTO hojas (contenido, fecha, categoria_id, tipo, apuntes, fecha_actualizado)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (contenido, fecha, cat_id, tipo, apuntes, fecha)
-        )
-
-    print(f"Bóveda: {len(cats)} categorías, {len(hojas)} hojas.")
+    print(f"Bóveda: {len(notas)} notas escritas en {VAULT_ROOT} "
+          f"(categorías/hojas se indexan solas en el próximo sync/arranque del backend).")
 
 
 # ─── FINANZAS ────────────────────────────────────────────────────────────────
@@ -160,7 +152,7 @@ def seed_finanzas(cursor):
     cursor.execute("SELECT id, nombre FROM fin_cuentas")
     cuentas_map = {r[1]: r[0] for r in cursor.fetchall()}
 
-    # Categorías
+    # Categorías de gasto/ingreso normales
     cats_fin = [
         ("Sueldo",          "#22c55e", "income"),
         ("Freelance",       "#86efac", "income"),
@@ -177,13 +169,41 @@ def seed_finanzas(cursor):
         ("Farmacia",        "#f9a8d4", "expense"),
         ("Suscripciones",   "#818cf8", "expense"),
         ("Transferencia",   "#94a3b8", "both"),
-        ("Ahorro",          "#10b981", "both"),
-        ("Emergencia",      "#ef4444", "both"),
     ]
     for c in cats_fin:
         cursor.execute(
             "INSERT OR IGNORE INTO fin_categorias (nombre, color, tipo) VALUES (?,?,?)", c
         )
+
+    # Categorías de sistema -- FIRE/Ajuste, no renombrar/eliminar desde la UI
+    # (ver CLAUDE.md, sección Finanzas). init_db()/_migrate_fin_categorias_
+    # objetivos() las recrea solas si faltan, pero se siembran acá también
+    # para que la demo quede completa sin depender de un reinicio del backend.
+    cursor.execute("INSERT OR IGNORE INTO fin_categorias (nombre, color, tipo) VALUES ('Ajuste', NULL, 'both')")
+    cursor.execute("INSERT OR IGNORE INTO fin_categorias (nombre, color, tipo) VALUES ('FIRE', '#f59e0b', 'both')")
+
+    # Objetivos de ahorro -- cada uno crea su categoría HOMÓNIMA (modelo actual,
+    # ver CLAUDE.md "Objetivos — cada objetivo crea categoría homónima"). Antes
+    # este script usaba una categoría genérica "Ahorro" (modelo legacy,
+    # explícitamente marcado como no alineado en CLAUDE.md) -- ya no.
+    objetivos = [
+        # nombre, meta, moneda, fecha_limite, cuota_mensual, fecha_creacion, color
+        ("Viaje a Europa",    4_500, "USD", "2027-06-01", 500,      "2026-01-15", "#38bdf8"),
+        ("Auto",           8_000_000, "ARS", "2027-12-01", 350_000, "2026-02-01", "#a78bfa"),
+        ("Fondo de reserva", 600_000, "ARS", None,         50_000,  "2025-10-01", "#34d399"),
+    ]
+    for nombre, meta, moneda, fecha_limite, cuota, fecha_creacion, color in objetivos:
+        cursor.execute(
+            "INSERT INTO fin_objetivos (nombre, meta, moneda, fecha_limite, cuota_mensual, fecha_creacion) "
+            "VALUES (?,?,?,?,?,?)",
+            (nombre, meta, moneda, fecha_limite, cuota, fecha_creacion),
+        )
+        oid = cursor.lastrowid
+        cursor.execute(
+            "INSERT INTO fin_categorias (nombre, color, tipo, oculta, objetivo_id) VALUES (?,?,?,0,?)",
+            (nombre, color, "both", oid),
+        )
+
     cursor.execute("SELECT id, nombre FROM fin_categorias")
     cats_map = {r[1]: r[0] for r in cursor.fetchall()}
 
@@ -304,11 +324,11 @@ def seed_finanzas(cursor):
     # Freelance
     mov((TODAY - timedelta(days=35)).isoformat(), 150_000, "income", "Proyecto web freelance — cliente Pérez", "Wise (USD)", "Freelance")
 
-    # Ahorro mensual
+    # Aporte FIRE mensual (cat. FIRE -- única que alimenta el plan FIRE, ver CLAUDE.md)
     for mes_offset in range(5):
         d = TODAY - timedelta(days=12 + mes_offset * 30)
-        mov(d.isoformat(), 200_000, "expense", "Ahorro mes", "Banco Galicia", "Ahorro",
-            nota="Transferencia a inversiones")
+        mov(d.isoformat(), 200_000, "expense", "Aporte FIRE", "Banco Galicia", "FIRE",
+            nota="Aporte mensual al plan FIRE")
 
     # Transferencias internas
     mov((TODAY - timedelta(days=8)).isoformat(),  50_000, "expense", "Transferencia a Uala", "Banco Galicia", "Transferencia")
@@ -339,19 +359,7 @@ def seed_finanzas(cursor):
         instrumentos
     )
 
-    # Objetivos de ahorro
-    objetivos = [
-        # nombre, meta, moneda, fecha_limite, cuota_mensual, fecha_creacion
-        ("Viaje a Europa",    4_500, "USD", "2027-06-01", 500,       "2026-01-15"),
-        ("Auto",           8_000_000, "ARS", "2027-12-01", 350_000,  "2026-02-01"),
-        ("Fondo de reserva", 600_000, "ARS", None,         50_000,   "2025-10-01"),
-    ]
-    cursor.executemany(
-        "INSERT INTO fin_objetivos (nombre, meta, moneda, fecha_limite, cuota_mensual, fecha_creacion) VALUES (?,?,?,?,?,?)",
-        objetivos
-    )
-
-    # Movimientos ahorro vinculados a objetivos
+    # Movimientos de ahorro vinculados a cada objetivo (categoría = nombre del objetivo)
     ahorro_obj = [
         ("Viaje a Europa",   (TODAY - timedelta(days=12)).isoformat(),  200_000),
         ("Viaje a Europa",   (TODAY - timedelta(days=42)).isoformat(),  200_000),
@@ -367,7 +375,7 @@ def seed_finanzas(cursor):
             """INSERT INTO fin_movimientos
                (fecha, monto, tipo, descripcion, icono, cuenta_id, cuotas, categoria_id, moneda, nota, audit)
                VALUES (?, ?, 'expense', ?, NULL, ?, NULL, ?, 'ARS', NULL, 0)""",
-            (fecha_mov, monto, nombre_obj, cuentas_map["Banco Galicia"], cats_map["Ahorro"])
+            (fecha_mov, monto, nombre_obj, cuentas_map["Banco Galicia"], cats_map[nombre_obj])
         )
 
     # FIRE filas (overrides)
@@ -392,7 +400,8 @@ def seed_finanzas(cursor):
     ]
     cursor.executemany("INSERT INTO fin_notas (contenido, fecha) VALUES (?,?)", notas)
 
-    print(f"Finanzas: {len(cuentas)} cuentas, {len(cats_fin)} categorías, {len(movs) + len(ahorro_obj)} movimientos, {len(instrumentos)} instrumentos, {len(objetivos)} objetivos.")
+    print(f"Finanzas: {len(cuentas)} cuentas, {len(cats_fin) + 2 + len(objetivos)} categorías, "
+          f"{len(objetivos)} objetivos, {len(movs) + len(ahorro_obj)} movimientos, {len(instrumentos)} instrumentos.")
 
 
 # ─── AGENDA ──────────────────────────────────────────────────────────────────
@@ -498,6 +507,7 @@ def seed_agenda(cursor):
     tarea("Rendir parcial Algoritmos",      "Llevar calculadora y libretas", "2026-06-10", "10:00", 0, 2)
 
     # Horario facultad (lunes=1, martes=2, miércoles=3, jueves=4, viernes=5)
+    # `color` no se pasa -- usa el default de schema (#059669) para las 4 materias.
     horario = [
         (3, "17:00", "19:00", "Redes",       "Lab 201 — Ing. Rodríguez"),
         (4, "14:00", "16:00", "Algoritmos",  "Aula 115 — Lic. Gómez"),
@@ -594,23 +604,40 @@ def seed_habitos(cursor):
 # ─── MAIN ────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    if not DB_PATH.exists():
-        print(f"ERROR: No se encuentra la base en {DB_PATH}")
-        print("Asegurate de haber iniciado el backend al menos una vez para que init_db() cree las tablas.")
+    if not VAULT_ROOT_SET_EXPLICITAMENTE:
+        print(f"ERROR: VAULT_ROOT no está seteada -- por default apuntaría a {VAULT_ROOT} (tu vault real).")
+        print("Este script escribe archivos .md de prueba dentro de VAULT_ROOT. Seteá la variable de "
+              "entorno VAULT_ROOT a una carpeta de scratch antes de correr esto (mismo patrón que "
+              "project/scripts/dev-start.ps1) para no tocar tus notas reales.")
         exit(1)
+
+    # init_db() (no solo "el archivo existe") -- crea la DB si hace falta y
+    # aplica TODAS las migraciones registradas hasta hoy, sin importar cuándo
+    # se corrió el backend por última vez contra esta ruta. clear_all() de
+    # abajo asume el schema completo más reciente (columnas/tablas de hoy
+    # mismo incluidas); confiar solo en ".exists()" podía dejar tablas viejas
+    # sin las migraciones más nuevas y romper con "no such table"/"no such
+    # column" -- confirmado en vivo al arreglar este script.
+    from app.db.database import init_db
+    init_db()
 
     conn = connect()
     cursor = conn.cursor()
 
     print("=== Seed demo SGR ===")
+    print(f"DB_PATH    = {DB_PATH}")
+    print(f"VAULT_ROOT = {VAULT_ROOT}")
     clear_all(cursor)
-    seed_boveda(cursor)
     seed_finanzas(cursor)
     seed_agenda(cursor)
     seed_habitos(cursor)
 
     conn.commit()
     conn.close()
-    print("=== Listo. Reiniciá el backend para que sirva los datos frescos. ===")
 
-'''
+    # Bóveda va aparte, después de cerrar la conexión de arriba: no toca
+    # `categorias`/`hojas` por SQL (ver comentario de seed_boveda()), solo
+    # escribe archivos .md -- no hace falta compartir conexión ni cursor.
+    seed_boveda()
+
+    print("=== Listo. Reiniciá el backend para que sirva los datos frescos. ===")

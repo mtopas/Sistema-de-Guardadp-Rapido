@@ -31,7 +31,14 @@ function finPayloadEqual(a, b) {
 
 // Per-section themes — each module has its own independent theme + tone.
 // Migration: if no per-section key exists yet, fall back to the old global key.
-const THEME_ALIASES = { 'arena-negro': 'underwater', 'sunbeach': 'underwater', 'moonbeach': 'underwater', 'pasteles': 'sakura', 'tierra': 'blanco-negro' }
+const THEME_ALIASES = {
+  'arena-negro': 'underwater',
+  'sunbeach': 'underwater',
+  'moonbeach': 'underwater',
+  'pasteles': 'nexo-nocturno',
+  'sakura': 'nexo-nocturno',
+  'tierra': 'blanco-negro',
+}
 function _resolveThemeKey(v) {
   const key = THEME_ALIASES[v] || v
   return (key && THEMES[key]) ? key : null

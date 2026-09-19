@@ -52,6 +52,7 @@ export default function TweaksPanel() {
     : []
 
   const isDark = THEMES[theme]?.dark !== false
+  const supportsTone = isDark && THEMES[theme]?.allowTone !== false
 
   const dragRef   = useRef(null)
   const offsetRef = useRef({ x: 16, y: 16 }) // distance from right/bottom edges
@@ -235,16 +236,17 @@ export default function TweaksPanel() {
           </div>
         </div>
 
-        {/* Tono base — solo aplica a temas oscuros */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, opacity: isDark ? 1 : 0.45 }}>
+        {/* Tono base — solo aplica a temas oscuros que permiten modificarlo */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, opacity: supportsTone ? 1 : 0.45 }}>
           <div style={{ fontSize: 11.5, color: 'var(--subtext)', display: 'flex', justifyContent: 'space-between' }}>
             <span style={{ fontWeight: 500 }}>Tono base</span>
             {!isDark && <span style={{ fontSize: 10, fontStyle: 'italic' }}>solo en oscuros</span>}
+            {isDark && !supportsTone && <span style={{ fontSize: 10, fontStyle: 'italic' }}>identidad fija</span>}
           </div>
           <div style={{
             display: 'flex', padding: 2, borderRadius: 8,
             background: 'rgba(0,0,0,0.22)', userSelect: 'none',
-            pointerEvents: isDark ? 'auto' : 'none',
+            pointerEvents: supportsTone ? 'auto' : 'none',
           }}>
             {Object.entries(TONES).map(([key, t]) => {
               const active = tone === key
@@ -253,14 +255,14 @@ export default function TweaksPanel() {
                   key={key}
                   type="button"
                   onClick={() => setTone(key)}
-                  disabled={!isDark}
+                  disabled={!supportsTone}
                   style={{
                     flex: 1, border: 0,
                     background: active ? 'rgba(255,255,255,0.12)' : 'transparent',
                     color: 'var(--text)',
                     fontWeight: 500, fontSize: 11.5,
                     minHeight: 24, borderRadius: 6,
-                    padding: '4px 6px', cursor: isDark ? 'pointer' : 'not-allowed',
+                    padding: '4px 6px', cursor: supportsTone ? 'pointer' : 'not-allowed',
                     boxShadow: active ? '0 1px 2px rgba(0,0,0,.25)' : 'none',
                     transition: 'background 0.12s',
                   }}

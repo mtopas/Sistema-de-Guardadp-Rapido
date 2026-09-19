@@ -87,37 +87,34 @@ export const THEMES = {
     '--font-mono':     FONT_MONO_GEIST,
   },
 
-  // ---------- 4. SAKURA — crema rosado, blush y rosa polvo ----------
-  'sakura': {
-    name: 'Sakura',
-    dark: false,
-    '--bg':            '#faf7f5',
-    '--sidebar':       '#ffffff',
-    '--surface':       '#ffffff',
-    '--panel-bg':      'rgba(255,255,255,0.94)',
-    '--header-bg':     '#edd8dc',
-    '--header-cta-bg': '#9e6369',
-    '--header-avatar-bg': '#8b6f72',
-    '--border':        'rgba(158,99,105,0.20)',
-    '--accent':        '#c4898e',
-    '--accent-light':  '#ddb4b8',
-    '--accent-deep':   '#9e6369',
-    '--accent-alt':    '#8b6f72',
-    '--color-cream':   '#faf7f5',
-    '--color-blush':   '#edd8dc',
-    '--color-rose':    '#c4898e',
-    '--color-mauve':   '#8b6f72',
-    '--text':          '#2d2428',
-    '--text-2':        '#453a3d',
-    '--subtext':       '#7a6569',
-    '--mute':          '#a89598',
-    '--cta-bg':        'linear-gradient(130deg, #9e6369, #c4898e)',
-    '--cta-text':      '#ffffff',
-    '--shadow-accent': '0 8px 22px -10px rgba(158,99,105,0.28)',
-    '--shadow-soft':   '0 4px 14px rgba(45,36,40,0.07)',
-    '--font-serif':    FONT_SERIF_PLAYFAIR,
+  // ---------- 4. NEXO NOCTURNO — azul profundo + cian eléctrico ----------
+  'nexo-nocturno': {
+    name: 'Nexo nocturno',
+    dark: true,
+    allowTone: false,
+    '--bg':            '#050b14',
+    '--sidebar':       '#06111e',
+    '--surface':       '#0b192a',
+    '--panel-bg':      'rgba(7,21,37,0.92)',
+    '--header-bg':     'rgba(5,17,31,0.96)',
+    '--header-cta-bg': 'linear-gradient(135deg, #22d3ee, #0ea5e9)',
+    '--header-avatar-bg': '#174b85',
+    '--border':        'rgba(56,189,248,0.20)',
+    '--accent':        '#22d3ee',
+    '--accent-light':  '#67e8f9',
+    '--accent-deep':   '#1478c9',
+    '--accent-alt':    '#8b5cf6',
+    '--text':          '#eef8ff',
+    '--text-2':        '#c8dcef',
+    '--subtext':       '#83a4c4',
+    '--mute':          '#4e6c89',
+    '--cta-bg':        'linear-gradient(135deg, #22d3ee 0%, #0ea5e9 48%, #2563eb 100%)',
+    '--cta-text':      '#f8fdff',
+    '--shadow-accent': '0 8px 26px -10px rgba(34,211,238,0.58)',
+    '--shadow-soft':   '0 10px 30px rgba(0,5,14,0.42)',
+    '--font-serif':    FONT_SANS_SPACE,
     '--font-sans':     FONT_SANS_SORA,
-    '--font-mono':     FONT_MONO_DEFAULT,
+    '--font-mono':     FONT_MONO_GEIST,
   },
 
   // ---------- 5. LIMA Y GRIS — minimalismo high-contrast ----------
@@ -414,8 +411,8 @@ export function applyTheme(themeKey, toneKey = null, fontKey = null) {
   root.dataset.themeMode = theme.dark ? 'dark' : 'light'
   root.dataset.theme = themeKey
 
-  // Tono base — sólo aplica a temas oscuros. En light temas lo ignoramos.
-  if (toneKey && theme.dark) {
+  // Tono base — sólo aplica a temas oscuros que no fijan su identidad cromática.
+  if (toneKey && theme.dark && theme.allowTone !== false) {
     const tone = TONES[toneKey] || TONES[DEFAULT_TONE]
     Object.entries(tone).forEach(([key, value]) => {
       if (key.startsWith('--') && value != null) root.style.setProperty(key, value)

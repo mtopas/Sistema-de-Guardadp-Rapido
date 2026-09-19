@@ -102,9 +102,12 @@ logger = logging.getLogger(__name__)
 _HTTP_TIMEOUT = 15
 
 
-def run_agenda_ingestion(now: datetime | None = None) -> dict:
+def run_agenda_ingestion(now: datetime | None = None, push: bool = True) -> dict:
     """Corre la ingestión completa. Nunca lanza -- cualquier error queda en
     el resumen (mismo contrato que run_audit()/scan_and_propose()).
+
+    push=False: mismo motivo y mismo contrato que run_audit(push=False) --
+    ver ese docstring. Único llamador es run_consolidation().
     """
     MANIFEST.assert_allowed("read_agenda_source")
     MANIFEST.assert_allowed("propose_agenda_capture")
@@ -159,7 +162,7 @@ def run_agenda_ingestion(now: datetime | None = None) -> dict:
     # corrida, para que el primer lote de propuestas recién creadas (o algo
     # que ya estaba en cola de una corrida anterior) salga sin esperar el
     # próximo tick ocioso del worker. Mismo criterio que run_audit().
-    if channel == "telegram" and chat_id:
+    if push and channel == "telegram" and chat_id:
         try:
             from jarvis.captures.passive import push_next_capture_batch
 

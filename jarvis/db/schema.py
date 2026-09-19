@@ -76,7 +76,21 @@ CREATE TABLE IF NOT EXISTS memory_entries (
     -- incluya TODAS las columnas reales -- el _add_column_if_missing()
     -- correspondiente en _migrate() queda como red de seguridad para DBs
     -- viejas que todavía no la tengan (mismo patrón que created_by arriba).
-    last_audited_at       DATETIME
+    last_audited_at       DATETIME,
+    -- Fix del loop de re-propuesta de "hueco de entidad" (2026-09-19, ver
+    -- Cerebro/decisiones-implementacion.md): _apply_create() (audit/service.py)
+    -- sabe DE ANTEMANO que la entrada que va a sintetizar debe quedar tipada
+    -- PEOPLE y vinculada como 'subject' a una entidad puntual -- antes de este
+    -- fix dependía de que process_entry() la clasificara así por su cuenta vía
+    -- LLM, que en la práctica nunca pasaba (quedaba SEMANTIC/'mentioned'), así
+    -- que _detect_entity_gaps() nunca consideraba resuelto el hueco y lo volvía
+    -- a proponer cada corrida. pinned_type/pinned_subject_entity_id, si están
+    -- presentes, hacen que process_entry() fuerce esos valores en vez de
+    -- confiar en la clasificación/extracción genérica. NULL para toda entrada
+    -- que no pase por este camino (la inmensa mayoría) -- sin CHECK, no hace
+    -- falta el rebuild completo que sí exige un CHECK sobre datos preexistentes.
+    pinned_type               TEXT,
+    pinned_subject_entity_id  TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_me_type   ON memory_entries(type);

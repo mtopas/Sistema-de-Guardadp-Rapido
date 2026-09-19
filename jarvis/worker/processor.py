@@ -7,7 +7,7 @@ from jarvis.db.database import get_connection
 from jarvis.debug.service import notify_debug_processed
 from jarvis.embeddings.client import generate_embedding
 from jarvis.embeddings.store import upsert_embedding
-from jarvis.entities.service import extract_entities, link_entities_for_entry
+from jarvis.entities.service import extract_entities, link_entities_for_entry, _link_entry_entity
 from jarvis.events.service import log_event
 from jarvis.llm.client import call_classify
 from jarvis.memory.service import get_entry, update_entry
@@ -39,9 +39,19 @@ def process_entry(entry_id: str) -> None:
         tag_catalog = list_tag_catalog(entry.get("user_id") or JARVIS_DEFAULT_USER)
         classification = _classify(entry["content_raw"], tag_catalog)
 
-        entry_type = classification.get("type", "RAW")
-        if entry_type not in ("RAW", "SEMANTIC", "DECISION", "PROJECT", "PEOPLE"):
-            entry_type = "RAW"
+        # pinned_type (fix del loop de re-propuesta de "hueco de entidad",
+        # 2026-09-19): el llamador (hoy solo audit/service.py::_apply_create())
+        # ya sabe con certeza el tipo final -- no dejarlo a criterio del LLM,
+        # que en la práctica clasificaba estas entradas como SEMANTIC y nunca
+        # cerraba el hueco (ver Cerebro/decisiones-implementacion.md). Se sigue
+        # usando la clasificación normal para title/tags.
+        pinned_type = entry.get("pinned_type")
+        if pinned_type:
+            entry_type = pinned_type
+        else:
+            entry_type = classification.get("type", "RAW")
+            if entry_type not in ("RAW", "SEMANTIC", "DECISION", "PROJECT", "PEOPLE"):
+                entry_type = "RAW"
 
         title = (classification.get("title") or "").strip()[:60] or None
         tags = classification.get("tags") or []
@@ -80,6 +90,26 @@ def process_entry(entry_id: str) -> None:
                 "[processor] Extracción/vinculación de entidades falló para entry_id=%s: %s",
                 entry_id, exc,
             )
+
+        # pinned_subject_entity_id (mismo fix del 2026-09-19 que pinned_type
+        # arriba): forzar el link 'subject' a la entidad puntual que el
+        # llamador ya identificó, sin depender de que extract_entities() la
+        # haya vuelto a encontrar por su cuenta y en la posición correcta
+        # (i==0) para que link_entities_for_entry() le asignara 'subject' --
+        # _link_entry_entity() hace upsert (ON CONFLICT DO UPDATE relation),
+        # así que pisa cualquier 'mentioned' que el paso genérico de arriba
+        # ya haya dejado para esta misma entidad.
+        pinned_subject_entity_id = entry.get("pinned_subject_entity_id")
+        if pinned_subject_entity_id:
+            try:
+                MANIFEST.assert_allowed("link_entities")
+                _link_entry_entity(entry_id, pinned_subject_entity_id, "subject")
+                log_event("ENTITY", f"subject forzado: {pinned_subject_entity_id[:8]}", entry_id)
+            except Exception as exc:
+                logger.warning(
+                    "[processor] No se pudo forzar el link 'subject' para entry_id=%s: %s",
+                    entry_id, exc,
+                )
 
         try:
             MANIFEST.assert_allowed("link_project")

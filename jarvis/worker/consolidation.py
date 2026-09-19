@@ -150,7 +150,11 @@ def run_consolidation() -> dict:
         try:
             from jarvis.audit.service import run_audit
 
-            summary["audit"] = run_audit(now)
+            # push=False (fix 2026-09-19, ver Cerebro/decisiones-implementacion.md
+            # "resumen corto + preguntas al final"): no empujar todavía -- se
+            # flushea la cola recién después de mandar el resumen corto, más
+            # abajo en esta misma función.
+            summary["audit"] = run_audit(now, push=False)
         except Exception as exc:
             logger.exception("[consolidation] Auditoría de memoria falló")
             summary["errors"].append(str(exc))
@@ -164,7 +168,7 @@ def run_consolidation() -> dict:
         try:
             from jarvis.ingestion.agenda import run_agenda_ingestion
 
-            summary["agenda_ingestion"] = run_agenda_ingestion(now)
+            summary["agenda_ingestion"] = run_agenda_ingestion(now, push=False)
         except Exception as exc:
             logger.exception("[consolidation] Ingestión de Agenda falló")
             summary["errors"].append(str(exc))
@@ -180,7 +184,7 @@ def run_consolidation() -> dict:
         try:
             from jarvis.ingestion.agenda_patterns import run_agenda_pattern_synthesis
 
-            summary["agenda_patterns"] = run_agenda_pattern_synthesis(now)
+            summary["agenda_patterns"] = run_agenda_pattern_synthesis(now, push=False)
         except Exception as exc:
             logger.exception("[consolidation] Síntesis de patrones de Agenda falló")
             summary["errors"].append(str(exc))
@@ -236,6 +240,32 @@ def run_consolidation() -> dict:
         _notify_run_report(now, summary, entries)
     except Exception:
         logger.exception("[consolidation] Error armando/enviando el reporte de Telegram")
+
+    # Flush de las colas de propuestas -- recién ACÁ, después del resumen de
+    # arriba (fix 2026-09-19, ver Cerebro/decisiones-implementacion.md
+    # "resumen corto + preguntas al final"). run_audit()/run_agenda_
+    # ingestion()/run_agenda_pattern_synthesis() corrieron con push=False
+    # más arriba -- sus propuestas (huecos de entidad, eventos/tareas de
+    # Agenda, patrones, triage del Inbox) quedaron en cola sin empujar.
+    # push_next_audit_batch()/push_next_capture_batch() son las mismas
+    # funciones de siempre (mismo throttle/batch-size, misma lógica de
+    # expiración desde pushed_at) -- solo cambia CUÁNDO se llaman la primera
+    # vez en el día, no cómo funcionan. Esto es exclusivo de la consolidación
+    # diaria: el resto del día, si el worker detecta algo digno de confirmar
+    # fuera de esta corrida (captura pasiva por inactividad, etc.), lo sigue
+    # preguntando en el momento -- el tick ocioso normal del worker
+    # (jarvis/worker/main.py) llama estas mismas funciones sin cambios.
+    try:
+        from jarvis.audit.service import push_next_audit_batch
+        from jarvis.captures.passive import push_next_capture_batch
+        from jarvis.debug.service import get_debug_chat_id
+
+        chat_id = get_debug_chat_id()
+        if chat_id:
+            push_next_audit_batch("telegram", chat_id, JARVIS_DEFAULT_USER)
+            push_next_capture_batch("telegram", chat_id, JARVIS_DEFAULT_USER)
+    except Exception:
+        logger.exception("[consolidation] Error flusheando la cola de propuestas tras el resumen")
 
     return summary
 
@@ -718,19 +748,22 @@ def _short(content: str, n: int = 100) -> str:
 # Ver Cerebro/decisiones-implementacion.md, 2026-09-03: antes solo se
 # empujaba un mensaje si la auditoría generaba una propuesta -- el resto (o
 # una corrida sin hallazgos) quedaba solo en el JSON terso de
-# jarvis_policies.consolidation_run. Ahora cada corrida manda siempre un
-# reporte con detalle legible, partido en varios mensajes si hace falta
-# (jarvis/notify/telegram.py::send_report(), límite ~4096 chars/mensaje de
-# la Bot API) -- se prefirió esto a "resumen corto + comando tipo /jdebug
-# para pedir el detalle" para que el detalle llegue siempre sin que el
-# usuario tenga que acordarse de pedirlo.
+# jarvis_policies.consolidation_run. Se probó despues (mismo día) "reporte
+# con detalle legible, partido en varios mensajes" -- con la Bóveda real
+# indexada eso llegó a ser un reporte de 37 mensajes de puro ruido (ver
+# Cerebro/decisiones-implementacion.md, 2026-09-19, "resumen corto +
+# preguntas al final"). Pedido explícito del usuario esa fecha: un resumen
+# corto (máx. 10 líneas) en vez del detalle línea por línea -- el detalle
+# COMPLETO (pairwise_detail, tag_block_entries, etc.) sigue persistiendo sin
+# cambios en jarvis_policies.consolidation_run para quien lo necesite después,
+# esto es un cambio de presentación en Telegram únicamente.
 
 def _notify_run_report(now: datetime, summary: dict, entries: list[dict]) -> None:
     from jarvis.debug.service import get_debug_chat_id
     from jarvis.notify.telegram import send_report
 
     title = f"📊 Consolidación diaria — {now.strftime('%Y-%m-%d %H:%M')} UTC"
-    sections = _build_report_sections(summary, entries)
+    sections = [_build_short_summary(summary, entries)]
 
     chat_id = get_debug_chat_id()
     if not chat_id:
@@ -741,6 +774,62 @@ def _notify_run_report(now: datetime, summary: dict, entries: list[dict]) -> Non
         )
         return
     send_report(chat_id, title, sections)
+
+
+def _build_short_summary(summary: dict, entries: list[dict]) -> str:
+    """Resumen de ≤10 líneas de toda la corrida (fix 2026-09-19, ver el
+    comentario largo arriba de _notify_run_report()). Reemplaza a
+    _build_report_sections() (queda sin uso, no se borra por si hace falta
+    volver al detalle completo -- ver Pendientes en el reporte de cierre de
+    esa fecha) como lo que se manda por Telegram.
+    """
+    lines = [f"📋 {summary.get('analyzed', 0)} entradas analizadas"]
+
+    pairwise = summary.get("pairwise_detail") or []
+    con_accion = len([d for d in pairwise if d.get("relation") in ("same_fact", "contradiction")])
+    if pairwise:
+        lines.append(f"🔗 {len(pairwise)} pares comparados — {con_accion} con acción")
+    lines.append(
+        f"🗑️ {summary.get('obsolete', 0)} obsoletas · 🏷️ {summary.get('tagged', 0)} tags nuevos"
+    )
+
+    audit = summary.get("audit")
+    total_proposed = 0
+    if audit:
+        findings = len(audit.get("tag_block_findings") or []) + len(audit.get("random_block_findings") or [])
+        huecos = len(audit.get("entity_gap_detail") or [])
+        lines.append(f"🔍 Auditoría: {findings} hallazgos · {huecos} huecos de entidad")
+        total_proposed += audit.get("proposed", 0)
+
+    agenda = summary.get("agenda_ingestion")
+    if agenda and (agenda.get("events_scanned") or agenda.get("tasks_scanned")):
+        lines.append(
+            f"🗓️ Agenda: {agenda.get('events_scanned', 0)} eventos, "
+            f"{agenda.get('tasks_scanned', 0)} tareas completadas"
+        )
+        total_proposed += agenda.get("proposed", 0)
+
+    patterns = summary.get("agenda_patterns")
+    if patterns and patterns.get("ran"):
+        total_proposed += patterns.get("rule_based_proposed", 0) + patterns.get("clusters_proposed", 0)
+        lines.append("🔁 Síntesis de patrones de Agenda: corrió esta vez")
+
+    triage = summary.get("inbox_triage")
+    if triage and triage.get("ran"):
+        total_proposed += triage.get("proposed", 0)
+        lines.append(f"🗂️ Triage del Inbox: {triage.get('proposed', 0)} propuestas")
+
+    if summary.get("quiet_day") and summary.get("open_question"):
+        lines.append("❓ Día tranquilo — te va a llegar una pregunta abierta a continuación.")
+    elif total_proposed:
+        lines.append(f"👉 {total_proposed} propuesta(s) esperando tu sí/no — llegan a continuación.")
+    else:
+        lines.append("Sin propuestas pendientes de confirmación hoy.")
+
+    if summary.get("errors"):
+        lines.append(f"⚠️ {len(summary['errors'])} error(es) durante la corrida.")
+
+    return "\n".join(lines)
 
 
 def _build_report_sections(summary: dict, entries: list[dict]) -> list[str]:

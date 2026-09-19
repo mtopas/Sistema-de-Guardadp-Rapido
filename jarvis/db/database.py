@@ -201,6 +201,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # sin CHECK -- no hace falta el rebuild completo.
     _add_column_if_missing(conn, "memory_entries", "last_audited_at", "last_audited_at DATETIME")
 
+    # Fix del loop de re-propuesta de "hueco de entidad" (2026-09-19) -- ver
+    # el comentario largo junto a estas columnas en jarvis/db/schema.py.
+    _add_column_if_missing(conn, "memory_entries", "pinned_type", "pinned_type TEXT")
+    _add_column_if_missing(
+        conn, "memory_entries", "pinned_subject_entity_id", "pinned_subject_entity_id TEXT"
+    )
+
     # Fusión Jarvis + Bóveda (2026-09-11): eje de autoría -- mismo patrón que
     # created_by (CHECK vía ADD COLUMN, sin rebuild; fallback sin CHECK si el
     # SQLite del entorno no lo soporta).

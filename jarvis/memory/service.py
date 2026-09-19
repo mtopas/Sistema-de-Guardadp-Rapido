@@ -23,6 +23,8 @@ def capture_raw(
     user_id: str | None = None,
     created_by: str = "explicit",
     authorship: str = "user",
+    pinned_type: str | None = None,
+    pinned_subject_entity_id: str | None = None,
 ) -> str:
     """Inserta el contenido en memory_entries (tipo RAW) y encola en inbox_queue.
 
@@ -41,6 +43,14 @@ def capture_raw(
     'jarvis_synthesis' (prosa que el LLM generó combinando fragmentos -- hoy
     solo jarvis/audit/service.py::_apply_create()). Determina a qué raíz de
     D:\\Boveda escribe write_entry(): ver jarvis/vault/writer.py.
+
+    pinned_type / pinned_subject_entity_id (fix del 2026-09-19, ver
+    Cerebro/decisiones-implementacion.md): cuando el llamador YA SABE con
+    certeza el tipo final y/o la entidad de la que esta entrada es 'subject'
+    (hoy solo audit/service.py::_apply_create() al resolver un hueco de
+    entidad), jarvis.worker.processor.process_entry() los usa en vez de
+    confiar en la clasificación/extracción genérica por LLM. None (default)
+    para toda entrada que deba clasificarse normal.
 
     Devuelve el entry_id generado.
     """
@@ -66,12 +76,14 @@ def capture_raw(
                     (id, type, content_raw, source, channel,
                      local_only, confidential, content_hash,
                      recorded_at, valid_from, source_id,
-                     origin_trust, user_id, created_at, created_by, authorship)
+                     origin_trust, user_id, created_at, created_by, authorship,
+                     pinned_type, pinned_subject_entity_id)
                 VALUES
                     (?, 'RAW', ?, ?, ?,
                      ?, ?, ?,
                      ?, ?, ?,
-                     ?, ?, ?, ?, ?)
+                     ?, ?, ?, ?, ?,
+                     ?, ?)
                 """,
                 (
                     entry_id, content, source, channel,
@@ -80,6 +92,7 @@ def capture_raw(
                     content_hash,
                     now, now, source_id,
                     origin_trust, uid, now, created_by, authorship,
+                    pinned_type, pinned_subject_entity_id,
                 ),
             )
             conn.execute(

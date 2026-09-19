@@ -151,9 +151,19 @@ _TRUST_RANK = {
 
 # ── Orquestación (llamado desde consolidation.py) ────────────────────────────
 
-def run_audit(now: datetime | None = None) -> dict:
+def run_audit(now: datetime | None = None, push: bool = True) -> dict:
     """Corre la auditoría completa. Nunca lanza -- cualquier error queda en
     el resumen (mismo patrón que run_consolidation()/scan_and_propose()).
+
+    push=False (fix del 2026-09-19, ver Cerebro/decisiones-implementacion.md
+    -- "resumen corto + preguntas al final"): omite el empuje inmediato a
+    Telegram de las propuestas que esta corrida generó. Único llamador de
+    run_audit() es run_consolidation() (confirmado, no hay otro call site),
+    que ahora manda primero el resumen corto de la corrida completa y recién
+    después flushea la cola (mismo push_next_audit_batch(), solo que
+    diferido) -- así las preguntas de sí/no quedan como últimos mensajes, no
+    los primeros. Default True para no romper el contrato de la función si
+    algún día se llama desde otro lado.
     """
     MANIFEST.assert_allowed("audit_memory")
     MANIFEST.assert_allowed("propose_audit_action")
@@ -210,14 +220,14 @@ def run_audit(now: datetime | None = None) -> dict:
 
     summary["proposed"] = len(created_ids)
 
-    if channel == "telegram" and chat_id and created_ids:
+    if push and channel == "telegram" and chat_id and created_ids:
         try:
             _push_created(created_ids, channel, chat_id, user_id)
         except Exception as exc:
             logger.exception("[audit] Error empujando propuestas a Telegram")
             summary["errors"].append(str(exc))
 
-    if channel == "telegram" and chat_id:
+    if push and channel == "telegram" and chat_id:
         try:
             push_next_audit_batch(channel, chat_id, user_id)
         except Exception as exc:
@@ -1137,8 +1147,28 @@ def _apply_create(proposal: dict, payload: dict) -> str:
     Es el único _apply_* que pasa este valor; todos los demás (clarify,
     open_question, _resolve_with_new_info) son texto que el usuario tipeó de
     verdad como respuesta, así que quedan en 'user' (default de capture_raw).
+
+    pinned_type='PEOPLE' + pinned_subject_entity_id (fix del 2026-09-19, ver
+    Cerebro/decisiones-implementacion.md -- "loop de re-propuesta de hueco de
+    entidad"): `create` es EXCLUSIVO de _process_entity_gaps() (único call
+    site de create_proposal("create", ...), confirmado), así que payload
+    siempre trae `entity_name`. Antes de este fix la entrada resultante
+    quedaba a merced de la clasificación/extracción genérica por LLM, que en
+    la práctica la dejaba SEMANTIC + relation='mentioned' -- _detect_entity_
+    gaps() nunca la contaba como "subject" de una entrada PEOPLE, así que el
+    hueco se volvía a proponer en cada corrida (y la entrada nueva sumaba una
+    mención más, rompiendo encima el dedup de _already_exists() contra el
+    target_ids de la propuesta anterior). Resolver la entidad acá (mismo
+    helper que usa el extractor genérico, _find_or_create_entity) para que
+    quede el MISMO entity_id -- nunca crea una entidad duplicada.
     """
+    from jarvis.entities.service import _find_or_create_entity
     from jarvis.memory.service import capture_raw
+
+    entity_id = _find_or_create_entity(
+        payload["entity_name"], "person", proposal["user_id"],
+        datetime.now(timezone.utc).isoformat(),
+    )
 
     return capture_raw(
         content=payload["content"],
@@ -1149,6 +1179,8 @@ def _apply_create(proposal: dict, payload: dict) -> str:
         user_id=proposal["user_id"],
         created_by="jarvis_proposal_accepted",
         authorship="jarvis_synthesis",
+        pinned_type="PEOPLE",
+        pinned_subject_entity_id=entity_id,
     )
 
 

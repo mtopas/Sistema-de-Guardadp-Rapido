@@ -101,10 +101,13 @@ def should_run_pattern_synthesis(now: datetime | None = None) -> bool:
     return last is None or (now - last) >= interval
 
 
-def run_agenda_pattern_synthesis(now: datetime | None = None) -> dict:
+def run_agenda_pattern_synthesis(now: datetime | None = None, push: bool = True) -> dict:
     """Corre la síntesis completa (ambos caminos) si el gate semanal lo
     permite. Nunca lanza -- cualquier error queda en el resumen (mismo
     contrato que run_agenda_ingestion()/run_audit()).
+
+    push=False: mismo motivo y contrato que run_audit(push=False). Único
+    llamador es run_consolidation().
     """
     now = now or datetime.now(timezone.utc)
     summary = {
@@ -189,7 +192,7 @@ def run_agenda_pattern_synthesis(now: datetime | None = None) -> dict:
     # run_agenda_ingestion(). Si el gate semanal bloqueó esta corrida (return
     # temprano de arriba), no hace falta empujar acá -- el tick ocioso del
     # worker ya lo hace cada JARVIS_WORKER_POLL_INTERVAL de todos modos.
-    if channel == "telegram" and chat_id:
+    if push and channel == "telegram" and chat_id:
         try:
             from jarvis.captures.passive import push_next_capture_batch
 

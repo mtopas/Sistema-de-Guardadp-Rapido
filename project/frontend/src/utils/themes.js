@@ -37,27 +37,32 @@ export const THEMES = {
     '--font-mono':     FONT_MONO_DEFAULT,
   },
 
-  // ---------- 2. ARCOÍRIS — gris neutro + violeta Bóveda ----------
-  'arcoiris': {
-    name: 'Arcoíris',
-    dark: false,
-    '--bg':            '#f7f6f4',
-    '--sidebar':       '#ffffff',
-    '--surface':       '#efedea',
-    '--panel-bg':      'rgba(255,255,255,0.92)',
-    '--border':        'rgba(109,40,217,0.13)',
-    '--accent':        '#7c3aed',
-    '--accent-light':  '#a78bfa',
-    '--accent-deep':   '#6d28d9',
-    '--text':          '#1a1714',
-    '--text-2':        '#3f3a36',
-    '--subtext':       '#7a736c',
-    '--mute':          '#a8a29a',
-    '--cta-bg':        'linear-gradient(130deg, #7c3aed, #ec4899, #f59e0b)',
-    '--cta-text':      '#ffffff',
-    '--shadow-accent': '0 8px 22px -10px rgba(20,20,20,0.28)',
-    '--shadow-soft':   '0 4px 14px rgba(20,20,20,0.10)',
-    '--font-serif':    FONT_SERIF_PLAYFAIR,
+  // ---------- 2. ECLIPSE SOLAR — carbón cálido + ámbar y coral ----------
+  'eclipse-solar': {
+    name: 'Eclipse solar',
+    dark: true,
+    allowTone: false,
+    '--bg':            '#0d0911',
+    '--sidebar':       '#120d17',
+    '--surface':       '#1a1420',
+    '--panel-bg':      'rgba(22,15,27,0.94)',
+    '--header-bg':     'rgba(13,9,17,0.96)',
+    '--header-cta-bg': 'linear-gradient(135deg, #f6c453, #ff6b6b)',
+    '--header-avatar-bg': '#6f3f46',
+    '--border':        'rgba(245,238,230,0.12)',
+    '--accent':        '#f6c453',
+    '--accent-light':  '#ffe08a',
+    '--accent-deep':   '#d97706',
+    '--accent-alt':    '#ff6b6b',
+    '--text':          '#f5eee6',
+    '--text-2':        '#d8ccc2',
+    '--subtext':       '#a9959c',
+    '--mute':          '#6c5b64',
+    '--cta-bg':        'linear-gradient(135deg, #f6c453 0%, #ff8a5b 52%, #ff6b6b 100%)',
+    '--cta-text':      '#160d10',
+    '--shadow-accent': '0 8px 26px -10px rgba(246,196,83,0.48)',
+    '--shadow-soft':   '0 10px 30px rgba(5,2,7,0.42)',
+    '--font-serif':    FONT_SERIF_FRAUNCES,
     '--font-sans':     FONT_SANS_SORA,
     '--font-mono':     FONT_MONO_DEFAULT,
   },
@@ -143,35 +148,31 @@ export const THEMES = {
     '--font-mono':     FONT_MONO_GEIST,
   },
 
-  // ---------- 6. UNDERWATER — azul profundo + celeste, arena, naranja y bordó ----------
-  'underwater': {
-    name: 'Underwater',
+  // ---------- 6. JARDÍN NOCTURNO — verde profundo + jade y orquídea ----------
+  'jardin-nocturno': {
+    name: 'Jardín nocturno',
     dark: true,
-    '--bg':            '#0a3842',
-    '--sidebar':       '#082f38',
-    '--surface':       '#0d4552',
-    '--panel-bg':      'rgba(10, 56, 66, 0.92)',
-    '--header-bg':     '#104552',
-    '--header-cta-bg': '#d59039',
-    '--header-avatar-bg': '#217891',
-    '--border':        'rgba(90, 197, 216, 0.22)',
-    '--accent':        '#5ac5d8',
-    '--accent-light':  '#7ed4e8',
-    '--accent-deep':   '#d59039',
-    '--accent-alt':    '#8b3d4f',
-    '--color-sand':    '#e8d3b2',
-    '--color-orange':  '#d59039',
-    '--color-celeste': '#5ac5d8',
-    '--color-blue':    '#217891',
-    '--color-burgundy':'#8b3d4f',
-    '--text':          '#e8d3b2',
-    '--text-2':        '#d4c4a8',
-    '--subtext':       '#9ecbd6',
-    '--mute':          '#6a9aa8',
-    '--cta-bg':        'linear-gradient(130deg, #d59039, #5ac5d8, #8b3d4f)',
-    '--cta-text':      '#ffffff',
-    '--shadow-accent': '0 6px 18px -8px rgba(90, 197, 216, 0.32)',
-    '--shadow-soft':   '0 4px 14px rgba(0, 0, 0, 0.45)',
+    allowTone: false,
+    '--bg':            '#07110e',
+    '--sidebar':       '#06100c',
+    '--surface':       '#0d1d17',
+    '--panel-bg':      'rgba(8,24,18,0.94)',
+    '--header-bg':     'rgba(6,16,12,0.96)',
+    '--header-cta-bg': 'linear-gradient(135deg, #2dd4a7, #14b8a6)',
+    '--header-avatar-bg': '#176b57',
+    '--border':        'rgba(45,212,167,0.17)',
+    '--accent':        '#2dd4a7',
+    '--accent-light':  '#86efac',
+    '--accent-deep':   '#0f9f6e',
+    '--accent-alt':    '#c084fc',
+    '--text':          '#edf7ef',
+    '--text-2':        '#c9ddd1',
+    '--subtext':       '#8fb7a2',
+    '--mute':          '#536f5f',
+    '--cta-bg':        'linear-gradient(135deg, #2dd4a7 0%, #14b8a6 58%, #0f9f6e 100%)',
+    '--cta-text':      '#03110d',
+    '--shadow-accent': '0 8px 26px -10px rgba(45,212,167,0.48)',
+    '--shadow-soft':   '0 10px 30px rgba(1,8,5,0.44)',
     '--font-serif':    FONT_SERIF_FRAUNCES,
     '--font-sans':     FONT_SANS_SORA,
     '--font-mono':     FONT_MONO_DEFAULT,
@@ -218,7 +219,7 @@ export const BRANCH_COLORS = [
 
 // ============================================================
 // TONO BASE — modificador opcional. Solo aplica a temas oscuros.
-// En temas claros (Arcoíris, Pasteles) lo ignoramos para no
+// En temas claros lo ignoramos para no
 // romper la identidad clara con un overlay oklch oscuro.
 // ============================================================
 export const TONES = {
@@ -304,13 +305,13 @@ export const FONT_PAIRS = {
 
 export const DEFAULT_FONT_PAIR = 'sobrio'
 
-// Arcoíris accent colors per route (exported so store can apply them inline)
-export const ARCOIRIS_ACCENTS = {
-  '/':         { accent: '#7c3aed', light: '#a78bfa', deep: '#6d28d9' },
-  '/finanzas': { accent: '#d97706', light: '#fbbf24', deep: '#b45309' },
-  '/agenda':   { accent: '#2563eb', light: '#60a5fa', deep: '#1d4ed8' },
-  '/habitos':  { accent: '#059669', light: '#34d399', deep: '#047857' },
-  '/jarvis':   { accent: '#06b6d4', light: '#67e8f9', deep: '#0891b2' },
+// Eclipse solar accent colors per route (exported so store can apply them inline)
+export const ECLIPSE_ACCENTS = {
+  '/finanzas': { accent: '#f6c453', light: '#ffe08a', deep: '#d97706' },
+  '/agenda':   { accent: '#60a5fa', light: '#93c5fd', deep: '#2563eb' },
+  '/habitos':  { accent: '#34d399', light: '#6ee7b7', deep: '#059669' },
+  '/jarvis':   { accent: '#22d3ee', light: '#67e8f9', deep: '#0891b2' },
+  '/':         { accent: '#a78bfa', light: '#c4b5fd', deep: '#7c3aed' },
 }
 
 export const SECTION_NAMES = {

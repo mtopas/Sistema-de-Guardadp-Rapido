@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { API_URL, DEBUG } from '../config'
 import { categoriaDescendantIds } from '../utils/categoriaColors'
-import { applyTheme, DEFAULT_THEME, DEFAULT_TONE, DEFAULT_FONT_PAIR, FONT_PAIRS, THEMES, TONES, ARCOIRIS_ACCENTS, pathToSection, SECTION_ORDER } from '../utils/themes'
+import { applyTheme, DEFAULT_THEME, DEFAULT_TONE, DEFAULT_FONT_PAIR, FONT_PAIRS, THEMES, TONES, ECLIPSE_ACCENTS, pathToSection, SECTION_ORDER } from '../utils/themes'
 import { JARVIS_EVENTS_PAGE_SIZE, JARVIS_EVENTS_MAX_LIMIT } from '../utils/jarvisPalette'
 
 // Multi-chat (Mejoras_Jarvis.md punto 3) reemplazó el modelo viejo de "un solo
@@ -32,9 +32,11 @@ function finPayloadEqual(a, b) {
 // Per-section themes — each module has its own independent theme + tone.
 // Migration: if no per-section key exists yet, fall back to the old global key.
 const THEME_ALIASES = {
-  'arena-negro': 'underwater',
-  'sunbeach': 'underwater',
-  'moonbeach': 'underwater',
+  'arcoiris': 'eclipse-solar',
+  'underwater': 'jardin-nocturno',
+  'arena-negro': 'jardin-nocturno',
+  'sunbeach': 'jardin-nocturno',
+  'moonbeach': 'jardin-nocturno',
   'pasteles': 'nexo-nocturno',
   'sakura': 'nexo-nocturno',
   'tierra': 'blanco-negro',
@@ -67,12 +69,12 @@ function _readSectionFontPair(s) {
 
 const initialSectionFontPairs = Object.fromEntries(SECTION_KEYS.map(s => [s, _readSectionFontPair(s)]))
 
-// Apply arcoíris accent override inline (used in actions below)
-function _applyArcoirisAccent(theme) {
-  if (theme !== 'arcoiris') return
+// Apply Eclipse solar accent override inline (used in actions below)
+function _applyEclipseAccent(theme) {
+  if (theme !== 'eclipse-solar') return
   const path = window.location.pathname
-  const key  = Object.keys(ARCOIRIS_ACCENTS).find(k => path.startsWith(k)) || '/'
-  const { accent, light, deep } = ARCOIRIS_ACCENTS[key]
+  const key  = Object.keys(ECLIPSE_ACCENTS).find(k => path.startsWith(k)) || '/'
+  const { accent, light, deep } = ECLIPSE_ACCENTS[key]
   const root = document.documentElement
   root.style.setProperty('--accent',       accent)
   root.style.setProperty('--accent-light', light)
@@ -85,7 +87,7 @@ const startTheme   = initialSectionThemes[startSection]
 const startTone    = initialSectionTones[startSection]
 const startFontPair = initialSectionFontPairs[startSection]
 applyTheme(startTheme, startTone, startFontPair)
-_applyArcoirisAccent(startTheme)
+_applyEclipseAccent(startTheme)
 
 const savedLang     = localStorage.getItem('sgr-lang')     || 'es'
 const savedUserName = localStorage.getItem('sgr-username')  || ''
@@ -1141,7 +1143,7 @@ export const useStore = create((set, get) => ({
   setTheme: (key) => {
     const { currentSection, sectionTones, sectionFontPairs } = get()
     applyTheme(key, sectionTones[currentSection], sectionFontPairs[currentSection])
-    _applyArcoirisAccent(key)
+    _applyEclipseAccent(key)
     localStorage.setItem(`sgr-theme-${currentSection}`, key)
     set({ theme: key, sectionThemes: { ...get().sectionThemes, [currentSection]: key } })
     if (DEBUG) console.log('theme set:', key, 'for', currentSection)
@@ -1152,7 +1154,7 @@ export const useStore = create((set, get) => ({
     const { currentSection, sectionThemes, sectionFontPairs } = get()
     const theme = sectionThemes[currentSection]
     applyTheme(theme, key, sectionFontPairs[currentSection])
-    _applyArcoirisAccent(theme)
+    _applyEclipseAccent(theme)
     localStorage.setItem(`sgr-tone-${currentSection}`, key)
     set({ tone: key, sectionTones: { ...get().sectionTones, [currentSection]: key } })
     if (DEBUG) console.log('tone set:', key, 'for', currentSection)
@@ -1163,7 +1165,7 @@ export const useStore = create((set, get) => ({
     const { currentSection, sectionThemes, sectionTones } = get()
     const theme = sectionThemes[currentSection]
     applyTheme(theme, sectionTones[currentSection], key)
-    _applyArcoirisAccent(theme)
+    _applyEclipseAccent(theme)
     localStorage.setItem(`sgr-font-pair-${currentSection}`, key)
     set({
       fontPair: key,
@@ -1179,7 +1181,7 @@ export const useStore = create((set, get) => ({
     const tone  = sectionTones[section]
     const fontPair = sectionFontPairs[section]
     applyTheme(theme, tone, fontPair)
-    _applyArcoirisAccent(theme)
+    _applyEclipseAccent(theme)
     set({ currentSection: section, theme, tone, fontPair })
   },
 
@@ -1191,7 +1193,7 @@ export const useStore = create((set, get) => ({
     set({ sectionThemes: newSectionThemes })
     if (section === currentSection) {
       applyTheme(key, sectionTones[section], sectionFontPairs[section])
-      _applyArcoirisAccent(key)
+      _applyEclipseAccent(key)
       set({ theme: key })
     }
     if (DEBUG) console.log('themeForSection set:', key, 'for', section)
@@ -1205,7 +1207,7 @@ export const useStore = create((set, get) => ({
     set({ sectionFontPairs: newSectionFontPairs })
     if (section === currentSection) {
       applyTheme(sectionThemes[section], sectionTones[section], key)
-      _applyArcoirisAccent(sectionThemes[section])
+      _applyEclipseAccent(sectionThemes[section])
       set({ fontPair: key })
     }
     if (DEBUG) console.log('fontPairForSection set:', key, 'for', section)

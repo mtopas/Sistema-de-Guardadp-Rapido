@@ -11,6 +11,68 @@ Formato de cada entrada:
 
 ---
 
+## 2026-09-19 — Loop de re-propuesta de huecos de entidad + resumen corto del reporte diario
+
+Contexto: el usuario pegó en `Consolidacion.txt` el reporte diario real del 19/09 y notó que la
+propuesta de crear la entidad "Robert Kiyosaki" (ya aceptada el 17/09, ver entrada de esa fecha
+sobre `formatAge`/Ethernet 2) volvió a aparecer, idéntica, 24hs después. Pidió además que el
+reporte diario se reduzca a un resumen corto (máx. 10 líneas) y que las preguntas de sí/no de esa
+corrida se manden como últimos mensajes, no primeros.
+
+Causa raíz del loop (confirmada contra la DB real del homelab antes de tocar código):
+`_detect_entity_gaps()` (`jarvis/audit/service.py`) considera un hueco de entidad persona
+resuelto solo si existe una entrada vinculada `relation='subject'` y `type='PEOPLE'`.
+`_apply_create()` (la función que corre al aceptar la propuesta) llamaba `capture_raw()`
+genérico, dejando la entrada resultante a merced de la clasificación/extracción normal por LLM
+-- que en la práctica la dejaba `SEMANTIC`/`relation='mentioned'`. El hueco nunca se cerraba, y
+la entrada nueva sumaba una mención más a la entidad, lo que además rompía el dedup de
+`_already_exists()` contra el `target_ids` de la propuesta anterior (ya no coincidía el
+conjunto). Resultado: cada corrida de auditoría volvía a proponer lo mismo, generando una entrada
+duplicada y un mensaje de Telegram nuevo, indefinidamente, para cualquier entidad persona que
+alguna vez hubiera pasado por este flujo.
+
+Decisión 1 (fix del loop): columnas nuevas `pinned_type`/`pinned_subject_entity_id` en
+`memory_entries` -- cuando el llamador de `capture_raw()` ya sabe con certeza el tipo final y la
+entidad `subject` (hoy exclusivo de `_apply_create()`), `process_entry()` los usa en vez de
+confiar en la clasificación genérica. `_apply_create()` resuelve la entidad con
+`_find_or_create_entity()` (mismo helper del extractor genérico) para nunca duplicarla, y pasa
+`pinned_type="PEOPLE"` + el `entity_id` resuelto. Limpieza aplicada en el homelab real (backup
+previo): la propuesta duplicada del 19/09 rechazada vía `reject_proposal()` (no un `DELETE`
+crudo, para no perder el historial), la entrada original de Kiyosaki backfilleada a
+`PEOPLE`/`subject` para cerrar el hueco real. Confirmado que Kiyosaki era la única entidad
+afectada, tanto local como en el homelab.
+
+Decisión 2 (resumen corto + orden): `run_audit()`/`run_agenda_ingestion()`/
+`run_agenda_pattern_synthesis()` ganan un parámetro `push: bool = True` -- con `False` (usado
+únicamente por `run_consolidation()`) no empujan sus propuestas a Telegram de inmediato, quedan
+en cola. `_notify_run_report()` ahora manda `_build_short_summary()` (≤9 líneas + título, contra
+un solo mensaje de Telegram gracias a `send_report()` -- antes podía ser un reporte de hasta 37
+mensajes con la Bóveda real indexada) en vez de `_build_report_sections()` (el detalle completo
+línea por línea, que queda sin uso pero no se borra). Recién después de mandar ese resumen,
+`run_consolidation()` flushea `push_next_audit_batch()`/`push_next_capture_batch()` -- mismo
+throttle/batch-size/expiración de siempre, solo cambia cuándo se llaman la primera vez. Alcance
+confirmado explícitamente con el usuario: esto es exclusivo de la corrida diaria de
+consolidación -- el resto del día, si Jarvis detecta algo digno de confirmar (captura pasiva,
+etc.), sigue preguntando en el momento sin cambios. La recolección completa de datos
+(`pairwise_detail`, etc.) y su persistencia en `jarvis_policies.consolidation_run` no cambian --
+es un cambio de presentación en Telegram únicamente.
+
+Investigado, sin cambios de código: "¿la ingestión de Agenda leyó las tareas pendientes?" --
+confirmado contra datos reales del homelab que la ingestión excluye tareas pendientes a
+propósito (solo ingiere tareas ya completadas + eventos, nunca el to-do abierto que vive en
+Agenda misma) -- no es un bug, es el diseño documentado desde el 03/09.
+
+Impacto: `jarvis/db/schema.py`, `jarvis/db/database.py`, `jarvis/memory/service.py`,
+`jarvis/worker/processor.py`, `jarvis/audit/service.py`, `jarvis/ingestion/agenda.py`,
+`jarvis/ingestion/agenda_patterns.py`, `jarvis/worker/consolidation.py`.
+
+Pendiente, no bloqueante: `maybe_ask_open_question()` (la pregunta abierta de "día tranquilo")
+sigue mandándose en su lugar original, sin reordenar -- es un mecanismo distinto que solo dispara
+en días sin nada más que reportar. Si el usuario lo quiere después del resumen también, es un
+cambio chico aparte.
+
+---
+
 ## 2026-09-18 — Bóveda entera vacía por colisión de `id` entre Jarvis (`index_writer.py`) y el sync de Bóveda
 
 Contexto: el usuario reportó que `http://100.117.86.117:8765` (acceso al homelab vía Tailscale,

@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Search, Bell, Plus, Settings, Target, CheckCircle2, Calendar, CheckSquare } from 'lucide-react'
+import { Search, Bell, Plus, Settings, Target, CheckCircle2, Calendar, CheckSquare, Sparkles } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { t } from '../utils/i18n'
 import { API_URL } from '../config'
@@ -178,6 +178,7 @@ export default function TopBar({ searchQuery = '', onSearchChange, searchInputRe
   const path        = location.pathname
   const modIdx      = moduleIndexForPath(path)
   const currentMod  = APP_MODULES[modIdx]
+  const isBoveda    = currentMod.id === 'boveda'
   const prevMod     = adjacentModule(path, -1)
   const nextMod     = adjacentModule(path, 1)
   const title       = (t(lang, currentMod.titleKey) || 'SGR').toUpperCase()
@@ -190,7 +191,7 @@ export default function TopBar({ searchQuery = '', onSearchChange, searchInputRe
 
   return (
     <header
-      className="h-[60px] shrink-0 sticky top-0 z-30 flex items-center px-6 gap-6 border-b"
+      className={`${isBoveda ? 'h-[72px]' : 'h-[60px]'} shrink-0 sticky top-0 z-30 flex items-center px-5 lg:px-6 gap-4 lg:gap-6 border-b`}
       style={{
         background: 'var(--header-bg, var(--panel-bg))',
         borderColor: 'var(--border)',
@@ -198,28 +199,42 @@ export default function TopBar({ searchQuery = '', onSearchChange, searchInputRe
         WebkitBackdropFilter: 'blur(12px)',
       }}
     >
-      {/* Module title — clic = siguiente · clic derecho = anterior */}
+      {/* Module identity — clic = siguiente · clic derecho = anterior */}
       <button
         type="button"
         onClick={cycleNext}
         onContextMenu={cyclePrev}
         title={`→ ${t(lang, nextMod.titleKey)}  ·  ← ${t(lang, prevMod.titleKey)}`}
-        className="flex items-center rounded-md select-none transition-transform duration-150 hover:scale-[1.03] active:scale-95 focus:outline-none cursor-pointer"
+        className="flex items-center gap-3 min-w-0 rounded-md select-none transition-transform duration-150 hover:scale-[1.02] active:scale-95 focus:outline-none cursor-pointer"
       >
-        <span
-          className="gradient-text font-bold"
-          style={{
-            fontFamily: 'var(--font-serif)',
-            fontStyle: 'italic',
-            fontSize: 28,
-            lineHeight: 1.2,
-            display: 'inline-block',
-            paddingBottom: '0.08em',
-            paddingRight: '0.18em',
-            paddingLeft: '0.02em',
-          }}
-        >
-          {title}
+        {isBoveda && (
+          <span className="hidden lg:inline-flex items-center gap-2.5 pr-3 border-r" style={{ borderColor: 'var(--border)' }}>
+            <span className="w-8 h-8 grid place-items-center rounded-lg" style={{ background: 'color-mix(in oklch, var(--accent) 15%, transparent)', color: 'var(--accent-light)' }}>
+              <Sparkles size={18} strokeWidth={2.25} />
+            </span>
+            <span className="text-[20px] font-bold tracking-[0.06em]" style={{ color: 'var(--text)' }}>SGR</span>
+          </span>
+        )}
+        <span className="min-w-0 text-left">
+          <span
+            className="gradient-text font-bold block"
+            style={{
+              fontFamily: 'var(--font-serif)',
+              fontStyle: 'italic',
+              fontSize: isBoveda ? 24 : 28,
+              lineHeight: 1.08,
+              paddingBottom: '0.08em',
+              paddingRight: '0.18em',
+              paddingLeft: '0.02em',
+            }}
+          >
+            {title}
+          </span>
+          {isBoveda && (
+            <span className="hidden sm:block text-[10px] leading-tight truncate" style={{ color: 'var(--subtext)' }}>
+              Todo tu conocimiento, conectado
+            </span>
+          )}
         </span>
       </button>
 

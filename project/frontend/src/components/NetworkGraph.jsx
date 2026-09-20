@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
+import { Minus, Plus, RotateCcw } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { buildCategoriaColorMap } from '../utils/categoriaColors'
 import { BRANCH_COLORS } from '../utils/themes'
@@ -91,11 +92,11 @@ function buildGraph(categorias, hojas) {
 
 const panelStyle = {
   background: 'var(--panel-bg)', backdropFilter: 'blur(16px)',
-  WebkitBackdropFilter: 'blur(16px)', border: '1px solid var(--border)', borderRadius: 14,
+  WebkitBackdropFilter: 'blur(16px)', border: '1px solid var(--border)', borderRadius: 8,
 }
 const iconBtnStyle = {
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-  width: 30, height: 30, borderRadius: 10, color: 'var(--subtext)',
+  width: 30, height: 30, borderRadius: 7, color: 'var(--subtext)',
   cursor: 'pointer', border: '1px solid transparent', background: 'transparent',
 }
 
@@ -112,6 +113,25 @@ export default function NetworkGraph({ onOpenHoja }) {
 
   // Tooltip state: { x, y, leaf } or null
   const [tooltip, setTooltip] = useState(null)
+  const [zoom, setZoom] = useState(1)
+  const [offset, setOffset] = useState({ x: 0, y: 0 })
+  const dragRef = useRef(null)
+  const graphTransform = `translate(${offset.x} ${offset.y}) translate(${HUB.x} ${HUB.y}) scale(${zoom}) translate(${-HUB.x} ${-HUB.y})`
+
+  const changeZoom = delta => setZoom(value => Math.max(0.7, Math.min(1.7, Number((value + delta).toFixed(2)))))
+  const resetView = () => { setZoom(1); setOffset({ x: 0, y: 0 }) }
+  const handlePointerDown = event => {
+    if (event.target !== event.currentTarget) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    dragRef.current = { x: event.clientX, y: event.clientY, rect }
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+  }
+  const handlePointerMove = event => {
+    if (!dragRef.current) return
+    const { x, y, rect } = dragRef.current
+    setOffset({ x: ((event.clientX - x) / rect.width) * W, y: ((event.clientY - y) / rect.height) * H })
+  }
+  const stopDragging = () => { dragRef.current = null }
 
   const handleLeafMouseEnter = (e, leaf) => {
     const rect = e.currentTarget.closest('svg').getBoundingClientRect()
@@ -136,6 +156,11 @@ export default function NetworkGraph({ onOpenHoja }) {
         preserveAspectRatio="xMidYMid meet"
         aria-label="Grafo de hojas por categoría"
         role="img"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={stopDragging}
+        onPointerLeave={stopDragging}
+        onWheel={event => { event.preventDefault(); changeZoom(event.deltaY > 0 ? -0.1 : 0.1) }}
       >
         <defs>
           <radialGradient id="hubGrad" cx="50%" cy="50%" r="50%">
@@ -148,6 +173,7 @@ export default function NetworkGraph({ onOpenHoja }) {
           </filter>
         </defs>
 
+        <g transform={graphTransform}>
         {/* tag cross-links */}
         {crossLinks.map((l, i) => (
           <line key={`x${i}`} x1={l.a.x} y1={l.a.y} x2={l.b.x} y2={l.b.y}
@@ -222,6 +248,7 @@ export default function NetworkGraph({ onOpenHoja }) {
           fontSize="22" fontWeight="700" textAnchor="middle" fill="var(--cta-text)">
           SGR
         </text>
+        </g>
       </svg>
 
       {/* Hover tooltip */}
@@ -262,19 +289,12 @@ export default function NetworkGraph({ onOpenHoja }) {
         </span>
       </div>
 
-      {/* zoom controls (decorative) */}
-      <div className="absolute top-3 right-3 flex flex-col" style={panelStyle} aria-hidden="true">
-        <button style={iconBtnStyle} tabIndex={-1}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-        </button>
+      <div className="absolute top-3 right-3 flex flex-col" style={panelStyle} aria-label="Controles del grafo">
+        <button type="button" onClick={() => changeZoom(0.1)} style={iconBtnStyle} title="Acercar" aria-label="Acercar"><Plus size={14} /></button>
         <div className="h-px" style={{ background: 'var(--border)' }} />
-        <button style={iconBtnStyle} tabIndex={-1}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-        </button>
+        <button type="button" onClick={() => changeZoom(-0.1)} style={iconBtnStyle} title="Alejar" aria-label="Alejar"><Minus size={14} /></button>
+        <div className="h-px" style={{ background: 'var(--border)' }} />
+        <button type="button" onClick={resetView} style={iconBtnStyle} title="Restablecer vista" aria-label="Restablecer vista"><RotateCcw size={13} /></button>
       </div>
     </div>
   )

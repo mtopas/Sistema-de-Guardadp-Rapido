@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from 'react'
-import { ChevronDown, ChevronRight, Maximize2, Minimize2, Plus, FolderPlus, ChevronsUpDown } from 'lucide-react'
+import { ChevronDown, ChevronRight, Plus, FolderPlus, ChevronsUpDown } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { extractTags } from '../utils/tags'
 import { buildCategoriaColorMap } from '../utils/categoriaColors'
@@ -252,8 +252,8 @@ export default function LeftPanel({ onOpenHoja, onHojaDeleted, searchQuery = '' 
   const categorias      = useStore(s => s.categorias)
   const lang            = useStore(s => s.lang)
   const openCaptureWith = useStore(s => s.openCaptureWith)
+  const crearCategoria  = useStore(s => s.crearCategoria)
 
-  const [expanded, setExpanded] = useState(false)
   const [openState, setOpenState] = useState(() => loadOpenState())
   const [contextMenu, setContextMenu] = useState(null)
   const [hojaMenu, setHojaMenu] = useState(null)
@@ -262,6 +262,8 @@ export default function LeftPanel({ onOpenHoja, onHojaDeleted, searchQuery = '' 
   const [deleteHoja, setDeleteHoja] = useState(null)
   const [deleteCat, setDeleteCat] = useState(null)
   const [subcatFormFor, setSubcatFormFor] = useState(null)
+  const [addingRoot, setAddingRoot] = useState(false)
+  const [rootName, setRootName] = useState('')
 
   const toggleOpen = useCallback((catId) => {
     setOpenState(prev => {
@@ -353,16 +355,20 @@ export default function LeftPanel({ onOpenHoja, onHojaDeleted, searchQuery = '' 
     openCaptureWith(categoriaId)
   }
 
-  const panelWidth = expanded ? '50vw' : '300px'
+  const handleAddRoot = async () => {
+    const nombre = rootName.trim()
+    if (!nombre) return
+    await crearCategoria(nombre)
+    setRootName('')
+    setAddingRoot(false)
+  }
 
   return (
-    <div
-      className="absolute left-0 top-0 h-full z-20 flex flex-col transition-all duration-300 overflow-hidden"
+    <aside
+      className="h-full min-h-0 flex flex-col overflow-hidden border-r"
       style={{
-        width: panelWidth,
-        background: 'transparent',
-        WebkitMaskImage: 'linear-gradient(to right, black calc(100% - 1px), black 100%)',
-        boxShadow: 'inset -1px 0 0 0 color-mix(in oklch, var(--border) 60%, transparent)',
+        background: 'var(--sidebar)',
+        borderColor: 'var(--border)',
       }}
     >
       {/* Header */}
@@ -382,17 +388,6 @@ export default function LeftPanel({ onOpenHoja, onHojaDeleted, searchQuery = '' 
             onMouseLeave={e => { e.currentTarget.style.color = 'var(--subtext)'; e.currentTarget.style.background = 'transparent' }}
           >
             <ChevronsUpDown size={12} />
-          </button>
-          {/* Agrandar/reducir panel */}
-          <button
-            onClick={() => setExpanded(e => !e)}
-            aria-label={expanded ? 'Reducir panel' : 'Agrandar panel'}
-            className="inline-flex items-center justify-center w-6 h-6 rounded-md transition-colors flex-shrink-0"
-            style={{ color: 'var(--subtext)' }}
-            onMouseEnter={e => { e.currentTarget.style.color = 'var(--text)'; e.currentTarget.style.background = 'color-mix(in oklch, var(--surface) 70%, transparent)' }}
-            onMouseLeave={e => { e.currentTarget.style.color = 'var(--subtext)'; e.currentTarget.style.background = 'transparent' }}
-          >
-            {expanded ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
           </button>
         </div>
       </div>
@@ -424,6 +419,25 @@ export default function LeftPanel({ onOpenHoja, onHojaDeleted, searchQuery = '' 
           />
         ))}
       </ScrollArea>
+
+      <div className="p-3 border-t" style={{ borderColor: 'var(--border)' }}>
+        {addingRoot ? (
+          <div className="flex items-center gap-1.5">
+            <input
+              autoFocus
+              value={rootName}
+              onChange={event => setRootName(event.target.value)}
+              onKeyDown={event => { if (event.key === 'Enter') handleAddRoot(); if (event.key === 'Escape') { setAddingRoot(false); setRootName('') } }}
+              placeholder="Nombre de categoría"
+              className="min-w-0 flex-1 px-2.5 py-2 text-xs outline-none border"
+              style={{ color: 'var(--text)', background: 'var(--surface)', borderColor: 'var(--border)', borderRadius: 7 }}
+            />
+            <button type="button" onClick={handleAddRoot} className="w-8 h-8 grid place-items-center" style={{ color: 'var(--cta-text)', background: 'var(--cta-bg)', borderRadius: 7 }} aria-label="Crear categoría"><Plus size={14} /></button>
+          </div>
+        ) : (
+          <button type="button" onClick={() => setAddingRoot(true)} className="w-full h-9 inline-flex items-center justify-center gap-2 border text-xs font-medium" style={{ color: 'var(--accent-light)', borderColor: 'color-mix(in oklch, var(--accent) 45%, var(--border))', borderRadius: 7 }}><FolderPlus size={14} />Nueva categoría</button>
+        )}
+      </div>
 
       {hojaMenu && (
         <AgendaContextMenu
@@ -466,6 +480,6 @@ export default function LeftPanel({ onOpenHoja, onHojaDeleted, searchQuery = '' 
         subcatCount={deleteCat ? categorias.filter(c => c.padre_id === deleteCat.id).length : 0}
         onClose={() => setDeleteCat(null)}
       />
-    </div>
+    </aside>
   )
 }

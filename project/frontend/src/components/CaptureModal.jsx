@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { X, FileText, Link as LinkIcon, Image as ImageIcon, Sparkles, Zap, Clock, Plus, BookOpen, Target, Calendar, TrendingUp } from 'lucide-react'
+import { X, FileText, Link as LinkIcon, Image as ImageIcon, Sparkles, Zap, BookOpen, Target, Calendar, TrendingUp } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { detectType } from '../utils/detectType'
 import { API_URL, DEBUG } from '../config'
@@ -491,36 +491,13 @@ export default function CaptureModal() {
             )}
           </div>}
 
-          {/* Category + Recordar — only for boveda */}
-          {section === 'boveda' && <div className="grid grid-cols-2 gap-3 mt-4">
+          {/* Category — only for boveda */}
+          {section === 'boveda' && <div className="mt-4">
             <div>
               <div className="text-[10px] uppercase tracking-widest mb-1.5" style={{ color: 'var(--subtext)' }}>
                 Categoría
               </div>
               <CategoryPicker value={categoriaId} onChange={setCategoriaId} />
-            </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-widest mb-1.5" style={{ color: 'var(--subtext)' }}>
-                Recordar (opcional)
-              </div>
-              <button
-                type="button"
-                disabled
-                aria-disabled="true"
-                title="Próximamente"
-                className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl border text-sm cursor-not-allowed"
-                style={{
-                  background: 'var(--surface)',
-                  borderColor: 'var(--border)',
-                  color: 'var(--subtext)',
-                  opacity: 0.55,
-                }}
-              >
-                <span className="flex items-center gap-2">
-                  <Clock size={12} /> Sin recordatorio
-                </span>
-                <Plus size={12} />
-              </button>
             </div>
           </div>}
         </div>

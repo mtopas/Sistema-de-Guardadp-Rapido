@@ -20,12 +20,13 @@ export default function Layout({ children }) {
 
   // Full-screen modules (Bóveda, Finanzas) own their layout and hide the Bóveda sidebar.
   const isBrowse         = path === '/'
+  const isBovedaDetail   = path.startsWith('/hoja/') || path === '/capture'
   const isFinanzas       = path.startsWith('/finanzas')
   const isAgenda         = path.startsWith('/agenda')
   const isHabitos        = path.startsWith('/habitos')
   const isJarvis         = path.startsWith('/jarvis')
-  const hideSidebar      = isBrowse || isFinanzas || isAgenda || isHabitos || isJarvis
-  const managesOwnLayout = isBrowse || isFinanzas || isAgenda || isHabitos || isJarvis
+  const hideSidebar      = isBrowse || isBovedaDetail || isFinanzas || isAgenda || isHabitos || isJarvis
+  const managesOwnLayout = isBrowse || isBovedaDetail || isFinanzas || isAgenda || isHabitos || isJarvis
 
   return (
     <div className="flex h-screen overflow-hidden text-app-text">

@@ -36,8 +36,11 @@ export default function App() {
   const fetchHabitosRegistros     = useStore(s => s.fetchHabitosRegistros)
 
   useEffect(() => {
-    fetchCategorias()
-    fetchHojas()
+    const cargarBoveda = async () => {
+      await fetchHojas()
+      await fetchCategorias()
+    }
+    cargarBoveda()
     fetchFinMovimientos()
     fetchFinCuentas()
     fetchFinCategorias()

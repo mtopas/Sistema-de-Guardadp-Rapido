@@ -6,6 +6,7 @@ import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import { useStore } from '../store/useStore'
 import LinkPreview from '../components/LinkPreview'
+import TopBar from '../components/TopBar'
 import { getCategoriaColor } from '../utils/categoriaColors'
 import { getLeafIcon } from '../utils/leafIcons'
 import { extractTags } from '../utils/tags'
@@ -51,6 +52,7 @@ export default function DetailScreen() {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [isDirty,       setIsDirty]       = useState(false)
   const [saving,        setSaving]        = useState(false)
+  const [searchQuery,   setSearchQuery]   = useState('')
 
   const editor = useEditor({
     extensions: [StarterKit, Underline],
@@ -81,11 +83,7 @@ export default function DetailScreen() {
     navigate('/')
   }
 
-  if (!hoja) return (
-    <div className="flex items-center justify-center h-full text-sm" style={{ color: 'var(--subtext)' }}>
-      Hoja no encontrada.
-    </div>
-  )
+  if (!hoja) return <div className="flex flex-col h-full" style={{ background: 'var(--bg)' }}><TopBar searchQuery={searchQuery} onSearchChange={setSearchQuery} /><div className="flex-1 grid place-items-center text-sm" style={{ color: 'var(--subtext)' }}>Hoja no encontrada.</div></div>
 
   const LeafIcon = getLeafIcon(hoja.icono, hoja.tipo)
   const tags     = extractTags(hoja.contenido, hoja.apuntes)
@@ -93,12 +91,13 @@ export default function DetailScreen() {
 
   return (
     <div className="flex flex-col h-full" style={{ background: 'var(--bg)' }}>
+      <TopBar searchQuery={searchQuery} onSearchChange={setSearchQuery} />
 
       {/* Header */}
-      <div className="sticky top-0 z-10 flex items-center gap-3 px-4 py-3 border-b flex-shrink-0"
-        style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}>
-        <button onClick={() => navigate(-1)}
-          className="p-0.5 transition-colors"
+      <div className="flex items-center gap-3 px-5 py-3 border-b flex-shrink-0"
+        style={{ background: 'var(--sidebar)', borderColor: 'var(--border)' }}>
+        <button type="button" onClick={() => navigate('/')}
+          className="w-8 h-8 grid place-items-center transition-colors"
           style={{ color: 'var(--subtext)' }}
           onMouseEnter={e => e.currentTarget.style.color = 'var(--text)'}
           onMouseLeave={e => e.currentTarget.style.color = 'var(--subtext)'}
@@ -106,9 +105,7 @@ export default function DetailScreen() {
           <ArrowLeft size={20} />
         </button>
 
-        <span className="flex-1 text-xs truncate font-medium" style={{ color }}>
-          {hoja.categoria_nombre}
-        </span>
+        <div className="flex-1 min-w-0"><span className="block text-[10px] uppercase tracking-[0.12em]" style={{ color: 'var(--subtext)' }}>Bóveda / {hoja.categoria_nombre || 'Sin categoría'}</span><span className="block text-xs truncate font-medium mt-0.5" style={{ color }}>Editor de hoja</span></div>
 
         {isDirty && (
           <button onClick={handleSave} disabled={saving}
@@ -134,12 +131,14 @@ export default function DetailScreen() {
       </div>
 
       {/* Body */}
-      <div className="flex-1 overflow-y-auto px-4 py-5 space-y-5 max-w-2xl mx-auto w-full">
+      <div className="flex-1 overflow-y-auto px-4 lg:px-6 py-5">
+      <div className="grid xl:grid-cols-[minmax(0,1fr)_260px] gap-5 max-w-6xl mx-auto">
+      <div className="min-w-0 space-y-5">
 
         {/* Hero card */}
-        <div className="rounded-2xl px-5 py-4 flex items-start gap-4"
-          style={{ background: 'var(--surface)', boxShadow: `0 0 0 1px ${color}30` }}>
-          <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
+        <div className="rounded-lg border px-5 py-4 flex items-start gap-4"
+          style={{ background: 'var(--surface)', borderColor: `${color}45` }}>
+          <div className="w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
             style={{ background: color + '22' }}>
             <LeafIcon size={22} style={{ color }} />
           </div>
@@ -213,7 +212,7 @@ export default function DetailScreen() {
           )}
 
           {/* Editor */}
-          <div className="rounded-xl overflow-hidden border transition-colors"
+          <div className="rounded-lg overflow-hidden border transition-colors"
             style={{ borderColor: color + '40', background: 'var(--surface)' }}>
             <EditorToolbar editor={editor} color={color} />
             <div className="px-4 py-3" style={{ color: 'var(--text)' }}>
@@ -222,6 +221,17 @@ export default function DetailScreen() {
           </div>
         </div>
 
+      </div>
+      <aside className="hidden xl:block border rounded-lg h-fit p-4" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+        <h2 className="text-[11px] uppercase tracking-[0.12em] font-semibold" style={{ color: 'var(--subtext)' }}>Información</h2>
+        <dl className="mt-4 space-y-3 text-xs">
+          <div><dt style={{ color: 'var(--subtext)' }}>Categoría</dt><dd className="mt-1 font-medium" style={{ color: 'var(--text)' }}>{hoja.categoria_nombre || 'Sin categoría'}</dd></div>
+          <div><dt style={{ color: 'var(--subtext)' }}>Tipo</dt><dd className="mt-1 font-medium capitalize" style={{ color }}>{hoja.tipo || 'texto'}</dd></div>
+          <div><dt style={{ color: 'var(--subtext)' }}>Creada</dt><dd className="mt-1" style={{ color: 'var(--text-2)' }}>{new Date(hoja.fecha).toLocaleDateString('es-AR')}</dd></div>
+          {tags.length > 0 && <div><dt style={{ color: 'var(--subtext)' }}>Etiquetas</dt><dd className="mt-1.5 flex flex-wrap gap-1">{tags.map(tag => <span key={tag} className="px-1.5 py-0.5 border text-[10px]" style={{ borderColor: 'var(--border)', color: 'var(--text-2)', borderRadius: 5 }}>#{tag}</span>)}</dd></div>}
+        </dl>
+      </aside>
+      </div>
       </div>
     </div>
   )

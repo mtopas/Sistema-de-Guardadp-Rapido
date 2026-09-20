@@ -12,6 +12,29 @@
 @keyframes jv-spin    { to { transform:rotate(360deg); } }
 @keyframes jv-blink   { 0%,100%{opacity:1} 50%{opacity:.2} }
 
+/* Jarvis fija su identidad nocturna incluso si el resto de SGR usa otro tema. */
+body[data-jarvis="1"] {
+  --bg: #05060d;
+  --sidebar: #070a16;
+  --surface: #0a1020;
+  --panel-bg: #080d1b;
+  --header-bg: rgba(5, 8, 20, .9);
+  --border: rgba(125, 170, 225, .18);
+  --accent: #38bdf8;
+  --accent-light: #7dd3fc;
+  --accent-deep: #0369a1;
+  --accent-alt: #a78bfa;
+  --text: #e8ecfb;
+  --text-2: #d8e4ff;
+  --subtext: rgba(200, 214, 255, .58);
+  --mute: rgba(200, 214, 255, .38);
+  --cta-bg: #0ea5e9;
+  --header-cta-bg: #0ea5e9;
+  --cta-text: #f4fbff;
+  --header-avatar-bg: #1d4ed8;
+  --shadow-accent: 0 8px 24px -13px rgba(56, 189, 248, .72);
+}
+
 .jv-root {
   --jv-bg:      #05060d;
   --jv-text:     #e8ecfb;
@@ -30,3 +53,78 @@
 .jv-root textarea::placeholder { color: rgba(200,214,255,0.34); }
 .jv-root textarea:focus, .jv-root input:focus { outline: none; }
 .jv-root ::-webkit-scrollbar-thumb { background: rgba(160,180,255,0.18); }
+
+.jv-empty-hero {
+  width: min(100%, 900px);
+  min-height: 100%;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 30px;
+  padding: 22px 0;
+}
+.jv-hero-metrics {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.jv-hero-metric {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, var(--jv-metric-color) 24%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--jv-metric-color) 7%, rgba(8,10,20,.65));
+  color: var(--jv-metric-color);
+}
+.jv-hero-metric-value { color: var(--jv-text-2); font-size: 16px; font-weight: 650; line-height: 1.1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jv-hero-metric-label { color: var(--jv-subtext); font-size: 10px; margin-top: 3px; }
+.jv-hero-intro { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.jv-hero-core {
+  width: 78px;
+  height: 78px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 18px;
+  border: 1px solid rgba(125,211,252,.58);
+  border-radius: 50%;
+  color: #7dd3fc;
+  background: rgba(125,211,252,.08);
+  box-shadow: 0 0 0 8px rgba(125,211,252,.035), 0 0 30px rgba(125,211,252,.18);
+}
+.jv-hero-intro h1 { margin: 0; color: var(--jv-text-2); font-size: 31px; font-weight: 650; letter-spacing: 0; }
+.jv-hero-intro h1 span { color: #7dd3fc; }
+.jv-hero-intro p { max-width: 500px; margin: 10px 0 0; color: var(--jv-subtext); font-size: 14px; line-height: 1.6; }
+.jv-hero-actions { width: 100%; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.jv-hero-action {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 14px 13px;
+  border: 1px solid color-mix(in srgb, var(--jv-action-color) 34%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--jv-action-color) 8%, rgba(8,10,20,.72));
+  color: var(--jv-action-color);
+  cursor: pointer;
+  text-align: left;
+  transition: background .16s ease, border-color .16s ease, transform .16s ease;
+}
+.jv-hero-action:hover { background: color-mix(in srgb, var(--jv-action-color) 15%, rgba(8,10,20,.78)); border-color: color-mix(in srgb, var(--jv-action-color) 56%, transparent); transform: translateY(-1px); }
+.jv-hero-action strong, .jv-hero-action small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jv-hero-action strong { color: var(--jv-text-2); font-size: 12.5px; font-weight: 650; }
+.jv-hero-action small { margin-top: 3px; color: var(--jv-subtext); font-size: 10.5px; }
+
+@media (max-width: 720px) {
+  .jv-empty-hero { justify-content: flex-start; gap: 20px; padding: 8px 0; }
+  .jv-hero-metrics, .jv-hero-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .jv-hero-metric { padding: 10px; }
+  .jv-hero-intro h1 { font-size: 24px; }
+  .jv-hero-core { width: 62px; height: 62px; margin-bottom: 12px; }
+  .jv-hero-action { padding: 11px; }
+}

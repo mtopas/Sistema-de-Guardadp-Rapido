@@ -1,5 +1,8 @@
 import { useRef, useEffect, useState } from 'react'
-import { Trash2, ChevronDown, ChevronUp } from 'lucide-react'
+import {
+  BrainCircuit, Database, FilePlus2, FolderSearch, Inbox, MessageCircleQuestion,
+  Network, Trash2, UsersRound, ChevronDown, ChevronUp,
+} from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import { useStore } from '../../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
@@ -173,13 +176,68 @@ function TypingIndicator() {
   )
 }
 
+function EmptyChatHero({ memoryCount, pendingCount, entityCount, workerAlive, onAsk, onCapture, onExplore, onInbox }) {
+  const metrics = [
+    { Icon: Database, label: 'Memorias', value: memoryCount, color: MEMORY_TYPE_COLORS.RAW },
+    { Icon: Inbox, label: 'En proceso', value: pendingCount, color: MEMORY_TYPE_COLORS.DECISION },
+    { Icon: UsersRound, label: 'Entidades', value: entityCount, color: MEMORY_TYPE_COLORS.PEOPLE },
+    { Icon: Network, label: 'Worker', value: workerAlive ? 'Activo' : 'Sin conexión', color: workerAlive ? MEMORY_TYPE_COLORS.SEMANTIC : MEMORY_TYPE_COLORS.PEOPLE },
+  ]
+  const actions = [
+    { Icon: MessageCircleQuestion, label: 'Preguntar', detail: 'Consultá tu memoria', color: MEMORY_TYPE_COLORS.RAW, onClick: onAsk },
+    { Icon: FilePlus2, label: 'Capturar', detail: 'Guardá una idea o fuente', color: MEMORY_TYPE_COLORS.SEMANTIC, onClick: onCapture },
+    { Icon: FolderSearch, label: 'Explorar', detail: 'Navegá tus memorias', color: MEMORY_TYPE_COLORS.PROJECT, onClick: onExplore },
+    { Icon: Inbox, label: 'Revisar inbox', detail: 'Seguí los procesamientos', color: MEMORY_TYPE_COLORS.DECISION, onClick: onInbox },
+  ]
+
+  return (
+    <div className="jv-empty-hero">
+      <div className="jv-hero-metrics">
+        {metrics.map(({ Icon, label, value, color }) => (
+          <div key={label} className="jv-hero-metric" style={{ '--jv-metric-color': color }}>
+            <Icon size={16} strokeWidth={1.8} />
+            <div>
+              <div className="jv-hero-metric-value">{value}</div>
+              <div className="jv-hero-metric-label">{label}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="jv-hero-intro">
+        <div className="jv-hero-core"><BrainCircuit size={30} strokeWidth={1.45} /></div>
+        <h1>Jarvis <span>— Segundo Cerebro</span></h1>
+        <p>Consultá, capturá y conectá el conocimiento que ya guardaste.</p>
+      </div>
+
+      <div className="jv-hero-actions">
+        {actions.map(({ Icon, label, detail, color, onClick }) => (
+          <button key={label} type="button" onClick={onClick} className="jv-hero-action" style={{ '--jv-action-color': color }}>
+            <Icon size={22} strokeWidth={1.8} />
+            <span><strong>{label}</strong><small>{detail}</small></span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function JarvisChat() {
-  const { jarvisMessages, jarvisLoading, jarvisQuery, createJarvisChat } = useStore(
+  const {
+    jarvisMessages, jarvisLoading, jarvisQuery, createJarvisChat, openJarvisCapture,
+    setJarvisTab, jarvisTypeCounts, jarvisInbox, jarvisEntities, jarvisHealth,
+  } = useStore(
     useShallow(s => ({
       jarvisMessages:   s.jarvisMessages,
       jarvisLoading:    s.jarvisLoading,
       jarvisQuery:      s.jarvisQuery,
       createJarvisChat: s.createJarvisChat,
+      openJarvisCapture: s.openJarvisCapture,
+      setJarvisTab:     s.setJarvisTab,
+      jarvisTypeCounts: s.jarvisTypeCounts,
+      jarvisInbox:      s.jarvisInbox,
+      jarvisEntities:   s.jarvisEntities,
+      jarvisHealth:     s.jarvisHealth,
     }))
   )
 
@@ -221,6 +279,9 @@ export default function JarvisChat() {
     }
   }
 
+  const memoryCount = Object.values(jarvisTypeCounts).reduce((total, count) => total + count, 0)
+  const pendingCount = jarvisInbox.filter(item => item.status === 'PENDING' || item.status === 'PROCESSING').length
+
   return (
     <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       <JarvisChatTabs />
@@ -228,10 +289,16 @@ export default function JarvisChat() {
       {/* Messages */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '26px 34px 10px', display: 'flex', flexDirection: 'column', gap: 20 }}>
         {jarvisMessages.length === 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 10, color: 'var(--jv-subtext)' }}>
-            <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--jv-text-2)' }}>Jarvis — Segundo Cerebro</div>
-            <div style={{ fontSize: 12 }}>Preguntale algo a tu memoria</div>
-          </div>
+          <EmptyChatHero
+            memoryCount={memoryCount}
+            pendingCount={pendingCount}
+            entityCount={jarvisEntities.length}
+            workerAlive={jarvisHealth.worker_alive}
+            onAsk={() => textareaRef.current?.focus()}
+            onCapture={openJarvisCapture}
+            onExplore={() => setJarvisTab('browse')}
+            onInbox={() => setJarvisTab('inbox')}
+          />
         )}
         {jarvisMessages.map((msg, i) => <MessageRow key={i} msg={msg} onOpenSource={setOpenSourceId} />)}
         {jarvisLoading && <TypingIndicator />}

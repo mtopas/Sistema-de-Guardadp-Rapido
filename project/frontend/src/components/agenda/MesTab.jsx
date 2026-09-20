@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, Edit2, GraduationCap } from 'lucide-react'
+import { CalendarDays, CheckSquare, ChevronLeft, ChevronRight, Edit2, GraduationCap, ListTodo, Timer } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import { t } from '../../utils/i18n'
@@ -36,6 +36,18 @@ function buildWeekDays(year, month, weekOffset) {
     d.setDate(monday.getDate() + i)
     return d
   })
+}
+
+function AgendaMetric({ Icon, label, value, detail, color }) {
+  return (
+    <div className="border px-3 py-3 min-w-0" style={{ background: 'color-mix(in oklch, var(--surface) 78%, transparent)', borderColor: 'var(--border)', borderRadius: 8 }}>
+      <div className="flex items-center gap-2.5">
+        <span className="w-8 h-8 grid place-items-center shrink-0" style={{ color, background: `color-mix(in oklch, ${color} 16%, transparent)`, borderRadius: 7 }}><Icon size={16} /></span>
+        <div className="min-w-0"><div className="text-[19px] leading-none font-semibold tnum" style={{ color: 'var(--text)' }}>{value}</div><div className="text-[10px] mt-1 truncate" style={{ color: 'var(--subtext)' }}>{label}</div></div>
+      </div>
+      {detail && <div className="mt-2 text-[10px] truncate" style={{ color }}>{detail}</div>}
+    </div>
+  )
 }
 
 export default function MesTab() {
@@ -151,12 +163,29 @@ export default function MesTab() {
 
   const cells = buildMonthCells(year, month)
   const weekDays = vista === 'semana' ? buildWeekDays(year, month, weekOff) : []
+  const todayISO = toLocalISODate(today)
+  const pendingCount = agendaTareas.filter(task => !task.completada).length
+  const todayEvents = agendaEventos.filter(evento => evento.fecha_inicio?.slice(0, 10) === todayISO).length
+  const plannedDays = new Set([
+    ...agendaEventos.map(evento => evento.fecha_inicio?.slice(0, 10)),
+    ...agendaTareas.map(task => task.fecha_opcional),
+  ].filter(Boolean)).size
+  const upcomingEvents = [...agendaEventos]
+    .filter(evento => evento.fecha_inicio?.slice(0, 10) >= todayISO)
+    .sort((a, b) => a.fecha_inicio.localeCompare(b.fecha_inicio))
+    .slice(0, 6)
 
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+    <div className="grid grid-cols-2 xl:grid-cols-4 gap-2.5 px-3 lg:px-4 py-3 border-b shrink-0" style={{ borderColor: 'var(--border)' }}>
+      <AgendaMetric Icon={CheckSquare} label="Tareas pendientes" value={pendingCount} detail={pendingCount ? 'Para organizar y completar' : 'Todo al día'} color="var(--accent)" />
+      <AgendaMetric Icon={CalendarDays} label="Eventos hoy" value={todayEvents} detail={todayEvents ? 'En tu agenda de hoy' : 'Sin eventos previstos'} color="var(--success)" />
+      <AgendaMetric Icon={ListTodo} label="Calendarios activos" value={agendaCalendarios.filter(cal => cal.activo).length} detail={`${agendaCalendarios.length} en total`} color="var(--accent-alt, var(--accent-light))" />
+      <AgendaMetric Icon={Timer} label="Días planificados" value={plannedDays} detail="Con eventos o tareas fechadas" color="var(--warning)" />
+    </div>
     <div className="flex flex-1 min-h-0 overflow-hidden">
       {/* Left panel */}
-      <aside className="w-[260px] shrink-0 flex flex-col h-full overflow-y-auto panel-scroll border-r p-4" style={{ borderColor: 'var(--border)' }}>
+      <aside className="hidden xl:flex w-[248px] shrink-0 flex-col h-full overflow-y-auto panel-scroll border-r p-4" style={{ borderColor: 'var(--border)' }}>
         <div className="flex items-center justify-between mb-2 px-1">
           <div className="label">{t(lang, 'agendaCalendarios')}</div>
           <button
@@ -169,9 +198,9 @@ export default function MesTab() {
         </div>
 
         <div className="flex flex-col gap-0.5">
-          {agendaCalendarios.map(cal => (
+          {agendaCalendarios.map((cal, index) => (
             <div
-              key={cal.id}
+              key={`${cal.id}-${index}`}
               className="group flex items-center gap-2.5 px-2 py-1.5 rounded-lg cursor-pointer hover:bg-[var(--surface)]"
               onClick={() => updateAgendaCalendario(cal.id, { activo: !cal.activo })}
             >
@@ -195,7 +224,7 @@ export default function MesTab() {
       {/* Center: calendar */}
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b shrink-0" style={{ borderColor: 'var(--border)' }}>
+        <div className="flex flex-wrap items-center justify-between gap-2 px-4 lg:px-5 py-3 border-b shrink-0" style={{ borderColor: 'var(--border)' }}>
           <div className="flex items-center gap-3">
             <button className="icon-btn" onClick={() => vista === 'mes' ? goMonth(-1) : setWeekOff(w => w - 1)}>
               <ChevronLeft size={15} />
@@ -448,10 +477,29 @@ export default function MesTab() {
           </div>
         )}
       </div>
+
+      <aside className="hidden xl:flex w-[296px] shrink-0 flex-col border-l min-h-0" style={{ borderColor: 'var(--border)', background: 'var(--sidebar)' }}>
+        <div className="px-4 pt-4 pb-2 flex items-center justify-between"><h2 className="text-[11px] uppercase tracking-[0.12em] font-semibold" style={{ color: 'var(--subtext)' }}>Próximos eventos</h2><span className="text-[11px]" style={{ color: 'var(--accent)' }}>{upcomingEvents.length}</span></div>
+        <div className="px-3 pb-4 min-h-0 overflow-y-auto space-y-1.5">
+          {selected ? (
+            <div className="border p-3" style={{ borderColor: selected.color || 'var(--accent)', background: 'var(--surface)', borderRadius: 8 }}>
+              <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="text-[10px] uppercase tracking-[0.1em]" style={{ color: selected.color || 'var(--accent)' }}>{selected.type === 'evento' ? 'Evento' : 'Tarea'}</p><p className="mt-1 text-sm font-semibold leading-snug" style={{ color: 'var(--text)' }}>{selected.item.titulo}</p></div><button type="button" className="icon-btn" style={{ width: 26, height: 26 }} onClick={() => setEditSelected(true)} title={t(lang, 'agendaEditar')}><Edit2 size={12} /></button></div>
+              <p className="mt-3 text-[11px]" style={{ color: 'var(--subtext)' }}>{selected.type === 'evento' ? selected.item.fecha_inicio?.replace('T', ' · ').slice(0, 16) : `${selected.item.fecha_opcional || 'Sin fecha'}${selected.item.hora_opcional ? ` · ${selected.item.hora_opcional}` : ''}`}</p>
+              {selected.item.descripcion && <p className="mt-2 text-xs leading-relaxed" style={{ color: 'var(--text-2)' }}>{selected.item.descripcion}</p>}
+            </div>
+          ) : upcomingEvents.length ? upcomingEvents.map((evento, index) => (
+            <button key={`${evento.id}-${evento.fecha_inicio}-${index}`} type="button" onClick={() => setSelected({ type: 'evento', color: evento.calendario_color || 'var(--accent)', item: evento })} className="w-full border px-3 py-2.5 text-left transition-colors" style={{ borderColor: 'var(--border)', background: 'var(--surface)', borderRadius: 8 }}>
+              <span className="flex items-center gap-2 text-[10px]" style={{ color: evento.calendario_color || 'var(--accent)' }}><span className="w-1.5 h-1.5 rounded-full" style={{ background: evento.calendario_color || 'var(--accent)' }} />{evento.todo_el_dia ? 'Todo el día' : evento.fecha_inicio?.slice(0, 16).replace('T', ' · ')}</span>
+              <span className="block mt-1 text-xs font-medium truncate" style={{ color: 'var(--text)' }}>{evento.titulo}</span>
+            </button>
+          )) : <p className="px-1 py-6 text-xs" style={{ color: 'var(--subtext)' }}>No hay eventos próximos.</p>}
+        </div>
+        <div className="border-t px-4 py-4" style={{ borderColor: 'var(--border)' }}><h2 className="text-[11px] uppercase tracking-[0.12em] font-semibold" style={{ color: 'var(--subtext)' }}>Calendarios</h2><div className="mt-3 space-y-2">{agendaCalendarios.filter(cal => cal.activo).slice(0, 5).map((cal, index) => <div key={`${cal.id}-${index}`} className="flex items-center justify-between text-xs"><span className="flex items-center gap-2 truncate" style={{ color: 'var(--text-2)' }}><span className="w-2 h-2 rounded-full" style={{ background: cal.color }} />{cal.nombre}</span><span className="tnum" style={{ color: 'var(--subtext)' }}>{agendaEventos.filter(evento => evento.calendario_id === cal.id).length}</span></div>)}</div></div>
+      </aside>
     </div>
 
       {/* Franja debajo del calendario: detalle del seleccionado, o próximos eventos si no hay nada seleccionado */}
-      <div className="shrink-0 border-t overflow-x-auto panel-scroll" style={{ borderColor: 'var(--border)' }}>
+      <div className="xl:hidden shrink-0 border-t overflow-x-auto panel-scroll" style={{ borderColor: 'var(--border)' }}>
         {selected ? (
           <div className="flex items-center gap-3 px-4 py-2.5">
             <div className="label shrink-0">{selected.type === 'evento' ? t(lang, 'agendaEventoLabel') : t(lang, 'agendaTareaLabel')}</div>
@@ -486,8 +534,8 @@ export default function MesTab() {
           <div className="flex items-center gap-3 px-4 py-2.5">
             <div className="label shrink-0">{t(lang, 'agendaProxEventos')}</div>
             <div className="flex gap-2 overflow-x-auto">
-              {agendaEventos.slice(0, 5).map(e => (
-                <div key={e.id}
+              {agendaEventos.slice(0, 5).map((e, index) => (
+                <div key={`${e.id}-${e.fecha_inicio}-${index}`}
                   className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-[var(--surface)] cursor-pointer shrink-0 panel-strong"
                   onClick={() => setSelected({ type: 'evento', color: e.calendario_color, item: e })}>
                   <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: e.calendario_color }} />

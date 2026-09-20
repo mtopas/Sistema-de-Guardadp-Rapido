@@ -320,7 +320,7 @@ export default function HoyTab() {
     <div className="flex flex-1 min-h-0 overflow-hidden">
       {/* Left panel */}
       <aside
-        className="w-[260px] shrink-0 flex flex-col h-full overflow-y-auto panel-scroll border-r"
+        className="hidden lg:flex w-[260px] shrink-0 flex-col h-full overflow-y-auto panel-scroll border-r"
         style={{ borderColor: 'var(--border)' }}
       >
         <div className="p-4">

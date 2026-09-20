@@ -175,7 +175,7 @@ export default function RevisionTab() {
   return (
     <div className="flex flex-1 min-h-0 overflow-hidden">
       {/* Left: week selector */}
-      <aside className="w-[200px] shrink-0 flex flex-col h-full border-r p-4" style={{ borderColor: 'var(--border)' }}>
+      <aside className="hidden lg:flex w-[200px] shrink-0 flex-col h-full border-r p-4" style={{ borderColor: 'var(--border)' }}>
         <div className="label mb-3">{t(lang, 'agendaRevisionTitle')}</div>
         <div className="flex items-center gap-2 mb-4">
           <button className="icon-btn" style={{ width: 26, height: 26 }} onClick={() => setWeekOff(w => w - 1)}>

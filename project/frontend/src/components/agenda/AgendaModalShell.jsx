@@ -48,7 +48,7 @@ export default function AgendaModalShell({ title, onClose, onSave, saving, child
         role="dialog"
         aria-modal="true"
         aria-labelledby="agenda-modal-title"
-        className={`w-full ${wide ? 'max-w-lg' : 'max-w-md'} rounded-2xl border shadow-2xl flex flex-col`}
+        className={`w-full ${wide ? 'max-w-lg' : 'max-w-md'} rounded-lg border shadow-2xl flex flex-col`}
         style={{ background: 'var(--panel-bg)', borderColor: 'var(--border)', maxHeight: '90vh' }}
         onClick={e => e.stopPropagation()}
       >
@@ -65,7 +65,7 @@ export default function AgendaModalShell({ title, onClose, onSave, saving, child
           {deleteBtn || <div />}
           <div className="flex items-center gap-2">
             <button
-              className="px-4 py-2 rounded-xl text-[13px] border"
+              className="px-4 py-2 rounded-lg text-[13px] border"
               style={{ borderColor: 'var(--border)', color: 'var(--subtext)' }}
               onClick={onClose}
             >
@@ -73,7 +73,7 @@ export default function AgendaModalShell({ title, onClose, onSave, saving, child
             </button>
             {onSave && (
               <button
-                className="px-4 py-2 rounded-xl text-[13px] font-medium transition-all"
+                className="px-4 py-2 rounded-lg text-[13px] font-medium transition-all"
                 style={{ background: 'var(--cta-bg)', color: 'var(--cta-text)' }}
                 disabled={saving}
                 onClick={onSave}

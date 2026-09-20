@@ -22,7 +22,7 @@ export default function AgendaScreen() {
   const navigate  = useNavigate()
   const params    = new URLSearchParams(location.search)
   const tabParam  = params.get('tab')
-  const initTab   = VALID_TABS.includes(tabParam) ? tabParam : 'hoy'
+  const initTab   = VALID_TABS.includes(tabParam) ? tabParam : 'mes'
 
   const [tab, setTab] = useState(initTab)
   const [facultadOpen, setFacultadOpen] = useState(false)
@@ -46,12 +46,12 @@ export default function AgendaScreen() {
     <div className="flex flex-col w-full h-full">
       <TopBar />
       <div
-        className="flex items-center justify-between px-5 py-2.5 border-b shrink-0"
+        className="flex items-center justify-between gap-3 px-3 lg:px-5 py-2.5 border-b shrink-0"
         style={{ borderColor: 'var(--border)', background: 'var(--panel-bg)' }}
       >
         <AgendaTabs active={tab} onChange={handleTabChange} />
         <button
-          className="flex items-center gap-1.5 text-[11.5px] px-2.5 py-1.5 rounded-lg border transition-colors"
+          className="hidden sm:flex items-center gap-1.5 text-[11.5px] px-2.5 py-1.5 rounded-lg border transition-colors"
           style={{ borderColor: 'var(--border)', color: 'var(--subtext)' }}
           onMouseEnter={e => { e.currentTarget.style.borderColor = '#059669'; e.currentTarget.style.color = '#059669' }}
           onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--subtext)' }}

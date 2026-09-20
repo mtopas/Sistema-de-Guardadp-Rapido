@@ -210,7 +210,7 @@ export default function TareasTab() {
       <div className="px-4 pt-3">{viewToggle}</div>
       <div className="flex flex-1 min-h-0 overflow-hidden">
       {/* Left panel: lists */}
-      <aside className="w-[260px] shrink-0 flex flex-col h-full overflow-y-auto panel-scroll border-r p-4" style={{ borderColor: 'var(--border)' }}>
+       <aside className="hidden lg:flex w-[248px] shrink-0 flex-col h-full overflow-y-auto panel-scroll border-r p-4" style={{ borderColor: 'var(--border)' }}>
         <div className="panel-strong p-3 mb-4">
           <MiniCalendar year={year} month={month} onMonthChange={goMonth} eventDays={miniEventDays} />
         </div>

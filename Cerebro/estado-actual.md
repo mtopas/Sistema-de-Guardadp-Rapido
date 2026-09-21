@@ -1,6 +1,41 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-21
 
+## FIX: `POST /hojas` devolvía 500 genérico con categoría sin ruta sincronizada al vault + hallazgo de procesos duplicados en :8765 local (2026-09-21)
+
+Cierra el bug reportado en la entrada de auditoría de arriba (mismo día). `app/main.py`
+(`crear_hoja_endpoint`, ~línea 582) ahora envuelve la llamada a `crear_hoja()` en
+`try/except ValueError`, traduciendo el error a `400` con el mensaje real
+("categoria_id N sin carpeta sincronizada en el vault") en vez de un 500 plano sin
+contexto — mismo patrón ya usado en otros endpoints de `main.py` (`except ValueError as
+exc: raise HTTPException(...)`, ver `actualizar_fin_instrumento` como ejemplo).
+
+**Verificado con reproducción real, no solo por lectura de código**: insertada una
+categoría de prueba (`ruta=NULL`) directo en `database/app.db` (bypaseando
+`crear_categoria()` a propósito para no tocar `D:\Boveda`), `POST /hojas` contra ella dio
+`400` con el mensaje esperado (antes daba 500 plano), sin crear ninguna hoja huérfana.
+Categoría de prueba borrada después. `python -m py_compile app/main.py` limpio.
+
+**Hallazgo real durante la verificación, no anticipado**: el intento de reproducir el bug
+inicialmente dio un resultado inesperado (200 en vez de 400) — investigado, la causa fue
+que el puerto **8765 local tenía DOS procesos uvicorn corriendo en paralelo** desde hacía
+varias sesiones: uno del venv del proyecto (huérfano, no escuchaba realmente) y otro con el
+**Python global de Windows** (no el venv), **sin `--reload`**, que era el que de verdad
+atendía las requests — nunca había recargado ningún cambio de código de esta sesión
+(incluidos los commits `45f87ee` y `95d2008` de más arriba). Esto también explica, con más
+certeza, la discrepancia de `app.db` que la auditoría anterior había marcado como "esperada
+sin investigar más": puede que ese proceso stale estuviera sirviendo contra un `app.db`
+distinto (sandbox de otra sesión), no necesariamente el real. Se mataron ambos procesos
+duplicados y se levantó uno limpio (venv, `--reload`) antes de verificar el fix.
+**Recomendación para la próxima sesión que use el entorno local**: antes de asumir "esto no
+refleja mi código actual", correr `Get-CimInstance Win32_Process -Filter "name='python.exe'"`
+y confirmar que no hay procesos duplicados en el mismo puerto — mismo tipo de problema ya
+documentado en `HOMELAB.md` para el bot de Telegram, ahora confirmado también para el
+backend local.
+
+Archivo tocado: `project/app/main.py`. Sin desplegar al homelab todavía (bug no reportado
+ahí, solo detectado en el entorno local).
+
 ## AUDITORÍA + FIX: 3 commits frontend sin documentar (Bóveda/Agenda/Jarvis) + 2 bugs reales encontrados en vivo (2026-09-20/21)
 
 Entre el deploy del 19/09 y esta sesión aparecieron 3 commits en `master` sin pasar por el

@@ -579,19 +579,22 @@ async def crear_hoja_endpoint(hoja: HojaCreate, background_tasks: BackgroundTask
         if url_match:
             preview = await _fetch_link_preview(url_match.group(0))
 
-    hid = crear_hoja(
-        hoja.contenido,
-        hoja.categoria_id,
-        tipo=hoja.tipo,
-        apuntes=hoja.apuntes,
-        lugar=hoja.lugar,
-        latitud=hoja.latitud,
-        longitud=hoja.longitud,
-        fecha_recordatorio=hoja.fecha_recordatorio,
-        icono=hoja.icono,
-        link_preview=preview,
-        origen=_detectar_origen(request),
-    )
+    try:
+        hid = crear_hoja(
+            hoja.contenido,
+            hoja.categoria_id,
+            tipo=hoja.tipo,
+            apuntes=hoja.apuntes,
+            lugar=hoja.lugar,
+            latitud=hoja.latitud,
+            longitud=hoja.longitud,
+            fecha_recordatorio=hoja.fecha_recordatorio,
+            icono=hoja.icono,
+            link_preview=preview,
+            origen=_detectar_origen(request),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     # Indexar en background — no bloquea la respuesta
     cat = next((c["nombre"] for c in obtener_categorias() if c["id"] == hoja.categoria_id), "")
     background_tasks.add_task(semantic.index_hoja, hid, hoja.contenido, cat, hoja.tipo)

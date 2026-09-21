@@ -4,6 +4,175 @@ Ideas anotadas para evaluar/diseñar más adelante — no aprobadas, no implemen
 
 ---
 
+## Auditoría de otro modelo de IA (2026-09-21) — roadmap de 90 días, mayormente diferido
+
+**Fecha:** 2026-09-21
+
+**Contexto:** el usuario le pidió a otro modelo de IA (no esta sesión) una auditoría integral
+de SGR — arquitectura, seguridad, cada módulo, homelab, Telegram — con un roadmap de 90 días.
+El archivo original (`SGR-Auditoria-Siguiente-Nivel-2026-09-21.md`, en la raíz del repo, sin
+commitear) se borró después de pasar esto acá, a pedido del usuario.
+
+**Criterio de decisión (del orquestador, discutido con el usuario)**: el roadmap está escrito
+con la vara de "esto va a ser un producto o va a tener equipo" — CI completo, harness de
+evaluación de Jarvis con métricas F1/MRR, migrar montos a centavos, adoptar RFC 5545 para
+recurrencia, arquitectura de `domain_events`/outbox unificada, Playwright E2E, etc. SGR es un
+proyecto de un solo desarrollador para uso personal (ver convenciones de Git en `CLAUDE.md`:
+"no hace falta esa ceremonia en un repo de un solo desarrollador"). El costo de ese nivel de
+rigor no se justifica hoy porque el único usuario es quien también detecta y arregla los
+problemas reales sobre la marcha (like esta misma sesión). **4 ítems baratos y de valor real sí
+se extrajeron y se mandaron a implementar aparte** (ver `Cerebro/decisiones-implementacion.md`,
+entrada `2026-09-21 — 4 ítems baratos de la auditoría externa`, o el handoff de la sesión que
+los implemente) — el resto queda anotado acá, sin implementar, para retomar si el contexto
+cambia (más usuarios, exposición pública, etc.).
+
+**Aplicado aparte, NO en esta lista de diferidos:** allowlist de Telegram global, offline
+honesto (rollback + aviso visible en vez de "guardado" falso), timezone explícita en jobs de
+Telegram, `SGR_SYNC_TOKEN` obligatorio.
+
+### Diferido — riesgo de pérdida de datos en el sync
+- Reemplazar el sync "archivo completo, el que escribe último gana" (`.exe` ↔ homelab) por algo
+  con precondición de versión: `GET /sync/version` con `revision` monotónico, el pull guarda
+  `base_revision`, el push manda `If-Match`, `409` si la revisión remota cambió.
+- Alternativa de fondo (más trabajo): outbox local con `operation_id`/idempotencia en vez de
+  sincronizar el `.sqlite` completo — el `.exe` deja de tener su propia copia de la DB y pasa a
+  ser un cliente más de la API vía Tailscale.
+
+### Diferido — seguridad
+- `/preview?url=` es una superficie SSRF (sigue redirects, puede pegarle a URLs internas/LAN).
+- `/upload` no aplica `MAX_IMAGE_SIZE_MB` en la práctica ni verifica el contenido real del
+  archivo.
+- `DetailScreen.jsx` usa `dangerouslySetInnerHTML` sobre `hoja.apuntes` sin sanitizador
+  visible — riesgo de XSS almacenado si algún día entra HTML no confiable (hoy el único
+  "atacante" posible sería el propio usuario, pero si Telegram se abre a más gente esto importa).
+  Necesitaría una librería de sanitización (allowlist de tags) + probar que TipTap sigue
+  renderizando bien.
+- Headers de seguridad ausentes (CSP, `X-Content-Type-Options`, `Referrer-Policy`).
+- Bind de FastAPI a localhost + Tailscale Serve como proxy HTTPS, en vez de exponer `:8765`
+  directo por IP Tailscale (evita depender de que nadie más entre al tailnet).
+
+### Diferido — "offline falso" más allá del parche rápido ya aplicado
+- Outbox real en IndexedDB (`operation_id`, payload, reintentos, estado, pantalla "cambios
+  pendientes") — lo aplicado ahora es el parche mínimo (rollback + error visible), no esto.
+- `Idempotency-Key` en el servidor para que un reintento no duplique un movimiento/registro.
+
+### Diferido — sin red de seguridad automatizada
+- Sin tests de proyecto ni de Jarvis, sin CI. Suite mínima sugerida: pytest backend (CRUD,
+  migraciones, transferencias, recurrencia, hábitos, sync), Vitest + Playwright frontend, tests
+  de handlers de Telegram, dataset dorado de routing/retrieval para Jarvis.
+- 5 flujos E2E propuestos como primer set: Telegram registra gasto → aparece en web; tarea
+  creada en web → aparece en `/hoy` → callback la completa; hábito en web → Telegram lo
+  refleja; nota en Bóveda → Markdown+SQLite+búsqueda consistentes; Jarvis responde citando
+  fuente válida.
+
+### Diferido — privacidad/tamaño del repo
+- `project/database/` tiene ~112 archivos versionados en git (SQLite, Chroma, datasets
+  viejos) — mismo tema que venimos parchando ad-hoc dejando `app.db.bak` afuera de cada commit
+  esta sesión, pero sin una limpieza de fondo del historial. Si algún día se quiere hacer
+  público el repo, hace falta inventariar qué hay ahí, sacarlo del tracking, y evaluar
+  reescribir historial con `git-filter-repo` (borrar el archivo en el último commit NO lo saca
+  del historial).
+- Backups 3-2-1 reales (hoy son manuales, timestamped, sin rotación) + restore drill
+  verificado periódicamente.
+
+### Diferido — plataforma web
+- `App.jsx` carga los 5 módulos al montar, aunque el usuario solo abra uno — lazy-load por
+  ruta pendiente (hoy solo Bóveda/Detalle lo tienen).
+- Bundle principal ~722kB minificado (198kB gzip), warning de Vite por chunk >500kB — separar
+  D3/TipTap/Jarvis en chunks explícitos.
+- Store único de casi 1.700 líneas mezclando caché, mutaciones, fallback offline, UI y dominio
+  — separar por módulo (`modules/boveda/api.js`+`store.js`, etc.) de forma incremental, no
+  big-bang.
+- PWA sigue llamándose "Bóveda — Sistema de Guardado Rápido" en el manifest.
+- Permiso de notificaciones se pide al montar `TopBar`, no tras una acción del usuario (MDN
+  recomienda pedirlo tras interacción).
+- Accesibilidad sin auditar (focus visible, navegación por teclado, contraste) — sugiere
+  Playwright + axe.
+
+### Diferido — Bóveda
+- Tres representaciones de conocimiento conviviendo sin regla clara: Markdown en `D:\Boveda`,
+  índice `categorias/hojas` en `app.db`, y DOS colecciones semánticas separadas
+  (`app/semantic.py` de SGR y `jarvis_memory` de Jarvis) — un buscador híbrido único
+  (FTS5 + embedding + recencia) resolvería inconsistencias entre `/buscar`, `/pregunta` y `/jq`.
+- Cada `GET` de Bóveda puede recorrer el vault completo (`rglob`) — mover la indexación a un
+  watcher/poller fuera del request, con tabla de estado (`archivo, hash, mtime, último error`).
+- Historial de notas aprovechando que la Bóveda ya tiene Git propio (diff, restaurar versión) —
+  en vez de inventar una tabla `hojas_revisiones` nueva.
+- Bandeja de entrada explícita para `00 - Sin categorizar` con acciones rápidas (archivar,
+  unir duplicados, convertir en proyecto/persona) — parcialmente cubierto ya por el triage
+  automático de Jarvis, pero sin UI web dedicada.
+- Links internos estables por `vault_id` en vez de ID autoincremental del índice.
+
+### Diferido — Finanzas
+- Montos como `REAL`/float — migrar a enteros (centavos) para evitar error de redondeo
+  acumulado. Esfuerzo grande (toca todo el módulo), no se justifica sin evidencia real de que
+  ya está pasando.
+- `transfer_group_id` con ambos lados de una transferencia en una sola transacción SQL, en vez
+  de dos movimientos independientes vinculados solo por convención.
+- Reconciliación de importaciones CSV: staging antes de confirmar, matching, detección de
+  duplicados con score.
+- Presupuesto mensual por categoría, gastos recurrentes como entidades (no inferidos por
+  texto), forecast 30/60/90 días.
+- Reglas de clasificación personales entrenables antes de recurrir al LLM en cada captura.
+
+### Diferido — Agenda
+- Recurrencia con JSON propio en vez de RFC 5545 (`RRULE`/`EXDATE`/`RECURRENCE-ID`) — el
+  patrón de excepciones de Facultad (implementado 19/09) es un antecedente parcial, pero
+  generalizarlo a RFC 5545 es un cambio de fondo.
+- Notificaciones fragmentadas entre polling web y jobs del bot — tabla `scheduled_notifications`
+  + outbox de entrega unificada, con reintentos y dead-letter visible.
+- De "plan" a "ejecución real": botón iniciar/finalizar bloque, tiempo real vs. planificado en
+  la Revisión semanal.
+- Vínculos reales entre módulos (tarea "Pagar tarjeta" ligada a una obligación financiera
+  concreta, evento ligado a una nota por `vault_id`).
+
+### Diferido — Hábitos
+- Motor de hábitos único en backend (`is_scheduled`, streak, stats) — hoy la lógica está
+  duplicada entre frontend/backend/bot.
+- Versionar la programación (`habit_schedule_versions` con `effective_from/to`) para que editar
+  la frecuencia hoy no reinterprete el historial pasado con la regla nueva.
+- Más tipos de hábito además de binario/parcial: conteo, duración, rango (ánimo 1-5), objetivo
+  semanal.
+- Pausas/excepciones explícitas (vacaciones, "saltar con razón" distinto de fallar).
+
+### Diferido — Jarvis
+- Evaluation harness real: dataset versionado (routing, RAG con fuentes esperadas,
+  same_fact/contradiction, privacidad, propuestas), métricas (F1, recall@5/MRR, groundedness,
+  tasa de aceptación de propuestas, latencia, costo) — hoy la validación es manual, sesión por
+  sesión, contra datos reales. Es la pieza más grande y la que más tardaría en pagarse sola,
+  pero también la que más se nota que falta cuando algo se rompe silenciosamente.
+- Citas a nivel de afirmación (no solo "estas son las fuentes" sino qué fragmento respalda qué
+  frase puntual), con "no lo sé" explícito si no hay evidencia suficiente.
+- Brief diario y revisión semanal cross-módulo (agenda + hábitos + finanzas + Bóveda por
+  clasificar) — el LLM redacta sobre un JSON agregado determinístico, no calcula totales él
+  mismo.
+- Panel de calidad/operación (salud de Ollama, backlog de jobs, cobertura de embeddings,
+  presupuesto, última consolidación).
+- Dividir `audit/service.py` y `consolidation.py` (ya grandes) por caso de uso: mantenimiento,
+  no funcionalidad nueva.
+
+### Diferido — Homelab
+- Red directa (gabinete al router/switch, sin depender de ICS de Windows) — la mitigación
+  actual (watchdogs) funciona pero sigue siendo un parche sobre una topología frágil.
+- Health checks reales (`/health/live`, `/health/ready`, `/health/deps`) + `depends_on:
+  condition: service_healthy` en el compose (hoy Docker solo espera a que el contenedor esté
+  *corriendo*, no a que la app esté lista).
+- Estado del bot (`chat_id.json`, `checkin_config.json`, etc.) vive en archivos dentro de un
+  mount read-only (`./mybot:/app/mybot:ro`) — los errores de escritura se silencian, cambios de
+  `/checkin`/`/notif_*` podrían no persistir en Docker. Mover a `app.db`/`jarvis.db`.
+- Deploy reproducible: Dockerfile multi-stage (Node adentro, no depender de un `dist/`
+  buildeado a mano localmente), build context explícito, tag por commit SHA — hoy el proceso es
+  literalmente `scp`/`tar` manual cada vez (documentado en `HOMELAB.md`, funciona pero es 100%
+  manual).
+- Observabilidad mínima: logs estructurados, rotación, alguna señal tipo Uptime Kuma.
+
+### No conviene hacer (según la auditoría, y coincide con el criterio de esta sesión)
+Migrar a PostgreSQL, microservicios, sync bidireccional de SQLite completo, más agentes
+autónomos antes de medir Jarvis, actualizar todas las libs (React/Tailwind/Zustand) de una,
+habilitar Tailscale Funnel, tratar Chroma como fuente de verdad respaldable.
+
+---
+
 ## Ingestión de Agenda: que Jarvis también vea tareas pendientes a corto plazo, no solo completadas
 
 **Fecha:** 2026-09-19

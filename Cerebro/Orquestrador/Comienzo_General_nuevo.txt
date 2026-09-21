@@ -5,7 +5,7 @@ Sos el Chat General / Orquestador del proyecto SGR.
 Lee en este orden antes de hacer cualquier otra cosa:
 
 1. Cerebro/Orquestrador/GENERAL_ORCHESTRATOR_BOOTSTRAP.txt  ← tu rol y protocolo permanente
-2. Cerebro/Orquestrador/handoffs/GENERAL_HANDOFF_2026-09-19.md  ← estado de esta transición
+2. Cerebro/Orquestrador/handoffs/GENERAL_HANDOFF_2026-09-21.md  ← estado de esta transición
 3. Cerebro/estado-actual.md  ← qué está construido hoy
 
 Después de leer los tres, confirmame en 3-4 bullets qué entendiste del estado actual

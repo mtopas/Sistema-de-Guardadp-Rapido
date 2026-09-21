@@ -30,6 +30,12 @@ Archivos tocados: `jarvis/config.py`, `jarvis/worker/consolidation.py`,
 `jarvis/worker/main.py`, `jarvis/captures/passive.py`, `jarvis/ingestion/agenda_patterns.py`,
 `jarvis/notify/telegram.py`.
 
+**Desplegado al homelab el mismo día**: `jarvis/` re-sincronizado completo (`tar`), imagen
+`sgr-app:latest` reconstruida y los 3 contenedores recreados. Verificado: `RestartCount=0`
+en los 3, logs del `worker` sin errores ("Loop activo. Poll cada 5s."). El próximo reporte
+de consolidación en Telegram debería salir con el título nuevo ("📊 Consolidación — ...", sin
+"diaria") y no repetirse hasta pasados 7 días desde la última corrida real.
+
 ## DEPLOY completo al homelab: todo lo de esta sesión ya está en vivo (2026-09-21)
 
 Cierra el pendiente que había quedado a mitad de camino: el primer intento de deploy de

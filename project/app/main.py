@@ -1420,6 +1420,8 @@ class AgendaTareaCreate(BaseModel):
     hora_opcional: Optional[str] = None
     hora_bloque: Optional[str] = None
     duracion_estimada: Optional[int] = None
+    se_repite: bool = False
+    regla_repeticion: Optional[str] = None
 
     @field_validator('hora_opcional', 'hora_bloque', mode='before')
     @classmethod
@@ -1657,6 +1659,8 @@ def crear_agenda_tarea(body: AgendaTareaCreate):
         hora_opcional=body.hora_opcional,
         hora_bloque=body.hora_bloque,
         duracion_estimada=body.duracion_estimada,
+        se_repite=body.se_repite,
+        regla_repeticion=body.regla_repeticion,
     )
 
 @app.patch("/agenda/tareas/{tarea_id}")
@@ -1886,7 +1890,20 @@ _SYNC_TOKEN = os.getenv("SGR_SYNC_TOKEN", "")
 
 
 def _check_sync_token(request: Request) -> None:
-    if _SYNC_TOKEN and request.headers.get("X-Sync-Token") != _SYNC_TOKEN:
+    """Sin SGR_SYNC_TOKEN configurado, antes quedaba "fail open" (cualquiera
+    que llegue a :8765 podía pegarle a /sync/import y reemplazar la DB
+    canónica completa) -- ahora "fail closed": sin token configurado, los dos
+    endpoints de sync se rechazan (2026-09-21, ver auditoría externa en
+    Cerebro/PROXIMAMENTE.md). No afecta el resto del backend -- solo estos 2
+    endpoints, a propósito, para no trabar toda la app si a alguien se le
+    olvidó configurar la env var sin darse cuenta de por qué el resto dejó de
+    andar."""
+    if not _SYNC_TOKEN:
+        raise HTTPException(
+            status_code=503,
+            detail="Sync deshabilitado: configurá SGR_SYNC_TOKEN en el servidor.",
+        )
+    if request.headers.get("X-Sync-Token") != _SYNC_TOKEN:
         raise HTTPException(status_code=401, detail="Token de sync inválido")
 
 

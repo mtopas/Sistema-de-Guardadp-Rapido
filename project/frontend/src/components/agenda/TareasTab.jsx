@@ -128,6 +128,7 @@ export default function TareasTab() {
   const [selectedColor, setSelectedColor]   = useState(COLORS[0])
   const [newTareaOpen, setNewTareaOpen]     = useState(false)
   const [editTarea, setEditTarea]           = useState(null)
+  const [editModalOpen, setEditModalOpen]   = useState(false)
   const [viewMode, setViewMode]             = useState('lista') // 'lista' | 'canvas'
 
   const goMonth = (dir) => {
@@ -144,6 +145,11 @@ export default function TareasTab() {
       if (filtro === 'completadas') return t.completada
       return true
     })
+
+  // Tarea "en vivo" para el aside de detalle -- evita mostrar datos viejos
+  // después de guardar una edición desde el modal (editTarea guarda la
+  // referencia del momento del click, no se actualiza sola).
+  const editTareaLive = editTarea ? (agendaTareas.find(x => x.id === editTarea.id) || editTarea) : null
 
   const handleCreateLista = async () => {
     if (!newListaNombre.trim()) return
@@ -375,38 +381,47 @@ export default function TareasTab() {
           <div>
             <div className="flex items-center justify-between mb-4">
               <div className="label">{t(lang, 'agendaDetalle')}</div>
-              <button className="icon-btn" style={{ width: 22, height: 22 }} onClick={() => setEditTarea(null)}>
-                <X size={12} />
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  className="icon-btn" style={{ width: 22, height: 22 }}
+                  onClick={() => setEditModalOpen(true)}
+                  title={t(lang, 'agendaEditar')}
+                >
+                  <Edit2 size={12} />
+                </button>
+                <button className="icon-btn" style={{ width: 22, height: 22 }} onClick={() => setEditTarea(null)}>
+                  <X size={12} />
+                </button>
+              </div>
             </div>
             <div className="panel-strong p-3 rounded-xl">
               <div className="flex items-center gap-2 mb-3">
                 <button
-                  style={{ color: editTarea.completada ? 'var(--accent)' : 'var(--mute)' }}
+                  style={{ color: editTareaLive.completada ? 'var(--accent)' : 'var(--mute)' }}
                   onClick={() => {
-                    const upd = { completada: !editTarea.completada }
+                    const upd = { completada: !editTareaLive.completada }
                     updateAgendaTarea(editTarea.id, upd)
                     setEditTarea(t => ({ ...t, ...upd }))
                   }}
                 >
-                  {editTarea.completada ? <CheckCircle2 size={16} /> : <Circle size={16} />}
+                  {editTareaLive.completada ? <CheckCircle2 size={16} /> : <Circle size={16} />}
                 </button>
-                <span className="text-[14px] font-semibold">{editTarea.titulo}</span>
+                <span className="text-[14px] font-semibold">{editTareaLive.titulo}</span>
               </div>
-              {editTarea.descripcion && (
-                <p className="text-[12.5px] mb-3" style={{ color: 'var(--text-2)' }}>{editTarea.descripcion}</p>
+              {editTareaLive.descripcion && (
+                <p className="text-[12.5px] mb-3" style={{ color: 'var(--text-2)' }}>{editTareaLive.descripcion}</p>
               )}
-              {editTarea.fecha_opcional && (
+              {editTareaLive.fecha_opcional && (
                 <div className="flex items-center gap-1.5 text-[11.5px]" style={{ color: 'var(--subtext)' }}>
                   <span>📅</span>
-                  <span className="mono">{editTarea.fecha_opcional}
-                    {editTarea.hora_opcional && ` · ${editTarea.hora_opcional}`}
+                  <span className="mono">{editTareaLive.fecha_opcional}
+                    {editTareaLive.hora_opcional && ` · ${editTareaLive.hora_opcional}`}
                   </span>
                 </div>
               )}
-              {editTarea.duracion_estimada && (
+              {editTareaLive.duracion_estimada && (
                 <div className="mono text-[11px] mt-1.5" style={{ color: 'var(--mute)' }}>
-                  ⏱ {editTarea.duracion_estimada} min
+                  ⏱ {editTareaLive.duracion_estimada} min
                 </div>
               )}
             </div>
@@ -431,6 +446,13 @@ export default function TareasTab() {
         <TareaModal
           defaultListaId={selectedListaId === INBOX_ID ? null : selectedListaId}
           onClose={() => setNewTareaOpen(false)}
+        />
+      )}
+
+      {editModalOpen && editTarea && (
+        <TareaModal
+          tarea={editTarea}
+          onClose={() => setEditModalOpen(false)}
         />
       )}
       </div>

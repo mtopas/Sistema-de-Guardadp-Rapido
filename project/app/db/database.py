@@ -683,6 +683,24 @@ def _apply_migrations(cursor):
         if DEBUG:
             print("migration: agenda_listas.pinned added")
 
+    # --- agenda_tareas: recurrencia (diario/semanal/mensual), mismo shape que
+    # agenda_eventos.regla_repeticion pero materializando filas reales en vez
+    # de expandir en tiempo de lectura -- las tareas tienen estado propio
+    # (completada) por ocurrencia, a diferencia de los eventos. ---
+    tareas_cols = _get_columns(cursor, "agenda_tareas")
+    if "se_repite" not in tareas_cols:
+        cursor.execute("ALTER TABLE agenda_tareas ADD COLUMN se_repite INTEGER NOT NULL DEFAULT 0")
+        if DEBUG:
+            print("migration: agenda_tareas.se_repite added")
+    if "regla_repeticion" not in tareas_cols:
+        cursor.execute("ALTER TABLE agenda_tareas ADD COLUMN regla_repeticion TEXT")
+        if DEBUG:
+            print("migration: agenda_tareas.regla_repeticion added")
+    if "serie_id" not in tareas_cols:
+        cursor.execute("ALTER TABLE agenda_tareas ADD COLUMN serie_id INTEGER")
+        if DEBUG:
+            print("migration: agenda_tareas.serie_id added")
+
     # --- Index para eventos por fecha ---
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_eventos_inicio ON agenda_eventos(fecha_inicio)"

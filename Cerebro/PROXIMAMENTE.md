@@ -4,6 +4,54 @@ Ideas anotadas para evaluar/diseñar más adelante — no aprobadas, no implemen
 
 ---
 
+## Extender automáticamente la ventana de recurrencia de tareas
+
+**Fecha:** 2026-09-21
+
+**Contexto:** al implementar recurrencia de tareas (`agenda_tareas.se_repite`/`regla_repeticion`/
+`serie_id`, ver `Cerebro/estado-actual.md`), se generan las ocurrencias reales de una sola vez
+al crear la tarea, dentro de una ventana acotada (diario 60 días, semanal 12 semanas, mensual 12
+ocurrencias) — sin ningún job que la extienda con el tiempo. Si una tarea recurrente sigue
+activa después de esa ventana, hoy hay que recrearla a mano.
+
+**Sin diseñar**: ¿un paso más en `run_consolidation()`/un job aparte que, para cada `serie_id`
+cuya última ocurrencia generada esté por vencer, genere el siguiente lote? ¿O alcanza con que el
+usuario la recree cuando se acabe, dado que son recurrencias de uso personal (no builds/cron
+crítico)? También queda sin resolver "editar esta ocurrencia vs. toda la serie" (mismo problema
+que ya señaló la auditoría externa para eventos, RFC 5545 completo) — hoy cada ocurrencia
+generada es una tarea independiente, editarla o borrarla no afecta a sus hermanas ni a la
+cabeza, lo cual es simple pero no permite "cambiar el horario de todos los martes de acá en
+adelante" en una sola acción.
+
+---
+
+## Auditoría de otro modelo de IA (2026-09-21, catálogo de features) — visión de largo plazo, no una propuesta a implementar
+
+**Fecha:** 2026-09-21
+
+**Contexto:** el usuario le pidió a otro modelo de IA un "catálogo de features y visión de
+producto" para evolucionar SGR hacia un asistente tipo JARVIS (Mission Control, memoria
+verificable con procedencia, motor de acciones con aprobación/verificación, entidad "Misión"
+que cruza todos los módulos, Telegram como bandeja de aprobaciones, Home Assistant como capa
+física, modo sombra antes de proactividad real). Documento completo compartido con el
+orquestador y resumido en el chat — el archivo original
+(`SGR-JARVIS-Catalogo-de-Features-2026-09-21.md`) es visión, no un plan aprobado.
+
+**Por qué queda acá y no como propuesta**: es un documento de dirección a 1-2 años (roadmap de
+6 fases, desde "confianza operativa" hasta "JARVIS ambiental" con voz por habitación), no algo
+para implementar ahora. El propio documento asume como prerrequisito (Fase 0) cerrar los riesgos
+de la auditoría técnica anterior (ver la entrada de arriba, "Roadmap de 90 días").
+
+**Si se retoma en el futuro**: el primer "vertical slice" concreto que proponen —
+**"Preparame el día"** (lee Agenda/misiones/hábitos/señales financieras/homelab, prioriza,
+propone máximo 3 cambios con diff, pide aprobación, ejecuta solo lo aprobado, verifica, y recién
+ahí guarda memoria) — es un buen punto de entrada acotado si algún día se decide perseguir esta
+dirección: obliga a resolver memoria con procedencia, separación planificador/ejecutor/
+verificador, y una bandeja de aprobaciones real, sin depender de hardware nuevo ni de voz.
+Ninguna decisión tomada — queda anotado para cuando el usuario quiera evaluarlo en serio.
+
+---
+
 ## Auditoría de otro modelo de IA (2026-09-21) — roadmap de 90 días, mayormente diferido
 
 **Fecha:** 2026-09-21

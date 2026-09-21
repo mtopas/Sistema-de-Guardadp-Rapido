@@ -2365,6 +2365,9 @@ def _tarea_dict(r) -> dict:
         "lista_id":          r[8],
         "lista_color":       r[9] or "#7c3aed",
         "lista_nombre":      r[10] or "",
+        "se_repite":         bool(r[11]),
+        "regla_repeticion":  r[12],
+        "serie_id":          r[13],
     }
 
 
@@ -2377,7 +2380,8 @@ def agenda_obtener_tareas(
     query = """
         SELECT t.id, t.titulo, t.descripcion, t.fecha_opcional, t.hora_opcional,
                t.hora_bloque, t.duracion_estimada, t.completada, t.lista_id,
-               COALESCE(l.color, '#7c3aed'), COALESCE(l.nombre, '')
+               COALESCE(l.color, '#7c3aed'), COALESCE(l.nombre, ''),
+               t.se_repite, t.regla_repeticion, t.serie_id
         FROM agenda_tareas t
         LEFT JOIN agenda_listas l ON l.id = t.lista_id
         WHERE 1=1
@@ -2395,6 +2399,63 @@ def agenda_obtener_tareas(
     return [_tarea_dict(r) for r in rows]
 
 
+# Recurrencia de tareas (2026-09-21): a diferencia de agenda_eventos (que
+# expande virtualmente en _expand_recurring(), nunca persiste), las tareas sí
+# tienen estado por ocurrencia (completada) -- una ocurrencia completada no
+# puede afectar a sus hermanas, así que acá se materializan filas reales.
+# Ventana acotada a propósito, sin job que la extienda: es una limitación
+# conocida, no un bug -- ver Cerebro/PROXIMAMENTE.md.
+_REC_TAREA_DIAS_DIARIO   = 60   # "diario": hasta 60 días hacia adelante
+_REC_TAREA_SEMANAS       = 12   # "semanal": hasta 12 semanas hacia adelante
+_REC_TAREA_MESES         = 12   # "mensual": hasta 12 ocurrencias
+
+
+def _generar_fechas_recurrencia_tarea(fecha_inicio: str, regla: dict) -> list:
+    """Fechas (ISO, sin incluir fecha_inicio) de las próximas ocurrencias de
+    una tarea recurrente, dentro de la ventana acotada de arriba. Mismo shape
+    de regla que agenda_eventos.regla_repeticion (frecuencia/dias/hasta) y
+    mismo criterio de "scheduled" que _expand_recurring(), pero generando
+    fechas concretas en vez de expandir un evento virtual."""
+    frecuencia = regla.get("frecuencia", "semanal")
+    dias       = regla.get("dias") or []  # [0=lunes..6=domingo], igual que eventos
+    hasta_rule = regla.get("hasta")
+
+    base = date.fromisoformat(fecha_inicio[:10])
+    limite = None
+    if hasta_rule:
+        try:
+            limite = date.fromisoformat(hasta_rule)
+        except Exception:
+            limite = None
+
+    fechas = []
+    if frecuencia == "mensual":
+        cur = base
+        for _ in range(_REC_TAREA_MESES):
+            m, y = cur.month + 1, cur.year
+            if m > 12:
+                m, y = 1, y + 1
+            day = min(base.day, _calendar.monthrange(y, m)[1])
+            cur = date(y, m, day)
+            if limite is not None and cur > limite:
+                break
+            fechas.append(cur.isoformat())
+    else:
+        if frecuencia == "diario":
+            fin = base + timedelta(days=_REC_TAREA_DIAS_DIARIO)
+        else:  # "semanal" (default)
+            fin = base + timedelta(weeks=_REC_TAREA_SEMANAS)
+        if limite is not None:
+            fin = min(fin, limite)
+        cur = base + timedelta(days=1)
+        while cur <= fin:
+            scheduled = frecuencia == "diario" or (not dias) or (cur.weekday() in dias)
+            if scheduled:
+                fechas.append(cur.isoformat())
+            cur += timedelta(days=1)
+    return fechas
+
+
 def agenda_crear_tarea(
     titulo: str,
     lista_id: Optional[int] = None,
@@ -2403,21 +2464,51 @@ def agenda_crear_tarea(
     hora_opcional: Optional[str] = None,
     hora_bloque: Optional[str] = None,
     duracion_estimada: Optional[int] = None,
+    se_repite: bool = False,
+    regla_repeticion: Optional[str] = None,
 ) -> dict:
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
         """INSERT INTO agenda_tareas
-           (titulo, descripcion, fecha_opcional, hora_opcional, hora_bloque, duracion_estimada, completada, lista_id)
-           VALUES (?, ?, ?, ?, ?, ?, 0, ?)""",
-        (titulo.strip(), descripcion, fecha_opcional, hora_opcional, hora_bloque, duracion_estimada, lista_id),
+           (titulo, descripcion, fecha_opcional, hora_opcional, hora_bloque, duracion_estimada,
+            completada, lista_id, se_repite, regla_repeticion)
+           VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)""",
+        (titulo.strip(), descripcion, fecha_opcional, hora_opcional, hora_bloque, duracion_estimada,
+         lista_id, int(bool(se_repite)), regla_repeticion),
     )
     tid = cursor.lastrowid
     conn.commit()
+
+    # Generar ocurrencias reales de la serie -- solo si hay fecha inicial (sin
+    # fecha_opcional no hay desde dónde contar la recurrencia) y una regla
+    # parseable. Cualquier error acá se loguea y se ignora -- la tarea cabeza
+    # ya quedó creada, no tiene sentido tumbar la request por esto.
+    if se_repite and regla_repeticion and fecha_opcional:
+        try:
+            regla = json.loads(regla_repeticion) if isinstance(regla_repeticion, str) else regla_repeticion
+            fechas = _generar_fechas_recurrencia_tarea(fecha_opcional, regla or {})
+            for f in fechas:
+                cursor.execute(
+                    """INSERT INTO agenda_tareas
+                       (titulo, descripcion, fecha_opcional, hora_opcional, hora_bloque,
+                        duracion_estimada, completada, lista_id, se_repite, regla_repeticion, serie_id)
+                       VALUES (?, ?, ?, ?, ?, ?, 0, ?, 0, NULL, ?)""",
+                    (titulo.strip(), descripcion, f, hora_opcional, hora_bloque,
+                     duracion_estimada, lista_id, tid),
+                )
+            conn.commit()
+            if DEBUG:
+                print(f"agenda_crear_tarea: {len(fechas)} ocurrencias generadas para serie_id={tid}")
+        except Exception as exc:
+            if DEBUG:
+                print(f"agenda_crear_tarea: fallo generando ocurrencias de recurrencia (serie_id={tid}): {exc}")
+
     cursor.execute(
         """SELECT t.id, t.titulo, t.descripcion, t.fecha_opcional, t.hora_opcional,
                   t.hora_bloque, t.duracion_estimada, t.completada, t.lista_id,
-                  COALESCE(l.color, '#7c3aed'), COALESCE(l.nombre, '')
+                  COALESCE(l.color, '#7c3aed'), COALESCE(l.nombre, ''),
+                  t.se_repite, t.regla_repeticion, t.serie_id
            FROM agenda_tareas t
            LEFT JOIN agenda_listas l ON l.id = t.lista_id
            WHERE t.id = ?""",
@@ -2450,7 +2541,8 @@ def agenda_actualizar_tarea(tarea_id: int, campos: dict) -> Optional[dict]:
     cursor.execute(
         """SELECT t.id, t.titulo, t.descripcion, t.fecha_opcional, t.hora_opcional,
                   t.hora_bloque, t.duracion_estimada, t.completada, t.lista_id,
-                  COALESCE(l.color, '#7c3aed'), COALESCE(l.nombre, '')
+                  COALESCE(l.color, '#7c3aed'), COALESCE(l.nombre, ''),
+                  t.se_repite, t.regla_repeticion, t.serie_id
            FROM agenda_tareas t
            LEFT JOIN agenda_listas l ON l.id = t.lista_id
            WHERE t.id = ?""",
@@ -2680,7 +2772,8 @@ def agenda_buscar(q: str) -> dict:
     cursor.execute(
         """SELECT t.id, t.titulo, t.descripcion, t.fecha_opcional, t.hora_opcional,
                   t.hora_bloque, t.duracion_estimada, t.completada, t.lista_id,
-                  COALESCE(l.color, '#7c3aed'), COALESCE(l.nombre, '')
+                  COALESCE(l.color, '#7c3aed'), COALESCE(l.nombre, ''),
+                  t.se_repite, t.regla_repeticion, t.serie_id
            FROM agenda_tareas t
            LEFT JOIN agenda_listas l ON l.id = t.lista_id
            WHERE t.titulo LIKE ? OR t.descripcion LIKE ?

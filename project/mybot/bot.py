@@ -6,19 +6,29 @@ import sys
 import time as _time
 from datetime import datetime, time as datetime_time, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
+    ApplicationHandlerStop,
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
+    Defaults,
     MessageHandler,
     TypeHandler,
     filters,
 )
 from telegram.request import HTTPXRequest
+
+# App de un solo usuario, una sola timezone -- hardcodeada a propósito, no hace
+# falta una env var nueva (2026-09-21, ver auditoría externa en
+# Cerebro/PROXIMAMENTE.md). Pasada a Defaults(tzinfo=...) en main(): todo
+# datetime.time naive en run_daily/run_repeating (bot.py y agenda_handlers.py)
+# hereda esta timezone en vez de UTC -- ver doc de JobQueue.run_daily.
+APP_TIMEZONE = ZoneInfo("America/Argentina/Buenos_Aires")
 
 from api_config import API_BASE
 
@@ -1313,6 +1323,54 @@ def _is_offline_user_message(update: Update, boot_time: datetime | None) -> bool
     return msg_date < boot_time
 
 
+# ──────────────────────────────────────────────────────────────
+# Allowlist global (2026-09-21, ver auditoría externa en Cerebro/PROXIMAMENTE.md)
+# ──────────────────────────────────────────────────────────────
+# Antes, BOT_ALLOWED_CHAT_IDS solo se chequeaba adentro de finanzas_handlers.py
+# (10 call sites de _is_allowed()) -- Bóveda/Agenda/Hábitos/Jarvis quedaban sin
+# ningún control de acceso. _is_allowed() de finanzas_handlers.py NO se tocó
+# (queda como chequeo redundante inofensivo); esto es el control real, global,
+# para todos los módulos.
+
+
+def _get_allowed_chat_ids() -> set:
+    """Mismo parseo que finanzas_handlers.py::_get_allowed_ids() -- no se
+    importa de ahí para no crear una dependencia cruzada entre módulos que hoy
+    no la tienen; son 8 líneas, duplicarlas es más simple que acoplar."""
+    raw = os.getenv("BOT_ALLOWED_CHAT_IDS", "")
+    ids = set()
+    for part in raw.split(","):
+        part = part.strip()
+        if part.lstrip("-").isdigit():
+            ids.add(int(part))
+    return ids
+
+
+_ALLOWED_CHAT_IDS = _get_allowed_chat_ids()
+
+
+async def _enforce_allowlist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Grupo -1: corre ANTES que cualquier CommandHandler/MessageHandler/
+    CallbackQueryHandler registrado en group=0. Sin BOT_ALLOWED_CHAT_IDS
+    configurado, deja pasar todo (mismo comportamiento permisivo de siempre --
+    no romper para quien no lo configuró). Configurado, corta el procesamiento
+    para chats no autorizados con ApplicationHandlerStop, sin revelar comandos
+    ni datos."""
+    if not _ALLOWED_CHAT_IDS:
+        return
+    chat = update.effective_chat
+    if chat is None or chat.id in _ALLOWED_CHAT_IDS:
+        return
+    try:
+        if update.effective_message:
+            await update.effective_message.reply_text("No tenés acceso a este bot.")
+        elif update.callback_query:
+            await update.callback_query.answer("No tenés acceso a este bot.", show_alert=True)
+    except Exception as e:
+        logger.warning("allowlist: no pude avisar a chat no autorizado (%s)", e)
+    raise ApplicationHandlerStop
+
+
 async def _catchup_after(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Grupo 1: corre después de los handlers normales.
@@ -1461,11 +1519,18 @@ def main():
         ApplicationBuilder()
         .token(TOKEN)
         .request(_build_telegram_request())
+        .defaults(Defaults(tzinfo=APP_TIMEZONE))
         .post_init(_post_init)
         .build()
     )
     app.bot_data["api_base"] = API_BASE
     app.add_error_handler(_global_error_handler)
+
+    if _ALLOWED_CHAT_IDS:
+        print(f"[bot] Allowlist activa: {len(_ALLOWED_CHAT_IDS)} chat(s) permitido(s)")
+    else:
+        print("[bot] ⚠ BOT_ALLOWED_CHAT_IDS sin configurar -- el bot acepta cualquier chat.")
+    app.add_handler(TypeHandler(Update, _enforce_allowlist), group=-1)
 
     # Cargar chat_id guardado
     saved_chat_id = _load_chat_id()

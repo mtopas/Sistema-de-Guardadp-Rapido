@@ -49,6 +49,83 @@ function tareaUrgencia(tarea, todayISO) {
 
 const URGENCIA_COLOR = { overdue: '#ef4444', today: '#d97706', normal: 'var(--subtext)' }
 
+// Tarjeta de una tarea pendiente en el panel izquierdo de HOY -- extraída para
+// reusarla en los dos bloques (con fecha / sin fecha) sin duplicar el JSX.
+function TareaPendienteCard({
+  tarea, lang, todayISO, schedulingId, horaInput, setHoraInput,
+  setSchedulingId, handleToggle, handleAgendar, navigate,
+}) {
+  const urg = tareaUrgencia(tarea, todayISO)
+  return (
+    <div className="group panel-strong rounded-lg px-2.5 py-2">
+      <div className="flex items-start gap-2">
+        <button
+          className="mt-0.5 shrink-0 transition-colors"
+          style={{ color: tarea.completada ? 'var(--accent)' : 'var(--mute)' }}
+          onClick={() => handleToggle(tarea)}
+          aria-label={tarea.completada ? 'Descompletar' : 'Completar'}
+        >
+          {tarea.completada ? <CheckCircle2 size={14} /> : <Circle size={14} />}
+        </button>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 mb-0.5">
+            <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: tarea.lista_color }} />
+            <span className="text-[12px] font-medium truncate flex-1" style={{ color: 'var(--text)' }}>
+              {tarea.titulo}
+            </span>
+            {FIN_KEYWORDS.test(tarea.titulo) && (
+              <button
+                onClick={e => { e.stopPropagation(); navigate('/finanzas') }}
+                title="Ver en Finanzas"
+                className="shrink-0 transition-opacity opacity-50 hover:opacity-100"
+                style={{ color: '#d97706' }}
+              >
+                <DollarSign size={10} />
+              </button>
+            )}
+          </div>
+          {tarea.fecha_opcional && (
+            <div className="text-[10.5px] mono" style={{ color: URGENCIA_COLOR[urg] }}>
+              {urg === 'overdue' && '⚠ '}
+              {new Date(tarea.fecha_opcional + 'T12:00:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })}
+              {tarea.hora_opcional && ` · ${tarea.hora_opcional}`}
+            </div>
+          )}
+        </div>
+      </div>
+      {schedulingId === tarea.id ? (
+        <div className="flex items-center gap-1.5 mt-2">
+          <input
+            type="time"
+            value={horaInput}
+            onChange={e => setHoraInput(e.target.value)}
+            className="flex-1 px-2 py-1 rounded-lg border text-[11px] outline-none"
+            style={{ background: 'var(--bg)', borderColor: 'var(--accent)', color: 'var(--text)', fontFamily: 'var(--font-mono)' }}
+            autoFocus
+          />
+          <button
+            className="px-2 py-1 rounded-lg text-[11px] font-medium"
+            style={{ background: 'var(--accent)', color: 'var(--bg)' }}
+            onClick={() => handleAgendar(tarea.id)}
+          >OK</button>
+          <button className="icon-btn" style={{ width: 22, height: 22 }} onClick={() => setSchedulingId(null)}>
+            <X size={11} />
+          </button>
+        </div>
+      ) : (
+        <button
+          className="mt-1.5 flex items-center gap-1 text-[10.5px] opacity-0 group-hover:opacity-100 transition-opacity"
+          style={{ color: 'var(--accent)' }}
+          onClick={() => { setSchedulingId(tarea.id); setHoraInput('') }}
+        >
+          <Clock size={10} />
+          {t(lang, 'agendaAgendar')}
+        </button>
+      )}
+    </div>
+  )
+}
+
 export default function HoyTab() {
   const navigate              = useNavigate()
   const lang                  = useStore(s => s.lang)
@@ -158,6 +235,11 @@ export default function HoyTab() {
     [agendaTareas, cutoff]
   )
 
+  // Panel izquierdo en dos bloques: con fecha (hoy cae primero por el sort de
+  // arriba) y sin fecha, separadas -- antes venían todas en una sola lista.
+  const pendingConFecha = useMemo(() => pending.filter(t => t.fecha_opcional), [pending])
+  const pendingSinFecha = useMemo(() => pending.filter(t => !t.fecha_opcional), [pending])
+
   const todayEventos = useMemo(() =>
     agendaEventos.filter(e => e.fecha_inicio?.slice(0, 10) === viewISO),
     [agendaEventos, viewISO]
@@ -232,9 +314,11 @@ export default function HoyTab() {
   const handleQuickTarea = useCallback(async () => {
     const titulo = quickTareaTitulo.trim()
     if (!titulo) return
-    await addAgendaTarea({ titulo, fecha_opcional: viewISO })
+    // El store ya avisa si falló (2026-09-21) -- solo festejamos si se
+    // guardó de verdad, para no pisar ese aviso con un "creada" falso.
+    const { ok } = await addAgendaTarea({ titulo, fecha_opcional: viewISO })
     setQuickTareaTitulo('')
-    showToast('Tarea creada')
+    if (ok) showToast('Tarea creada')
   }, [quickTareaTitulo, viewISO, addAgendaTarea, showToast])
 
   // Task 7: quick event from popover
@@ -360,79 +444,50 @@ export default function HoyTab() {
               {t(lang, 'agendaSinTareas')}
             </div>
           ) : (
-            <div className="flex flex-col gap-1">
-              {pending.map(tarea => {
-                const urg = tareaUrgencia(tarea, todayISO)
-                return (
-                  <div key={tarea.id} className="group panel-strong rounded-lg px-2.5 py-2">
-                    <div className="flex items-start gap-2">
-                      <button
-                        className="mt-0.5 shrink-0 transition-colors"
-                        style={{ color: tarea.completada ? 'var(--accent)' : 'var(--mute)' }}
-                        onClick={() => handleToggle(tarea)}
-                        aria-label={tarea.completada ? 'Descompletar' : 'Completar'}
-                      >
-                        {tarea.completada ? <CheckCircle2 size={14} /> : <Circle size={14} />}
-                      </button>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5 mb-0.5">
-                          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: tarea.lista_color }} />
-                          <span className="text-[12px] font-medium truncate flex-1" style={{ color: 'var(--text)' }}>
-                            {tarea.titulo}
-                          </span>
-                          {FIN_KEYWORDS.test(tarea.titulo) && (
-                            <button
-                              onClick={e => { e.stopPropagation(); navigate('/finanzas') }}
-                              title="Ver en Finanzas"
-                              className="shrink-0 transition-opacity opacity-50 hover:opacity-100"
-                              style={{ color: '#d97706' }}
-                            >
-                              <DollarSign size={10} />
-                            </button>
-                          )}
-                        </div>
-                        {tarea.fecha_opcional && (
-                          <div className="text-[10.5px] mono" style={{ color: URGENCIA_COLOR[urg] }}>
-                            {urg === 'overdue' && '⚠ '}
-                            {new Date(tarea.fecha_opcional + 'T12:00:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })}
-                            {tarea.hora_opcional && ` · ${tarea.hora_opcional}`}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    {schedulingId === tarea.id ? (
-                      <div className="flex items-center gap-1.5 mt-2">
-                        <input
-                          type="time"
-                          value={horaInput}
-                          onChange={e => setHoraInput(e.target.value)}
-                          className="flex-1 px-2 py-1 rounded-lg border text-[11px] outline-none"
-                          style={{ background: 'var(--bg)', borderColor: 'var(--accent)', color: 'var(--text)', fontFamily: 'var(--font-mono)' }}
-                          autoFocus
-                        />
-                        <button
-                          className="px-2 py-1 rounded-lg text-[11px] font-medium"
-                          style={{ background: 'var(--accent)', color: 'var(--bg)' }}
-                          onClick={() => handleAgendar(tarea.id)}
-                        >OK</button>
-                        <button className="icon-btn" style={{ width: 22, height: 22 }} onClick={() => setSchedulingId(null)}>
-                          <X size={11} />
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        className="mt-1.5 flex items-center gap-1 text-[10.5px] opacity-0 group-hover:opacity-100 transition-opacity"
-                        style={{ color: 'var(--accent)' }}
-                        onClick={() => { setSchedulingId(tarea.id); setHoraInput('') }}
-                      >
-                        <Clock size={10} />
-                        {t(lang, 'agendaAgendar')}
-                      </button>
-                    )}
+            <>
+              {pendingConFecha.length > 0 && (
+                <div className="flex flex-col gap-1">
+                  {pendingConFecha.map(tarea => (
+                    <TareaPendienteCard
+                      key={tarea.id}
+                      tarea={tarea}
+                      lang={lang}
+                      todayISO={todayISO}
+                      schedulingId={schedulingId}
+                      horaInput={horaInput}
+                      setHoraInput={setHoraInput}
+                      setSchedulingId={setSchedulingId}
+                      handleToggle={handleToggle}
+                      handleAgendar={handleAgendar}
+                      navigate={navigate}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {pendingSinFecha.length > 0 && (
+                <div className={pendingConFecha.length > 0 ? 'mt-4' : ''}>
+                  <div className="label mb-2 px-1">{t(lang, 'agendaSinFecha')}</div>
+                  <div className="flex flex-col gap-1">
+                    {pendingSinFecha.map(tarea => (
+                      <TareaPendienteCard
+                        key={tarea.id}
+                        tarea={tarea}
+                        lang={lang}
+                        todayISO={todayISO}
+                        schedulingId={schedulingId}
+                        horaInput={horaInput}
+                        setHoraInput={setHoraInput}
+                        setSchedulingId={setSchedulingId}
+                        handleToggle={handleToggle}
+                        handleAgendar={handleAgendar}
+                        navigate={navigate}
+                      />
+                    ))}
                   </div>
-                )
-              })}
-            </div>
+                </div>
+              )}
+            </>
           )}
         </div>
 

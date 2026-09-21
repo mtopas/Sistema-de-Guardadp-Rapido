@@ -223,24 +223,39 @@ export const useStore = create((set, get) => ({
       get().fetchFinCuentas()
       get().fetchFinCategorias()
     } catch {
+      // "Offline falso" (2026-09-21, ver auditoría externa en Cerebro/PROXIMAMENTE.md):
+      // antes este fallback quedaba silencioso -- el usuario veía el movimiento
+      // en la lista como si se hubiera guardado, pero el servidor nunca lo
+      // recibió. El fallback local se mantiene (no hay outbox real todavía,
+      // eso quedó diferido a propósito), pero ahora se avisa.
       const id = `m_${Date.now()}`
       const full = { id, ...payload }
       set(state => ({
         finMovimientos:    [full, ...state.finMovimientos],
         finMovimientosAll: [full, ...state.finMovimientosAll],
       }))
+      get().showToast('No se pudo guardar el movimiento -- revisá tu conexión', 'error')
       if (DEBUG) console.log('addFinMovimiento (mock):', full)
     }
   },
 
   deleteFinMovimiento: async (id) => {
+    let ok = true
     try {
-      await fetch(`${API_URL}/fin/movimientos/${id}`, { method: 'DELETE' })
-    } catch { /* noop */ }
+      const res = await fetch(`${API_URL}/fin/movimientos/${id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('not ok')
+    } catch {
+      ok = false
+    }
+    // Se borra del state local en los dos casos (mismo criterio optimista de
+    // siempre), pero si el DELETE real falló, el usuario ahora se entera --
+    // antes quedaba en silencio y el movimiento podía reaparecer solo al
+    // recargar, sin explicación.
     set(state => ({
       finMovimientos:    state.finMovimientos.filter(m => m.id !== id),
       finMovimientosAll: state.finMovimientosAll.filter(m => m.id !== id),
     }))
+    if (!ok) get().showToast('No se pudo eliminar el movimiento en el servidor -- revisá tu conexión', 'error')
     get().fetchFinCuentas()
     if (DEBUG) console.log('deleteFinMovimiento:', id)
   },
@@ -254,13 +269,19 @@ export const useStore = create((set, get) => ({
       finMovimientosAll: state.finMovimientosAll.map(m => m.id === id ? { ...m, ...merged } : m),
     }))
     try {
-      await fetch(`${API_URL}/fin/movimientos/${id}`, {
+      const res = await fetch(`${API_URL}/fin/movimientos/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       })
+      if (!res.ok) throw new Error('not ok')
       get().fetchFinMovimientosAll()
-    } catch { /* offline ok */ }
+    } catch {
+      // Antes: "offline ok" sin avisar y sin chequear res.ok siquiera (un 400/500
+      // del servidor no llegaba ni a este catch). Ahora se avisa en cualquiera
+      // de los dos casos -- el cambio local ya se aplicó arriba (optimista).
+      get().showToast('No se pudo actualizar el movimiento en el servidor -- revisá tu conexión', 'error')
+    }
     get().fetchFinCuentas()
     if (DEBUG) console.log('updateFinMovimiento:', id, patch)
   },
@@ -934,6 +955,14 @@ export const useStore = create((set, get) => ({
     } catch { set({ agendaTareas: [] }) }
   },
 
+  // addAgendaTarea/updateAgendaTarea devuelven ahora { ok, data } / ok booleano
+  // (2026-09-21, ver Cerebro/PROXIMAMENTE.md) -- antes no señalaban éxito/
+  // fracaso, así que un caller que mostraba un toast de éxito después del
+  // `await` lo hacía SIEMPRE, pisando el toast de error de acá abajo incluso
+  // cuando el guardado había fallado de verdad (visto en vivo con TareaModal.jsx
+  // y HoyTab.jsx -- ambos actualizados para chequear `ok` antes de festejar).
+  // Ningún otro caller usa el valor de retorno (todos son fire-and-forget),
+  // así que el cambio de forma no rompe nada más.
   addAgendaTarea: async (payload) => {
     try {
       const res = await fetch(`${API_URL}/agenda/tareas`, {
@@ -942,28 +971,49 @@ export const useStore = create((set, get) => ({
       })
       if (!res.ok) throw new Error('not ok')
       const data = await res.json()
-      set(s => ({ agendaTareas: [...s.agendaTareas, data] }))
-      return data
+      if (payload.se_repite) {
+        // Una tarea recurrente genera varias filas reales en el backend
+        // (ocurrencias materializadas, 2026-09-21) -- la respuesta solo trae
+        // la cabeza de la serie, así que hace falta refetchear todo en vez de
+        // appendear solo esa una.
+        await get().fetchAgendaTareas()
+      } else {
+        set(s => ({ agendaTareas: [...s.agendaTareas, data] }))
+      }
+      return { ok: true, data }
     } catch {
+      // "Offline falso" (2026-09-21, ver Cerebro/PROXIMAMENTE.md) -- el
+      // fallback local se mantiene, ahora se avisa que no llegó al servidor.
       const mock = { id: `tarea_${Date.now()}`, completada: false, lista_color: '#7c3aed', lista_nombre: '', ...payload }
       set(s => ({ agendaTareas: [...s.agendaTareas, mock] }))
-      return mock
+      get().showToast('No se pudo guardar la tarea -- revisá tu conexión', 'error')
+      return { ok: false, data: mock }
     }
   },
 
   updateAgendaTarea: async (id, patch) => {
     set(s => ({ agendaTareas: s.agendaTareas.map(t => t.id === id ? { ...t, ...patch } : t) }))
     try {
-      await fetch(`${API_URL}/agenda/tareas/${id}`, {
+      const res = await fetch(`${API_URL}/agenda/tareas/${id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       })
-    } catch { /* offline ok */ }
+      if (!res.ok) throw new Error('not ok')
+      return true
+    } catch {
+      get().showToast('No se pudo actualizar la tarea en el servidor -- revisá tu conexión', 'error')
+      return false
+    }
   },
 
   deleteAgendaTarea: async (id) => {
     set(s => ({ agendaTareas: s.agendaTareas.filter(t => t.id !== id) }))
-    try { await fetch(`${API_URL}/agenda/tareas/${id}`, { method: 'DELETE' }) } catch { /* noop */ }
+    try {
+      const res = await fetch(`${API_URL}/agenda/tareas/${id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('not ok')
+    } catch {
+      get().showToast('No se pudo eliminar la tarea en el servidor -- revisá tu conexión', 'error')
+    }
   },
 
   fetchAgendaHorarioFacultad: async () => {
@@ -1117,13 +1167,23 @@ export const useStore = create((set, get) => ({
       set(s => ({ habitosRegistros: s.habitosRegistros.map(r =>
         r.habito_id === habitoId && r.fecha === fecha ? data : r
       )}))
-    } catch { /* offline ok — optimistic update stays */ }
+    } catch {
+      // "Offline falso" (2026-09-21, ver Cerebro/PROXIMAMENTE.md) -- el
+      // optimistic update queda igual (mismo criterio de siempre), pero ahora
+      // se avisa que no se confirmó contra el servidor.
+      get().showToast('No se pudo guardar el hábito -- revisá tu conexión', 'error')
+    }
     if (DEBUG) console.log('upsertHabitoRegistro:', key, valor)
   },
 
   deleteHabitoRegistro: async (registroId, habitoId, fecha) => {
     set(s => ({ habitosRegistros: s.habitosRegistros.filter(r => !(r.habito_id === habitoId && r.fecha === fecha)) }))
-    try { await fetch(`${API_URL}/habitos/registros/${registroId}`, { method: 'DELETE' }) } catch { /* noop */ }
+    try {
+      const res = await fetch(`${API_URL}/habitos/registros/${registroId}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('not ok')
+    } catch {
+      get().showToast('No se pudo eliminar el registro en el servidor -- revisá tu conexión', 'error')
+    }
   },
 
   // --- User name ---

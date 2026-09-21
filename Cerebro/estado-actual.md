@@ -1,6 +1,67 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-21
 
+## IMPLEMENTADO: 4 fixes baratos de la auditoría externa + 3 mejoras de Agenda (2026-09-21)
+
+Dos forks lanzados en paralelo (sin worktree aislado — riesgo real de pisada entre ellos
+porque terminaron tocando 3 archivos en común: `main.py`, `HoyTab.jsx`, `TareaModal.jsx`;
+verificado a mano después de que ambos terminaran que el resultado final combina los dos
+sin corrupción — confirmado diff por diff, no asumido). Próxima vez que haya trabajo paralelo
+genuino sobre los mismos módulos, usar `isolation: "worktree"` como ya se hizo otras veces
+esta sesión, en vez de dos forks sueltos sobre el mismo working directory.
+
+### 4 fixes de la auditoría externa (ver `Cerebro/PROXIMAMENTE.md`, entrada `2026-09-21`)
+1. **Allowlist de Telegram global** — `project/mybot/bot.py`: `_enforce_allowlist()` registrado
+   con `group=-1` (corre antes que cualquier otro handler), `ApplicationHandlerStop` si el chat
+   no está en `BOT_ALLOWED_CHAT_IDS`. Sin la env var configurada, comportamiento idéntico a
+   antes (todos pasan). `finanzas_handlers.py::_is_allowed()` queda como chequeo redundante,
+   sin tocar.
+2. **Timezone explícita en jobs de Telegram** — `APP_TIMEZONE = ZoneInfo("America/Argentina/
+   Buenos_Aires")` hardcodeada, pasada a `ApplicationBuilder().defaults(Defaults(tzinfo=...))`
+   — los `datetime.time` naive de `run_daily`/`run_repeating` (check-in nocturno, resumen
+   semanal de Finanzas, etc.) dejan de interpretarse en UTC.
+3. **`SGR_SYNC_TOKEN` obligatorio** — `project/app/main.py::_check_sync_token()`: sin token
+   configurado, `/sync/export` y `/sync/import` ahora rechazan con 503 (antes: fail open,
+   cualquiera podía reemplazar la DB canónica completa sin token).
+4. **Avisos de "guardado falso"** — 8 mutaciones de `useStore.js` (Finanzas: movimientos;
+   Agenda: tareas; Hábitos: registros) ahora llaman `showToast(..., 'error')` cuando el fetch
+   real falla, en vez de fallback silencioso. Hallazgo real no anticipado: `TareaModal.jsx` y
+   `HoyTab.jsx` mostraban un toast de éxito incondicional que pisaba el de error — `addAgendaTarea`/
+   `updateAgendaTarea` ahora devuelven `{ok, data}`/`ok` y esos 2 archivos solo festejan si `ok`.
+   Sin cubrir: Bóveda, calendarios/listas/eventos de Agenda, altas de hábitos, horario de
+   Facultad — quedan con el fallback silencioso de siempre.
+
+### 3 mejoras de Agenda
+1. **HOY, panel izquierdo en 2 bloques** — `HoyTab.jsx`: mismo conjunto de tareas de siempre
+   (próximos 15 días + sin fecha), separadas visualmente en bloque "con fecha" (hoy cae primero
+   por el sort existente) y bloque "Sin fecha" debajo. `TareaPendienteCard` extraído para
+   reusar el JSX sin duplicar.
+2. **Editar tarea desde TAREAS→Lista** — antes solo se podía desde Canvas (el aside de la vista
+   Lista era de solo lectura). Ahora un botón "Editar" abre `TareaModal` real (mismo componente
+   que usa Canvas). De paso, fix de un bug real de datos obsoletos: el aside mostraba el objeto
+   del momento del click, no reflejaba ediciones sin cerrar y reabrir (`editTareaLive`).
+3. **Recurrencia de tareas** (diario / días de semana / día del mes) — diseño: a diferencia de
+   `agenda_eventos` (expansión virtual en `_expand_recurring()`, nunca persiste), las tareas
+   **materializan filas reales** porque tienen `completada` por ocurrencia. Columnas nuevas en
+   `agenda_tareas`: `se_repite`/`regla_repeticion`/`serie_id` (mismo shape de regla que
+   eventos). `agenda_crear_tarea()` genera las ocurrencias al crear la cabeza, dentro de una
+   **ventana acotada sin job que la extienda** (limitación conocida, no un bug): diario 60 días,
+   semanal 12 semanas, mensual 12 ocurrencias. Solo se puede configurar recurrencia AL CREAR una
+   tarea, no después — no se soporta "editar esta ocurrencia vs. toda la serie" (RFC 5545
+   completo quedó diferido en `Cerebro/PROXIMAMENTE.md`). UI de recurrencia en `TareaModal.jsx`
+   copiada del patrón ya usado en `EventoModal.jsx` (mismas claves i18n, sin duplicar).
+
+**Verificado por el orquestador** (no solo por el reporte de los forks): diff completo de los 9
+archivos revisado línea por línea, sin corrupción entre los 2 forks; `py_compile` limpio en los
+6 archivos backend; `npm run build` limpio; **sandbox propio** (nunca la DB real) probando las
+3 frecuencias de recurrencia de tareas — semanal (25 filas, días de semana correctos), diario
+(61 filas), mensual (13 filas, todas día 15) — y confirmando que completar/borrar una ocurrencia
+no afecta a sus hermanas ni a la cabeza de la serie.
+
+**Pendiente real, anotado para más adelante**: la ventana de recurrencia de tareas no se
+extiende sola con el tiempo — si una tarea semanal sigue activa después de 12 semanas, hay que
+recrearla a mano. Sumado a `Cerebro/PROXIMAMENTE.md`.
+
 ## IMPLEMENTADO + DESPLEGADO: panel lateral colapsable "Sin fecha" en canvas de Tareas (2026-09-21)
 
 Pedido explícito del usuario: la tarjeta "Sin fecha" competía visualmente con las listas

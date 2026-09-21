@@ -62,6 +62,13 @@ no afecta a sus hermanas ni a la cabeza de la serie.
 extiende sola con el tiempo — si una tarea semanal sigue activa después de 12 semanas, hay que
 recrearla a mano. Sumado a `Cerebro/PROXIMAMENTE.md`.
 
+**Desplegado al homelab el mismo día**: `project/`+`jarvis/` resincronizados, imagen
+reconstruida, 3 contenedores recreados. `RestartCount=0` en los 3; logs del `bot` sin errores
+(muestra correctamente "BOT_ALLOWED_CHAT_IDS sin configurar -- el bot acepta cualquier chat",
+esperado porque el usuario no configuró la env var); logs del `backend` sin errores nuevos
+(mismos 2 warnings preexistentes ya documentados); `curl` externo confirma el hash del build
+nuevo servido.
+
 ## IMPLEMENTADO + DESPLEGADO: panel lateral colapsable "Sin fecha" en canvas de Tareas (2026-09-21)
 
 Pedido explícito del usuario: la tarjeta "Sin fecha" competía visualmente con las listas

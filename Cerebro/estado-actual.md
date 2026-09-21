@@ -1,6 +1,35 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-21
 
+## CAMBIO: la consolidación de memoria pasa de diaria a semanal (2026-09-21)
+
+Pedido explícito del usuario. `run_consolidation()` (`jarvis/worker/consolidation.py`) —
+el job completo (pares similares, stale por edad, backfill de tags, auditoría proactiva,
+ingestión/síntesis de Agenda, triage de Inbox, pregunta abierta) — corría gateado a 24h
+(`_RUN_INTERVAL = timedelta(hours=24)`, hardcodeado). Ahora es configurable:
+`JARVIS_CONSOLIDATION_INTERVAL_DAYS` nuevo en `jarvis/config.py` (default `7`, mismo patrón
+ya usado por `JARVIS_AGENDA_PATTERN_SYNTH_INTERVAL_DAYS`/`JARVIS_INBOX_TRIAGE_INTERVAL_DAYS`).
+
+De paso se corrigieron las menciones a "diaria" en comentarios/docstrings/logs que quedaban
+desactualizadas (`jarvis/worker/main.py`, `jarvis/captures/passive.py`,
+`jarvis/ingestion/agenda_patterns.py`, `jarvis/notify/telegram.py`) y, más importante, el
+**título del reporte de Telegram** (`_notify_run_report()`, antes "📊 Consolidación diaria —
+...", ahora "📊 Consolidación — ...") — ese título es user-facing, dejarlo diciendo "diaria"
+hubiera sido confuso con la nueva cadencia semanal.
+
+No se tocó el auto-gating interno ya semanal de `agenda_patterns.py`/`inbox_triage.py` (esos
+ya corrían cada 7 días por su cuenta, independiente del job completo) — ahora que el job
+completo también es semanal, ambos gates pueden desalinearse en días distintos de la semana
+sin que importe, mismo comportamiento que ya toleraban antes.
+
+Verificado: `python -m py_compile` limpio en los 6 archivos tocados; `_RUN_INTERVAL` resuelve
+a `7 days, 0:00:00` corrido contra el venv real; `should_run()` probado con timestamps
+sintéticos de 3 días (False) y 8 días (True) desde la última corrida.
+
+Archivos tocados: `jarvis/config.py`, `jarvis/worker/consolidation.py`,
+`jarvis/worker/main.py`, `jarvis/captures/passive.py`, `jarvis/ingestion/agenda_patterns.py`,
+`jarvis/notify/telegram.py`.
+
 ## DEPLOY completo al homelab: todo lo de esta sesión ya está en vivo (2026-09-21)
 
 Cierra el pendiente que había quedado a mitad de camino: el primer intento de deploy de

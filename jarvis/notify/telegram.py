@@ -84,7 +84,7 @@ _REPORT_MESSAGE_LIMIT = 3900
 
 
 def send_report(chat_id: str, title: str, sections: list[str]) -> None:
-    """Arma y envía un reporte largo (ej. consolidación diaria, ver
+    """Arma y envía un reporte largo (ej. consolidación periódica, ver
     jarvis/worker/consolidation.py) como uno o varios mensajes de Telegram.
 
     `sections` son bloques de texto ya formados por el caller (uno por paso

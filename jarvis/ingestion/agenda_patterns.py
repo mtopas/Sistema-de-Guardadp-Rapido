@@ -53,7 +53,7 @@ se resuelve en accept_proposal() (jarvis/captures/passive.py) mirando ese
 prefijo -- ver el cambio puntual ahí.
 
 Actualización de un patrón que cambió ("deja de entrenar los martes"): NO hay
-mecanismo de supersesión nuevo acá -- se reusa la consolidación diaria
+mecanismo de supersesión nuevo acá -- se reusa la consolidación periódica
 existente (same_fact, jarvis/worker/consolidation.py, recalibrada a umbral
 0.70 el 26/08-31/08 con datos reales). Incertidumbre real, sin probar: nunca
 se validó ese umbral contra contenido de horarios/hábitos (solo contra

@@ -84,7 +84,7 @@ _consolidation_thread: threading.Thread | None = None
 
 
 def _maybe_run_consolidation() -> None:
-    """Lanza el job de consolidación diaria en un thread aparte si corresponde.
+    """Lanza el job de consolidación en un thread aparte si corresponde.
 
     Corre en background (no en el hilo del loop) para que nunca bloquee el
     procesamiento de entradas PENDING del inbox, que es la prioridad del worker.
@@ -106,7 +106,7 @@ def _maybe_run_consolidation() -> None:
         target=_run, name="jarvis-consolidation", daemon=True
     )
     _consolidation_thread.start()
-    logger.info("[worker] Job de consolidación diaria lanzado en background")
+    logger.info("[worker] Job de consolidación lanzado en background")
 
 
 _passive_thread: threading.Thread | None = None
@@ -116,7 +116,7 @@ def _maybe_run_passive_capture() -> None:
     """Escanea conversaciones inactivas y expira propuestas vencidas, en un
     thread aparte (mismo motivo que consolidación: nunca bloquear el
     procesamiento de inbox_queue, que es la prioridad del worker). A
-    diferencia de consolidación (gate de 24h vía should_run), esto corre en
+    diferencia de consolidación (gate semanal vía should_run), esto corre en
     cada vuelta ociosa del loop -- find_idle_conversations() es una query
     SQL barata; el costo real (llamada al modelo local) solo se paga cuando
     de verdad hay una conversación inactiva sin revisar.

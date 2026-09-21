@@ -19,7 +19,7 @@ con un sweep periódico del propio worker (expire_stale_proposals), no con un
 timer de python-telegram-bot: el worker y el bot son procesos separados, así
 que un job_queue del bot no puede programarse desde acá -- un sweep reusa el
 mismo patrón "el worker poll marca estado" que ya usa todo el resto del
-sistema (retry de inbox_queue, consolidación diaria), sin necesitar
+sistema (retry de inbox_queue, consolidación periódica), sin necesitar
 coordinación entre procesos.
 
 Throttle de propuestas (2026-09-17, ver Cerebro/decisiones-implementacion.md):

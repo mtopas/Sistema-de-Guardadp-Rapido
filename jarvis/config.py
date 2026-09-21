@@ -168,6 +168,10 @@ JARVIS_CONSOLIDATION_STALE_DAYS = int(os.getenv("JARVIS_CONSOLIDATION_STALE_DAYS
 JARVIS_CONSOLIDATION_STALE_CONFIDENCE = float(
     os.getenv("JARVIS_CONSOLIDATION_STALE_CONFIDENCE", "0.4")
 )
+# Cada cuántos días corre el job de consolidación completo (pares similares,
+# stale por edad, backfill de tags, auditoría, ingestión/síntesis de Agenda,
+# triage de Inbox, pregunta abierta) -- antes corría una vez por día (2026-09-21).
+JARVIS_CONSOLIDATION_INTERVAL_DAYS = int(os.getenv("JARVIS_CONSOLIDATION_INTERVAL_DAYS", "7"))
 
 # ── Worker — reintentos (jarvis/worker/processor.py) ─────────────────────────
 # Delays en segundos antes de reintentar una entrada que falló (1min, 5min, 30min).

@@ -1,11 +1,13 @@
 """
-Job de consolidación diaria de memoria (Jarvis 0.2 — Slice 1).
+Job de consolidación de memoria (Jarvis 0.2 — Slice 1).
 
 Sin esto, hechos viejos y hechos nuevos sobre lo mismo (ej. "vivo en Madrid" en
 enero, "me mudé a Buenos Aires" en agosto) coexisten en memory_entries sin que
 nada le diga al sistema cuál es vigente, contaminando el RAG con conocimiento
-obsoleto. Este job corre una vez por día (disparado desde jarvis/worker/main.py)
-y hace tres cosas, en orden, sobre memory_entries "vigentes" (valid_to IS NULL):
+obsoleto. Este job corre una vez cada JARVIS_CONSOLIDATION_INTERVAL_DAYS días
+(default 7 — antes corría una vez por día, cambiado 2026-09-21; disparado desde
+jarvis/worker/main.py) y hace tres cosas, en orden, sobre memory_entries
+"vigentes" (valid_to IS NULL):
 
 1. Detecta pares con alta similitud semántica (coseno > 0.92) del mismo tipo y
    user_id vía ChromaDB, y usa el modelo de razonamiento (externo, con fallback
@@ -14,7 +16,7 @@ y hace tres cosas, en orden, sobre memory_entries "vigentes" (valid_to IS NULL):
    (baja confidence en ambos y loguea para revisión manual) o distintos (ignora).
 2. Marca como stale por edad (valid_from > 90 días, confidence < 0.4).
 3. Loguea el resumen y registra la corrida en jarvis_policies (también sirve
-   como marca de "última corrida" para el gating de una vez por día).
+   como marca de "última corrida" para el gating).
 
 Nunca borra nada — solo marca valid_to o reduce confidence (spec: Memoria ≠
 destrucción; ver Cerebro/estado-actual.md). La clasificación de pares usa
@@ -52,6 +54,7 @@ from datetime import datetime, timedelta, timezone
 
 from jarvis.config import (
     JARVIS_AGENDA_PATTERN_CLUSTER_MIN_OCCURRENCES,
+    JARVIS_CONSOLIDATION_INTERVAL_DAYS,
     JARVIS_CONSOLIDATION_SIMILARITY_THRESHOLD,
     JARVIS_CONSOLIDATION_STALE_CONFIDENCE,
     JARVIS_CONSOLIDATION_STALE_DAYS,
@@ -67,7 +70,7 @@ _SIMILARITY_THRESHOLD = JARVIS_CONSOLIDATION_SIMILARITY_THRESHOLD
 _STALE_DAYS = JARVIS_CONSOLIDATION_STALE_DAYS
 _STALE_CONFIDENCE = JARVIS_CONSOLIDATION_STALE_CONFIDENCE
 _CONFLICT_CONFIDENCE_PENALTY = 0.5
-_RUN_INTERVAL = timedelta(hours=24)
+_RUN_INTERVAL = timedelta(days=JARVIS_CONSOLIDATION_INTERVAL_DAYS)
 
 _POLICY_LAST_RUN = "consolidation_last_run"
 _POLICY_RUN_SUMMARY = "consolidation_run"
@@ -81,7 +84,7 @@ _TAG_BACKFILL_LIMIT = 20
 
 
 def should_run(now: datetime | None = None) -> bool:
-    """True si nunca corrió o si pasaron >=24h desde la última corrida."""
+    """True si nunca corrió o si pasó >=_RUN_INTERVAL desde la última corrida."""
     now = now or datetime.now(timezone.utc)
     last = _last_run_at()
     return last is None or (now - last) >= _RUN_INTERVAL
@@ -762,7 +765,7 @@ def _notify_run_report(now: datetime, summary: dict, entries: list[dict]) -> Non
     from jarvis.debug.service import get_debug_chat_id
     from jarvis.notify.telegram import send_report
 
-    title = f"📊 Consolidación diaria — {now.strftime('%Y-%m-%d %H:%M')} UTC"
+    title = f"📊 Consolidación — {now.strftime('%Y-%m-%d %H:%M')} UTC"
     sections = [_build_short_summary(summary, entries)]
 
     chat_id = get_debug_chat_id()

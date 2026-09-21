@@ -1,6 +1,22 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-21
 
+## IMPLEMENTADO + DESPLEGADO: panel lateral colapsable "Sin fecha" en canvas de Tareas (2026-09-21)
+
+Pedido explícito del usuario: la tarjeta "Sin fecha" competía visualmente con las listas
+reales en la grilla del canvas de Tareas. Implementado por fork (verificación real con
+Chrome, no solo lectura de código) — un solo archivo tocado,
+`project/frontend/src/components/agenda/TareasTab.jsx`: la tarjeta se reemplazó por
+`SinFechaPanel`, una barra de 36px pegada al borde derecho (ícono + contador) que expande un
+panel de 280px al clickear. De paso, `TareaRow` ganó una prop opcional `color` — cada tarea en
+Canvas (dentro de una `ListaCard` o en el panel de Sin fecha) ahora muestra un punto del color
+de su lista (resuelto por `lista_id` para las tareas mezcladas del panel de Sin fecha).
+
+Verificado por el orquestador (diff completo revisado, no solo el reporte del fork): `npm run
+build` limpio: confirmado dos veces. Desplegado al homelab el mismo día — 3 contenedores
+recreados, `RestartCount=0`, `curl` externo confirma que sirve el hash nuevo
+(`index-Ckqj62C4.js`).
+
 ## IMPLEMENTADO: botones de Telegram para triage_move (Sí/No/Ver contenido/categoría manual) (2026-09-21)
 
 Pedido explícito del usuario tras la primera propuesta real (ver entrada de arriba, mismo

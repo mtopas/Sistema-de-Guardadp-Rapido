@@ -69,10 +69,16 @@ significativos de tamaño). `dist/` restaurado a su estado commiteado tras la ve
 De paso se corrigió `CLAUDE.md` (Agenda: tab por defecto documentado como `mes`, no `hoy`
 — quedó desactualizado desde `3dcf777`).
 
-**Pendiente, no cerrado del todo**: la confirmación visual en vivo de los 2 fixes en sí
-(clic derecho + resaltado ya parcheados) no se completó — Chrome se desconectó justo
-después de aplicar los cambios. Alta confianza porque el código es una copia estructural
-directa del patrón ya probado en `LeftPanel.jsx`, pero no se vio correr.
+**Cerrado (2026-09-21, mismo día, sesión del orquestador)**: confirmación visual en vivo de
+los 2 fixes, contra `npm run dev` local + backend local reiniciado limpio (ver entrada de
+abajo sobre los procesos duplicados). Clic en una nota del panel derecho ("Markmap") resaltó
+correctamente la misma fila en la vista Lista central (borde/fondo igual al del panel
+derecho). Clic derecho sobre otra nota ("Obsidian") en la vista Lista abrió el menú
+contextual con "Editar Hoja"/"Eliminar Hoja". Sin errores de consola, 30 requests a la API
+revisadas, todas 200. (Nota: la extensión Claude in Chrome tenía 2 navegadores conectados;
+"Browser 2" no podía cargar ninguna página incluida example.com — se cambió a "Browser 1",
+que sí funcionó. Si esto se repite, revisar qué perfil de Chrome está realmente conectado
+antes de asumir que SGR está roto.)
 
 **Hallazgo nuevo, no arreglado, fuera del alcance de los 3 commits auditados (bug
 preexistente, no introducido por ellos)**: `POST /hojas` devuelve 500/503 genérico si la

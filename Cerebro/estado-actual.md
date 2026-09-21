@@ -1,5 +1,58 @@
 # Estado Actual de Jarvis
-Última actualización: 2026-09-19
+Última actualización: 2026-09-21
+
+## AUDITORÍA + FIX: 3 commits frontend sin documentar (Bóveda/Agenda/Jarvis) + 2 bugs reales encontrados en vivo (2026-09-20/21)
+
+Entre el deploy del 19/09 y esta sesión aparecieron 3 commits en `master` sin pasar por el
+proceso de documentación del orquestador (autoría "Mateo-PC", 20/09, de otra sesión no
+registrada en este archivo): `0d7e716` (rediseño de Bóveda — `BovedaWorkspace.jsx` nuevo,
+`RightPanel.jsx` perdió 676 líneas), `3dcf777` (Agenda: tab por defecto pasa de `hoy` a
+`mes`), `5c53ba1` (bienvenida contextual real de Jarvis en `JarvisChat.jsx`).
+
+Auditoría en dos pasadas (fork/worker): (1) revisión de código + `npm run build` — sin
+bugs de wiring, solo 2 hallazgos menores sospechados; (2) recorrido real en Chrome contra
+`npm run dev` local + backend local, que **confirmó ambos hallazgos como reales**:
+
+1. **`selectedHojaId` sin usar en `BovedaWorkspace.jsx`** — la nota seleccionada no se
+   resaltaba visualmente en las vistas Lista/Explorador (sí en `RightPanel`). Fix: `HojaRow`
+   acepta `active` y aplica el mismo estilo de borde/fondo que `RightPanel`
+   (`BovedaWorkspace.jsx` líneas ~38-58, ~168, ~188).
+2. **Menú contextual ausente en la vista central de Bóveda** — clic derecho sobre una nota
+   en "Lista"/"Explorador" no abría nada; borrar/editar solo era posible expandiendo el
+   árbol correcto en `LeftPanel`. Fix: mismo patrón ya usado en `LeftPanel.jsx`
+   (`AgendaContextMenu` + `EditHojaModal` + `DeleteHojaModal`) replicado en
+   `BovedaWorkspace.jsx`; `BrowseScreen.jsx` gana `onHojaDeleted` para limpiar la selección
+   de `RightPanel` si se borra la hoja abierta desde la vista nueva.
+
+Verificado por el orquestador (no solo por el reporte del worker): diff real de los 3
+archivos tocados coincide con lo descrito, los 3 componentes importados
+(`EditHojaModal`/`DeleteHojaModal`/`AgendaContextMenu`) existen en el árbol, `npm run build`
+post-fix compila limpio (mismo warning preexistente de chunk >500kB, sin cambios
+significativos de tamaño). `dist/` restaurado a su estado commiteado tras la verificación
+(no se quiso dejar como diff de ruido).
+
+De paso se corrigió `CLAUDE.md` (Agenda: tab por defecto documentado como `mes`, no `hoy`
+— quedó desactualizado desde `3dcf777`).
+
+**Pendiente, no cerrado del todo**: la confirmación visual en vivo de los 2 fixes en sí
+(clic derecho + resaltado ya parcheados) no se completó — Chrome se desconectó justo
+después de aplicar los cambios. Alta confianza porque el código es una copia estructural
+directa del patrón ya probado en `LeftPanel.jsx`, pero no se vio correr.
+
+**Hallazgo nuevo, no arreglado, fuera del alcance de los 3 commits auditados (bug
+preexistente, no introducido por ellos)**: `POST /hojas` devuelve 500/503 genérico si la
+categoría elegida no tiene ruta sincronizada al vault (`app/db/crud.py` ~línea 280-284
+lanza `ValueError` sin capturar; FastAPI lo convierte en "Internal Server Error" plano sin
+mensaje útil). Reproducido en vivo con la categoría "General" del entorno local. Sin fix
+aplicado — queda para decidir si amerita sesión aparte (traducir a un 400 con mensaje claro
+en `app/main.py` donde se llama `crear_hoja()`).
+
+**Aclarado, no es un problema**: el backend local (`:8765`, corriendo desde el 19/09) usa un
+`app.db` con conteos/categorías distintos al `project/database/app.db` real en disco —
+confirmado con el usuario que es esperado (entorno local con datos de prueba inventados; el
+dato real vive en el homelab vía Tailscale). No es pérdida de datos.
+
+Sin commitear al momento de escribir esta entrada — queda a cargo del orquestador.
 
 ## CONFIRMADO: usuario verificó visualmente Horario Facultad + canvas de listas de Tareas (2026-09-19)
 

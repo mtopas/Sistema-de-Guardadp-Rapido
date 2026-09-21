@@ -161,7 +161,7 @@ Modal Hábitos en `HabitosScreen`: `NuevoHabitoModal` (TopBar CTA o botón del p
 
 ### Agenda (resumen)
 
-- **Tabs:** `hoy` (default) | `mes` | `tareas` | `revision`. Componentes en `components/agenda/`.
+- **Tabs:** `mes` (default) | `hoy` | `tareas` | `revision`. Componentes en `components/agenda/`.
 - **HOY:** grilla horaria 6–23h; tareas pendientes próximos 15 días en panel izq; time blocking; capa facultad opacada. **Integración hábitos:** sección "Hábitos de hoy" en panel izq (hábitos sin hora), bloques en grilla (hábitos con hora).
 - **Mes:** vista 6×7 + semana; chips sólidos eventos, chips punteados tareas.
 - **Tareas:** listas con color; filtro pendientes/completadas/todas.

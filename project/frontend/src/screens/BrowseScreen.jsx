@@ -28,7 +28,14 @@ function BovedaLayout({ compact = false }) {
             onOpenHoja={openHoja}
             onHojaDeleted={id => { if (selectedHojaId === id) setSelectedHojaId(null) }}
           />
-          <main className="min-w-0 min-h-0 overflow-hidden"><BovedaWorkspace searchQuery={searchQuery} selectedHojaId={selectedHojaId} onOpenHoja={openHoja} /></main>
+          <main className="min-w-0 min-h-0 overflow-hidden">
+            <BovedaWorkspace
+              searchQuery={searchQuery}
+              selectedHojaId={selectedHojaId}
+              onOpenHoja={openHoja}
+              onHojaDeleted={id => { if (selectedHojaId === id) setSelectedHojaId(null) }}
+            />
+          </main>
           <RightPanel selectedHojaId={selectedHojaId} onSelectHoja={setSelectedHojaId} />
         </div>
       )}

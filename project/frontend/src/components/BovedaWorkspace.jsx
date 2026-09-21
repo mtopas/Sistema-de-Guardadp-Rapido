@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Compass, FileText, FolderTree, Link2, List, Network, Search, Tags } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { buildCategoriaColorMap } from '../utils/categoriaColors'
@@ -6,6 +6,9 @@ import { extractTags } from '../utils/tags'
 import { getHojaDisplayTitle } from '../utils/hojaUtils'
 import { getLeafIcon } from '../utils/leafIcons'
 import NetworkGraph from './NetworkGraph'
+import AgendaContextMenu from './agenda/AgendaContextMenu'
+import EditHojaModal from './EditHojaModal'
+import DeleteHojaModal from './DeleteHojaModal'
 
 function localDate(value) {
   if (!value) return ''
@@ -32,7 +35,7 @@ function Metric({ Icon, label, value, detail, color }) {
   )
 }
 
-function HojaRow({ hoja, color, onOpen }) {
+function HojaRow({ hoja, color, active, onOpen, onContextMenu }) {
   const Icon = getLeafIcon(hoja.icono, hoja.tipo)
   const tags = extractTags(hoja.contenido, hoja.apuntes)
   const title = getHojaDisplayTitle(hoja) || 'Sin título'
@@ -41,10 +44,15 @@ function HojaRow({ hoja, color, onOpen }) {
     <button
       type="button"
       onClick={() => onOpen(hoja.id)}
+      onContextMenu={e => onContextMenu?.(e, hoja)}
       className="w-full flex items-center gap-3 px-3 py-2.5 text-left border transition-colors"
-      style={{ background: 'color-mix(in oklch, var(--surface) 74%, transparent)', borderColor: 'var(--border)', borderRadius: 8 }}
-      onMouseEnter={e => { e.currentTarget.style.borderColor = color; e.currentTarget.style.background = `color-mix(in oklch, ${color} 8%, var(--surface))` }}
-      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.background = 'color-mix(in oklch, var(--surface) 74%, transparent)' }}
+      style={{
+        background: active ? `color-mix(in oklch, ${color} 12%, var(--surface))` : 'color-mix(in oklch, var(--surface) 74%, transparent)',
+        borderColor: active ? color : 'var(--border)',
+        borderRadius: 8,
+      }}
+      onMouseEnter={e => { if (!active) { e.currentTarget.style.borderColor = color; e.currentTarget.style.background = `color-mix(in oklch, ${color} 8%, var(--surface))` } }}
+      onMouseLeave={e => { if (!active) { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.background = 'color-mix(in oklch, var(--surface) 74%, transparent)' } }}
     >
       <span className="w-8 h-8 grid place-items-center shrink-0" style={{ background: `color-mix(in oklch, ${color} 18%, transparent)`, color, borderRadius: 7 }}>
         <Icon size={15} />
@@ -59,12 +67,26 @@ function HojaRow({ hoja, color, onOpen }) {
   )
 }
 
-export default function BovedaWorkspace({ onOpenHoja, searchQuery = '' }) {
+export default function BovedaWorkspace({ onOpenHoja, onHojaDeleted, searchQuery = '', selectedHojaId = null }) {
   const hojas = useStore(s => s.hojas)
   const categorias = useStore(s => s.categorias)
   const [view, setView] = useState('grafo')
   const [selectedTag, setSelectedTag] = useState(null)
   const [query, setQuery] = useState('')
+  const [hojaMenu, setHojaMenu] = useState(null)
+  const [editHoja, setEditHoja] = useState(null)
+  const [deleteHoja, setDeleteHoja] = useState(null)
+
+  const openHojaContextMenu = useCallback((e, hoja) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setHojaMenu({ x: e.clientX, y: e.clientY, hoja })
+  }, [])
+
+  const buildHojaContextItems = useCallback((hoja) => [
+    { label: 'Editar Hoja', onClick: () => setEditHoja(hoja) },
+    { label: 'Eliminar Hoja', danger: true, onClick: () => setDeleteHoja(hoja) },
+  ], [])
 
   const colorMap = useMemo(() => buildCategoriaColorMap(categorias), [categorias])
   const today = localDate(new Date())
@@ -143,7 +165,7 @@ export default function BovedaWorkspace({ onOpenHoja, searchQuery = '' }) {
         {view === 'lista' && (
           <div className="min-h-0 flex-1 overflow-y-auto p-3 space-y-2">
             {filteredHojas.length ? filteredHojas.map(hoja => (
-              <HojaRow key={hoja.id} hoja={hoja} color={colorMap[hoja.categoria_id] || 'var(--accent)'} onOpen={onOpenHoja} />
+              <HojaRow key={hoja.id} hoja={hoja} color={colorMap[hoja.categoria_id] || 'var(--accent)'} active={hoja.id === selectedHojaId} onOpen={onOpenHoja} onContextMenu={openHojaContextMenu} />
             )) : <p className="py-12 text-center text-[12px]" style={{ color: 'var(--subtext)' }}>No hay hojas que coincidan con esta búsqueda.</p>}
           </div>
         )}
@@ -163,12 +185,29 @@ export default function BovedaWorkspace({ onOpenHoja, searchQuery = '' }) {
             </div>
             <div className="min-h-0 overflow-y-auto p-3 space-y-2">
               {filteredHojas.length ? filteredHojas.map(hoja => (
-                <HojaRow key={hoja.id} hoja={hoja} color={colorMap[hoja.categoria_id] || 'var(--accent)'} onOpen={onOpenHoja} />
+                <HojaRow key={hoja.id} hoja={hoja} color={colorMap[hoja.categoria_id] || 'var(--accent)'} active={hoja.id === selectedHojaId} onOpen={onOpenHoja} onContextMenu={openHojaContextMenu} />
               )) : <p className="py-12 text-center text-[12px]" style={{ color: 'var(--subtext)' }}>No hay hojas para esta etiqueta.</p>}
             </div>
           </div>
         )}
       </div>
+
+      {hojaMenu && (
+        <AgendaContextMenu
+          x={hojaMenu.x}
+          y={hojaMenu.y}
+          items={buildHojaContextItems(hojaMenu.hoja)}
+          onClose={() => setHojaMenu(null)}
+        />
+      )}
+
+      <EditHojaModal hoja={editHoja} onClose={() => setEditHoja(null)} />
+
+      <DeleteHojaModal
+        hoja={deleteHoja}
+        onClose={() => setDeleteHoja(null)}
+        onDeleted={id => onHojaDeleted?.(id)}
+      />
     </section>
   )
 }

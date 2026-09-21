@@ -1,6 +1,38 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-21
 
+## DEPLOY completo al homelab: todo lo de esta sesión ya está en vivo (2026-09-21)
+
+Cierra el pendiente que había quedado a mitad de camino: el primer intento de deploy de
+esta sesión (sync de `project/`+`jarvis/` vía `tar`) había copiado los archivos al
+filesystem del gabinete, pero el `docker build && docker-compose up -d --no-build` final
+nunca se confirmó corrido — los 3 contenedores siguieron sirviendo la imagen `sgr-app:latest`
+armada el **19/09 a las 19:38**, sin ninguno de los cambios de esta sesión (ni el primer
+build de Horario Facultad/canvas, ni mucho menos la auditoría de Bóveda posterior).
+
+Antes de repetir el deploy se detectó y corrigió un problema adicional: el `dist/`
+commiteado en `45f87ee` (19/09) nunca se había vuelto a buildear tras los 3 fixes de
+`BovedaWorkspace.jsx`/`BrowseScreen.jsx`/`app/main.py` de esta sesión (`95d2008`, `7eff0c8`)
+— un deploy directo hubiera llevado el frontend viejo, sin esos fixes. Se corrió
+`npm run build` de nuevo y se commiteó (`2bebfa5`) antes de sincronizar.
+
+**Deploy real ejecutado y verificado** (esta vez de punta a punta, sin pasos a medias):
+`tar` de `project/` (excluyendo `venv`/`node_modules`/`database`/`uploads`) y de `jarvis/`
+sincronizados al gabinete; `docker build --network=host -t sgr-app:latest -f Dockerfile ..`
+corrido con éxito (usó cache donde correspondía, reconstruyó las capas de `app`/`mybot`/
+`frontend/dist`); `docker-compose up -d --no-build` recreó los 3 contenedores. Verificado
+después, no solo asumido: `docker inspect` → `RestartCount=0` en los 3; `curl` externo a
+`http://192.168.137.10:8765/` devuelve el HTML con `index-BlFgTcAj.js` — el hash exacto del
+build nuevo (722.262 bytes, coincide con el `npm run build` de esta sesión). Logs de
+`backend` sin errores nuevos (los 2 warnings ya conocidos de `Error leyendo frontmatter` y
+`UNIQUE constraint failed: hojas.ruta` para Robert Kiyosaki siguen apareciendo — mismo
+hallazgo sin investigar documentado arriba, no relacionado a este deploy).
+
+**Estado real desde ahora**: el homelab (vía Tailscale, `http://100.117.86.117:8765`, o LAN
+`http://192.168.137.10:8765`) sirve el mismo código que `origin/master` HEAD (`2bebfa5`) —
+Horario Facultad, canvas de listas de Tareas, rediseño de Bóveda con los 2 fixes, y el fix
+del 500 en `POST /hojas`, todo en vivo.
+
 ## FIX: `POST /hojas` devolvía 500 genérico con categoría sin ruta sincronizada al vault + hallazgo de procesos duplicados en :8765 local (2026-09-21)
 
 Cierra el bug reportado en la entrada de auditoría de arriba (mismo día). `app/main.py`

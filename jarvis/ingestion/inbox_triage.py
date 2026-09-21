@@ -330,7 +330,8 @@ def _process_candidate(candidate: dict, channel: str, chat_id, summary: dict) ->
 
     from jarvis.audit.service import propose_triage_move
 
-    pid = propose_triage_move(entry_id, dest, channel, chat_id, JARVIS_DEFAULT_USER)
+    titulo = titulo_desde_vault_path(entry.get("vault_path") or "")
+    pid = propose_triage_move(entry_id, dest, channel, chat_id, JARVIS_DEFAULT_USER, titulo=titulo)
     if not pid:
         # Dedup de create_proposal() -- ya había una propuesta (cualquier
         # status) para esta entrada, no se repite (mismo criterio que
@@ -361,6 +362,21 @@ def _process_candidate(candidate: dict, channel: str, chat_id, summary: dict) ->
 def _short(content: str, n: int = 140) -> str:
     c = (content or "").strip().replace("\n", " ")
     return c if len(c) <= n else c[:n].rstrip() + "…"
+
+
+def titulo_desde_vault_path(vault_path: str) -> str:
+    """Nombre de archivo sin carpeta ni extensión, tal cual el usuario lo ve
+    en su Bóveda (2026-09-21, botones Sí/No/Ver contenido de triage_move) --
+    sin reformatear mayúsculas/guiones, para no arriesgar mostrar algo
+    distinto de lo que el usuario reconoce. Reusado desde
+    project/mybot/jarvis_handlers.py::handle_triage_callback() para los
+    mensajes de cierre ("Terminamos con «título»")."""
+    if not vault_path:
+        return "nota sin título"
+    base = vault_path.rsplit("/", 1)[-1]
+    if base.lower().endswith(".md"):
+        base = base[: -len(".md")]
+    return base or "nota sin título"
 
 
 # ── Gate semanal (mismo mecanismo que agenda_patterns.py::_last_run_at()) ──

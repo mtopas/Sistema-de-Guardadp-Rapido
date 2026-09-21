@@ -5802,3 +5802,63 @@ scratch aislada de la real): captura mencionando a una persona real → extracci
 la entidad correctamente → apareció en `memory_entities` y en `list_entities()` → consulta
 "¿Qué sé sobre [nombre]?" devolvió las entradas vinculadas correctas, citando la información
 real de la captura. Detalle completo en `Cerebro/estado-actual.md`.
+
+---
+
+## 2026-09-21 — Botones de Telegram para triage_move (Sí/No/Ver contenido/categoría manual) — amplía el conjunto de destinos alcanzables más allá de los 8 fijos
+
+Pedido explícito del usuario tras ver la primera propuesta real de triage automático del
+Inbox (ver `Cerebro/estado-actual.md`, misma fecha): el mensaje de texto plano no decía QUÉ
+nota se proponía mover, y no había forma de corregir el destino salvo texto libre sin
+parsear (comportamiento conservador ya documentado el 15/09: "una respuesta de texto libre
+nombrando otro destino NO redirige el movimiento").
+
+**Cambio de diseño real**: la propuesta original de triage (15/09) restringía los destinos
+posibles a 8 rutas fijas (`_DEST_OPTIONS` en `jarvis/ingestion/inbox_triage.py`) precisamente
+para que el LLM nunca pudiera inventar una carpeta — el riesgo era la alucinación del
+modelo. El flujo nuevo de "No" → "Elegir categoría" NO le da esa libertad al LLM: es el
+usuario navegando a mano el árbol REAL de categorías (mismo `GET /categorias` que ya usa el
+picker de captura de `bot.py`), así que no reintroduce el riesgo que motivó la restricción
+original — solo amplía qué destino puede terminar aplicándose, sin tocar el clasificador
+automático (que sigue proponiendo únicamente entre las 8 rutas de siempre).
+
+**Diseño implementado** (fork, revisado diff completo por el orquestador antes de commitear):
+- Mensaje inicial con título de la nota (nombre de archivo sin extensión,
+  `titulo_desde_vault_path()` en `jarvis/ingestion/inbox_triage.py`) + 3 botones inline
+  (Sí/No/Ver contenido) en vez de texto plano + "Respondé sí/no" — solo para `action_type ==
+  "triage_move"`, los otros 7 tipos de propuesta de auditoría siguen sin cambios.
+- "Ver contenido": manda el contenido completo (truncado a 3900 caracteres) en un mensaje
+  aparte, después repite la pregunta con un teclado de solo 2 botones (Sí/No).
+- "No": submenú con "Elegir categoría" (recorre el árbol real vía
+  `_build_triage_category_keyboard()`, nueva en `bot.py`, mismo patrón que
+  `_build_category_keyboard()` pero sin "Nueva categoría" y con `callback_data` bajo el
+  namespace `jtriage:`) o "Dejar sin archivar" (`reject_proposal()`, sin cambios).
+- `accept_proposal()` (`jarvis/audit/service.py`) gana `payload_override: dict | None`,
+  mergeado sobre el payload guardado antes de despachar por `action_type` — permite aceptar
+  `triage_move` con un `dest_dir_rel` elegido a mano sin tocar `_apply_triage_move()`.
+- Cola: no se agregó ningún mecanismo nuevo — el throttle ya existente de
+  `push_next_audit_batch()` (bloquea el siguiente push mientras quede una `PENDING` con
+  `pushed_at` seteado para ese chat) alcanza solo con no resolver la propuesta hasta el paso
+  final del flujo (Sí / categoría elegida / dejar sin archivar) → recién ahí sale el mensaje
+  "✅ Terminamos con «título»" y el próximo triage puede salir en el siguiente tick del
+  worker (~5s).
+- `GET /categorias` (`project/app/db/crud.py`) ahora incluye `ruta` en la respuesta —
+  necesario para que el picker manual sepa el `dest_dir_rel` real de la categoría elegida;
+  aditivo, `_categoria_row_dict()` sigue soportando el call site viejo de 5 columnas.
+
+**Capas**: `jarvis_handlers.py` sigue siendo el único punto de este proceso que importa
+`jarvis.*` directo (4 wrappers nuevos: `get_triage_proposal`/`accept_triage_proposal`/
+`reject_triage_proposal`/`triage_entry_titulo`/`triage_entry_content`) — la lógica de
+callbacks (`_handle_triage_callback`) vive en `bot.py`, no en `jarvis_handlers.py` como se
+planeó al principio, porque necesita `_get_categories()`/`context.bot_data` y
+`jarvis_handlers.py` no puede importar de `bot.py` sin ciclo (`bot.py` ya hace `import
+jarvis_handlers as jh`).
+
+**Verificado**: `py_compile` limpio en los 6 archivos tocados (confirmado dos veces —
+por el fork y de nuevo por el orquestador); import real de `bot.py`/`jarvis_handlers.py`
+con el venv real sin errores; sandbox aislado (nunca la DB real) confirmó que
+`accept_proposal(pid, payload_override={"dest_dir_rel": "01 - Proyectos"})` mueve el archivo
+físico al destino manual (no al recomendado), `reject_proposal()` no mueve nada, y que los
+otros 7 `action_types` de auditoría siguen mandando el texto plano de siempre sin
+`reply_markup`. **Sin verificar**: el flujo real de clics en un chat de Telegram de verdad
+(no se puede automatizar sin interacción humana) — pendiente de probar a mano.

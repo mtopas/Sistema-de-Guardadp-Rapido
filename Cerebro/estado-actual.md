@@ -1,6 +1,32 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-21
 
+## IMPLEMENTADO: botones de Telegram para triage_move (Sí/No/Ver contenido/categoría manual) (2026-09-21)
+
+Pedido explícito del usuario tras la primera propuesta real (ver entrada de arriba, mismo
+día): el mensaje de texto plano no decía qué nota se proponía mover. Implementado por fork
+(2 intentos — el primero terminó en 5s sin usar ninguna herramienta ni tocar archivos, falla
+silenciosa detectada al revisar `git status`; el segundo sí hizo el trabajo real, 65 tool
+calls). Diff completo revisado por el orquestador línea por línea antes de commitear —
+detalle completo del diseño en `Cerebro/decisiones-implementacion.md`, entrada `2026-09-21 —
+Botones de Telegram para triage_move`.
+
+**Resumen**: cada propuesta `triage_move` ahora llega con el título de la nota + 3 botones
+(Sí/No/Ver contenido) en vez de texto plano a responder con "sí/no". "No" abre un submenú
+para elegir cualquier categoría real del árbol (no solo las 8 fijas del clasificador
+automático) o dejar la nota sin archivar. El throttle existente (`push_next_audit_batch()`)
+ya garantiza que la siguiente nota no se propone hasta que la actual esté resuelta del todo
+— no hizo falta ninguna cola nueva.
+
+Archivos tocados: `jarvis/notify/telegram.py`, `jarvis/audit/service.py`,
+`jarvis/ingestion/inbox_triage.py`, `project/app/db/crud.py`, `project/mybot/bot.py`,
+`project/mybot/jarvis_handlers.py`.
+
+**Verificado** (sandbox aislado, nunca datos reales): `py_compile`/import limpios; el override
+manual de destino mueve el archivo real al lugar elegido, no al recomendado; los otros 7
+tipos de propuesta de auditoría no cambiaron de comportamiento. **Sin verificar todavía**: el
+flujo de clics real en Telegram — pendiente de probar con el usuario tras el deploy.
+
 ## PRIMERA PROPUESTA REAL del triage de Inbox — umbral bajado a pedido del usuario (2026-09-21)
 
 El usuario preguntó si el triage automático del Inbox (`jarvis/ingestion/inbox_triage.py`,

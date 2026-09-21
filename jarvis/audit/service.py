@@ -1090,10 +1090,19 @@ def _resolve_proposal(proposal_id: str, status: str, entry_id: str | None) -> No
 
 # ── Aplicar una acción aceptada ───────────────────────────────────────────────
 
-def accept_proposal(proposal_id: str, reply_text: str | None = None) -> dict | None:
+def accept_proposal(
+    proposal_id: str,
+    reply_text: str | None = None,
+    payload_override: dict | None = None,
+) -> dict | None:
     """Aplica la acción de una propuesta PENDING. Devuelve {"entry_id": ...|None}
     (entry_id solo si la acción crea contenido nuevo), o None si la propuesta
     no existe o ya estaba resuelta. reply_text solo se usa para 'clarify'.
+
+    payload_override (2026-09-21, botones de triage_move): si viene, se
+    mergea sobre el payload guardado ANTES de despachar por action_type --
+    permite aceptar triage_move con un dest_dir_rel elegido a mano (categoría
+    manual) en vez del recomendado por el LLM, sin tocar _apply_triage_move().
     """
     proposal = get_proposal(proposal_id)
     if not proposal or proposal["status"] != "PENDING":
@@ -1102,6 +1111,8 @@ def accept_proposal(proposal_id: str, reply_text: str | None = None) -> dict | N
     action_type = proposal["action_type"]
     target_ids = json.loads(proposal["target_entry_ids"])
     payload = json.loads(proposal["payload"]) if proposal["payload"] else {}
+    if payload_override:
+        payload = {**payload, **payload_override}
     entry_id = None
 
     if action_type == "create":
@@ -1310,7 +1321,8 @@ def _apply_triage_move(target_ids: list[str], payload: dict) -> None:
 
 
 def propose_triage_move(
-    entry_id: str, dest_dir_rel: str, channel: str, channel_id, user_id: str
+    entry_id: str, dest_dir_rel: str, channel: str, channel_id, user_id: str,
+    titulo: str = "",
 ) -> str | None:
     """Crea la propuesta gateada para mover una nota del inbox a su destino
     sugerido -- llamada desde jarvis/ingestion/inbox_triage.py tras la
@@ -1318,11 +1330,19 @@ def propose_triage_move(
     destino posible, la pregunta no necesita nombrarlo), acá la pregunta SÍ
     nombra el destino explícito -- pedido explícito de la propuesta aprobada
     (ver Cerebro/decisiones-implementacion.md, 2026-09-15).
+
+    `titulo` (2026-09-21, botones Sí/No/Ver contenido): nombre del archivo
+    sin extensión, para que el usuario sepa de qué nota se trata sin tener
+    que adivinar por el destino sugerido solo -- ver
+    jarvis/ingestion/inbox_triage.py::_titulo_desde_vault_path(). El sufijo
+    "Respondé sí/no" ya NO se agrega acá -- push_next_audit_batch() arma el
+    teclado inline para este action_type en vez del texto genérico.
     """
     payload = {"dest_dir_rel": dest_dir_rel}
+    titulo_txt = f'"{titulo}"\n\n' if titulo else ""
     question = (
-        f'🧠 Esta nota del inbox parece lista para archivar en "{dest_dir_rel}". '
-        f"¿La muevo?"
+        f'🧠 {titulo_txt}Parece lista para archivar en "{dest_dir_rel}". '
+        f"¿Qué hacés?"
     )
     return create_proposal(
         "triage_move", [entry_id], payload, question, channel, channel_id, user_id,
@@ -1913,16 +1933,34 @@ def push_next_audit_batch(channel: str, channel_id, user_id: str = JARVIS_DEFAUL
         # responder (ver Cerebro/decisiones-implementacion.md, 2026-09-17,
         # entrada de desambiguación). Con batch=1 (default) n siempre es 1 y
         # esto no cambia nada del mensaje de siempre.
-        if n > 1:
+        if row["action_type"] == "triage_move":
+            # Botones inline en vez de sí/no de texto libre (2026-09-21) --
+            # ver project/mybot/jarvis_handlers.py::handle_triage_callback().
+            # Con n>1 (JARVIS_AUDIT_PUSH_BATCH_SIZE >= 2, no es el default)
+            # se antepone el mismo prefijo "N/M:" que el resto, el usuario
+            # igual resuelve por botón, no por texto, así que no hace falta
+            # la instrucción de "empezá con el número".
+            prefix = f"{idx}/{n}: " if n > 1 else ""
+            text = prefix + row["question"]
+            keyboard = {
+                "inline_keyboard": [[
+                    {"text": "✅ Sí", "callback_data": f"jtriage:yes:{row['id']}"},
+                    {"text": "❌ No", "callback_data": f"jtriage:no:{row['id']}"},
+                    {"text": "👁 Ver contenido", "callback_data": f"jtriage:view:{row['id']}"},
+                ]]
+            }
+            send_telegram_message(channel_id, text, reply_markup=keyboard)
+        elif n > 1:
             text = (
                 f"{idx}/{n}: {row['question']}\n\n"
                 "Respondé sí/no (o agregá una aclaración). Como tenés más de "
                 "una pendiente, empezá tu respuesta con el número (ej: "
                 f'"{idx} sí").'
             )
+            send_telegram_message(channel_id, text)
         else:
             text = row["question"] + "\n\nRespondé sí/no (o agregá una aclaración)."
-        send_telegram_message(channel_id, text)
+            send_telegram_message(channel_id, text)
         _mark_pushed(row["id"], now_iso)
         pushed_ids.append(row["id"])
     return pushed_ids

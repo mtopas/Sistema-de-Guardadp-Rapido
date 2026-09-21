@@ -95,7 +95,10 @@ def _hoja_dict(f):
 # mueven por esta vía (decisión 2026-09-11, Milestone 2).
 
 def _categoria_row_dict(row) -> dict:
-    return {"id": row[0], "nombre": row[1], "padre_id": row[2], "icono": row[3], "color": row[4]}
+    d = {"id": row[0], "nombre": row[1], "padre_id": row[2], "icono": row[3], "color": row[4]}
+    if len(row) > 5:
+        d["ruta"] = row[5]
+    return d
 
 
 def _categoria_descendant_ids(cursor, categoria_id: int) -> list:
@@ -183,7 +186,10 @@ def obtener_categorias():
     sincronizar_vault_si_hace_falta()
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, nombre, padre_id, icono, color FROM categorias ORDER BY id ASC")
+    # `ruta` sumado 2026-09-21 (bot de Telegram: picker de categoría manual
+    # para triage_move necesita el dest_dir_rel real) -- aditivo, no rompe
+    # ningún consumidor existente del array (frontend ignora la key nueva).
+    cursor.execute("SELECT id, nombre, padre_id, icono, color, ruta FROM categorias ORDER BY id ASC")
     filas = cursor.fetchall()
     conn.close()
     return [_categoria_row_dict(f) for f in filas]

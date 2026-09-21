@@ -35,8 +35,15 @@ def notify_telegram_done(chat_id: str, text: str) -> None:
     send_telegram_message(chat_id, text)
 
 
-def send_telegram_message(chat_id: str, text: str) -> None:
+def send_telegram_message(chat_id: str, text: str, reply_markup: dict | None = None) -> None:
     """Envía un mensaje de texto plano a un chat_id vía la HTTP API de Telegram.
+
+    `reply_markup`, si viene, es la estructura cruda que espera la Bot API
+    para un teclado inline (`{"inline_keyboard": [[{"text": ..., "callback_data": ...}], ...]}`)
+    -- no hace falta ninguna clase de `python-telegram-bot`, esto es una
+    llamada HTTP directa (ver docstring del módulo). Usado por
+    jarvis/audit/service.py::push_next_audit_batch() para las propuestas
+    `triage_move` (2026-09-21, botones Sí/No/Ver contenido).
 
     Best-effort: nunca lanza -- si falla (sin token, sin red, Telegram caído,
     o -- ya no debería pasar, pero por las dudas -- un 400 de la Bot API),
@@ -51,10 +58,13 @@ def send_telegram_message(chat_id: str, text: str) -> None:
     if not token or not chat_id:
         return
 
-    payload = json.dumps({
+    body = {
         "chat_id": chat_id,
         "text": text,
-    }).encode("utf-8")
+    }
+    if reply_markup:
+        body["reply_markup"] = reply_markup
+    payload = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(
         _SEND_MESSAGE_URL.format(token=token),
         data=payload,

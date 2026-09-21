@@ -11,6 +11,7 @@ Comandos registrados:
     /jdebugoff   — desactiva el modo debug
 """
 import asyncio
+import json
 import logging
 import re
 
@@ -22,8 +23,11 @@ logger = logging.getLogger(__name__)
 
 try:
     from jarvis.audit.service import (
+        accept_proposal as _accept_audit_proposal,
         build_individual_disambiguation_message as _build_audit_disambiguation_message,
+        get_proposal as _get_audit_proposal,
         list_pending_individual_proposals_for_channel as _list_pending_individual_audit,
+        reject_proposal as _reject_audit_proposal,
         resolve_grouped_reply as _resolve_audit_grouped_reply,
         resolve_individual_reply as _resolve_audit_individual_reply,
     )
@@ -41,7 +45,8 @@ try:
         remember_chat_id,
         set_debug_mode,
     )
-    from jarvis.memory.service import capture_raw
+    from jarvis.ingestion.inbox_triage import titulo_desde_vault_path as _titulo_desde_vault_path
+    from jarvis.memory.service import capture_raw, get_entry as _get_jarvis_entry
     from jarvis.query.service import query as _jarvis_query
     _JARVIS_AVAILABLE = True
 except ImportError:
@@ -432,6 +437,51 @@ def _format_audit_grouped_result(result: dict) -> str:
     if n_no:
         parts.append(f"{n_no} descartada(s)")
     return "✅ " + ", ".join(parts) + "."
+
+
+# ── Wrappers públicos para el flujo de botones de triage_move (2026-09-21) ──
+# bot.py::_handle_triage_callback() usa estos en vez de importar jarvis.*
+# directo -- mismo criterio de capas que el resto del archivo (jarvis_handlers
+# es el único punto de este proceso que toca el paquete jarvis).
+
+def get_triage_proposal(proposal_id: str) -> dict | None:
+    if not _JARVIS_AVAILABLE:
+        return None
+    return _get_audit_proposal(proposal_id)
+
+
+def accept_triage_proposal(proposal_id: str, payload_override: dict | None = None) -> dict | None:
+    if not _JARVIS_AVAILABLE:
+        return None
+    return _accept_audit_proposal(proposal_id, payload_override=payload_override)
+
+
+def reject_triage_proposal(proposal_id: str) -> bool:
+    if not _JARVIS_AVAILABLE:
+        return False
+    return _reject_audit_proposal(proposal_id)
+
+
+def triage_entry_titulo(proposal: dict) -> str:
+    """Título de la nota objetivo de una propuesta triage_move (nombre de
+    archivo sin extensión), para los mensajes de cierre ("Terminamos con
+    «título»") y para repetir la pregunta tras "Ver contenido"."""
+    if not _JARVIS_AVAILABLE:
+        return "nota sin título"
+    target_ids = json.loads(proposal.get("target_entry_ids") or "[]")
+    entry = _get_jarvis_entry(target_ids[0]) if target_ids else None
+    return _titulo_desde_vault_path((entry or {}).get("vault_path") or "")
+
+
+def triage_entry_content(proposal: dict) -> str:
+    """Contenido completo de la nota objetivo, para el botón "Ver contenido"."""
+    if not _JARVIS_AVAILABLE:
+        return "(Jarvis no disponible)"
+    target_ids = json.loads(proposal.get("target_entry_ids") or "[]")
+    entry = _get_jarvis_entry(target_ids[0]) if target_ids else None
+    if not entry:
+        return "(no se encontró el contenido -- puede que la nota se haya movido o borrado)"
+    return entry.get("content_processed") or entry.get("content_raw") or "(sin contenido)"
 
 
 async def cmd_jq(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -439,6 +439,35 @@ def _build_category_keyboard(categorias: list, parent_id: int | None = None,
     return InlineKeyboardMarkup(rows)
 
 
+def _build_triage_category_keyboard(categorias: list, proposal_id: str, parent_id: int | None = None,
+                                     back_btn: bool = False) -> InlineKeyboardMarkup:
+    """Teclado inline para elegir categoría manual al resolver una propuesta
+    triage_move con "No" -> "Elegir categoría" (2026-09-21). Mismo recorrido
+    de árbol que _build_category_keyboard, pero con callback_data bajo el
+    namespace jtriage: (proposal_id embebido) y SIN botón de "Nueva
+    categoría" -- acá solo se elige entre categorías que ya existen.
+    Categorías con hijos siempre abren un nivel más (nunca se puede elegir un
+    nodo padre como destino directo), mismo criterio que el picker de
+    captura.
+    """
+    parent_ids_with_children = {c["padre_id"] for c in categorias if c.get("padre_id") is not None}
+    level_cats = [c for c in categorias if c.get("padre_id") == parent_id]
+
+    rows = []
+    for c in level_cats:
+        label = f"{c.get('icono', '') or ''} {c['nombre']}".strip()
+        if c["id"] in parent_ids_with_children:
+            label = f"📂 {label}"
+            rows.append([InlineKeyboardButton(label, callback_data=f"jtriage:catroot:{proposal_id}:{c['id']}")])
+        else:
+            rows.append([InlineKeyboardButton(label, callback_data=f"jtriage:catleaf:{proposal_id}:{c['id']}")])
+
+    if back_btn:
+        rows.append([InlineKeyboardButton("⬅ Volver", callback_data=f"jtriage:catback:{proposal_id}:root")])
+
+    return InlineKeyboardMarkup(rows)
+
+
 async def _save_draft(
     ud: dict,
     bot_data: dict,
@@ -1110,6 +1139,144 @@ async def _handle_llm_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 # ──────────────────────────────────────────────────────────────
+# Callbacks de triage_move (botones Sí/No/Ver contenido del Inbox, 2026-09-21)
+# ──────────────────────────────────────────────────────────────
+
+_TRIAGE_CONTENT_LIMIT = 3900  # mismo margen que _REPORT_MESSAGE_LIMIT de jarvis/notify/telegram.py
+
+
+def _triage_yesno_keyboard(proposal_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Sí", callback_data=f"jtriage:yes:{proposal_id}"),
+        InlineKeyboardButton("❌ No", callback_data=f"jtriage:no:{proposal_id}"),
+    ]])
+
+
+def _triage_no_submenu_keyboard(proposal_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📁 Elegir categoría", callback_data=f"jtriage:manualcat:{proposal_id}")],
+        [InlineKeyboardButton("🗑 Dejar sin archivar", callback_data=f"jtriage:leave:{proposal_id}")],
+    ])
+
+
+async def _triage_finish(query, proposal_id: str, titulo: str, extra: str = "") -> None:
+    """Saca los botones del mensaje resuelto y manda el mensaje de cierre
+    aparte -- recién después de este mensaje puede salir el próximo triage
+    (push_next_audit_batch corre en el worker, no acá; el gate ya existente
+    de jarvis/audit/service.py hace el resto solo con el status en ACCEPTED/
+    REJECTED)."""
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass  # mensaje viejo/ya editado -- no debe tumbar el cierre
+    await query.message.chat.send_message(f"✅ Terminamos con «{titulo}».{extra}")
+
+
+async def _handle_triage_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str) -> bool:
+    """Maneja los botones de una propuesta triage_move (jtriage:*). Devuelve
+    True si fue manejado. Ver Cerebro/estado-actual.md, 2026-09-21, para el
+    diseño completo del flujo (Sí / No -> submenú / Ver contenido)."""
+    if not data.startswith("jtriage:"):
+        return False
+
+    query = update.callback_query
+    await query.answer()
+
+    parts = data.split(":")
+    action = parts[1] if len(parts) > 1 else ""
+    proposal_id = parts[2] if len(parts) > 2 else ""
+
+    proposal = jh.get_triage_proposal(proposal_id)
+    if not proposal or proposal.get("status") != "PENDING":
+        try:
+            await query.edit_message_text("❌ Esa propuesta ya no está disponible (venció o ya se resolvió).")
+        except Exception:
+            pass
+        return True
+
+    titulo = jh.triage_entry_titulo(proposal)
+
+    if action == "yes":
+        jh.accept_triage_proposal(proposal_id)
+        await _triage_finish(query, proposal_id, titulo)
+        return True
+
+    if action == "no":
+        try:
+            await query.edit_message_reply_markup(reply_markup=_triage_no_submenu_keyboard(proposal_id))
+        except Exception:
+            pass
+        return True
+
+    if action == "view":
+        content = jh.triage_entry_content(proposal)
+        if len(content) > _TRIAGE_CONTENT_LIMIT:
+            content = content[:_TRIAGE_CONTENT_LIMIT] + "\n\n(recortado -- la nota sigue completa en la Bóveda)"
+        await query.message.chat.send_message(f"📄 «{titulo}»:\n\n{content}")
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        await query.message.chat.send_message(
+            proposal["question"], reply_markup=_triage_yesno_keyboard(proposal_id)
+        )
+        return True
+
+    if action == "manualcat":
+        cats = _get_categories(context.bot_data)
+        try:
+            await query.edit_message_reply_markup(
+                reply_markup=_build_triage_category_keyboard(cats, proposal_id, parent_id=None, back_btn=False)
+            )
+        except Exception:
+            pass
+        return True
+
+    if action == "catroot":
+        cat_id = int(parts[3])
+        cats = _get_categories(context.bot_data)
+        try:
+            await query.edit_message_reply_markup(
+                reply_markup=_build_triage_category_keyboard(cats, proposal_id, parent_id=cat_id, back_btn=True)
+            )
+        except Exception:
+            pass
+        return True
+
+    if action == "catback":
+        cats = _get_categories(context.bot_data)
+        try:
+            await query.edit_message_reply_markup(
+                reply_markup=_build_triage_category_keyboard(cats, proposal_id, parent_id=None, back_btn=False)
+            )
+        except Exception:
+            pass
+        return True
+
+    if action == "catleaf":
+        cat_id = int(parts[3])
+        cats = _get_categories(context.bot_data)
+        cat = next((c for c in cats if c["id"] == cat_id), None)
+        ruta = (cat or {}).get("ruta")
+        if not ruta:
+            try:
+                await query.edit_message_text("❌ Esa categoría no tiene una carpeta real todavía.")
+            except Exception:
+                pass
+            return True
+        jh.accept_triage_proposal(proposal_id, payload_override={"dest_dir_rel": ruta})
+        await _triage_finish(query, proposal_id, titulo)
+        return True
+
+    if action == "leave":
+        jh.reject_triage_proposal(proposal_id)
+        await _triage_finish(query, proposal_id, titulo, extra=" Queda sin archivar.")
+        return True
+
+    return False
+
+
+# ──────────────────────────────────────────────────────────────
 # Dispatcher de callbacks (LLM → Bóveda → Finanzas → Agenda)
 # ──────────────────────────────────────────────────────────────
 
@@ -1235,6 +1402,8 @@ async def _dispatch_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     data  = query.data or ""
 
     if await _handle_llm_callback(update, context, data):
+        return
+    if await _handle_triage_callback(update, context, data):
         return
     if await _handle_boveda_callback(update, context, data):
         return

@@ -27,6 +27,14 @@ manual de destino mueve el archivo real al lugar elegido, no al recomendado; los
 tipos de propuesta de auditoría no cambiaron de comportamiento. **Sin verificar todavía**: el
 flujo de clics real en Telegram — pendiente de probar con el usuario tras el deploy.
 
+**Desplegado al homelab el mismo día** (`jarvis/`+`project/` resincronizados, imagen
+reconstruida, 3 contenedores recreados): `RestartCount=0` en los 3, logs del `bot` sin
+errores de import (los 2 reintentos de healthcheck al arrancar son la carrera normal entre
+`backend`/`bot` ya documentada, se resuelve sola). La propuesta que ya estaba pusheada como
+texto plano antes de este deploy sigue como texto plano (no retroactivo); las 2 que quedaban
+en cola van a salir con los botones nuevos la próxima vez que `push_next_audit_batch()`
+corra. Pendiente real: probar el flujo de clics con el usuario en un chat de Telegram real.
+
 ## PRIMERA PROPUESTA REAL del triage de Inbox — umbral bajado a pedido del usuario (2026-09-21)
 
 El usuario preguntó si el triage automático del Inbox (`jarvis/ingestion/inbox_triage.py`,

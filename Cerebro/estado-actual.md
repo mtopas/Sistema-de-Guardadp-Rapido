@@ -1,6 +1,39 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-21
 
+## PRIMERA PROPUESTA REAL del triage de Inbox — umbral bajado a pedido del usuario (2026-09-21)
+
+El usuario preguntó si el triage automático del Inbox (`jarvis/ingestion/inbox_triage.py`,
+implementado 15/09) ya le había recomendado algo — nunca lo había hecho: verificado contra
+`jarvis.db` real del homelab, 0 propuestas `triage_move` desde que existe, última corrida
+17/09. Causa real (no un bug): las únicas notas reales con contenido suficiente (los 6
+archivos `idea_*`/`Idea_05_...`/`Ideas para hacer un Portafolio.md`, 13k-50k caracteres)
+tenían 6.3 días de antigüedad — muy por debajo del umbral conservador original de 21 días.
+
+**Pedido explícito del usuario**: bajar el umbral y probarlo ya. `JARVIS_INBOX_TRIAGE_MIN_AGE_DAYS`
+pasó de `21` a **`6`** en `jarvis/config.py` (nota: 7 no alcanzaba — el código trunca a
+entero con `int()`, así que 6.32 días reales truncaban a `6`, por debajo de un umbral de 7;
+confirmado con el usuario antes de aplicar el cambio). Desplegado (sync + rebuild + restart,
+mismo proceso de siempre).
+
+**Corrida forzada contra datos reales** (bypaseando el gate semanal de
+`should_run_inbox_triage()` — última corrida real había sido hace solo 4 días, menos que el
+intervalo de 7; se llamó a `_select_candidates()`/`_process_candidate()` directo, sin tocar
+código, vía `docker exec` en el contenedor `worker`, mismo patrón que otras corridas
+forzadas de esta bitácora): **4 candidatas reales encontradas** (tope de
+`JARVIS_INBOX_TRIAGE_LIMIT`, quedaron 2 más sin procesar para la próxima corrida),
+clasificadas las 4 a `03 - Recursos/Carrera Profesional` por el LLM de razonamiento — primera
+vez que el triage produce una recomendación real, no sintética. **1 de las 4 propuestas ya
+se empujó de verdad a Telegram** (`pushed_at` seteado); las otras 3 quedaron en cola
+(`pushed_at IS NULL`, throttle `JARVIS_AUDIT_PUSH_BATCH_SIZE=1` de siempre) — van a llegar de
+a una a medida que el usuario resuelva la anterior. Ninguna nota se movió todavía en disco
+(`triage_move` solo mueve el archivo si el usuario acepta la propuesta por Telegram).
+
+**Pendiente real, anotado explícitamente en el comentario de `config.py`**: el umbral de 6
+días es una excepción para esta prueba, no la recomendación de la propuesta original
+(21-30 días). Evaluar si conviene volver a subirlo una vez que el usuario haya visto el
+triage funcionar de verdad — decisión pendiente, no tomada unilateralmente.
+
 ## CAMBIO: la consolidación de memoria pasa de diaria a semanal (2026-09-21)
 
 Pedido explícito del usuario. `run_consolidation()` (`jarvis/worker/consolidation.py`) —

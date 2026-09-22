@@ -1,8 +1,9 @@
-"START $(Get-Date)" | Out-File "D:\Sistema-de-Guardadp-Rapido\project\scripts\ics-repair-log.txt"
+$LogFile = Join-Path $PSScriptRoot "ics-repair-log.txt"
+"START $(Get-Date)" | Out-File $LogFile
 try {
-  & "D:\Sistema-de-Guardadp-Rapido\project\scripts\Repair-Ics.ps1"
-  "END OK $(Get-Date)" | Out-File "D:\Sistema-de-Guardadp-Rapido\project\scripts\ics-repair-log.txt" -Append
+  & (Join-Path $PSScriptRoot "Repair-Ics.ps1")
+  "END OK $(Get-Date)" | Out-File $LogFile -Append
 } catch {
-  "END ERR: $($_.Exception.Message)" | Out-File "D:\Sistema-de-Guardadp-Rapido\project\scripts\ics-repair-log.txt" -Append
-  "END ERR: $($_.ScriptStackTrace)" | Out-File "D:\Sistema-de-Guardadp-Rapido\project\scripts\ics-repair-log.txt" -Append
+  "END ERR: $($_.Exception.Message)" | Out-File $LogFile -Append
+  "END ERR: $($_.ScriptStackTrace)" | Out-File $LogFile -Append
 }

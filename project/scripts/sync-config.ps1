@@ -6,11 +6,15 @@ $HomelabUser    = "mtopas"
 $HomelabProject = "~/project"          # Ruta en el homelab (tilde expandida por bash remoto)
 $HomelabApiPort = 8765
 
-$SgrExe         = "D:\Sistema-de-Guardadp-Rapido\project\dist\SGR\SGR.exe"
-$LocalDataRoot  = "D:\Sistema-de-Guardadp-Rapido\project"
+## Rutas locales derivadas de la ubicacion de este script (portable, no
+## hardcodeadas) -- $LocalDataRoot es project/, $LocalVault es el sibling
+## del repo (mismo criterio que VAULT_ROOT en app/config.py).
+$LocalDataRoot  = Split-Path $PSScriptRoot -Parent
+$RepoRoot       = Split-Path $LocalDataRoot -Parent
+$SgrExe         = Join-Path $LocalDataRoot "dist\SGR\SGR.exe"
 $LocalDb        = "$LocalDataRoot\database\app.db"
 $LocalUploads   = "$LocalDataRoot\uploads"
-$LocalVault     = "D:\Boveda"
+$LocalVault     = Join-Path (Split-Path $RepoRoot -Parent) "Boveda"
 
 ## Token de seguridad opcional.
 ## Si el homelab tiene SGR_SYNC_TOKEN=<valor> en su .env, poner el mismo valor aqui.

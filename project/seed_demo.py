@@ -9,7 +9,7 @@ DB_PATH / VAULT_ROOT respetan las variables de entorno del mismo nombre que ya
 usa el resto de la app (ver app/config.py) -- para sembrar sin tocar tus datos
 reales, seteá las dos a una carpeta/DB de scratch antes de correr esto (mismo
 patrón que project/scripts/dev-start.ps1, que arma exactamente ese sandbox).
-VAULT_ROOT NO tiene default silencioso a D:\\Boveda -- ver el chequeo en
+VAULT_ROOT NO tiene default silencioso al vault real -- ver el chequeo en
 __main__ más abajo: sin la variable de entorno seteada explícitamente, el
 script se niega a arrancar en vez de escribir notas de prueba en tu vault real.
 """
@@ -27,8 +27,11 @@ from pathlib import Path
 DB_PATH = Path(os.environ.get("DB_PATH") or (Path(__file__).parent / "database" / "app.db"))
 os.environ["DB_PATH"] = str(DB_PATH)
 
+# Default portable (sibling del repo, mismo criterio que VAULT_ROOT en app/config.py)
+# -- nunca se usa de verdad si VAULT_ROOT_SET_EXPLICITAMENTE es False, ver __main__.
+_DEFAULT_VAULT_ROOT = Path(__file__).resolve().parent.parent.parent / "Boveda"
 VAULT_ROOT_SET_EXPLICITAMENTE = bool(os.environ.get("VAULT_ROOT"))
-VAULT_ROOT = Path(os.environ.get("VAULT_ROOT") or r"D:\Boveda")
+VAULT_ROOT = Path(os.environ.get("VAULT_ROOT") or _DEFAULT_VAULT_ROOT)
 os.environ["VAULT_ROOT"] = str(VAULT_ROOT)
 
 TODAY = date.today()

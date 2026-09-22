@@ -1,7 +1,7 @@
 #Requires -RunAsAdministrator
 ## Restaura ICS tras un repair fallido (Ethernet 2 en 169.254.x).
 $ErrorActionPreference = "Stop"
-$LogFile = "D:\Sistema-de-Guardadp-Rapido\project\scripts\ics-repair-log.txt"
+$LogFile = Join-Path $PSScriptRoot "ics-repair-log.txt"
 function Log($m) { Add-Content $LogFile $m; Write-Host $m }
 
 "" | Set-Content $LogFile

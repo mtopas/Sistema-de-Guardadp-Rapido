@@ -1,7 +1,7 @@
 #Requires -RunAsAdministrator
 ## Alternativa a ICS clasico: NetNat + forwarding (mas estable en Win10/11)
 $ErrorActionPreference = "Continue"
-$LogFile = "D:\Sistema-de-Guardadp-Rapido\project\scripts\ics-repair-log.txt"
+$LogFile = Join-Path $PSScriptRoot "ics-repair-log.txt"
 function Log($m) { Add-Content $LogFile $m; Write-Host $m }
 "" | Set-Content $LogFile
 Log "[NAT] Start $(Get-Date -Format o)"

@@ -12,7 +12,7 @@ nunca la dejes en texto plano en este archivo.
 $ErrorActionPreference = "Stop"
 
 $ShareName = "Boveda"
-$SharePath = "D:\Boveda"
+$SharePath = if ($env:BOVEDA_PATH) { $env:BOVEDA_PATH } else { "D:\Boveda" }  # ajustar a tu ruta real, o setear BOVEDA_PATH
 $MountUser = "sgr-homelab"
 
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)

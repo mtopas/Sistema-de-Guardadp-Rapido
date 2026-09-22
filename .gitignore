@@ -5,6 +5,7 @@ __pycache__/
 .DS_Store
 node_modules/
 project/dist/
+project/frontend/dist/
 project/build/
 
 # Datos y secretos — nunca commitear
@@ -29,3 +30,6 @@ project/wheelhouse/*.whl
 
 # Build artifacts de pip install -e
 *.egg-info/
+
+# Logs de runtime
+project/scripts/ics-repair-log.txt

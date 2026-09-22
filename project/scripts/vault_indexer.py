@@ -30,7 +30,7 @@ from app.vault import parser  # noqa: E402
 
 logger = logging.getLogger("vault_indexer")
 
-DEFAULT_VAULT_ROOT = Path(r"D:\Boveda")
+DEFAULT_VAULT_ROOT = ROOT.parent.parent / "Boveda"  # sibling del repo, portable
 DEFAULT_DB_PATH = ROOT / "database" / "vault_index.db"
 
 SCHEMA = """

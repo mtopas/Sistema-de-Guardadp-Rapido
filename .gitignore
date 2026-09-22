@@ -15,6 +15,10 @@ project/database/jarvis.db
 project/database/jarvis.db-shm
 project/database/jarvis.db-wal
 project/database/jarvis.bak-*.db
+project/database/app.db.bak
+project/database/app.db.pre-*
+project/database/backup-*/
+project/database/backups/
 project/database/chroma/
 project/vault/
 project/uploads/

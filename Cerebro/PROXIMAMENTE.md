@@ -162,6 +162,12 @@ Telegram, `SGR_SYNC_TOKEN` obligatorio.
 - Presupuesto mensual por categoría, gastos recurrentes como entidades (no inferidos por
   texto), forecast 30/60/90 días.
 - Reglas de clasificación personales entrenables antes de recurrir al LLM en cada captura.
+- `fmtARSShort` (`project/frontend/src/data/finanzas.js`) redondea mal justo en el borde de
+  1M: `fmtARSShort(999_999)` da `"$1.000,00K"` (`999999/1000 = 999.999`, redondeado a 2
+  decimales sube a `1000.00`) — matemáticamente no pierde datos, pero visualmente un valor de
+  $999.999 se ve idéntico a haber cruzado el millón. Encontrado testeando Finanzas
+  (2026-09-23, ver `Cerebro/estado-actual.md`). Cosmético, rango angosto
+  (~$999.500–999.999), decisión explícita del usuario de no tocarlo por ahora.
 
 ### Diferido — Agenda
 - Recurrencia con JSON propio en vez de RFC 5545 (`RRULE`/`EXDATE`/`RECURRENCE-ID`) — el

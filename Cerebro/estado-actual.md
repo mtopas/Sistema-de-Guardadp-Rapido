@@ -1,5 +1,157 @@
 # Estado Actual de Jarvis
-Última actualización: 2026-09-22
+Última actualización: 2026-09-23
+
+## FIX: columna de nivel del Log del Worker (Jarvis/Debug) se pisaba con la columna de mensaje (2026-09-23)
+
+Reportado por el usuario: en `/jarvis` → Debug → "LOG DEL WORKER", la segunda columna (nivel
+del evento, ej. `BACKFILL_DONE`) se superponía visualmente con la tercera (mensaje).
+
+**Causa real**: `JarvisDebugPanel.jsx` fija el grid de cada fila en `78px 88px 1fr` (hora /
+nivel / mensaje). Los `88px` de la columna de nivel se dimensionaron en la fase 0.1, cuando los
+niveles conocidos eran cortos (`CLASSIFY`, `ENTITY`, `EMBED`, `LINK`, `ERROR`, 4-8 caracteres).
+Los niveles agregados después por el backfill one-time (`jarvis/cli/backfill_vault_content.py`,
+2026-09-15) son bastante más largos — `BACKFILL_CLASSIFY` (17), `BACKFILL_EMBED` (14),
+`BACKFILL_DONE` (13), `TELEGRAM_FAIL` (13) — y nadie actualizó el ancho de columna. Además,
+a diferencia de la columna de mensaje (que ya tenía `overflow: hidden` +
+`textOverflow: ellipsis` + `whiteSpace: nowrap`), la columna de nivel no tenía ningún manejo de
+overflow, así que el texto que no entraba se derramaba visualmente sobre la columna siguiente
+en vez de cortarse.
+
+**Fix**: columna de nivel ampliada a `150px` (cubre cómodo el caso más largo conocido,
+`BACKFILL_CLASSIFY`) + `minWidth: 0`, `overflow: hidden`, `textOverflow: ellipsis`,
+`whiteSpace: nowrap` (mismo tratamiento que ya tenía la columna de mensaje) + `title={ev.level}`
+para poder ver el valor completo en un tooltip si algún nivel futuro igual no entra. Así,
+cualquier nivel nuevo que se agregue más adelante trunca con "…" en vez de volver a pisar la
+columna de al lado.
+
+**Verificado**: `npx vite build` limpio, sin errores nuevos (mismo warning de chunk grande que
+ya existía antes, no relacionado). No se verificó visualmente en navegador contra datos reales
+con un evento `BACKFILL_DONE` real — la próxima vez que corra el backfill o alguien abra ese
+panel con datos de backfill reales conviene confirmarlo a ojo.
+
+Impacto: `project/frontend/src/components/jarvis/JarvisDebugPanel.jsx` únicamente.
+
+---
+
+## CONTINUACIÓN TANDA 1 (Finanzas): cobertura de formateo + rutas HTTP (2026-09-23, segunda sesión)
+
+Retoma de donde quedó la tanda 1 sin resolver: las 4 áreas de Finanzas que faltaban cobertura.
+
+**Tests nuevos, los 47 en verde**:
+- **Frontend (40 tests)**: `project/frontend/src/data/finanzas.formato.test.js` — nuevo archivo.
+  - Formateo: `fmtARS`, `fmtUSD`, `fmtARSShort`, `fmtCantidad`, `fmtDolarQuote` (23 tests).
+  - Conversión y matemática de fechas: `contribucionFireUSD`, `mesesCalendarioHasta`, `cuotaMensualObjetivo` (17 tests).
+- **Backend (7 tests)**: `project/tests/test_fin_routes.py` — nuevo archivo con rutas HTTP/FastAPI.
+  - `GET /fin/categorias` (vacía, con data, con parámetro `?include_ocultas`) — 3 tests.
+  - `GET /fin/movimientos/resumen` (vacía, con data, excluye transferencias) — 3 tests.
+  - `PATCH /fin/cuentas/{id}/saldo` (verifica que da 410 Gone deprecated) — 1 test.
+
+**Suite completa verificada**:
+- Frontend: 68 tests en verde (28 anterior + 40 nuevo formateo).
+- Backend: 17 tests en verde (10 anterior + 7 nuevo rutas HTTP).
+- Total: 85 tests sin fallos.
+
+**Bugs reales encontrados al correr contra código real** (1 en esta sesión):
+1. `fmtARSShort(999_999)` devuelve `'$1.000,00K'`, no `'$999,99K'` — edge case de redondeo:
+   `999_999 / 1000 = 999.999` → redondea a `1000.00` con 2 decimales. No es un bug del código
+   (es cómo funciona `toLocaleString`), pero se documenta en el test (`999_950` test límite que no redondea).
+   **Decisión**: documentar el comportamiento real, no bajar la exigencia del test.
+
+**No cubierto aún en Finanzas** (evaluar si agotar antes de Tanda 2 Hábitos o pasar adelante):
+- Rutas HTTP adicionales (ej: `POST /fin/categorias`, `PATCH /fin/movimientos/{id}`, etc.) — candidas pero no P0.
+- Datos específicos de Demo (`seed_demo.py` — genera data de ejemplo, aún usa cat. `Ahorro` legacy).
+- Edge cases de parsing de fechas en `mesesCalendarioHasta` con formatos ISO8601 complejos (hora/tz).
+- Integración end-to-end con dólar real (`GET /fin/dolar/cotizacion`) — requeriría red/cache.
+
+**Decisión para continuar**: Finanzas módulo 1 considerado "suficientemente cubierto" (4 áreas→4 tandas
+completadas: cajón/categorías/formateo/rutas). Pasar a **Tanda 2: Hábitos** del plan (backend CRUD +
+frontend utilities de tracking diario/heatmap/streak).
+
+---
+
+## IMPLEMENTADO: infraestructura de testing + tanda 1 (Finanzas) del plan de testing con modelo local (2026-09-23)
+
+Ejecuta la tanda 1 del plan aprobado en `Cerebro/decisiones-implementacion.md`
+(`2026-09-22 — PROPUESTA APROBADA: plan de testing de todo el sistema con modelo local...`).
+No es una sesión de auditoría aparte — el propio orquestador corrió el loop generar (modelo
+local) → auditar (orquestador) en esta sesión, no delegado a otra.
+
+**Infraestructura nueva** (prerrequisito del plan, antes no existía nada):
+- Backend: `pytest`+`pytest-asyncio` (`project/requirements-dev.txt`, nuevo),
+  `project/pytest.ini` (marker `integration`), `project/tests/conftest.py` con fixture
+  `tmp_app_db` (SQLite real en `%TEMP%`, nunca `project/database/app.db`; overridea `DB_PATH`
+  antes de que se importe `app.config`/`app.db.crud` por primera vez — ver comentario en el
+  propio archivo). `project/tests/test_sandbox_fixture.py` verifica el aislamiento de la
+  fixture contra la DB real.
+- Frontend: Vitest (`project/frontend/vitest.config.js`, `package.json` con script `test`).
+
+**Modelo local usado — cambio respecto al plan original**: se probó `gemma3:12b` (el ganador
+del bake-off de extracción del 26/08) para la primera tanda, tardó varios minutos por archivo.
+Se comparó contra `qwen2.5-coder:7b` (modelo de código, más chico) sobre el mismo prompt: 3-4x
+más rápido (281s/527s/246s por tanda vs. gemma3:12b sin cronometrar con precisión pero
+sensiblemente más lento) y calidad equivalente — ambos necesitan el mismo nivel de auditoría
+real, no se detectó que el modelo más chico generara peor cobertura. **Se adoptó
+`qwen2.5-coder:7b` para el resto del plan** (Ollama local, `http://localhost:11434`, mismo
+host que ya usa Jarvis) — no vía LiteLLM porque es tooling de generación de tests, no código de
+producto de `jarvis/` (el invariante de LiteLLM aplica al pipeline de Jarvis, no a este script).
+
+**Tests nuevos, los 3 en verde**:
+- `project/frontend/src/data/finanzas.cajon.test.js` (5 tests): `isTransferencia`,
+  `movimientoAsignadoACajon`, `contribucionCategoria`, `contribucionFire`,
+  `acumuladoPorCategoriaNombre`.
+- `project/frontend/src/data/finanzas.categorias.test.js` (23 tests): `normalizeMovimiento`,
+  `isFinCategoriaObjetivo`, `isFinCategoriaReservada`, `categoriaAplicaATipo`,
+  `filterCategoriasPorTipo`, `pickDefaultCategoria`.
+- `project/tests/test_fin_saldos_objetivos.py` (7 tests, `@pytest.mark.integration` contra
+  `tmp_app_db` real): saldos ARS/USD separados por movimiento, `fin_recalcular_saldos_cuentas`
+  idempotente y equivalente al cálculo incremental, `fin_crear_objetivo` crea categoría
+  homónima visible, `fin_eliminar_objetivo` la oculta sin borrarla (`oculta=1`,
+  `objetivo_id=NULL`), id inexistente da `False` sin excepción.
+
+**Bugs reales encontrados en los borradores del modelo, corregidos antes de aceptar cada
+tanda** (evidencia de que la auditoría no es opcional, ni con el modelo de código):
+1. `movimientoAsignadoACajon({categoria_nombre:'otra categoria'}, 'otra categoria')` — el
+   modelo asumió `false` (que el matcher solo sirve para "FIRE"); es genérico, da `true`.
+2. `acumuladoPorCategoriaNombre` con dos movimientos donde solo uno matchea la categoría —
+   el modelo sumó igual el que no matchea (`-50` en vez de `-100`).
+3. `normalizeMovimiento` con ambos esquemas presentes para el mismo campo (`type` Y `tipo` a
+   la vez) — el modelo asumió que gana el esquema nuevo; en realidad gana el que aparece
+   PRIMERO en el `??` de la fuente, que es el viejo (`m.type ?? m.tipo`).
+4. `filterCategoriasPorTipo`/`categoriaAplicaATipo` compuestos — el modelo no arrastró
+   correctamente la regla "Transferencia aplica a cualquier tipoMov" al armar los arrays
+   esperados de la función de filtro (3 de 4 casos con arrays incorrectos), y asumió que
+   `tipoMov==='both'` actúa como comodín para todas las categorías cuando en realidad solo
+   matchea categorías cuyo propio campo `tipo` sea literalmente `'both'`.
+5. `pickDefaultCategoria` — 2 de 6 casos con el resultado esperado equivocado: asumió que
+   `lastSaved` siempre gana si es válido (ignora que además tiene que cumplir
+   `t==='both' || t===tipoMov`), y asumió que `'Transferencia'` podía ser el resultado de la
+   función cuando el código la excluye explícitamente del pool (comentario fuente: "nunca
+   Transferencia").
+6. Backend: `fin_crear_objetivo(...)` devuelve un dict (`{"id":..., "nombre":..., ...}`), el
+   modelo lo trató como si fuera directamente el id numérico — comparaciones y llamadas
+   posteriores (`fin_eliminar_objetivo(objetivo_id)`) habrían fallado o comparado mal.
+7. Backend: 3 de 4 llamadas a `fin_crear_movimiento(...)` omitían `descripcion` (argumento
+   posicional obligatorio) — `TypeError` al ejecutar, no un error silencioso.
+8. (Bug del propio orquestador, no del modelo, encontrado corriendo el test) — la primera
+   versión de la corrección usaba `c["nombre"]` para leer el nombre de una categoría desde
+   `fin_obtener_categorias()`; la clave real del dict es `c["name"]` (`_fin_cat_dict` en
+   `crud.py`), no `"nombre"` (aunque la columna SQL sí se llame `nombre`).
+
+Ninguno de estos bugs quedó silenciado bajando la exigencia del test — se corrigió el
+assert/código de test para que refleje el comportamiento real verificado contra la fuente
+(y, en varios casos, corriendo el test antes y después del fix para confirmar).
+
+**No cubierto en esta pasada de tanda 1** (queda para retomar si se sigue con Finanzas antes
+de pasar a la tanda 2 del plan — Hábitos): `contribucionFireUSD` (conversión USD/dólar),
+`mesesCalendarioHasta`/`cuotaMensualObjetivo` (matemática de fechas del objetivo FIRE),
+formateo (`fmtARS`/`fmtUSD`/etc.), y ninguna ruta HTTP de `/fin/*` probada a nivel FastAPI
+(`TestClient`) — solo las funciones de `crud.py` directo contra la DB de sandbox.
+
+**Verificado**: suite completa corrida al final (`npx vitest run` + `pytest tests/`), 38 tests
+en verde (28 frontend + 10 backend), sin tocar `project/database/app.db` real en ningún
+momento (confirmado por `test_tmp_app_db_is_isolated_from_real_db`).
+
+---
 
 ## CAMBIO DE ESTADO: el repo pasó a público en GitHub (2026-09-22)
 

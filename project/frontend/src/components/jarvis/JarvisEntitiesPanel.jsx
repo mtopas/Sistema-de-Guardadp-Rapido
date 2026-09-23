@@ -1,7 +1,14 @@
+import { useEffect, useMemo, useState } from 'react'
+import { Search } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import { MEMORY_TYPE_COLORS, JARVIS_ENTITY_CARD_MIN, rgba } from '../../utils/jarvisPalette'
 import { formatAge } from '../../utils/formatAge'
+
+const inputStyle = {
+  background: 'rgba(150,170,255,0.06)', border: '1px solid rgba(150,170,255,0.14)',
+  color: '#eef2ff', borderRadius: 8,
+}
 
 function initials(name) {
   return name.slice(0, 2).toUpperCase()
@@ -15,6 +22,27 @@ export default function JarvisEntitiesPanel() {
       jarvisQuery:    s.jarvisQuery,
     }))
   )
+
+  const [searchText, setSearchText] = useState('')
+  const [typeFilter, setTypeFilter] = useState('')
+
+  const sorted = useMemo(() => {
+    const copy = [...jarvisEntities]
+    copy.sort((a, b) => {
+      const countDiff = (b.memory_count ?? 0) - (a.memory_count ?? 0)
+      if (countDiff !== 0) return countDiff
+      return (new Date(b.last_seen) - new Date(a.last_seen))
+    })
+    return copy
+  }, [jarvisEntities])
+
+  const filtered = useMemo(() => {
+    return sorted.filter(e => {
+      const matchesText = e.name.toLowerCase().includes(searchText.toLowerCase())
+      const matchesType = !typeFilter || e.entity_type === typeFilter
+      return matchesText && matchesType
+    })
+  }, [sorted, searchText, typeFilter])
 
   function ask(name) {
     setJarvisTab('chat')
@@ -36,8 +64,34 @@ export default function JarvisEntitiesPanel() {
         </div>
       )}
 
+      {jarvisEntities.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2" style={{ paddingBottom: 16, marginBottom: 16, borderBottom: '1px solid rgba(150,170,255,0.1)' }}>
+          <div className="flex items-center gap-2 flex-1" style={{ minWidth: 200, ...inputStyle, padding: '0 10px' }}>
+            <Search size={13} style={{ color: 'var(--jv-mute)' }} />
+            <input
+              value={searchText}
+              onChange={e => setSearchText(e.target.value)}
+              placeholder="Buscar por nombre..."
+              className="flex-1 py-2 text-[13px] outline-none bg-transparent"
+              style={{ color: '#eef2ff' }}
+            />
+          </div>
+          <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} className="text-[12px] py-2 px-2.5 outline-none" style={{backgroundColor: 'rgba(30,30,50,0.8)', border: '1px solid rgba(150,170,255,0.14)', color: '#eef2ff', borderRadius: 8}}>
+            <option style={{backgroundColor: 'rgba(20,20,40,0.95)', color: '#eef2ff'}}>Todas</option>
+            <option value="person" style={{backgroundColor: 'rgba(20,20,40,0.95)', color: '#eef2ff'}}>Personas</option>
+            <option value="organization" style={{backgroundColor: 'rgba(20,20,40,0.95)', color: '#eef2ff'}}>Organizaciones</option>
+          </select>
+        </div>
+      )}
+
+      {filtered.length === 0 && jarvisEntities.length > 0 && (
+        <div style={{ fontSize: 13, color: 'var(--jv-mute)', padding: '20px 4px' }}>
+          Ninguna entidad coincide con el filtro.
+        </div>
+      )}
+
       <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${JARVIS_ENTITY_CARD_MIN}px, 1fr))`, gap: 12 }}>
-        {jarvisEntities.map(e => {
+        {filtered.map(e => {
           const color = e.entity_type === 'person' ? MEMORY_TYPE_COLORS.PEOPLE : MEMORY_TYPE_COLORS.PROJECT
           const kind = e.entity_type === 'person' ? 'PERSONA' : 'ORGANIZACIÓN'
           return (

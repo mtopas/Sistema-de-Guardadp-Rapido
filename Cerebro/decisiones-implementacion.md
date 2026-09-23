@@ -11,6 +11,55 @@ Formato de cada entrada:
 
 ---
 
+## 2026-09-22 — Repo publicado en GitHub (público) — purga de historial y endurecimiento contra secrets/rutas
+
+Contexto: el usuario pidió auditar el repo (`mtopas/Sistema-de-Guardadp-Rapido`) antes de hacerlo
+público. Auditoría (por fork) encontró 4 archivos de DB con datos reales trackeados en git desde
+hace semanas: `project/database/app.db.bak` (136 notas de Bóveda reales, 88 movimientos
+financieros reales con montos/nombres), 3 backups `backup-testseed-*/jarvis.db` (conversaciones
+reales del usuario probando Jarvis) — más un 5º archivo (`jarvis.bak-20260825-201528.db`) vacío
+pero del mismo patrón. Como el repo ya estaba pusheado (privado) a GitHub, no alcanzaba con
+borrar los archivos hacia adelante: seguían recuperables desde el historial.
+
+Decisión 1 (purga): backup de los 5 archivos fuera del repo antes de tocar nada
+(`C:\Users\User\Desktop\SGR-db-backup-pre-purge-20260922-142244\`, incluye también una copia
+completa del `.git` original). Purga con `git filter-repo --invert-paths` corrida primero en una
+copia aislada (verificada archivo por archivo: diff de árbol completo mostró exactamente los 5
+archivos removidos, nada más) y recién después aplicada al repo real + force-push a `origin`
+(`master` y la rama vieja `feature/boveda-jarvis-fusion`, que resultó ser un ancestro de `master`
+sin commits propios que perder). `.gitignore` reforzado con patrones para que `app.db.bak`,
+`app.db.pre-*`, y los directorios `backup-*/`/`backups/` de `project/database/` no puedan
+volver a colarse.
+
+Decisión 2 (limpieza adicional antes de publicar): `project/frontend/dist/` estaba trackeado por
+un bug real de `.gitignore` (cubría `project/dist/`, el output de PyInstaller, pero no
+`project/frontend/dist/`, el build de Vite) — destrackeado, no hacía falta versionarlo porque el
+deploy real usa `scp` manual (ver `HOMELAB.md`). `project/scripts/ics-repair-log.txt` (log de
+runtime) también se había colado trackeado — destrackeado e ignorado. Rutas hardcodeadas
+(`D:\Boveda`, `D:\Sistema-de-Guardadp-Rapido`) en 8 archivos con lógica real (`app/config.py`,
+`seed_demo.py`, `vault_indexer.py`, `sync-config.ps1` y los wrappers de ICS/NAT) pasaron a
+calcularse desde la ubicación del propio módulo/script (mismo criterio que ya usaba
+`jarvis/config.py`), verificado que resuelven al mismo valor real en esta PC (sin regresión). Las
+IPs LAN `192.168.137.x` se dejaron como están a propósito — son el default estándar de ICS de
+Windows, no específicas de este usuario, y tocarlas no bajaba riesgo real.
+
+Decisión 3 (visibilidad): con lo anterior verificado (`git log` contra `origin/master` confirmando
+que los 5 archivos ya no existen en ningún commit remoto), el repo se pasó a público con
+`gh repo edit --visibility public`. Confirmado con `gh repo view` (`isPrivate: false`).
+
+Diferencia con spec: ninguna — es una decisión de infraestructura/repo, no de arquitectura Jarvis.
+
+Impacto: `.gitignore`, `project/app/config.py`, `project/seed_demo.py`,
+`project/scripts/vault_indexer.py`, `project/scripts/sync-config.ps1`,
+`project/scripts/{Enable-HomelabNat,Repair-Ics,_run-repair-ics,setup-boveda-smb-windows}.ps1`,
+historial completo de git (reescrito), visibilidad del repo en GitHub. Se agregó una sección
+nueva "Repo público" en `CLAUDE.md` (convenciones de git) y una entrada permanente en
+`Cerebro/Orquestrador/GENERAL_ORCHESTRATOR_BOOTSTRAP.txt` sección VI, para que cualquier sesión
+futura sepa que el repo es público y qué implica (nunca hardcodear rutas de esta PC, nunca
+commitear secrets/datos reales de DB).
+
+---
+
 ## 2026-09-19 — Loop de re-propuesta de huecos de entidad + resumen corto del reporte diario
 
 Contexto: el usuario pegó en `Consolidacion.txt` el reporte diario real del 19/09 y notó que la

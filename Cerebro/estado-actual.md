@@ -1,5 +1,22 @@
 # Estado Actual de Jarvis
-Última actualización: 2026-09-21
+Última actualización: 2026-09-22
+
+## CAMBIO DE ESTADO: el repo pasó a público en GitHub (2026-09-22)
+
+`mtopas/Sistema-de-Guardadp-Rapido` dejó de ser privado. Antes de publicarlo se auditó y purgó:
+4 archivos de DB con datos reales (notas de Bóveda, movimientos financieros, conversaciones de
+Jarvis) que estaban trackeados en git desde hacía semanas se sacaron del historial completo con
+`git filter-repo` (backup fuera del repo antes de purgar, verificado que no quedaron rastros en
+ningún commit remoto). Se destrackeó `project/frontend/dist/` (bug de `.gitignore`) y un log de
+runtime, y se portabilizaron las rutas hardcodeadas (`D:\Boveda`, `D:\Sistema-de-Guardadp-Rapido`)
+en 8 archivos con lógica real. Detalle completo en `Cerebro/decisiones-implementacion.md`, entrada
+`2026-09-22`.
+
+**Implicancia permanente para cualquier sesión futura**: el repo es público. Ver la sección "Repo
+público" en `CLAUDE.md` (convenciones de git) antes de tocar código que se vaya a commitear —
+nunca hardcodear rutas absolutas de esta PC, nunca commitear secrets/tokens reales, nunca
+commitear archivos de DB/datos reales. La sección VI del bootstrap del orquestador
+(`Cerebro/Orquestrador/GENERAL_ORCHESTRATOR_BOOTSTRAP.txt`) también se actualizó con esto.
 
 ## IMPLEMENTADO: 4 fixes baratos de la auditoría externa + 3 mejoras de Agenda (2026-09-21)
 

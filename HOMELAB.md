@@ -1,5 +1,11 @@
 # Homelab SGR — Cheatsheet y referencia
 
+> **Repo público desde 2026-09-22.** Este archivo queda versionado — no pegar acá tokens, passwords,
+> ni valores reales de `SGR_SYNC_TOKEN`/`TELEGRAM_BOT_TOKEN`/etc. Los ejemplos de IP/usuario que ya
+> hay abajo (`192.168.137.x`, `mtopas`) se dejaron como están (rango LAN estándar de ICS, no un
+> secreto), pero cualquier valor nuevo que sea realmente sensible va a `.env` (gitignoreado), nunca
+> a este archivo. Ver `CLAUDE.md` sección "Repo público" para el detalle completo.
+
 Gabinete Ubuntu con **backend + bot** en Docker. API en **`:8765`** (no `:8000`).
 
 ### ⚠️ Dos bases de datos (causa típica: “el bot guardó pero no lo veo en Finanzas”)
@@ -34,8 +40,8 @@ ssh mtopas@192.168.137.10 “echo OK”
 $HomelabHost    = “192.168.137.10”   # IP del gabinete
 $HomelabUser    = “mtopas”
 $HomelabProject = “~/project”
-$SgrExe         = “D:\Sistema-de-Guardadp-Rapido\project\dist\SGR\SGR.exe”
-$LocalDataRoot  = “D:\Sistema-de-Guardadp-Rapido\project”
+$SgrExe         = “D:\SGR\project\dist\SGR\SGR.exe”
+$LocalDataRoot  = “D:\SGR\project”
 $SyncToken      = “”                  # Igual al SGR_SYNC_TOKEN en .env del homelab (si se configuró)
 ```
 
@@ -125,13 +131,13 @@ Si el archivo no existía, nano lo crea al guardar.
 En **CMD**, para cambiar a otro disco hace falta `/d`:
 
 ```cmd
-cd /d D:\Sistema-de-Guardadp-Rapido
+cd /d D:\SGR
 ```
 
 En **PowerShell**:
 
 ```powershell
-cd D:\Sistema-de-Guardadp-Rapido
+cd D:\SGR
 ```
 
 ---
@@ -144,7 +150,7 @@ El contenedor **no** lee tu PC: primero copiás, después rebuild en el gabinete
 
 ```powershell
 # Proyecto completo (sin venv ni node_modules)
-cd D:\Sistema-de-Guardadp-Rapido
+cd D:\SGR
 scp -r ./project mtopas@192.168.137.10:~/
 ```
 
@@ -152,13 +158,13 @@ scp -r ./project mtopas@192.168.137.10:~/
 # jarvis/ también hace falta -- vive como hermano de project/, fuera del build context
 # viejo (antes de 2026-08-26 no se copiaba nunca). __pycache__ e Investigacion/ no hacen
 # falta en el server:
-tar czf - --exclude='__pycache__' --exclude='Investigacion' -C D:\Sistema-de-Guardadp-Rapido jarvis `
+tar czf - --exclude='__pycache__' --exclude='Investigacion' -C D:\SGR jarvis `
   | ssh mtopas@192.168.137.10 "mkdir -p ~/jarvis && tar xzf - -C ~/jarvis --strip-components=1"
 ```
 
 ```powershell
 # Solo un archivo (ej. fix del bot)
-scp "D:\Sistema-de-Guardadp-Rapido\project\mybot\finanzas_handlers.py" mtopas@192.168.137.10:~/project/mybot/finanzas_handlers.py
+scp "D:\SGR\project\mybot\finanzas_handlers.py" mtopas@192.168.137.10:~/project/mybot/finanzas_handlers.py
 ```
 
 ```powershell
@@ -204,7 +210,7 @@ homelab necesita repetir estos 3 pasos:
 **1. Buildear localmente (Windows, con Node instalado):**
 
 ```powershell
-cd D:\Sistema-de-Guardadp-Rapido\project\frontend
+cd D:\SGR\project\frontend
 npm run build   # genera project/frontend/dist/ -- VITE_API_URL sin setear = fetches relativos,
                  # correcto para servir index.html y API desde el mismo origen/puerto
 ```
@@ -212,7 +218,7 @@ npm run build   # genera project/frontend/dist/ -- VITE_API_URL sin setear = fet
 **2. Copiar el build + el `Dockerfile` (que ahora sí copia `frontend/dist`):**
 
 ```powershell
-cd D:\Sistema-de-Guardadp-Rapido
+cd D:\SGR
 scp project/Dockerfile mtopas@192.168.137.10:~/project/Dockerfile
 scp -r project/frontend/dist mtopas@192.168.137.10:~/project/frontend/dist
 ```
@@ -412,7 +418,7 @@ Mitigación (una sola vez): watchdogs en ambos lados (abajo). Si hay ruta pero n
 Desde Windows (copia scripts + SSH):
 
 ```powershell
-scp -r D:\Sistema-de-Guardadp-Rapido\project\scripts\homelab mtopas@192.168.137.10:~/project/scripts/
+scp -r D:\SGR\project\scripts\homelab mtopas@192.168.137.10:~/project/scripts/
 ssh mtopas@192.168.137.10
 # en el gabinete:
 cd ~/project && sudo bash scripts/homelab/install-default-route-watchdog.sh
@@ -431,7 +437,7 @@ Verificar: `systemctl status sgr-default-route.timer` · `ip route` · `ping -c2
 PowerShell **como administrador**:
 
 ```powershell
-cd D:\Sistema-de-Guardadp-Rapido\project\scripts
+cd D:\SGR\project\scripts
 .\Install-IcsWatchdog.ps1   # tarea SGR-Ensure-ICS: al startup (+45s) Y cada 5 min de ahí en más
 .\Ensure-Ics.ps1            # NetNat + forwarding + 192.168.137.1 + perfil Private
 ```
@@ -606,14 +612,14 @@ En el gabinete **no hay salida a Internet durante `docker build`** (contenedor a
 **Solución recomendada — wheelhouse offline (desde Windows):**
 
 ```powershell
-cd D:\Sistema-de-Guardadp-Rapido\project
+cd D:\SGR\project
 .\scripts\prepare-docker-wheelhouse.ps1
 scp -r .\wheelhouse mtopas@192.168.137.10:~/project/
 scp .\Dockerfile .\docker-compose.yml mtopas@192.168.137.10:~/project/
 # .dockerignore va en ~ (raíz del build context), NO en ~/project/ -- ver
 # "Deploy del frontend al homelab" más arriba (corregido 2026-09-17, error real
 # en versiones previas de esta guía):
-cd D:\Sistema-de-Guardadp-Rapido
+cd D:\SGR
 scp .dockerignore mtopas@192.168.137.10:~/.dockerignore
 ```
 

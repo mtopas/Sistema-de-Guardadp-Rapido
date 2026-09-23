@@ -209,6 +209,38 @@ Lógica en `Layout.jsx` (`ARCOIRIS_ACCENTS`).
 
 ## Convenciones de Git
 
+### Repo público (desde 2026-09-22)
+
+`mtopas/Sistema-de-Guardadp-Rapido` es público en GitHub desde el 2026-09-22. Antes de esa fecha
+era privado y el código asumía implícitamente que nadie más lo iba a leer — eso ya no es cierto.
+Reglas que aplican desde ahora, para cualquier agente que trabaje en este repo:
+
+- **Nunca hardcodear rutas absolutas de esta PC** (`D:\Boveda`, `D:\SGR`,
+  `C:\Users\<usuario>`) como default de una variable en código nuevo. Usar el patrón ya establecido:
+  default calculado en base a la ubicación del propio módulo/script (`project_dir()` en
+  `app/paths.py`, `_BASE` en `jarvis/config.py`, `$PSScriptRoot` en los `.ps1`), con override por
+  env var. Ver `project/app/config.py::VAULT_ROOT` y `project/scripts/sync-config.ps1` como
+  referencia de cómo se resolvió esto.
+- **Nunca commitear secrets/tokens/API keys reales** — solo nombres de variable en `.env.example`,
+  nunca un valor real. Si un archivo de config necesita un valor real para funcionar (tokens de
+  Telegram, LiteLLM, etc.), va en `.env` (gitignoreado) o se pide interactivamente, nunca
+  hardcodeado en un `.py`/`.ps1`/`.sh` versionado.
+- **Nunca commitear archivos de datos reales**: `*.db`, `*.db.bak`, backups de DB, dumps de la
+  Bóveda o de conversaciones — ver los patrones ya cubiertos en `.gitignore`
+  (`project/database/*.db*`, `project/database/backup-*/`, etc.). Si un cambio agrega un nuevo
+  tipo de backup/export, agregar el patrón al `.gitignore` en el mismo commit, no después.
+  Antes de un `git add -A` o similar, revisar `git status` con atención — un archivo de datos que
+  se cuela y se pushea queda en el historial de un repo público para siempre salvo purga manual
+  (`git filter-repo`), que ya se tuvo que hacer una vez el 2026-09-22 (ver
+  `Cerebro/decisiones-implementacion.md`, entrada de esa fecha).
+- **IPs de LAN privada** (`192.168.137.x`, rango default de ICS de Windows) se dejaron como están
+  a propósito — no son específicas de este usuario, son el default estándar de Windows, y
+  genericizarlas no bajaba riesgo real. No es necesario evitarlas en código nuevo de
+  infraestructura homelab, pero sí evitar cualquier IP pública, credencial de Tailscale, o dato
+  que si identifique de forma única al usuario o a terceros (nombres reales, contactos, etc.).
+- Si algo de lo anterior no está claro para un cambio puntual, preguntar antes de commitear en vez
+  de asumir — es mucho más barato preguntar que purgar historial de nuevo.
+
 ### Commits
 
 - Mensaje en español, imperativo, foco en **qué** cambió y **por qué** — el diff ya muestra el cómo.

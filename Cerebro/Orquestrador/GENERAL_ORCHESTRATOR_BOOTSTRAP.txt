@@ -232,6 +232,11 @@ prompts de workers que toquen Jarvis o el homelab:
   - source_id obligatorio en toda escritura al memory store.
   - Docker build context = root del repo (jarvis/ es sibling de project/).
   - Jarvis es personal — no implementar multiusuario/RBAC hasta que sea un producto.
+  - El repo es PÚBLICO desde 2026-09-22 (`mtopas/Sistema-de-Guardadp-Rapido` en GitHub). Nunca
+    hardcodear rutas absolutas de esta PC, nunca commitear secrets/tokens reales, nunca commitear
+    datos de DB reales — ver detalle y motivo en `CLAUDE.md` sección "Repo público" y en
+    `Cerebro/decisiones-implementacion.md` (entrada 2026-09-22, purga de historial). Incluir esto
+    en cualquier prompt de worker que vaya a tocar código que se commitea.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 VII. CONVENCIONES DE TRABAJO

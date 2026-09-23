@@ -269,8 +269,8 @@ sudo docker compose up -d
 $HomelabHost = "192.168.137.10"
 $HomelabUser = "mtopas"
 $HomelabProject = "~/project"
-$SgrExe = "D:\Sistema-de-Guardadp-Rapido\project\dist\SGR\SGR.exe"
-$SgrDataRoot = "D:\Sistema-de-Guardadp-Rapido\project"  # contiene database/ y uploads/
+$SgrExe = "D:\SGR\project\dist\SGR\SGR.exe"
+$SgrDataRoot = "D:\SGR\project"  # contiene database/ y uploads/
 ```
 
 ### SSH

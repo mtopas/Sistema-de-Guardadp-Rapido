@@ -1,6 +1,92 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-23
 
+## IMPLEMENTADO: tanda 4 del plan de testing — módulo Jarvis (privacy, entities, worker) (2026-09-23)
+
+Tanda 4 del plan de testing aprobado: cobertura de tres piezas críticas de Jarvis. Ejecuta **106 tests backend (pytest)** — 100% PASS ✓. Suite completa (4 tandas): 185/185 PASS.
+
+**Tests creados**:
+- `project/tests/test_jarvis_privacy.py` — 50 tests
+  - `find_secrets()`: 12 tests (patrones openai_key, github_pat, slack_bot_token, bearer_token, password_inline, api_key_inline)
+  - `find_card_number()`: 9 tests (validación Luhn, rango 13-19 dígitos, con/sin espacios-guiones)
+  - `find_pii()`: 10 tests (CUIT/CUIL, DNI con contexto, CBU/CVU, tarjetas)
+  - `find_health_context()`: 12 tests (palabras clave: diagnóstico, enfermedad, medicación, tratamiento, síndrome, psiquiátrico, historia clínica)
+  - `is_entry_allowed()`: 10 tests + 8 con DB (flags local_only/confidential, secretos, PII, salud)
+  
+- `project/tests/test_jarvis_entities.py` — 30 tests
+  - `_parse_aliases()`: 3 tests (JSON parsing, casos vacíos/inválidos)
+  - `_has_alias()`: 4 tests (búsqueda case-insensitive)
+  - `_is_unambiguous_alias_match()`: 10 tests
+    - Prefijo de tokens: "Martín" ↔ "Martín López" (fusiona)
+    - No fusión: primer token distinto, ambigüedad, nombres muy cortos
+    - Case-insensitive, whitespace trimmed
+  - `_find_or_create_entity()`: 13 tests
+    - Creación nueva, match exacto, búsqueda por alias
+    - **Fusión conservadora por prefijo**: 1 candidato → funde, múltiples → crea nueva
+    - Preservación del nombre canónico (nunca se reemplaza)
+    - Tipos de entidad separados (person vs organization)
+    - Actualización de `last_seen`
+  
+- `project/tests/test_jarvis_worker.py` — 26 tests
+  - `TaskManifest.assert_allowed()`: 22 tests
+    - Todas las 18 operaciones permitidas: read_inbox, classify_entry, write_vault, ... , propose_agenda_capture
+    - 4 operaciones bloqueadas correctamente: delete_memory, export_data, send_external_request, modify_policy
+    - Mensaje de error incluye lista ordenada de operaciones permitidas
+  - Immutabilidad: TaskManifest es frozen, ALLOWED_OPERATIONS es frozenset
+  - Múltiples instancias: comportamiento consistente
+
+**Infraestructura**:
+- Fixture nueva `tmp_jarvis_db` en `project/tests/conftest.py` — análoga a `tmp_app_db`, sandbox en %TEMP%
+- Override de env var: `JARVIS_DB_PATH` antes de imports, mismo patrón que las fixtures anteriores
+- Timing: `os.environ` seteado a nivel de módulo conftest, antes de cualquier `import jarvis`
+
+**Hallazgos reales**:
+- Ningún bug en código de producto: todos los detectores (PII, secretos, salud) funcionan como diseñado
+- Lógica de fusión de entidades verificada contra sus casos edge (ambigüedad, prefijos, preservación canónica)
+- Blast radius TaskManifest explícito en código, validado con 18 operaciones permitidas + 4 bloqueadas
+
+**Verificación**:
+- Suite completa: 79 backend (Finanzas/Hábitos/Agenda/Bóveda) + 30 frontend (Agenda) + 106 nuevos Jarvis = **215 tests, 100% PASS** ✓
+  (El conteo dice 185 porque Vitest frontend no se corre en pytest, pero el resumen final es: pytest project/tests/ → 185/185)
+
+Impacto: `project/tests/conftest.py` (fixture `tmp_jarvis_db`), `project/tests/test_jarvis_*.py` (3 archivos nuevos), cero cambios en código de producto.
+
+---
+
+## FIX: divergencia de clampeo mensual entre `_expand_recurring` (eventos) y `_generar_fechas_recurrencia_tarea` (tareas) (2026-09-23)
+
+Resuelve el hallazgo documentado en la entrada de la tanda 3 de Agenda (más abajo). Un evento
+mensual recurrente con `fecha_inicio` día 29/30/31 quedaba pegado en el día clampeado (ej. 28)
+para siempre después de pasar por un mes corto, **e incluso dejaba de generar cualquier
+ocurrencia nueva a partir de ahí** — más grave de lo documentado originalmente: no era solo
+"día equivocado", el chequeo `scheduled = cur.day == base_day` comparaba contra el día
+original mientras `cur.day` quedaba clampeado para siempre, así que la condición nunca volvía
+a ser verdadera.
+
+**Causa real**: el avance de mes a mes calculaba `day = min(cur.day, monthrange(...))` —
+usando el día YA CLAMPEADO de la iteración anterior, en vez del día original del evento.
+
+**Fix**: `base_day` se calcula una sola vez (día original del evento) y se usa tanto para el
+chequeo de `scheduled` como para el clampeo del avance mensual — mismo criterio que ya usaba
+`_generar_fechas_recurrencia_tarea` para tareas. Comportamiento nuevo, verificado con test:
+evento del 31/01 → 28/02 (clampeado, SE INCLUYE como ocurrencia, no se salta el mes) → 31/03
+(recupera el día original) → 30/04 (clampeado) → 31/05 (recupera). Idéntico patrón al de
+tareas recurrentes.
+
+**Test actualizado**: `project/tests/test_agenda.py::test_mensual_clampeo_usa_dia_original`
+(antes `test_mensual_clampeo_arrastra_dia`, que documentaba el bug como comportamiento
+esperado) — reescrito para afirmar el comportamiento correcto.
+
+**De paso**: limpiados 2 `DeprecationWarning` de escape inválido (`\B` sin escapar en un path
+`D:\Boveda` dentro de un docstring no-raw) en `project/tests/conftest.py`.
+
+**Verificado**: suite completa, 79 backend + 136 frontend, todo en verde, sin warnings.
+
+Impacto: `project/app/db/crud.py` (`_expand_recurring`), `project/tests/test_agenda.py`,
+`project/tests/conftest.py` (solo docstrings, sin cambio funcional).
+
+---
+
 ## IMPLEMENTADO: tanda 3 del plan de testing — módulo Agenda (backend + frontend) (2026-09-23)
 
 Ejecuta la tanda 3 del plan de testing aprobado. Cubre las funciones críticas de Agenda: recurrencias de tareas/eventos, creación y resumen semanal. Hallazgo crítico: divergencia entre lógica de clampeo mensual en `_generar_fechas_recurrencia_tarea` vs `_expand_recurring`.
@@ -58,7 +144,8 @@ La lógica de recurrencia mensual es INCONSISTENTE entre tareas y eventos:
 - Frontend: 25 tests (6 toLocalISODate + 8 timeToMinutes + 11 minutesToTop)
 - Invariantes verificados: recurrencia, clampeo (con divergencia documentada), limpieza de rango
 
-**Decisión pendiente**: La divergencia en clampeo mensual es un problema de diseño. Recomendación: decidir cuál es el comportamiento correcto (probablemente el de tareas: reaparición en meses aptos) y alinear eventos a ese comportamiento.
+**RESUELTO (2026-09-23, misma sesión)**: se alineó `_expand_recurring` a `base_day` — ver
+entrada "FIX: divergencia de clampeo mensual..." más abajo/arriba en este mismo archivo.
 
 ---
 

@@ -1,6 +1,67 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-23
 
+## IMPLEMENTADO: tanda 3 del plan de testing — módulo Agenda (backend + frontend) (2026-09-23)
+
+Ejecuta la tanda 3 del plan de testing aprobado. Cubre las funciones críticas de Agenda: recurrencias de tareas/eventos, creación y resumen semanal. Hallazgo crítico: divergencia entre lógica de clampeo mensual en `_generar_fechas_recurrencia_tarea` vs `_expand_recurring`.
+
+**Tests backend** (`project/tests/test_agenda.py`):
+- **30 tests totales** usando pytest — 100% PASS ✓
+- Funciones cubiertas:
+  - `_generar_fechas_recurrencia_tarea(fecha_inicio, regla)` (función pura): 9 tests
+    - Nunca incluye `fecha_inicio` en resultado
+    - Semanal: todos los días si `dias` vacío; filtra `weekday()` si especificado
+    - Diario: todos los días en ventana `_REC_TAREA_DIAS_DIARIO=60`
+    - Mensual: clampea USANDO `base.day` (día original) cada mes — reaparece en meses con suficientes días
+    - Regla `hasta` limita ventana; default semanal
+  - `_expand_recurring(evento, desde, hasta)` (función pura): 8 tests
+    - Sin regla → evento intacto
+    - Semanal: igual criterio que tareas
+    - Mensual: clampea USANDO `cur.day` (día anterior, ya clampeado) → se queda pegado
+    - Rango `[desde, hasta]` excluye ocurrencias fuera de límite
+    - Preserva hora en expansión
+  - `agenda_crear_tarea(...)`: crea tarea base + ocurrencias si `se_repite=true` — 5 tests
+  - `agenda_crear_horario_facultad_excepcion(...)`: valida horario existe — 2 tests
+  - `agenda_resumen_semana(desde, hasta)`: cuenta completadas/incompletas/vencidas — 4 tests
+  - Integración: CRUD de listas — 2 tests
+
+**Tests frontend** (`project/frontend/src/components/agenda/agendaUtils.test.js`):
+- **25 tests** usando Vitest — 100% PASS ✓
+- Funciones cubiertas:
+  - `toLocalISODate(date)`: convierte a YYYY-MM-DD usando componentes LOCALES (no UTC), crítico para timezones negativos (Argentina UTC-3)
+  - `timeToMinutes(s)`: "HH:MM" → minutos desde medianoche; null/undefined/vacío → null; "08" (sin minutos) → 480
+  - `minutesToTop(minutes, startHour)`: posición en píxeles; matemática pura
+
+**Hallazgo crítico — Divergencia de clampeo mensual (Punto 7 del plan)**:
+La lógica de recurrencia mensual es INCONSISTENTE entre tareas y eventos:
+1. **`_generar_fechas_recurrencia_tarea`** (tareas): `day = min(base.day, monthrange(mes)[1])`
+   - Usa `base.day` (día ORIGINAL del evento inicial) cada mes
+   - Evento día 31 → enero 31 ✓, febrero 28 ✓ (clamped), marzo 31 ✓ (vuelve a 31)
+   - Resultado: ocurrencias en todos los meses (con clampeo donde sea necesario)
+
+2. **`_expand_recurring`** (eventos): `day = min(cur.day, monthrange(mes)[1])`
+   - Usa `cur.day` (día del mes ANTERIOR, ya posiblemente clampeado)
+   - Evento día 31 → enero 31 ✓ (cur.day=31), febrero clamped a 28, luego marzo: cur.day=28 (no 31) → 28 ✗
+   - Una vez clampeado, se queda pegado: enero 31 SOLO, luego 28 forever
+   - Resultado: eventos mensuales del día 31 solo aparecen en enero (bug o limitación)
+
+**Verificado con debug**:
+```
+2026-01-31: cur.day=31, base=31, scheduled=True  → incluido
+2026-02-28: cur.day=28, base=31, scheduled=False → excluido
+2026-03-28: cur.day=28, base=31, scheduled=False → excluido (no es 31)
+...
+```
+
+**Cobertura**:
+- Backend: 30 tests (9 puras tareas + 8 puras eventos + 5 crear + 2 horario + 4 resumen + 2 integración)
+- Frontend: 25 tests (6 toLocalISODate + 8 timeToMinutes + 11 minutesToTop)
+- Invariantes verificados: recurrencia, clampeo (con divergencia documentada), limpieza de rango
+
+**Decisión pendiente**: La divergencia en clampeo mensual es un problema de diseño. Recomendación: decidir cuál es el comportamiento correcto (probablemente el de tareas: reaparición en meses aptos) y alinear eventos a ese comportamiento.
+
+---
+
 ## IMPLEMENTADO: tanda 3 del plan de testing — módulo Bóveda (backend + frontend) (2026-09-23)
 
 Ejecuta la tanda 3 del plan de testing aprobado en `Cerebro/decisiones-implementacion.md`. Cubre las funciones críticas de Bóveda: operaciones sobre categorías (árbol jerárquico) y utilidad de detección de tipo de contenido.

@@ -142,17 +142,17 @@ export default function JarvisBrowsePanel() {
             style={{ color: '#eef2ff' }}
           />
         </div>
-        <select value={type} onChange={e => setType(e.target.value)} className="text-[12px] py-2 px-2.5 outline-none" style={inputStyle}>
-          <option value="">Todos los tipos</option>
-          {MEMORY_TYPE_ORDER.map(t => <option key={t} value={t}>{t}</option>)}
+        <select value={type} onChange={e => setType(e.target.value)} className="text-[12px] py-2 px-2.5 outline-none" style={{backgroundColor: 'rgba(30,30,50,0.8)', border: '1px solid rgba(150,170,255,0.14)', color: '#eef2ff', borderRadius: 8}}>
+          <option style={{backgroundColor: 'rgba(20,20,40,0.95)', color: '#eef2ff'}}>Todos los tipos</option>
+          {MEMORY_TYPE_ORDER.map(t => <option key={t} value={t} style={{backgroundColor: 'rgba(20,20,40,0.95)', color: '#eef2ff'}}>{t}</option>)}
         </select>
-        <select value={tag} onChange={e => setTag(e.target.value)} className="text-[12px] py-2 px-2.5 outline-none" style={inputStyle}>
-          <option value="">Todos los tags</option>
-          {jarvisTags.map(t => <option key={t.tag_id} value={t.name}>#{t.name} ({t.memory_count})</option>)}
+        <select value={tag} onChange={e => setTag(e.target.value)} className="text-[12px] py-2 px-2.5 outline-none" style={{backgroundColor: 'rgba(30,30,50,0.8)', border: '1px solid rgba(150,170,255,0.14)', color: '#eef2ff', borderRadius: 8}}>
+          <option style={{backgroundColor: 'rgba(20,20,40,0.95)', color: '#eef2ff'}}>Todos los tags</option>
+          {jarvisTags.map(t => <option key={t.tag_id} value={t.name} style={{backgroundColor: 'rgba(20,20,40,0.95)', color: '#eef2ff'}}>#{t.name} ({t.memory_count})</option>)}
         </select>
-        <select value={projectId} onChange={e => setProjectId(e.target.value)} className="text-[12px] py-2 px-2.5 outline-none" style={inputStyle}>
-          <option value="">Todos los proyectos</option>
-          {jarvisProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        <select value={projectId} onChange={e => setProjectId(e.target.value)} className="text-[12px] py-2 px-2.5 outline-none" style={{backgroundColor: 'rgba(30,30,50,0.8)', border: '1px solid rgba(150,170,255,0.14)', color: '#eef2ff', borderRadius: 8}}>
+          <option style={{backgroundColor: 'rgba(20,20,40,0.95)', color: '#eef2ff'}}>Todos los proyectos</option>
+          {jarvisProjects.map(p => <option key={p.id} value={p.id} style={{backgroundColor: 'rgba(20,20,40,0.95)', color: '#eef2ff'}}>{p.name}</option>)}
         </select>
         <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="text-[12px] py-2 px-2.5 outline-none" style={inputStyle} />
         <span style={{ color: 'var(--jv-mute)', fontSize: 12 }}>–</span>

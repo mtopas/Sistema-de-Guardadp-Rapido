@@ -1,6 +1,63 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-23
 
+## Tests: Cobertura comprehensiva de Hábitos (2026-09-23)
+
+**Frontend tests** (`project/frontend/src/components/habitos/habitos.test.js`):
+- **20 tests** usando Vitest — 100% PASS ✓
+- Funciones cubiertas:
+  - `isScheduled(habito, date)`: activo flag, diario vs semanal, JSON inválido
+  - `calcMaxStreak()`: racha máxima sin registro, con parciales, con gaps, semanal
+  - **Caso límite crítico**: racha en curso pero hoy programado sin completar → maxStreak correcto
+  - `calcMonthPct()`: sin días scheduled, mes actual parcial, mes pasado, semanal, parciales
+  - `toISODate()`, `buildRegistrosMap()` — helpers
+
+**Backend tests** (`project/tests/test_habitos.py`):
+- **16 tests** usando pytest — 100% PASS ✓
+- `habitos_actualizar()`: auto-completa `archivado_en` al desactivar, respeta valor explícito, resetea al reactivar
+- `habitos_pendientes_hoy()`: diarios, semanal con filtro, conversión weekday (Python 0-6 → JS 0-6), registro del día, inactivos excluidos
+- **Conversión weekday verificada**:
+  - Lunes: Python weekday=0 → JS dow=(0+1)%7=1 ✓
+  - Domingo: Python weekday=6 → JS dow=(6+1)%7=0 ✓
+- `habitos_stats()`: nonexistent, campos requeridos, parciales contados, 100% si todo completo, semanal
+
+**Divergencias encontradas**:
+- **Limitación de backend**: `habitos_stats` comienza desde `creado_en` (datetime.now() al crear hábito), no desde la fecha más antigua de un registro. Esto significa streaks del pasado distante no se calculan correctamente si se crea el hábito "ahora". No se encontró divergencia real entre `calcMaxStreak` frontend y `habitos_stats` backend (ambos iteran y rompen en ausencia de registro), pero la limitación de `creado_en` impide probar con datos históricos. Documentado en test `test_backend_frontend_streak_consistency` con nota explicativa.
+
+**Cobertura**:
+- Frontend: 88 tests total (+ 20 nuevos Hábitos); backend: 16 tests Hábitos
+- Casos límite críticos: case limit de racha (hoy sin completar), conversión de días de semana, parciales
+- Sin identificar bugs funcionales en la lógica de cálculo de racha o porcentaje
+
+---
+
+## Mejoras: Panel de Entidades — ordenamiento, búsqueda y filtro (2026-09-23)
+
+## Mejoras: Panel de Entidades — ordenamiento, búsqueda y filtro (2026-09-23)
+
+**Cambio 1 — Ordenamiento por menciones**: el panel de Entidades (`/jarvis`) ahora muestra las
+entidades ordenadas por `memory_count` descendente (más mencionadas primero), y a igualdad de
+menciones, por `last_seen` más reciente. **Implementación**: ordenamiento client-side en
+`JarvisEntitiesPanel.jsx` (`useMemo` + `sort`), no afecta el backend ni otros consumidores de
+`jarvisEntities` (como el preview en `JarvisContextPanel.jsx` que sigue mostrando las más
+recientes). Decisión de diseño: ordenar solo en este panel (más seguro, localizado).
+
+**Cambio 2 — Búsqueda y filtro**: agregados un input de texto (busca por `name`, substring
+case-insensitive) y un select de tipo (Todas / Personas / Organizaciones). Filtros client-side.
+Reutiliza los estilos de input de `JarvisBrowsePanel.jsx` para consistencia visual.
+
+**Fix colateral**: los selectores de `JarvisBrowsePanel.jsx` (Explorar) y `JarvisEntitiesPanel.jsx`
+tenían fondo blanco + letra blanca (invisible). Agregados estilos explícitos oscuros tanto en
+`<select>` como en `<option>` para forzar que el navegador renderice desplegables visibles en tema
+oscuro. Afecta: 3 selectores en Browse (tipo, tag, proyecto) + 1 en Entidades (tipo).
+
+**Verificado**: manualmente en navegador. Filtros funcionales, ordenamiento visible, desplegables
+visibles. No hay tests automatizados de componentes React (todavía).
+
+Impacto: `project/frontend/src/components/jarvis/{JarvisEntitiesPanel,JarvisBrowsePanel}.jsx`.
+
+---
+
 ## FIX: columna de nivel del Log del Worker (Jarvis/Debug) se pisaba con la columna de mensaje (2026-09-23)
 
 Reportado por el usuario: en `/jarvis` → Debug → "LOG DEL WORKER", la segunda columna (nivel

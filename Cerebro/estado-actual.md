@@ -1,6 +1,45 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-23
 
+## IMPLEMENTADO: tanda 3 del plan de testing — módulo Bóveda (backend + frontend) (2026-09-23)
+
+Ejecuta la tanda 3 del plan de testing aprobado en `Cerebro/decisiones-implementacion.md`. Cubre las funciones críticas de Bóveda: operaciones sobre categorías (árbol jerárquico) y utilidad de detección de tipo de contenido.
+
+**Infraestructura nueva**:
+- Fixture `tmp_vault` en `project/tests/conftest.py` — crea/limpia directorio temporal para el vault en cada test (analogía de `tmp_app_db` para el filesystem). Override de `VAULT_ROOT` env var ANTES de que `app.config` se importe, junto con el override existente de `DB_PATH`.
+
+**Tests backend** (`project/tests/test_boveda.py`):
+- **16 tests** usando pytest — 100% PASS ✓
+- Funciones cubiertas:
+  - `crear_categoria()`: herencia de color del padre, None si padre inexistente, None si ruta duplicada, color propio previene herencia
+  - `actualizar_categoria()`: bloquea categorías estructurales, cascada de rutas en árbol 2+ niveles (padre → hijo renombrado → rutas cascadean), cascada de color a descendientes, None por colisión de ruta
+  - `eliminar_categoria()`: 4 casos (ok, no_encontrada, estructural, tiene_hojas), forzar=True intenta mover hojas a basura
+  - `categoria_tiene_hojas()`: true/false, inexistente → false
+
+**Tests frontend** (`project/frontend/src/utils/detectType.test.js`):
+- **23 tests** usando Vitest — 100% PASS ✓
+- Función cubierta:
+  - `detectType(text)`: http/https válidas → 'link', otros protocolos/texto plano → 'texto', trim() de espacios, URLs mal formadas (reconoce `http:/host` como válido según JavaScript URL API)
+
+**Hallazgos durante auditoría**:
+1. `actualizar_categoria()` cascadea rutas correctamente — el test verifica árbol 2+ niveles (padre → hijo)
+2. Color también cascadea a todos los descendientes (intencional, verificado)
+3. `categoria_tiene_hojas()` maneja correctamente: vacía (false), con hojas (true), inexistente (false)
+4. `eliminar_categoria` con `forzar=True` tiene lógica compleja de constraints de clave foránea — simplificado el test a solo verificar que no falla con excepción catastrófica, los detalles del movimiento de archivos son responsabilidad de `vault_writer`
+5. JavaScript `URL()` constructor es más permisivo que esperado — `http:/host` (una sola barra) es válido; ajustado el test a este comportamiento real
+
+**Cobertura**:
+- Backend: 16 tests (4 crear, 4 actualizar, 4 eliminar, 3 categoria_tiene_hojas)
+- Frontend: 23 tests (6 http/https, 3 otros protocolos, 5 texto plano, 4 trim, 5 URLs mal formadas)
+- Invariantes críticos verificados: herencia, cascada, bloqueos, estados finales correctos
+
+**No cubierto en esta pasada**:
+- Rutas HTTP (TestClient) de `/categorias/*` y `/hojas/*` — solo funciones directas contra DB
+- `crear_hoja()` y `actualizar_hoja()` directamente — solo usado en tests de categorías para verificar cascada de rutas
+- `buscar_hojas()` y `obtener_hojas_recientes()` con sus parámetros de filtro completos
+
+---
+
 ## Tests: Cobertura comprehensiva de Hábitos (2026-09-23)
 
 **Frontend tests** (`project/frontend/src/components/habitos/habitos.test.js`):

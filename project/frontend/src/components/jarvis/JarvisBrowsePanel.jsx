@@ -69,7 +69,7 @@ export default function JarvisBrowsePanel() {
     fetchJarvisIsolatedEntries()
   }, [view, fetchJarvisAuditHistory, fetchJarvisIsolatedEntries])
 
-  useEffect(() => {
+  function refetchBrowse() {
     fetchJarvisBrowse({
       type: type || undefined,
       tag: tag || undefined,
@@ -80,8 +80,26 @@ export default function JarvisBrowsePanel() {
       limit: PAGE_SIZE,
       offset: page * PAGE_SIZE,
     })
+  }
+
+  useEffect(() => {
+    refetchBrowse()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [type, tag, projectId, dateFrom, dateTo, q, page, fetchJarvisBrowse])
+
+  // El modal de "olvidar" (JarvisSourceModal) hace un DELETE contra el backend
+  // pero no toca ningún estado del store -- sin este refetch, la entrada
+  // olvidada seguía apareciendo en la lista hasta el próximo cambio de filtro
+  // (el usuario reportó esto: "pongo para olvidar una entrada y no desaparece
+  // del panel"). Refresca la lista que esté visible según la vista actual.
+  function handleEntryForgotten() {
+    if (view === 'auditoria') {
+      fetchJarvisAuditHistory()
+      fetchJarvisIsolatedEntries()
+    } else {
+      refetchBrowse()
+    }
+  }
 
   useEffect(() => { setPage(0) }, [type, tag, projectId, dateFrom, dateTo, q])
 
@@ -282,7 +300,13 @@ export default function JarvisBrowsePanel() {
         </div>
       )}
 
-      {openSourceId && <JarvisSourceModal entryId={openSourceId} onClose={() => setOpenSourceId(null)} />}
+      {openSourceId && (
+        <JarvisSourceModal
+          entryId={openSourceId}
+          onClose={() => setOpenSourceId(null)}
+          onForgotten={handleEntryForgotten}
+        />
+      )}
     </div>
   )
 }

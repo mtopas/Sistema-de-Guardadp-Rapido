@@ -101,10 +101,18 @@ export default function JarvisDebugPanel() {
           <div
             key={ev.id}
             className="jv-mono"
-            style={{ display: 'grid', gridTemplateColumns: '78px 88px 1fr', gap: 12, fontSize: 11.5, lineHeight: 1.7 }}
+            style={{ display: 'grid', gridTemplateColumns: '78px 150px 1fr', gap: 12, fontSize: 11.5, lineHeight: 1.7 }}
           >
             <div style={{ color: 'rgba(200,214,255,0.3)' }}>{timeLabel(ev.created_at)}</div>
-            <div style={{ color: LEVEL_COLOR[ev.level] || MEMORY_TYPE_COLORS.RAW, fontWeight: 700 }}>{ev.level}</div>
+            <div
+              style={{
+                color: LEVEL_COLOR[ev.level] || MEMORY_TYPE_COLORS.RAW, fontWeight: 700,
+                minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}
+              title={ev.level}
+            >
+              {ev.level}
+            </div>
             <div style={{ color: 'rgba(220,228,255,0.66)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {ev.message}
             </div>

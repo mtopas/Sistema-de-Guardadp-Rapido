@@ -27,7 +27,7 @@ function parseTags(entry) {
   }
 }
 
-export default function JarvisSourceModal({ entryId, onClose }) {
+export default function JarvisSourceModal({ entryId, onClose, onForgotten }) {
   const { fetchJarvisEntry, editJarvisEntry, forgetJarvisEntry, showToast } = useStore(
     useShallow(s => ({
       fetchJarvisEntry:  s.fetchJarvisEntry,
@@ -94,6 +94,7 @@ export default function JarvisSourceModal({ entryId, onClose }) {
     setSaving(false)
     if (ok) {
       showToast('Entrada olvidada', 'success')
+      onForgotten?.()
       onClose()
     } else {
       showToast('No se pudo olvidar la entrada', 'error')

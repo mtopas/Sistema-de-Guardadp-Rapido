@@ -33,3 +33,12 @@ project/wheelhouse/*.whl
 
 # Logs de runtime
 project/scripts/ics-repair-log.txt
+
+# Artefactos sueltos en la raíz — deploys manuales, dumps de auditoría/investigación
+# pegados a mano. No deberían versionarse; si algo de acá se quiere subir a propósito
+# algún día, se agrega en un commit explícito con `git add <archivo>`, no vía este patrón.
+*.tar.gz
+Consolidacion.txt
+SGR-JARVIS-Catalogo-de-Features-2026-09-21.md
+SGR-JARVIS-Estado-del-Arte-y-Benchmark-2026-09-21.md
+SGR-JARVIS-Laboratorio-de-Repositorios-2026-09-21.md

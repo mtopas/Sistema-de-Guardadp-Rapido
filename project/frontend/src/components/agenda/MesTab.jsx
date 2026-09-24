@@ -6,6 +6,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { t } from '../../utils/i18n'
 import EventoModal from './EventoModal'
 import TareaModal from './TareaModal'
+import CalendarioModal from './CalendarioModal'
 import AgendaContextMenu from './AgendaContextMenu'
 import { toLocalISODate } from './agendaUtils'
 
@@ -94,7 +95,25 @@ export default function MesTab() {
   const [selected, setSelected]     = useState(null) // { type, item }
   const [editSelected, setEditSelected] = useState(false)
   const [contextMenu, setContextMenu] = useState(null) // { x, y, entry }
+  const [calContextMenu, setCalContextMenu] = useState(null) // { x, y, cal }
+  const [editCalendario, setEditCalendario] = useState(null) // calendario | null
+  const [newCalendario, setNewCalendario]   = useState(false)
   const lastFetchedMonth = useRef(null)
+
+  const openCalContextMenu = (e, cal) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setCalContextMenu({ x: e.clientX, y: e.clientY, cal })
+  }
+
+  const buildCalContextItems = (cal) => {
+    if (!cal) return []
+    return [
+      { label: t(lang, 'agendaEditar'), onClick: () => setEditCalendario(cal) },
+      { separator: true },
+      { label: t(lang, 'agendaEliminar'), danger: true, onClick: () => setEditCalendario(cal) },
+    ]
+  }
 
   const openContextMenu = (e, entry) => {
     e.preventDefault()
@@ -191,7 +210,7 @@ export default function MesTab() {
           <button
             className="text-[10.5px] flex items-center gap-1 hover:text-[var(--text)]"
             style={{ color: 'var(--subtext)' }}
-            onClick={() => setNewEvento({ tipo: 'calendario' })}
+            onClick={() => setNewCalendario(true)}
           >
             {t(lang, 'agendaNuevoCal')}
           </button>
@@ -203,19 +222,28 @@ export default function MesTab() {
               key={`${cal.id}-${index}`}
               className="group flex items-center gap-2.5 px-2 py-1.5 rounded-lg cursor-pointer hover:bg-[var(--surface)]"
               onClick={() => updateAgendaCalendario(cal.id, { activo: !cal.activo })}
+              onContextMenu={e => openCalContextMenu(e, cal)}
             >
               <div
-                className="w-4 h-4 rounded grid place-items-center shrink-0"
+                className="w-4 h-4 rounded flex items-center justify-center shrink-0"
                 style={{
                   background: cal.activo ? cal.color : 'transparent',
                   border: `1.5px solid ${cal.activo ? cal.color : 'var(--border-2)'}`,
                 }}
               >
-                {cal.activo && <span style={{ color: 'white', fontSize: 9, fontWeight: 700 }}>✓</span>}
+                {cal.activo && <span style={{ color: 'white', fontSize: 9, fontWeight: 700, lineHeight: 1 }}>✓</span>}
               </div>
               <span className="text-[12.5px] flex-1" style={{ color: cal.activo ? 'var(--text)' : 'var(--subtext)' }}>
                 {cal.nombre}
               </span>
+              <button
+                className="icon-btn opacity-0 group-hover:opacity-100 shrink-0"
+                style={{ width: 20, height: 20 }}
+                onClick={e => { e.stopPropagation(); setEditCalendario(cal) }}
+                title={t(lang, 'agendaEditar')}
+              >
+                <Edit2 size={10} />
+              </button>
             </div>
           ))}
         </div>
@@ -550,7 +578,7 @@ export default function MesTab() {
         )}
       </div>
 
-      {newEvento && newEvento.tipo !== 'calendario' && (
+      {newEvento && (
         <EventoModal
           defaultFecha={newEvento.fecha}
           onClose={() => setNewEvento(null)}
@@ -575,6 +603,20 @@ export default function MesTab() {
           items={buildContextItems(contextMenu.entry)}
           onClose={() => setContextMenu(null)}
         />
+      )}
+      {calContextMenu && (
+        <AgendaContextMenu
+          x={calContextMenu.x}
+          y={calContextMenu.y}
+          items={buildCalContextItems(calContextMenu.cal)}
+          onClose={() => setCalContextMenu(null)}
+        />
+      )}
+      {newCalendario && (
+        <CalendarioModal onClose={() => setNewCalendario(false)} />
+      )}
+      {editCalendario && (
+        <CalendarioModal calendario={editCalendario} onClose={() => setEditCalendario(null)} />
       )}
     </div>
   )

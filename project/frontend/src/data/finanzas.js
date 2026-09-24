@@ -214,6 +214,37 @@ export function pickDefaultCategoria(categorias, tipo, lastSaved = null) {
   return specific?.name ?? pool[0]?.name ?? ''
 }
 
+/**
+ * Filtra movimientos por categoría, cuenta, tipo (income|expense|transferencia) y rango de
+ * fechas (YYYY-MM-DD, inclusivo). Reusa isTransferencia/nombreCategoriaMovimiento — no
+ * reinventar qué es transferencia ni cómo se normaliza el nombre de categoría.
+ */
+export function filtrarMovimientos(movs, filtros = {}) {
+  const { categoria, cuenta, tipo, desde, hasta } = filtros
+  const categoriaKey = (categoria || '').trim().toLowerCase()
+  const cuentaKey = (cuenta || '').trim().toLowerCase()
+  return (movs || []).filter(m => {
+    if (categoriaKey && nombreCategoriaMovimiento(m) !== categoriaKey) return false
+    if (cuentaKey) {
+      const cuentaMov = String(m.method ?? m.metodo ?? m.cuenta_nombre ?? '').trim().toLowerCase()
+      if (cuentaMov !== cuentaKey) return false
+    }
+    if (tipo) {
+      const xfer = isTransferencia(m)
+      if (tipo === 'transferencia') {
+        if (!xfer) return false
+      } else {
+        if (xfer) return false
+        if ((m.type ?? m.tipo ?? 'expense') !== tipo) return false
+      }
+    }
+    const fecha = String(m.date ?? m.fecha ?? '').slice(0, 10)
+    if (desde && (!fecha || fecha < desde)) return false
+    if (hasta && (!fecha || fecha > hasta)) return false
+    return true
+  })
+}
+
 /** Normalize a movimiento to consistent shape regardless of mock vs API schema. */
 export const normalizeMovimiento = (m) => ({
   id:               m.id,

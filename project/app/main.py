@@ -98,6 +98,7 @@ from app.db.crud import (
     agenda_crear_calendario,
     agenda_actualizar_calendario,
     agenda_eliminar_calendario,
+    agenda_reasignar_eventos_calendario,
     agenda_obtener_eventos,
     agenda_crear_evento,
     agenda_actualizar_evento,
@@ -1498,6 +1499,13 @@ def eliminar_agenda_calendario(cal_id: int):
     if not agenda_eliminar_calendario(cal_id):
         raise HTTPException(status_code=404, detail="Calendario no encontrado")
     return {"mensaje": "Calendario eliminado"}
+
+@app.patch("/agenda/calendarios/{cal_id}/reasignar-eventos")
+def reasignar_eventos_agenda_calendario(cal_id: int, destino_id: int = Query(...)):
+    if cal_id == destino_id:
+        raise HTTPException(status_code=400, detail="El calendario de destino debe ser distinto del origen")
+    afectados = agenda_reasignar_eventos_calendario(cal_id, destino_id)
+    return {"reasignados": afectados}
 
 
 # ---------------------------------------------------------------------------

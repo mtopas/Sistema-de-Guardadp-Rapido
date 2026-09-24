@@ -2081,6 +2081,19 @@ def agenda_eliminar_calendario(cal_id: int) -> bool:
     return deleted
 
 
+def agenda_reasignar_eventos_calendario(origen_id: int, destino_id: int) -> int:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE agenda_eventos SET calendario_id = ? WHERE calendario_id = ?",
+        (destino_id, origen_id),
+    )
+    afectados = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return afectados
+
+
 # ---------------------------------------------------------------------------
 # Agenda — Eventos
 # ---------------------------------------------------------------------------

@@ -140,7 +140,7 @@ parte del contrato común — ver README de `D:\Boveda`).
 
 **HOY:** grilla horaria 6–23h; tareas pendientes próximos 15 días en panel izq con checkbox y time blocking; capa facultad opacada. **Integración hábitos:** sección "Hábitos de hoy" en panel izq (hábitos sin hora con checkbox inline), bloques en grilla horaria (hábitos con hora).
 
-**Mes:** vista 6×7 + semana; toggle calendarios activos; click en celda → `EventoModal`.
+**Mes:** vista 6×7 + semana; toggle calendarios activos; click en celda → `EventoModal`. CRUD de calendarios (crear/renombrar/cambiar color/eliminar) vía `CalendarioModal.jsx` — al eliminar un calendario con otros disponibles, elige entre borrar sus eventos o moverlos a otro (`PATCH /agenda/calendarios/{id}/reasignar-eventos`).
 
 **Tareas:** listas con color; filtro pendientes/completadas/todas; detalle en panel derecho. Toggle **Lista/Canvas** (`TareasTab.jsx`): vista Canvas muestra todas las listas a la vez como tarjetas (pineadas arriba, `agenda_listas.pinned`), con quick-add de tarea por tarjeta; "Sin fecha" (filtro virtual, no lista real) aparece como tarjeta de solo lectura sin pin ni quick-add.
 
@@ -244,7 +244,7 @@ Sin seed — arranca vacío.
 ### Finanzas — hecho
 
 - **Dashboard:** donuts con tooltip hover monto/% por segmento e highlight interactivo; tarjetas movimientos; modal "ver todos" (sort 3-clicks + filtro categoría + **export CSV**); cuotas; notas; panel derecho.
-- **Datos:** histórico completo, edición inline blur con **debounce 300ms**, delete, orden por fecha. `scope="col"` en headers de tabla.
+- **Datos:** histórico completo, edición inline blur con **debounce 300ms**, delete, orden por fecha. `scope="col"` en headers de tabla. Cuadro de filtros (categoría, cuenta, tipo income/expense/transferencia, rango de fechas) — `filtrarMovimientos()` en `data/finanzas.js`, reusa `isTransferencia`.
 - **Anual:** agregados por año, gráfico barras nominal/real, tabla meses, inflación mensual editable, panel derecho.
 - **FIRE:** tabla mensual con proyección, overrides ahorrado, panel config. **Motor en USD** — `fire_aporte_inicial`/`fire_saldo_inicial` en USD; contribuciones ARS se convierten con MEP via `contribucionFireUSD`.
 - **Ahorro:** reparto por categoría (FIRE + objetivos + líquido sin invertir), portafolio ARS/USD, instrumentos colapsables, CRUD, objetivos, P&L, ledger transacciones.

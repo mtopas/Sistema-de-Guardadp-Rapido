@@ -861,6 +861,18 @@ export const useStore = create((set, get) => ({
     try { await fetch(`${API_URL}/agenda/calendarios/${id}`, { method: 'DELETE' }) } catch { /* noop */ }
   },
 
+  reasignarEventosAgendaCalendario: async (origenId, destinoId) => {
+    const destino = get().agendaCalendarios.find(c => c.id === destinoId)
+    set(s => ({
+      agendaEventos: s.agendaEventos.map(e => e.calendario_id === origenId
+        ? { ...e, calendario_id: destinoId, calendario_color: destino?.color ?? e.calendario_color, calendario_nombre: destino?.nombre ?? e.calendario_nombre }
+        : e),
+    }))
+    try {
+      await fetch(`${API_URL}/agenda/calendarios/${origenId}/reasignar-eventos?destino_id=${destinoId}`, { method: 'PATCH' })
+    } catch { /* offline ok */ }
+  },
+
   fetchAgendaEventos: async (desde, hasta) => {
     try {
       const params = new URLSearchParams()
@@ -890,7 +902,13 @@ export const useStore = create((set, get) => ({
   },
 
   updateAgendaEvento: async (id, patch) => {
-    set(s => ({ agendaEventos: s.agendaEventos.map(e => e.id === id ? { ...e, ...patch } : e) }))
+    set(s => {
+      const cal = patch.calendario_id != null
+        ? s.agendaCalendarios.find(c => c.id === patch.calendario_id)
+        : null
+      const extra = cal ? { calendario_color: cal.color, calendario_nombre: cal.nombre } : {}
+      return { agendaEventos: s.agendaEventos.map(e => e.id === id ? { ...e, ...patch, ...extra } : e) }
+    })
     try {
       await fetch(`${API_URL}/agenda/eventos/${id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },

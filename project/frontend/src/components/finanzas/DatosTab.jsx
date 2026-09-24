@@ -1,9 +1,9 @@
 import { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { Trash2 } from 'lucide-react'
+import { Trash2, X } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
-import { fmtARS, isTransferencia } from '../../data/finanzas'
+import { fmtARS, isTransferencia, filtrarMovimientos } from '../../data/finanzas'
 import { buildFinCategoriaColorByName, getFinCategoriaColor } from '../../data/finCategoriaColors'
 
 // Normalize field access across mock (type/amount/date/cat/desc/method) and API schemas
@@ -98,6 +98,7 @@ export default function DatosTab() {
   const lang      = useStore(s => s.lang)
   const movAll           = useStore(s => s.finMovimientosAll)
   const finCategorias    = useStore(s => s.finCategorias)
+  const finCuentas       = useStore(s => s.finCuentas)
   const updateMov        = useStore(s => s.updateFinMovimiento)
   const deleteMov        = useStore(s => s.deleteFinMovimiento)
   const setFinSyncPaused = useStore(s => s.setFinSyncPaused)
@@ -107,14 +108,19 @@ export default function DatosTab() {
     [finCategorias],
   )
 
+  const [filtros, setFiltros] = useState({ categoria: '', cuenta: '', tipo: '', desde: '', hasta: '' })
+  const setFiltro = (campo, valor) => setFiltros(f => ({ ...f, [campo]: valor }))
+  const limpiarFiltros = () => setFiltros({ categoria: '', cuenta: '', tipo: '', desde: '', hasta: '' })
+  const hayFiltrosActivos = Object.values(filtros).some(Boolean)
+
   const rows = useMemo(() =>
-    movAll
+    filtrarMovimientos(movAll, filtros)
       .slice()
       .sort((a, b) => {
         const ts = v => { const d = new Date(v ?? 0); return isNaN(d) ? 0 : d.getTime() }
         return ts(b.date ?? b.fecha) - ts(a.date ?? a.fecha)
       }),
-    [movAll]
+    [movAll, filtros]
   )
 
   const [editing, setEditing] = useState(null) // { id, field }
@@ -330,8 +336,69 @@ export default function DatosTab() {
   // Si el viewport colapsa (solo maxHeight), el virtualizer devuelve 0 ítems → tabla vacía
   const renderPlain = !useVirtual || virtualItems.length === 0
 
+  const selectStyle = {
+    background: 'var(--surface)',
+    border: '1px solid var(--border)',
+    borderRadius: 8,
+    color: 'var(--text)',
+    fontSize: 12,
+    padding: '5px 8px',
+    minWidth: 0,
+  }
+
   return (
-    <div className="panel-strong" style={{ width: '100%', overflow: 'hidden' }}>
+    <div className="flex flex-col gap-2.5">
+      <div
+        className="flex flex-wrap items-end gap-2.5 px-3 py-2.5 rounded-xl border"
+        style={{ borderColor: 'var(--border)', background: 'var(--panel-bg)' }}
+      >
+        <div className="flex flex-col gap-1 min-w-[140px]">
+          <label className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--subtext)' }}>{t(lang, 'datosFiltroCategoria')}</label>
+          <select style={selectStyle} value={filtros.categoria} onChange={e => setFiltro('categoria', e.target.value)}>
+            <option value="">{t(lang, 'datosFiltroTodas')}</option>
+            {finCategorias.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+          </select>
+        </div>
+        <div className="flex flex-col gap-1 min-w-[140px]">
+          <label className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--subtext)' }}>{t(lang, 'datosFiltroCuenta')}</label>
+          <select style={selectStyle} value={filtros.cuenta} onChange={e => setFiltro('cuenta', e.target.value)}>
+            <option value="">{t(lang, 'datosFiltroTodas')}</option>
+            {finCuentas.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+          </select>
+        </div>
+        <div className="flex flex-col gap-1 min-w-[120px]">
+          <label className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--subtext)' }}>{t(lang, 'datosFiltroTipo')}</label>
+          <select style={selectStyle} value={filtros.tipo} onChange={e => setFiltro('tipo', e.target.value)}>
+            <option value="">{t(lang, 'datosFiltroTodos')}</option>
+            <option value="income">{t(lang, 'tipoIngreso')}</option>
+            <option value="expense">{t(lang, 'tipoGasto')}</option>
+            <option value="transferencia">{t(lang, 'tipoTransferencia')}</option>
+          </select>
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--subtext)' }}>{t(lang, 'datosFiltroDesde')}</label>
+          <input type="date" style={selectStyle} value={filtros.desde} onChange={e => setFiltro('desde', e.target.value)} />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--subtext)' }}>{t(lang, 'datosFiltroHasta')}</label>
+          <input type="date" style={selectStyle} value={filtros.hasta} onChange={e => setFiltro('hasta', e.target.value)} />
+        </div>
+        {hayFiltrosActivos && (
+          <button
+            type="button"
+            onClick={limpiarFiltros}
+            className="flex items-center gap-1 text-[11px] px-2.5 py-[7px] rounded-lg border"
+            style={{ borderColor: 'var(--border)', color: 'var(--subtext)' }}
+          >
+            <X size={11} /> {t(lang, 'datosFiltroLimpiar')}
+          </button>
+        )}
+        <div className="text-[11px] ml-auto" style={{ color: 'var(--subtext)' }}>
+          {rows.length} {t(lang, 'datosFiltroResultados')}
+        </div>
+      </div>
+
+      <div className="panel-strong" style={{ width: '100%', overflow: 'hidden' }}>
       <div
         ref={parentRef}
         style={{
@@ -408,6 +475,7 @@ export default function DatosTab() {
             )}
           </tbody>
         </table>
+      </div>
       </div>
     </div>
   )

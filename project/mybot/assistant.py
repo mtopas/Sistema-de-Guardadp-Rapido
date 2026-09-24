@@ -303,20 +303,30 @@ def _gather_agenda(api: str) -> dict:
 def _gather_boveda(pregunta: str, api: str) -> dict | None:
     """
     Busca hojas relevantes via RAG y devuelve el contexto para síntesis.
-    Devuelve None si no hay resultados (índice vacío u Ollama no disponible).
+    Si la búsqueda semántica no encuentra nada (índice vacío, Ollama caído, o el hit
+    simplemente no existe por similitud), cae a búsqueda por palabras clave (GET /hojas?q=)
+    antes de rendirse — mismo contenido puede existir por texto exacto sin ser semánticamente
+    cercano. Devuelve None solo si ninguna de las dos encuentra resultados.
     """
     hits = emb.search(pregunta, top_k=5, api_base=api)
+    usa_keyword = False
     if not hits:
-        return None
+        hits = emb.search_keyword(pregunta, api_base=api)
+        usa_keyword = True
+        if not hits:
+            return None
     notas = [
         {
             "titulo":    (h.get("contenido") or "")[:80],
             "categoria": h.get("categoria_nombre") or "",
             "tipo":      h.get("tipo") or "texto",
             "apuntes":   (h.get("apuntes") or "")[:200] if h.get("apuntes") else None,
-            "relevancia": h.get("score"),
+            # La búsqueda por palabras clave no tiene score de relevancia semántica real;
+            # se usa un valor fijo porque _synthesize() solo lo pasa como contexto al LLM,
+            # no depende de que sea preciso.
+            "relevancia": 1.0 if usa_keyword else h.get("score"),
         }
-        for h in hits
+        for h in hits[:5]
     ]
     return {"pregunta": pregunta, "notas_encontradas": notas}
 

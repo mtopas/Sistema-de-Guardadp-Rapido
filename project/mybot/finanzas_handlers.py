@@ -202,19 +202,90 @@ def _monto_abs(mv: dict) -> float:
 # Fuzzy match
 # ──────────────────────────────────────────────────────────────
 
+class _AmbiguousMatch:
+    """Sentinel: hay más de un candidato igualmente válido — el llamador decide qué hacer
+    (típicamente tratarlo igual que 'no encontrado' y pedir más precisión), pero nunca hay
+    que confundirlo con un match real ni con None."""
+    __slots__ = ()
+
+    def __repr__(self):
+        return "AMBIGUOUS_MATCH"
+
+    def __bool__(self):
+        # Explícitamente truthy pero distinguible por identidad (`is AMBIGUOUS_MATCH`) —
+        # nunca comparar con `if not resultado` para chequear "sin match", usar `is`.
+        return True
+
+
+AMBIGUOUS_MATCH = _AmbiguousMatch()
+
+# Palabras demasiado cortas o genéricas para servir de señal de match por sí solas
+# (evita que "de"/"la super"/"el" etc. matcheen cualquier cosa que las contenga).
+_STOPWORDS_ES = {"de", "del", "la", "el", "los", "las", "un", "una", "y", "en", "con"}
+_MIN_SUBSTRING_LEN = 3   # la cadena más corta debe tener al menos esta longitud
+_MIN_SHARED_WORD_LEN = 3  # la palabra compartida debe tener MÁS de esta longitud
+_MAX_LENGTH_RATIO = 4    # la cadena más larga no puede ser más de N veces la más corta
+
+
 def _fuzzy_match(nombre: str, items: list, key: str = "nombre"):
-    nombre_lower = nombre.lower()
+    """
+    Busca `nombre` entre `items` comparando contra `item[key]`, con un criterio mínimo
+    de confianza (nada de matchear por una palabra suelta de 2 letras o un ratio de
+    longitud absurdo).
+
+    Devuelve:
+      - el `item` si hay un único candidato razonable,
+      - `AMBIGUOUS_MATCH` si hay más de un candidato igual de válido (el llamador decide
+        qué hacer: pedir precisión, listar opciones, tratarlo como "sin match", etc.),
+      - `None` si no hay ningún candidato con confianza mínima.
+    """
+    nombre_lower = (nombre or "").strip().lower()
+    if not nombre_lower:
+        return None
+
+    # 1) Match exacto — siempre gana, no hay ambigüedad posible entre nombres iguales.
     for item in items:
-        if item[key].lower() == nombre_lower:
+        if item[key].strip().lower() == nombre_lower:
             return item
+
+    # 2) Substring — con longitud mínima y ratio de longitud acotado para evitar
+    #    falsos positivos tipo "de" ⊂ "Fondo de emergencia".
+    substring_candidates = []
     for item in items:
-        if nombre_lower in item[key].lower() or item[key].lower() in nombre_lower:
-            return item
-    words = nombre_lower.split()
-    for item in items:
-        item_words = item[key].lower().split()
-        if any(w in item_words for w in words):
-            return item
+        item_lower = item[key].strip().lower()
+        shorter, longer = sorted((nombre_lower, item_lower), key=len)
+        if len(shorter) < _MIN_SUBSTRING_LEN:
+            continue
+        if len(longer) > len(shorter) * _MAX_LENGTH_RATIO:
+            continue
+        if shorter in longer:
+            substring_candidates.append(item)
+    if len(substring_candidates) == 1:
+        return substring_candidates[0]
+    if len(substring_candidates) > 1:
+        return AMBIGUOUS_MATCH
+
+    # 3) Palabra suelta compartida — solo palabras "significativas" (más de
+    #    _MIN_SHARED_WORD_LEN caracteres, sin stopwords), y solo si hay un único item
+    #    que comparte alguna. Si más de uno comparte, es ambiguo, no "el primero".
+    words = [
+        w for w in nombre_lower.split()
+        if len(w) > _MIN_SHARED_WORD_LEN and w not in _STOPWORDS_ES
+    ]
+    word_candidates = []
+    if words:
+        for item in items:
+            item_words = [
+                w for w in item[key].strip().lower().split()
+                if len(w) > _MIN_SHARED_WORD_LEN and w not in _STOPWORDS_ES
+            ]
+            if any(w in item_words for w in words):
+                word_candidates.append(item)
+    if len(word_candidates) == 1:
+        return word_candidates[0]
+    if len(word_candidates) > 1:
+        return AMBIGUOUS_MATCH
+
     return None
 
 
@@ -752,6 +823,12 @@ async def cmd_objetivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     obj = _fuzzy_match(nombre, objetivos)
+    if obj is AMBIGUOUS_MATCH:
+        await update.message.reply_text(
+            f"Hay más de un objetivo que podría coincidir con \"{nombre}\". "
+            "Sé más específico, o usá /objetivo sin argumentos para ver la lista completa."
+        )
+        return
     if not obj:
         await update.message.reply_text(f"No encontré ningún objetivo que coincida con \"{nombre}\".")
         return
@@ -803,6 +880,9 @@ async def handle_fin_quick_capture(update: Update, context: ContextTypes.DEFAULT
         return True
 
     cuenta = _fuzzy_match(parsed["cuenta_hint"], cuentas) if parsed["cuenta_hint"] else None
+    if cuenta is AMBIGUOUS_MATCH:
+        # Más de una cuenta candidata: mejor pedir explícitamente que asumir una.
+        cuenta = None
 
     ud = context.user_data
     ud["fin_draft"] = {

@@ -56,7 +56,7 @@ def answer_question(pregunta: str, modulo: str, api_base: str = DEFAULT_API_BASE
 
     try:
         if modulo_base == "finanzas":
-            contexto = _gather_finanzas(api_base)
+            contexto = _gather_finanzas(api_base, pregunta)
         elif modulo_base == "habitos":
             contexto = _gather_habitos(api_base)
         elif modulo_base == "agenda":
@@ -85,7 +85,23 @@ def answer_question(pregunta: str, modulo: str, api_base: str = DEFAULT_API_BASE
 
 # ── Recopilación de contexto ───────────────────────────────────────────────────
 
-def _gather_finanzas(api: str) -> dict:
+# Preguntas que sí necesitan contexto de objetivos de ahorro — el resto (saldo simple,
+# "cuánta plata tengo", etc.) no lo recibe, para que el LLM no confunda meta con disponible
+# (ver Testeos-Ollama.md, prueba 2: sumó meta + saldo como si la meta fuera plata en cuenta).
+_OBJETIVOS_KEYWORDS = (
+    "objetivo", "objetivos",
+    "meta", "metas",
+    "ahorro", "ahorrado", "ahorrar",
+    "cuanto falta", "cuánto falta",
+)
+
+
+def _pregunta_menciona_objetivos(pregunta: str) -> bool:
+    p = (pregunta or "").lower()
+    return any(kw in p for kw in _OBJETIVOS_KEYWORDS)
+
+
+def _gather_finanzas(api: str, pregunta: str = "") -> dict:
     mes = date.today().strftime("%Y-%m")
     cuentas   = fh._get_cuentas(api)
     config    = fh._get_config(api)
@@ -144,7 +160,7 @@ def _gather_finanzas(api: str) -> dict:
         for obj in objetivos[:5]
     ]
 
-    return {
+    contexto = {
         "mes": mes,
         "total_ingresos": round(ingresos, 2),
         "total_gastos": round(gastos, 2),
@@ -153,8 +169,10 @@ def _gather_finanzas(api: str) -> dict:
         "gastos_por_categoria": [{"categoria": c, "total": round(t, 2)} for c, t in top_cats],
         "cuentas": saldos,
         "dolar_mep": dolar if dolar else None,
-        "objetivos_de_ahorro": objs,
     }
+    if _pregunta_menciona_objetivos(pregunta):
+        contexto["objetivos_de_ahorro"] = objs
+    return contexto
 
 
 def _gather_habitos(api: str) -> dict:

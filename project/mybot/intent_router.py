@@ -25,6 +25,7 @@ from datetime import date, datetime
 
 import requests
 
+import finanzas_handlers as fh
 import llm_client
 from api_config import API_BASE
 
@@ -144,6 +145,31 @@ def _looks_like_question(texto: str) -> bool:
     return any(t.startswith(s) for s in _QUESTION_STARTERS)
 
 
+def _resolve_cuenta_fuzzy(datos: dict) -> None:
+    """
+    Reemplaza `datos['cuenta']` (texto crudo devuelto por el LLM, a veces mal escrito —
+    p. ej. "ula aya" o "ªala" en vez de "Uala") por el nombre real de la cuenta usando el
+    mismo `_fuzzy_match` que ya usa la captura rápida `$:` en finanzas_handlers.py.
+
+    Muta `datos` in-place. Si no hay match (o es ambiguo), quita `cuenta` del dict en vez
+    de dejar pasar texto que no corresponde a ninguna cuenta real — el llamador (preview de
+    confirmación / ejecución) ya maneja bien la ausencia de cuenta.
+    """
+    cuenta_raw = datos.get("cuenta")
+    if not cuenta_raw:
+        return
+    try:
+        cuentas = fh._get_cuentas(API_BASE)
+    except Exception as exc:
+        logger.warning("[router] no pude cargar /fin/cuentas para fuzzy match: %s", exc)
+        return
+    match = fh._fuzzy_match(cuenta_raw, cuentas)
+    if match is None or match is fh.AMBIGUOUS_MATCH:
+        datos.pop("cuenta", None)
+    else:
+        datos["cuenta"] = match["nombre"]
+
+
 def _consulta_modulo(modulo: str) -> str:
     if modulo.startswith("consulta_"):
         return modulo
@@ -215,6 +241,9 @@ def route(mensaje: str) -> RouteResult:
         q_mod = _consulta_modulo(modulo)
         return RouteResult(action="question", modulo=q_mod, datos=datos,
                            confianza=confianza, es_pregunta=True)
+
+    if modulo == "finanzas":
+        _resolve_cuenta_fuzzy(datos)
 
     if modulo in ("desconocido", "boveda") or confianza < CONFIDENCE_MEDIUM:
         logger.info(

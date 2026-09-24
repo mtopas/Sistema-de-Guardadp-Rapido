@@ -1,7 +1,57 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-24
 
-## EN WORKING TREE (sin commit): rediseño completo de Settings (2026-09-24)
+## IMPLEMENTADO: 7 quick wins del triage de julio + edición completa de hoja en DetailScreen (2026-09-24)
+
+Hecho por sesiones worker en paralelo (prompts armados por el orquestador, ejecutados por el
+usuario en otras sesiones) — 4 commits nuevos en `master`, todos autoría `Mateo-PC`, sin
+problemas de atribución. Verificado por el orquestador después de recibir los reportes: **273
+tests backend + 152 tests frontend en verde** (corridos de nuevo, no solo tomados del reporte),
+`npm run build` limpio.
+
+**Commits:**
+- `8317089` — 3 quick wins de Finanzas: botón de duplicados en Datos (`GET
+  /fin/movimientos/duplicados`), matching case-insensitive de categorías en
+  `fin_buscar_categoria_por_nombre` (con 4 tests nuevos), `saldoFondoEmergencia` client-side en
+  `data/finanzas.js` reemplazando el único consumidor que quedaba de `GET /fin/emergencia`
+  (deprecated). Hallazgo de la sesión: el dashboard ya mostraba el fondo de emergencia por otra
+  vía (panel de Metas genérico) — no hizo falta UI nueva, solo sacar la dependencia muerta.
+- `502c18d` — toggle keyword/semántica en `LeftPanel.jsx` de Bóveda (debounce 350ms sobre `GET
+  /hojas/buscar-semantico`); botón "Marcar todos" en la sección Hábitos de hoy de Agenda → HOY,
+  usa `POST /habitos/registros/batch` en vez de un PUT por hábito.
+- `3652bef` — `SGR_VERSION` real (`app/config.py`, propagada a `FastAPI(version=...)`, antes
+  caía al default genérico de FastAPI) + `CHANGELOG.md` nuevo en la raíz + `verify-sync.ps1`
+  (compara counts de `/meta` local vs homelab), **probado contra el homelab real, match**.
+- `12ef1b3` — `DetailScreen.jsx` (`/hoja/:id`, "Abrir Hoja") reescrito: título editable (input),
+  ícono editable inline (`IconPicker`), **color propio por hoja nuevo** (columna `hojas.color`,
+  antes el color siempre se heredaba de la categoría — decisión explícita del usuario de
+  quedarse con esta función pese a que en un momento de la conversación se había pedido sacarla;
+  ya estaba implementada/testeada/commiteada cuando se resolvió, revertir hubiera tirado trabajo
+  real ya probado), categoría editable (`CategoryPicker` embebido en el panel "Información"),
+  bloque de preview de apuntes duplicado eliminado (queda un solo editor TipTap). Botones
+  "Guardar"/"Eliminar Hoja" se movieron del header al panel "Información".
+
+**Ya no vigente en `Cerebro/PROXIMAMENTE.md`** (marcar al tocar ese archivo): "Quick wins
+todavía sin hacer" de la entrada del triage de julio — quedan 0 de 7 pendientes de esa lista
+(sumado a `seed_demo.py` y las carpetas `routes/services`, que ya no aplicaban).
+
+**Hallazgos nuevos, sin corregir (reportados por las sesiones worker, no evaluados todavía):**
+- Botones "Guardar"/"Eliminar Hoja" de `DetailScreen.jsx` quedaron dentro del `<aside>` que es
+  `hidden xl:block` (heredado del layout original del panel "Información") — **inaccesibles en
+  mobile/tablet** (pantallas <xl). No se corrigió porque el pedido decía "mismo lugar, debajo de
+  Información" sin mencionar el breakpoint responsive.
+- Código muerto en `project/frontend/src/utils/i18n.js`: claves `goalEmergency*` sin uso tras el
+  cambio de emergencia a client-side.
+- Descarte silencioso de valores inválidos en `habitos_registros_batch_upsert` (backend) — no
+  se investigó el alcance real.
+- Errores preexistentes de indexado semántico al arrancar el backend: frontmatter roto +
+  `UNIQUE constraint failed` en una nota de `Jarvis/Entidades` — mismo tipo de error ya visto
+  antes con la ficha de Robert Kiyosaki (ver entradas previas de este archivo, sigue sin
+  investigarse la causa raíz).
+- `EditHojaModal.jsx` (usado desde `BovedaWorkspace.jsx`/`LeftPanel.jsx`/`RightPanel.jsx`) sigue
+  sin selector de color — quedó asimétrico respecto a `DetailScreen.jsx`, que sí lo tiene.
+
+## IMPLEMENTADO: rediseño completo de Settings (2026-09-24) — commiteado en `dc6cc1e`
 
 Hecho por otra sesión en paralelo (mismo checkout `D:\SGR` compartido, no un worktree
 aislado) mientras este chat hacía el deploy del feedback button y el laboratorio

@@ -316,7 +316,7 @@ Telegram, `SGR_SYNC_TOKEN` obligatorio.
   big-bang.
 - PWA sigue llamándose "Bóveda — Sistema de Guardado Rápido" en el manifest.
 - ~~Permiso de notificaciones se pide al montar `TopBar`, no tras una acción del usuario~~
-  **Resuelto, 2026-09-24** (sin commitear todavía, ver `Cerebro/estado-actual.md` — rediseño de
+  **Resuelto, 2026-09-24** (commiteado en `dc6cc1e`, ver `Cerebro/estado-actual.md` — rediseño de
   Settings) — ahora se activan explícitamente desde Ajustes → Avisos, con anticipación
   configurable; `AgendaNotificationWatcher.jsx` nuevo dispara los avisos ya no solo en Agenda.
 - Accesibilidad sin auditar (focus visible, navegación por teclado, contraste) — sugiere

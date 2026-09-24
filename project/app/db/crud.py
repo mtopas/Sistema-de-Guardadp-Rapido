@@ -3030,10 +3030,28 @@ def habitos_registros_eliminar(registro_id: int) -> bool:
     return deleted
 
 
+def _habito_is_scheduled(h: dict, fecha_str: str) -> bool:
+    """Returns True if `fecha_str` (YYYY-MM-DD) is a scheduled day for habito dict `h`.
+
+    Extracted from the closure formerly nested in habitos_stats() so it's importable
+    for parity tests against isScheduled() (frontend) / _is_scheduled() (bot) -- same
+    behavior as before the extraction, including not checking `h["activo"]` (see
+    habitos_paridad fixture "inactive_habit_ignored_by_backend" for why that matters).
+    """
+    d = date.fromisoformat(fecha_str)
+    if h["frecuencia_tipo"] == "diario":
+        return True
+    try:
+        dias = json.loads(h["dias_semana"] or "[]")
+    except Exception:
+        return False
+    dow_js = (d.weekday() + 1) % 7
+    return dow_js in dias
+
+
 def habitos_stats(habito_id: int) -> Optional[dict]:
     """Return pre-computed stats for a single habit (reduces client-side calculation)."""
     from datetime import date as _date
-    import json as _json
 
     conn = get_connection()
     cursor = conn.cursor()
@@ -3056,15 +3074,7 @@ def habitos_stats(habito_id: int) -> Optional[dict]:
     reg_map = {r[0]: r[1] for r in reg_rows}
 
     def is_scheduled(fecha_str: str) -> bool:
-        d = _date.fromisoformat(fecha_str)
-        if h["frecuencia_tipo"] == "diario":
-            return True
-        try:
-            dias = _json.loads(h["dias_semana"] or "[]")
-        except Exception:
-            return False
-        dow_js = (d.weekday() + 1) % 7
-        return dow_js in dias
+        return _habito_is_scheduled(h, fecha_str)
 
     start_str = h["creado_en"][:10] if h["creado_en"] else "2000-01-01"
     today_str  = today.isoformat()

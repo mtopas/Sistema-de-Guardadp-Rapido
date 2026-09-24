@@ -70,9 +70,12 @@ entrada es específica de la limpieza de documentos sueltos en la raíz del repo
   lo que seguía vigente a `PROXIMAMENTE.md`/`decisiones-implementacion.md`). Confirmado que una
   carpeta vieja (`D:\Sistema-de-Guardadp-Rapido`, pre-rename, congelada desde el 22/09) causaba
   confusión — el usuario ya la borró.
-- Sesión "ArreglosFront-Finanzas/Agenda" corriendo en paralelo (CRUD de calendarios en Agenda +
-  filtros en Finanzas → Datos) — ver prompt en el handoff de esta conversación si hace falta
-  el detalle completo; cuando cierre, va a dejar su propia entrada acá.
+- Sesión "ArreglosFront-Finanzas/Agenda" — **completada y commiteada** (`dd3a253`): CRUD de
+  calendarios en Agenda + filtros en Finanzas → Datos. Ver su propia entrada arriba de esta
+  ("IMPLEMENTADO: CRUD de calendarios en Agenda + filtros en Finanzas → Datos") para el detalle
+  completo.
+- **Suite completa verificada** (2026-09-24, después de los 3 commits de hoy): 265 backend +
+  147 frontend = 412 tests, todo en verde.
 
 **Pendiente, sin resolver, para la próxima sesión que retome esto:**
 1. **`SGR-Informe-Siguiente-Nivel.md`** (raíz del repo) — todavía sin triar. Es el documento

@@ -4,6 +4,184 @@ Ideas anotadas para evaluar/diseñar más adelante — no aprobadas, no implemen
 
 ---
 
+## ADR-005 del laboratorio Jarvis-Research: separar Agent Router / Model Router / Policy Engine
+
+**Fecha:** 2026-09-24 (hallazgo recuperado; el ADR en sí es del 21-22/09)
+
+**Contexto:** el laboratorio de investigación de repos externos para Jarvis vive en
+`D:\Proyectos\Investigacion\Jarvis-Research\` (ruta física real — el `manifest.yaml` y
+`Cerebro/decisiones-implementacion.md` referenciaban por error `D:\Jarvis-Research\`, ya
+corregido en ese archivo). Se había dado por perdido/no iniciado en un handoff anterior porque
+una búsqueda previa no encontró la carpeta en esa ruta equivocada; auditado a fondo el
+2026-09-24 y confirmado que **sí se ejecutó, parcialmente**: de 7 repos descargados (openclaw,
+personal-jarvis, leon, isair-jarvis, jarvis-aio, openjarvis, ruflo), solo **Ruflo** tuvo
+revisión estática completa; los otros 6 quedaron catalogados sin veredicto. La "ola 2" (Khoj,
+OVOS, Home Assistant) nunca arrancó. De 5 ADRs planeados (`decisions/README.md`), solo se
+escribió **ADR-005**.
+
+**El hallazgo:** ADR-005 propone, a partir de revisar código real de Ruflo, separar
+responsabilidades en tres piezas conceptuales — **Agent Router** (qué agente/flujo atiende una
+solicitud), **Model Router** (qué modelo LLM se usa, ya parcialmente cubierto por el uso de
+LiteLLM en `jarvis/`), y **Policy Engine** (qué puede hacer cada tool/acción, candidato natural
+a evolucionar el `jarvis/tools/` Tool Registry ya implementado o el policy store de permisos
+que `CLAUDE.md` ya exige mantener separado del LLM). El ADR es explícito: **NO adoptar el
+runtime/monorepo de Ruflo** (swarms por defecto, catálogo de 100+ agentes, MCP con acceso
+amplio, hooks — todo incompatible con el alcance personal de Jarvis) — solo el patrón de
+separación de responsabilidades como referencia de diseño. Marcado en el propio ADR como
+"aceptada para investigación; adopción productiva pendiente de un spike" — el spike nativo
+nunca se hizo (`spikes/` del laboratorio solo tiene el README de proceso, cero spikes reales).
+
+**Relación con lo ya implementado:** el Tool Registry v1 de Jarvis (2026-09-23, ver entrada
+`2026-09-22 — PROPUESTA APROBADA` en `decisiones-implementacion.md`) ya nació de este mismo
+laboratorio (revisando OpenJarvis, no Ruflo) — este ADR es un hallazgo adicional, no aplicado,
+del mismo esfuerzo de investigación.
+
+**Sin diseñar/decidir:** si vale la pena el spike nativo que el propio ADR pide antes de
+adoptar nada, o si el Tool Registry + policy store ya cubren la necesidad real sin necesitar una
+capa de "Agent Router" explícita (Jarvis hoy es un solo worker, no múltiples agentes
+compitiendo por una solicitud — la separación podría no pagar su complejidad todavía). Evaluar
+cuando/si Jarvis crezca a más de un flujo de agente real.
+
+---
+
+## Triage de `SGR-Informe-Siguiente-Nivel.md` (julio 2026) — deuda técnica y quick wins vigentes
+
+**Fecha:** 2026-09-24 (informe original de julio 2026; triado contra el código real de hoy,
+ver `SGR-Informe-Siguiente-Nivel-Verificacion-2026-09-24.txt` en la raíz del repo para el
+detalle completo ítem por ítem con evidencia).
+
+**Contexto:** informe externo de diagnóstico/roadmap. Su premisa central ("cero tests, esa es
+la palanca #1") **ya no aplica** — la red de tests se construyó por otro camino (412 tests,
+ver arriba). Su sugerencia de partir `main.py`/`crud.py` en `app/routes/`/`app/services/`
+**tampoco aplica** — es una decisión de arquitectura ya tomada en sentido contrario
+(`CLAUDE.md`: "no hay `app/routes/` ni `app/services/`... si alguna vez se agregan, verificar
+primero que no sea el mismo patrón plano fragmentado"). El resto de la deuda que describe sigue
+siendo real y no estaba capturada en ningún otro lugar de `Cerebro/` — se vuelca acá.
+
+**Deuda técnica vigente, no cubierta en otras entradas:**
+- **Monolitos crecieron, no se achicaron**: `main.py` 2050 líneas (era 1586 en julio),
+  `crud.py` 3193 (era 2349), `useStore.js` 1953 (era 1306), `agenda_handlers.py` 2005 (era
+  1462) — ~30-35% de crecimiento en 2 meses. El corte plano por `APIRouter`/slices que sugiere
+  el informe choca con la decisión de `CLAUDE.md` (arriba) — si se retoma, sería con otro
+  criterio de partición, no el propuesto.
+- **Cajones por typo (Finanzas)**: `fin_buscar_categoria_por_nombre` (`crud.py:960-966`) hace
+  `WHERE nombre = ?` exacto, sin `lower()`/`trim()`. La auto-creación de categoría en
+  `POST /fin/movimientos` (`main.py:1028-1033`) sigue sin normalizar — "Comida"/"comida" crean
+  cajones distintos.
+- **Migraciones sin red**: `_apply_migrations` (`database.py:482`) sigue siendo checks de
+  columna ad-hoc (`ALTER TABLE ... ADD COLUMN` condicional). Sin `schema_version`, sin backup
+  automático pre-migración, sin log de qué se aplicó.
+- **Dual schema de movimientos, parcialmente mitigado**: `normalizeMovimiento()`
+  (`data/finanzas.js:249`) sigue existiendo con tests dedicados; el fallback offline en
+  `addFinMovimiento` (`useStore.js:208-245`) sigue construyendo un shape mixto. Lo que sí
+  cambió (por la auditoría de septiembre, no por este informe): el fallback ya no falla en
+  silencio — hace rollback visual + toast (`useStore.js:232-243`).
+- **Legacy visible**: banner de `Ahorro` legacy sigue en `AhorroTab.jsx:1469-1478`;
+  `GET /fin/emergencia` sigue `deprecated=True` (`main.py:1164`) y sigue consumido por el store
+  (`useStore.js:186`).
+- **Sync sin guard de divergencia**: `POST /sync/import` (`main.py:1967-2012`) no tiene
+  precondición de versión (`expected_hash`/`If-Match`/409) — mismo hallazgo P0 que ya está en
+  `Diferido — riesgo de pérdida de datos en el sync` arriba, **con una decisión explícita ya
+  tomada de diferirlo** (auditoría del 21/09, "vara de equipo, no de un solo desarrollador") —
+  si se retoma, es revalidar esa decisión, no partir de cero.
+
+**Quick wins todavía sin hacer** (8 de 10 del informe; `seed_demo.py` y "carpetas
+routes/services" ya no aplican, ver arriba):
+1. Botón "Crear backup ahora" en Settings — no existe.
+2. Banner de frescura de sync en TopBar — no existe.
+3. `SGR_VERSION` visible + `CHANGELOG.md` — no existen.
+4. `GET /fin/movimientos/duplicados` (`main.py:953-955`, ya existe en backend) sin ningún
+   consumidor en el frontend — **distinto** del cuadro de filtros agregado el 24/09 a
+   `DatosTab.jsx`, que no lo cubre.
+5. Matching case-insensitive en POST movimiento — ver arriba.
+6. Emergencia client-side en dashboard (reemplazar el consumidor de `/fin/emergencia`) — ver
+   arriba.
+7. Toggle de búsqueda semántica en `LeftPanel` de Bóveda — backend existe, cero UI (sin
+   mención de "semantic"/"semántica"/"embedding" en `LeftPanel.jsx` ni screens de Bóveda).
+8. `verify-sync.ps1` (script de humo que compara counts `/meta` antes/después de sync) — no
+   existe.
+9. `POST /habitos/registros/batch` (`main.py:1912-1915`, ya existe en backend) sin consumidor
+   — candidato natural para marcar varios hábitos de una vez en Agenda HOY.
+
+**Ya no vigente / ya cubierto en otro lado (no repetir si se retoma esto):**
+- "Cero tests" → superado (ver `Diferido — sin red de seguridad automatizada`).
+- `app/routes/`/`app/services/` vacías → no existen, decisión de arquitectura tomada en
+  sentido contrario.
+- `seed_demo.py` desalineado → ya alineado al modelo de objetivos/FIRE
+  (`seed_demo.py:243-246`); **`CLAUDE.md` quedó desactualizado en este punto puntual, corregir
+  si se toca ese archivo**.
+- Bug P0 IDs offline de Hábitos → ya trackeado en `project/Habitos-Roadmap.md:10`, no duplicar
+  acá.
+- Notificaciones unificadas → ya tiene su propia entrada completa más abajo
+  (`Diferido — Notificaciones unificadas`).
+
+**El archivo original queda en la raíz del repo** (`SGR-Informe-Siguiente-Nivel.md` +
+`SGR-Informe-Siguiente-Nivel-Verificacion-2026-09-24.txt`) — preguntarle al usuario si se
+borran una vez volcado el contenido acá, mismo patrón que los documentos sueltos anteriores.
+
+---
+
+## Laboratorio Jarvis-Research: ola 1 completa, sin decisión de abrir ola 2
+
+**Fecha:** 2026-09-24 (actualizado — completado el mismo día; ver abajo el estado original con
+el que arrancó esta entrada)
+
+**Contexto:** distinto del hallazgo de arriba (ADR-005, que sí es una propuesta de diseño
+evaluable) — esto es sobre el estado del laboratorio de investigación en sí
+(`D:\Proyectos\Investigacion\Jarvis-Research\`), que se dio por perdido en el handoff del 21/09
+y se confirmó/auditó el 24/09. **Ola 1 completa**: los 7 dossiers
+(`dossiers/{openclaw,personal-jarvis,leon,isair-jarvis,jarvis-aio,openjarvis,ruflo}.md`) tienen
+revisión estática completa siguiendo el formato de `ruflo.md`, y `manifest.yaml` marca los 7
+repos `downloaded_reviewed_static`. Ningún runtime completo se adopta — veredicto consistente
+en los 7: patrones/contratos puntuales sí, dependencia del monorepo no.
+
+**Patrones candidatos a ADR nativo** (evaluados con evidencia de código, ninguno con ADR escrito
+todavía — decisión pendiente del usuario):
+- **OpenJarvis**: capability floor no-bypasseable para tools (fail-closed en built-ins sin
+  revisar) + redacción PII fail-closed en analytics. Confirma y amplía la decisión ya tomada el
+  22/09 sobre el Tool Registry v1.
+- **Leon**: progressive tool discovery (`load_toolkit` carga schemas exactos bajo demanda,
+  decisión de precarga medida por costo) + finishing-pass reservado en el agent loop. Usa
+  clientes LLM directos por proveedor (sin LiteLLM) — no replicar eso.
+- **Personal Jarvis**: `approval_surface` de tres estados (timeout / usuario dijo que no / nadie
+  pudo responder) — candidato directo para cualquier futuro flujo de confirmación de Jarvis. Más
+  event sourcing persist-before-publish y crash-recovery opt-in fail-closed.
+- **jarvis-aio**: autonomía graduada (3 aceptaciones + confianza ≥0.80 antes de auto-ejecutar,
+  revocable) con confirmación de voz y fail-safe que nunca se salta en acciones sensibles.
+  Riesgo: visión/LLM principal a APIs cloud por defecto, reconocimiento facial pasivo sin opt-in
+  visible.
+- **isair/jarvis**: recall gate barato (heurística sin LLM antes de tocar memoria de largo
+  plazo, fail-open) y selección de tools en cascada (keyword→embedding→LLM→todas). **Licencia
+  no-comercial con cláusula share-alike — no reutilizar código literal**, solo como referencia
+  conceptual.
+- **OpenClaw** y **Ruflo** (ADR-005): RECHAZAR el runtime en ambos casos; el patrón de Ruflo
+  (Agent Router/Model Router/Policy Engine) es el único que ya tiene ADR escrito.
+
+**Riesgo recurrente confirmado en 3 de los 7** (Ruflo, OpenClaw, OpenJarvis): defaults de
+ejecución/permisos inseguros out-of-the-box (`default_deny: false`, `security: "full", ask:
+"off"`, etc.) — refuerza que los invariantes deny-by-default y LiteLLM-only de Jarvis no son
+capricho, es exactamente lo que este tipo de proyecto tiende a hacer mal por defecto.
+
+**Sin decidir:** si alguno de los 5 patrones de arriba amerita un ADR nativo real (serían los
+primeros desde ADR-005), o si se los deja anotados acá hasta que haya una necesidad concreta
+(ej. Jarvis empieza a necesitar un flujo de aprobación real recién ahí usar `approval_surface`
+de Personal Jarvis como referencia). **Ola 2** (Khoj, OVOS, Home Assistant) sigue sin arrancar y
+sin decisión de si vale la pena — quedaron en `queued_repositories` del manifest.
+
+<details>
+<summary>Estado original de esta entrada (2026-09-24, antes de completar la ola 1)</summary>
+
+El proceso de 9 etapas que proponía el documento de diseño original había quedado a medias:
+7 de 7 repos descargados (~1.1 GB, ninguno ejecutado) pero solo 1 de 7 con revisión estática
+completa (Ruflo); los otros 6 estaban descargados y catalogados con `research_tracks`
+asignados en `manifest.yaml`, sin revisión ni veredicto — trabajo pagado (la descarga, el
+catálogo) sin cobrar (el análisis). 4 de 5 ADRs sin escribir, `spikes/`/`evals/` sin nada
+ejecutado. No había ningún puntero desde `Cerebro/` hacia la carpeta salvo esta entrada.
+
+</details>
+
+---
+
 ## Extender automáticamente la ventana de recurrencia de tareas
 
 **Fecha:** 2026-09-21
@@ -105,13 +283,18 @@ Telegram, `SGR_SYNC_TOKEN` obligatorio.
 - `Idempotency-Key` en el servidor para que un reintento no duplique un movimiento/registro.
 
 ### Diferido — sin red de seguridad automatizada
-- Sin tests de proyecto ni de Jarvis, sin CI. Suite mínima sugerida: pytest backend (CRUD,
-  migraciones, transferencias, recurrencia, hábitos, sync), Vitest + Playwright frontend, tests
-  de handlers de Telegram, dataset dorado de routing/retrieval para Jarvis.
+- ~~Sin tests de proyecto~~ **Superado, 2026-09-24** — 265 tests backend (pytest) + 148
+  frontend (vitest) + Playwright E2E configurado (`project/frontend/playwright.config.ts`,
+  `project/frontend/e2e/`), 412 en total (ver `Cerebro/estado-actual.md`). Sigue vigente solo
+  lo que sigue abajo: **CI** (no existe `.github/workflows/` en el repo — nada corre los tests
+  automáticamente en cada push) y el **dataset dorado de routing/retrieval para Jarvis**
+  (evaluation harness — ver `Diferido — Jarvis` más abajo, sigue sin implementar).
 - 5 flujos E2E propuestos como primer set: Telegram registra gasto → aparece en web; tarea
   creada en web → aparece en `/hoy` → callback la completa; hábito en web → Telegram lo
   refleja; nota en Bóveda → Markdown+SQLite+búsqueda consistentes; Jarvis responde citando
-  fuente válida.
+  fuente válida. **Parcial**: 2 de 5 ya existen como E2E Playwright (Agenda, Bóveda — ver
+  `Cerebro/estado-actual.md`, 2026-09-24); los otros 3 (Telegram↔web, hábito↔Telegram, Jarvis
+  citando fuente) siguen sin cubrir.
 
 ### Diferido — privacidad/tamaño del repo
 - `project/database/` tiene ~112 archivos versionados en git (SQLite, Chroma, datasets
@@ -132,8 +315,10 @@ Telegram, `SGR_SYNC_TOKEN` obligatorio.
   — separar por módulo (`modules/boveda/api.js`+`store.js`, etc.) de forma incremental, no
   big-bang.
 - PWA sigue llamándose "Bóveda — Sistema de Guardado Rápido" en el manifest.
-- Permiso de notificaciones se pide al montar `TopBar`, no tras una acción del usuario (MDN
-  recomienda pedirlo tras interacción).
+- ~~Permiso de notificaciones se pide al montar `TopBar`, no tras una acción del usuario~~
+  **Resuelto, 2026-09-24** (sin commitear todavía, ver `Cerebro/estado-actual.md` — rediseño de
+  Settings) — ahora se activan explícitamente desde Ajustes → Avisos, con anticipación
+  configurable; `AgendaNotificationWatcher.jsx` nuevo dispara los avisos ya no solo en Agenda.
 - Accesibilidad sin auditar (focus visible, navegación por teclado, contraste) — sugiere
   Playwright + axe.
 

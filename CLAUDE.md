@@ -156,7 +156,7 @@ Modal Hábitos en `HabitosScreen`: `NuevoHabitoModal` (TopBar CTA o botón del p
 - **API:** `/fin/*` — categorías con `?include_ocultas=`, objetivos sin PATCH de `nombre`, emergencia deprecated.
 - **Dual schema:** algunos consumidores aceptan `type`/`amount`/`cat`; API usa `tipo`/`monto`/`categoria_nombre` — usar `normalizeMovimiento()`.
 - **Dólar:** `GET /fin/dolar/cotizacion` → cache en `fin_config` (`dolar_mep`, `dolar_oficial_compra`); UI usa MEP con fallback.
-- **Demo opcional:** `project/seed_demo.py` — **borra** la DB y rellena datos de ejemplo (aún usa cat. `Ahorro` legacy; no alineado al modelo nuevo).
+- **Demo opcional:** `project/seed_demo.py` — **borra** la DB y rellena datos de ejemplo (alineado al modelo de objetivos/FIRE desde 2026-09; ya no usa la categoría `Ahorro` legacy).
 - **Bot Telegram:** `mybot/finanzas_handlers.py` — `/mov`, `/mes`, `/ahorro` (FIRE + objetivos por categoría), `/objetivo`, captura `$:`; categorías `oculta` no en teclados. Ver `project/Finanzas.md` §6.
 
 ### Agenda (resumen)

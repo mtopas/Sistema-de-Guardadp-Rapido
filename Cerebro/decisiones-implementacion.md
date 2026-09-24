@@ -119,8 +119,9 @@ detalle completo de bugs reales encontrados en los borradores de ambos modelos.
 
 Contexto: sesión de verificación (no de implementación) sobre un prompt ya redactado para
 llevar a SGR un ToolSpec/Registry/Executor nativo, inspirado en OpenJarvis, evaluando 3-5
-tools read-only. Se verificó código real (no solo dossiers) de `D:\Jarvis-Research\repos\
-openjarvis` y el estado real de SGR antes de aprobar nada. Hallazgos clave de esa
+tools read-only. Se verificó código real (no solo dossiers) de
+`D:\Proyectos\Investigacion\Jarvis-Research\repos\openjarvis` y el estado real de SGR antes de
+aprobar nada. Hallazgos clave de esa
 verificación (detalle completo en la conversación, no repetido acá):
 - El `ToolSpec` real de OpenJarvis (`rust/crates/openjarvis-core/src/types.rs` y su origen
   Python `src/openjarvis/tools/_stubs.py`) es más flaco de lo que sugiere el informe
@@ -140,8 +141,9 @@ verificación (detalle completo en la conversación, no repetido acá):
 - Licencia Apache-2.0 confirmada, sin archivo NOTICE en el repo de OpenJarvis → no hay avisos
   que reproducir bajo la cláusula 4(d). Como esto adapta el patrón conceptual (forma del
   contrato) y no copia código fuente literal, no se dispara la obligación de atribución de
-  copyright — igual se deja constancia acá y en `THIRD-PARTY.md` (`D:\Jarvis-Research\
-  licenses\THIRD-PARTY.md`) de que la inspiración es OpenJarvis, Apache-2.0.
+  copyright — igual se deja constancia acá y en `THIRD-PARTY.md`
+  (`D:\Proyectos\Investigacion\Jarvis-Research\licenses\THIRD-PARTY.md`) de que la inspiración
+  es OpenJarvis, Apache-2.0.
 - Ya existe un precursor real en el repo: `jarvis/worker/task_manifest.py` (`TaskManifest`,
   allowlist fija de 18 operaciones + `assert_allowed()`). No tiene schema/versión/riesgo/
   timeout — el Tool Registry nuevo no lo reemplaza necesariamente, pero hay que decidir en la

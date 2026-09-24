@@ -1,6 +1,99 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-24
 
+## EN WORKING TREE (sin commit): rediseño completo de Settings (2026-09-24)
+
+Hecho por otra sesión en paralelo (mismo checkout `D:\SGR` compartido, no un worktree
+aislado) mientras este chat hacía el deploy del feedback button y el laboratorio
+Jarvis-Research — verificado por el orquestador después, no asumido del reporte de esa sesión:
+**268 tests backend pasan** (`./venv/Scripts/python.exe -m pytest tests/` — era 265 + 3 nuevos
+de `project/tests/test_settings_routes.py`), build de frontend limpio (`npm run build`, sin
+errores). Reemplaza `SettingsScreen.jsx` completo (305 líneas de diff) — ya no muestra
+categorías de Bóveda ni las matrices de temas/tipografía por módulo (eso se movió a un panel
+propio, sigue accesible). Nuevas secciones: Datos (info de la copia de datos local, estado de
+sync, descarga de respaldo), Perfil e idioma, Avisos (activa recordatorios de Agenda con
+anticipación configurable 5/15/30/60 min), Apariencia (abre el panel de tweaks existente),
+Feedback (CRUD completo: crear/editar/borrar con confirmación — antes solo tenía alta),
+Información (versión API, ubicación de la DB).
+
+**Backend nuevo, verificado en código:**
+- Tabla `app_settings` (`database.py:62`) — nombre para mostrar persistido en `app.db` en vez de
+  solo `localStorage`; si la DB no tiene nombre todavía, se recupera el que estaba en el
+  navegador (migración implícita, no destructiva).
+- `PATCH`/`DELETE /feedback/{fid}` (`main.py:533,543`) — Feedback pasa de solo-alta a CRUD real.
+- `GET /settings/backup` (`main.py:600`) — ZIP con `app.db` + `jarvis.db` (si existe) + `uploads/`.
+  Guardado con `backup_available` gateado a `client_host` loopback (`main.py:595`) — **no
+  disponible si SGR se sirve desde el homelab/Tailscale**, solo desde la app local. El vault
+  externo de Bóveda (`D:\Boveda`) queda afuera a propósito, necesita respaldo propio.
+- Registro de estado de sync tanto desde el launcher como desde los scripts de sync
+  (`sgr-sync-pull.ps1`/`sgr-sync-push.ps1`/`sync-config.ps1` modificados) — la pantalla muestra
+  el último resultado registrado, no sync en tiempo real.
+
+**Comportamiento nuevo:** los avisos de notificación del browser ya no se piden automáticamente
+al abrir SGR (antes se pedían al montar `TopBar`, señalado como deuda en `PROXIMAMENTE.md`
+"Diferido — plataforma web" — **este ítem queda resuelto**, corregir esa entrada). Ahora se
+activan desde Ajustes; `AgendaNotificationWatcher.jsx` (componente nuevo) puede disparar avisos
+estando en cualquier módulo, no solo en Agenda.
+
+**Pendiente/aviso:**
+- **Nada de esto está commiteado ni deployado al homelab** — 21 archivos modificados + 3 nuevos
+  en el working tree (ver `git status`). Hace falta decidir mensaje de commit y si se hace un
+  segundo deploy al homelab (mismo proceso que el del feedback button, con el cuidado del bug de
+  `scp -r`/`dist/dist` ya documentado arriba).
+- El ejecutable `.exe` de Windows NO refleja esto — hace falta recompilar (`project/BUILD.md`)
+  para verlo en una copia ya empaquetada.
+- Algunos textos de Ajustes quedaron sin traducir al inglés en otros módulos (deuda de i18n
+  preexistente, no introducida por este cambio).
+- La sesión que hizo este trabajo reportó que la revisión automática le bloqueó borrar un
+  directorio temporal de pruebas (`%TEMP%\sgr-settings-qa`) — quedó fuera del proyecto, sin
+  impacto en datos de SGR, no requiere acción.
+
+## DEPLOY: botón de feedback en el avatar del TopBar (2026-09-24)
+
+Commit `20beb5c` (rama `claude/task-3kecq7`, sesión en la nube) + merge `e238735` a `master`,
+hechos por otra sesión (no el orquestador de este chat). Avatar circular del TopBar (antes
+decorativo) ahora abre un modal: input de feedback arriba, historial completo abajo con scroll
+propio. Backend: tabla `feedback` nueva (`CREATE TABLE IF NOT EXISTS`, aditiva, sin riesgo para
+la DB existente), `GET`/`POST /feedback`. Frontend: `FeedbackModal.jsx` nuevo, integrado al
+patrón optimista del store.
+
+**Deploy al homelab hecho y verificado el mismo día** (no automático — ver `HOMELAB.md` §"Deploy
+del frontend"). Detalle porque salió mal en el primer intento y vale la pena dejarlo anotado:
+`scp -r project/frontend/dist mtopas@...:~/project/frontend/dist` con el directorio remoto ya
+existente creó un `dist/dist/` anidado (el gotcha clásico de `scp -r` cuando el destino ya
+existe) — el primer `docker build` usó el `dist/` viejo de afuera sin fallar ni avisar
+(`index.html` seguía apuntando al bundle del 21/09). Se detectó comparando el hash de
+`/assets/index-*.js` sub_servido contra el del build local, se corrigió con
+`rm -rf ~/project/frontend/dist` + `scp -r project/frontend/dist mtopas@...:~/project/frontend/`
+(destino el padre, no el mismo nombre) y se re-hizo build+restart. Verificado end-to-end
+después: 3 contenedores sin restart, bundle nuevo servido, `POST /feedback` real contra la DB
+del homelab (fila de prueba creada, `id:1`).
+
+**Aviso, sin acción tomada (decisión del usuario, 2026-09-24):** los dos commits (`20beb5c`,
+`e238735`) llevan `Claude-Session: https://claude.ai/code/session_...` en el cuerpo — viola la
+regla explícita de `CLAUDE.md` ("Nunca agregar Co-Authored-By: Claude... ni una línea
+Claude-Session: ... — decisión explícita del usuario, 2026-09-24, aplica a cualquier sesión,
+incluidas las delegadas"). La sesión en la nube que generó el commit no siguió la convención.
+Usuario confirmó dejarlo así — no se reescribe el historial por esto. La fila de prueba creada
+al verificar el deploy (`feedback.id=1`, "smoke test deploy 2026-09-24") tampoco se borra — sin
+impacto real, queda en la tabla.
+
+## Laboratorio Jarvis-Research: ola 1 completa (2026-09-24)
+
+Los 7 dossiers de `D:\Proyectos\Investigacion\Jarvis-Research\dossiers\` quedaron completos
+(reemplazando sus stubs), y `manifest.yaml` marca los 7 repos `downloaded_reviewed_static`:
+Ruflo (ya estaba), OpenClaw, Personal Jarvis, OpenJarvis, Leon, isair/jarvis, jarvis-aio. Ver
+`Cerebro/PROXIMAMENTE.md` (entrada "Laboratorio Jarvis-Research") para el detalle de cada
+veredicto — resumen: ningún runtime completo se adopta; patrones puntuales candidatos a ADR
+nativo (sin escribir todavía, decisión del usuario): capability floor + PII-redaction
+(OpenJarvis), progressive tool discovery (Leon), approval-surface de tres estados y
+crash-recovery opt-in (Personal Jarvis), autonomía graduada con fail-safe (jarvis-aio), recall
+gate barato (isair/jarvis, con la salvedad de que su licencia no-comercial impide reutilizar
+código literal). Riesgo recurrente confirmado en 3 de los 7 repos (Ruflo, OpenClaw, OpenJarvis):
+defaults de ejecución/permisos inseguros out-of-the-box — refuerza que los invariantes
+deny-by-default y LiteLLM-only de Jarvis no son capricho. Ola 2 (Khoj, OVOS, Home Assistant)
+sigue sin empezar, sin decisión de retomarla.
+
 ## IMPLEMENTADO: CRUD de calendarios en Agenda + filtros en Finanzas → Datos (2026-09-24)
 
 Sesión "ArreglosFront-Finanzas/Agenda", dos features de frontend independientes pedidas desde
@@ -78,20 +171,36 @@ entrada es específica de la limpieza de documentos sueltos en la raíz del repo
   147 frontend = 412 tests, todo en verde.
 
 **Pendiente, sin resolver, para la próxima sesión que retome esto:**
-1. **`SGR-Informe-Siguiente-Nivel.md`** (raíz del repo) — todavía sin triar. Es el documento
-   más importante de los que quedan: identifica un **riesgo real de pérdida de datos** (el
-   push del sync `.exe` ↔ homelab puede pisar escrituras del bot sin avisar, sin guard de
-   divergencia) que ya está parcialmente anotado en `PROXIMAMENTE.md` ("Diferido — riesgo de
-   pérdida de datos en el sync") pero el informe tiene mucho más detalle (plan de 30 días,
-   matriz de priorización, checklist de "producto profesional") que todavía no se evaluó punto
-   por punto. Hacer el mismo ejercicio que con `PLAN-NEXTLEVEL.md`: qué ya está hecho (algunos
-   ítems de testing ya se cerraron esta semana), qué migra a `PROXIMAMENTE.md`, qué se
-   descarta.
-2. **`SGR-JARVIS-Laboratorio-de-Repositorios-2026-09-21.md`** (raíz del repo) — era el diseño
-   de una carpeta `D:\Jarvis-Research` que parecía no existir; resuelto: la búsqueda anterior
-   leyó por error el checkout viejo ya borrado, no la ubicación real. Falta la verificación
-   final: confirmar dónde vive `D:\Jarvis-Research` de verdad y si el archivo puede borrarse
-   (documento de diseño ya materializado) o si tiene contenido sin implementar.
+1. ~~**`SGR-Informe-Siguiente-Nivel.md`**~~ **Triado, 2026-09-24.** Verificado ítem por ítem
+   contra el código real (detalle completo en
+   `SGR-Informe-Siguiente-Nivel-Verificacion-2026-09-24.txt`, raíz del repo). Su premisa
+   central ("cero tests") ya no aplica (412 tests existen) y su sugerencia de partir
+   `main.py`/`crud.py` en `app/routes/`/`app/services/` choca con una decisión de arquitectura
+   ya tomada en `CLAUDE.md`. El resto de la deuda que describe (monolitos que crecieron ~30%,
+   cajones por typo, migraciones sin `schema_version`, dual schema parcial, legacy visible,
+   sync sin guard de divergencia — este último con una decisión explícita ya tomada de
+   diferirlo el 21/09) y 8 de 10 quick wins siguen vigentes — todo volcado con evidencia
+   concreta (archivo:línea) en `Cerebro/PROXIMAMENTE.md`, entrada "Triage de
+   `SGR-Informe-Siguiente-Nivel.md` (julio 2026)". `seed_demo.py` estaba desalineado según el
+   informe y `CLAUDE.md` — resultó ya corregido en el código; `CLAUDE.md` actualizado para
+   reflejarlo. Pendiente real: preguntarle al usuario si borra el informe original + el archivo
+   de verificación de la raíz del repo, ya volcados acá.
+2. ~~**`SGR-JARVIS-Laboratorio-de-Repositorios-2026-09-21.md`**~~ **Resuelto, 2026-09-24.** El
+   archivo (que describía el diseño de un laboratorio de investigación de repos externos para
+   Jarvis) ya no está en el repo — se encontró borrado en la Papelera de reciclaje de Windows,
+   probablemente en la limpieza del 22/09 o 24/09. La carpeta que proponía sí se materializó,
+   pero en una ubicación distinta a la que el documento describía y a la que
+   `decisiones-implementacion.md` referenciaba: **`D:\Proyectos\Investigacion\Jarvis-Research\`**
+   (no `D:\Jarvis-Research\`, ya corregido en `decisiones-implementacion.md`). Auditada a fondo:
+   quedó **a medio camino** — de 7 repos descargados (openclaw, personal-jarvis, leon,
+   isair-jarvis, jarvis-aio, openjarvis, ruflo, ~1.1 GB), solo **Ruflo** tuvo revisión estática
+   completa; los otros 6 siguen solo catalogados. La "ola 2" (Khoj, OVOS, Home Assistant) nunca
+   arrancó. De 5 ADR planificados, solo se escribió 1 (ADR-005). El único hallazgo con
+   consecuencia real en código (Tool Registry v1, inspirado en OpenJarvis) ya estaba bien
+   documentado; el hallazgo nuevo sin aplicar (ADR-005, patrón Agent Router/Model Router/Policy
+   Engine) se agregó a `PROXIMAMENTE.md`. El estado incompleto del laboratorio en sí (6 repos
+   sin revisar, ola 2 sin empezar) quedó anotado ahí también, no hace falta retomar la
+   verificación de este ítem.
 3. Backup de la limpieza previa del incidente de seguridad — ya resuelto (carpeta borrada el
    23/09), no necesita seguimiento.
 

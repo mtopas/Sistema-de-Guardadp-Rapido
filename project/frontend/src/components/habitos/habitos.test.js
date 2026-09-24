@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   isScheduled,
   calcStreak,
@@ -9,6 +9,22 @@ import {
 } from './habitosUtils.js'
 
 describe('habitosUtils', () => {
+  // Varios tests de este archivo asumen implícitamente una fecha de "hoy" fija
+  // (comentarios como "today is 23" a lo largo del archivo) porque
+  // calcStreak/calcMaxStreak/calcMonthPct usan `new Date()` internamente sin
+  // aceptar una fecha de referencia como parámetro -- sin fijar el reloj, esos
+  // tests se rompen cada vez que pasa un día real (encontrado 2026-09-24, ver
+  // Cerebro/estado-actual.md). Se fija a la fecha que los comentarios ya
+  // asumían (2026-09-23) para no tener que rehacer los cálculos esperados.
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-23T12:00:00'))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   describe('isScheduled', () => {
     it('returns false if habit is not active', () => {
       const habito = {

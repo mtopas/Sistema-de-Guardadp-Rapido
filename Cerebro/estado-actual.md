@@ -1,6 +1,26 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-24
 
+## FIX: `habitos.test.js` fijaba "hoy" implícitamente — se rompía cada día real (2026-09-24)
+
+Resuelve el hallazgo de la entrada anterior (fix de `fmtARSShort`): no era solo un test
+suelto (`calcMonthPct` "counts partial values correctly") — **casi todo el archivo** asume una
+fecha de "hoy" fija (comentarios como "today is 23" repartidos en tests de `calcStreak`,
+`calcMaxStreak` y `calcMonthPct`), porque esas tres funciones de `habitosUtils.js` usan
+`new Date()` internamente sin aceptar una fecha de referencia como parámetro. Solo uno había
+fallado hoy (23→24/09) porque los demás resultan insensibles a ese corrimiento puntual de un
+día, pero eran igual de frágiles — iban a romperse en algún momento futuro impredecible.
+
+**Fix** (sin tocar `habitosUtils.js`, código de producción intacto): `beforeEach`/`afterEach`
+con `vi.useFakeTimers()` + `vi.setSystemTime('2026-09-23T12:00:00')` a nivel de todo el
+`describe('habitosUtils', ...)` — fija el reloj a la fecha que los comentarios ya asumían, así
+no hubo que rehacer ningún cálculo esperado.
+
+**Verificado**: frontend 137/137 en verde (incluye el fix de `fmtARSShort` de la entrada
+anterior). Backend sin cambios, sigue en 245/245.
+
+Impacto: `project/frontend/src/components/habitos/habitos.test.js` únicamente.
+
 ## FIX: redondeo de `fmtARSShort` cerca del límite de 1M (2026-09-24)
 
 Resuelve el hallazgo cosmético documentado en `PROXIMAMENTE.md` (Finanzas): `fmtARSShort(999_999)`

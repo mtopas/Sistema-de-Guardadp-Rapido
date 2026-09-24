@@ -28,8 +28,8 @@ Impacto: `jarvis/tools/builtin.py`, `project/tests/test_jarvis_tools.py`.
 **Estado**: Infraestructura 100% funcional, flujo (4) PASANDO en verde real, flujo (2) parcialmente debugged, script de backend en sandbox listo para reusar.
 
 **Resultado de ejecución real**:
-- ✅ **Flujo (4) - Bóveda**: PASADO en verde (4.9s) — crear nota, buscar en UI, tolera error 404 en `/hojas/` (backend issue separado, no relacionado a tests)
-- ⚠️ **Flujo (2) - Agenda**: Cuelga al esperar input de modal — el modal se abre pero el selector `input[type="text"]` no encuentra el campo de título después de 90s. Requiere debugging de por qué el input del EventoModal no es accesible vía ese selector en Playwright (posible ShadowDOM, iframes, o timing).
+- ✅ **Flujo (4) - Bóveda**: PASANDO en verde (7.3s) — crear nota, buscar en UI, ahora verifica correctamente en backend con `/hojas` (sin trailing slash, FastAPI redirige `/hojas/` → `/hojas`)
+- ⚠️ **Flujo (2) - Agenda**: Cuelga al esperar input de modal (90s timeout) — el modal se abre pero el selector `input[type="text"]` no encuentra el campo de título. Requiere debugging: posible ShadowDOM, iframes, timing, o que el input tenga atributo `type` diferente en renderizado real.
 
 **Qué se hizo**:
 1. Instalación de Playwright (`@playwright/test`) en `project/frontend`.

@@ -88,9 +88,9 @@ test.describe('Flujo (4): Bóveda - Nota creada y búsqueda funciona', () => {
 });
 
 async function getHojas(apiUrl: string) {
-  const res = await fetch(`${apiUrl}/hojas/`);
+  const res = await fetch(`${apiUrl}/hojas`); // sin barra final — FastAPI redirige /hojas/ → /hojas
   if (!res.ok) {
-    throw new Error(`GET /hojas/: ${res.status} ${res.statusText}`);
+    throw new Error(`GET /hojas: ${res.status} ${res.statusText}`);
   }
   return res.json();
 }

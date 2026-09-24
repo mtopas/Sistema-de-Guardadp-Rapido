@@ -1,6 +1,47 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-23
 
+## IMPLEMENTADO: tanda "integración de rutas HTTP" del plan de testing — Agenda, Hábitos, Bóveda (2026-09-23)
+
+Cierra el hueco documentado en la tanda 4 de Jarvis: hasta ahora solo Finanzas tenía tests
+contra las rutas reales de FastAPI (`test_fin_routes.py`); Agenda/Hábitos/Bóveda solo
+probaban `crud.py` directo, sin verificar que `main.py` conecte bien (Pydantic, status codes,
+serialización).
+
+**24 tests nuevos** (`TestClient` + `tmp_app_db`, Bóveda además con `tmp_vault`):
+- `project/tests/test_agenda_routes.py` (8): CRUD de eventos, `model_validator` rechaza
+  `fecha_fin < fecha_inicio` (422), tarea recurrente vía HTTP genera ocurrencias reales
+  (confirma que el body llega bien mapeado a `_generar_fechas_recurrencia_tarea`), 404 en
+  update/delete de inexistentes, `/agenda/revision`.
+- `project/tests/test_habitos_routes.py` (8): CRUD de hábitos, `archivado_en` automático vía
+  `PATCH activo=false`, 404 en inexistentes.
+- `project/tests/test_boveda_routes.py` (9): CRUD de categorías, 400 en nombre vacío/duplicado,
+  mapeo de `eliminar_categoria()` a status codes (`estructural`→409, `tiene_hojas`→409 sin
+  `forzar`, 200 con `forzar=true`), `/hojas/recientes`.
+
+**Hallazgo cerrado (no era un bug)**: al escribir el test de "borrar categoría con hojas +
+forzar=true", una `IntegrityError` (FK) casi se documentó como bug real de
+`eliminar_categoria()`. Investigado a fondo: no lo es —
+`sincronizar_vault_si_hace_falta()` (que corre dentro de `crear_categoria()`) purga de la DB
+cualquier categoría cuya carpeta física no exista en el vault, y el test original solo
+insertaba la fila "05 - Basura" por SQL directo sin crear la carpeta real, así que el propio
+sync la borraba antes de que `eliminar_categoria()` llegara a usarla. Corregido creando también
+la carpeta física en `tmp_vault`. **Conclusión real, sí vale la pena anotarla**: cualquier test
+futuro que inserte filas de `categorias` por SQL directo (saltándose `crear_categoria()`)
+necesita crear también la carpeta correspondiente en `tmp_vault`, o el sync la va a purgar en
+la primera operación que dispare `sincronizar_vault_si_hace_falta()`.
+
+**Confirmado de paso**: la validación "valor debe ser 0.5 o 1.0" de hábitos vive en el
+`field_validator` de Pydantic (`HabitoRegistroUpsert`/`HabitoRegistroBatchItem`), no solo en
+`crud.py` — un valor inválido corta en la capa HTTP con 422, nunca llega a disparar el
+`ValueError` de `habitos_registros_upsert()`. Cierra la duda que había quedado abierta en la
+tanda 2 (Hábitos).
+
+**Verificado**: suite completa, 210 backend + 136 frontend = 346 tests, todo en verde.
+
+Impacto: `project/tests/test_agenda_routes.py`, `project/tests/test_habitos_routes.py`,
+`project/tests/test_boveda_routes.py` (todos nuevos). Sin cambios de código de producción.
+
 ## IMPLEMENTADO: tanda 4 del plan de testing — módulo Jarvis (privacy, entities, worker) (2026-09-23)
 
 Tanda 4 del plan de testing aprobado: cobertura de tres piezas críticas de Jarvis. Ejecuta **106 tests backend (pytest)** — 100% PASS ✓. Suite completa (4 tandas): 185/185 PASS.

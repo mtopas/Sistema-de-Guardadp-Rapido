@@ -15,7 +15,7 @@ import DeleteFinCategoriaModal from './DeleteFinCategoriaModal'
 
 function countMovsForCat(movAll, catName) {
   return movAll.filter(m => {
-    const n = m.categoria_nombre ?? m.cat ?? ''
+    const n = m.categoria_nombre ?? ''
     return n === catName && !isTransferencia(m)
   }).length
 }

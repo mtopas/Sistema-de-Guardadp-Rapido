@@ -15,12 +15,12 @@ function exportCSV(rows, type) {
   const lines = [
     header.join(','),
     ...rows.map(m => [
-      m.date ?? m.fecha ?? '',
-      escape(m.desc ?? m.descripcion ?? ''),
-      escape(m.cat  ?? m.categoria_nombre ?? ''),
-      Math.abs(m.amount ?? m.monto ?? 0),
+      m.fecha ?? '',
+      escape(m.descripcion ?? ''),
+      escape(m.categoria_nombre ?? ''),
+      Math.abs(m.monto ?? 0),
       m.moneda ?? 'ARS',
-      escape(m.method ?? m.cuenta_nombre ?? ''),
+      escape(m.cuenta_nombre ?? ''),
       m.cuotas ?? '',
       escape(m.nota ?? ''),
     ].join(',')),
@@ -110,44 +110,44 @@ export default function MovimientosTableModal({ open, onClose, type = 'expense' 
   }, [open])
 
   const filtered = useMemo(() => {
-    return finMovimientos.filter(m => (m.type ?? m.tipo) === type)
+    return finMovimientos.filter(m => m.tipo === type)
   }, [finMovimientos, type])
 
   const categories = useMemo(() => {
-    const set = new Set(filtered.map(m => m.cat ?? m.categoria_nombre ?? ''))
+    const set = new Set(filtered.map(m => m.categoria_nombre ?? ''))
     return [...set].filter(Boolean).sort()
   }, [filtered])
 
   const rows = useMemo(() => {
     let base = filterCat === '__all__'
       ? [...filtered]
-      : filtered.filter(m => (m.cat ?? m.categoria_nombre ?? '') === filterCat)
+      : filtered.filter(m => (m.categoria_nombre ?? '') === filterCat)
 
     if (!sortCol) {
       // default: fecha desc
       base.sort((a, b) => {
-        const da = new Date(a.fecha ?? a.date ?? 0)
-        const db = new Date(b.fecha ?? b.date ?? 0)
+        const da = new Date(a.fecha ?? 0)
+        const db = new Date(b.fecha ?? 0)
         return db - da
       })
     } else {
       base.sort((a, b) => {
         let va, vb
         if (sortCol === 'fecha') {
-          va = new Date(a.fecha ?? a.date ?? 0)
-          vb = new Date(b.fecha ?? b.date ?? 0)
+          va = new Date(a.fecha ?? 0)
+          vb = new Date(b.fecha ?? 0)
         } else if (sortCol === 'monto') {
-          va = Math.abs(a.amount ?? a.monto ?? 0)
-          vb = Math.abs(b.amount ?? b.monto ?? 0)
+          va = Math.abs(a.monto ?? 0)
+          vb = Math.abs(b.monto ?? 0)
         } else if (sortCol === 'desc') {
-          va = (a.desc ?? a.descripcion ?? '').toLowerCase()
-          vb = (b.desc ?? b.descripcion ?? '').toLowerCase()
+          va = (a.descripcion ?? '').toLowerCase()
+          vb = (b.descripcion ?? '').toLowerCase()
         } else if (sortCol === 'cat') {
-          va = (a.cat ?? a.categoria_nombre ?? '').toLowerCase()
-          vb = (b.cat ?? b.categoria_nombre ?? '').toLowerCase()
+          va = (a.categoria_nombre ?? '').toLowerCase()
+          vb = (b.categoria_nombre ?? '').toLowerCase()
         } else if (sortCol === 'method') {
-          va = (a.method ?? a.cuenta_nombre ?? '').toLowerCase()
-          vb = (b.method ?? b.cuenta_nombre ?? '').toLowerCase()
+          va = (a.cuenta_nombre ?? '').toLowerCase()
+          vb = (b.cuenta_nombre ?? '').toLowerCase()
         } else {
           va = 0; vb = 0
         }
@@ -193,16 +193,16 @@ export default function MovimientosTableModal({ open, onClose, type = 'expense' 
   const startEdit = (m) => {
     setEditingId(m.id)
     setEditForm({
-      descripcion: m.desc ?? m.descripcion ?? '',
-      monto:       String(Math.abs(m.amount ?? m.monto ?? 0)),
-      fecha:       m.date ?? m.fecha ?? '',
+      descripcion: m.descripcion ?? '',
+      monto:       String(Math.abs(m.monto ?? 0)),
+      fecha:       m.fecha ?? '',
     })
   }
 
   const commitEdit = async (m) => {
     const monto = parseFloat(editForm.monto.replace(',', '.'))
     if (!isNaN(monto) && monto > 0) {
-      const signed = (m.type ?? m.tipo) === 'income' ? monto : -monto
+      const signed = m.tipo === 'income' ? monto : -monto
       await updateMov(m.id, { monto: signed, descripcion: editForm.descripcion, fecha: editForm.fecha })
     }
     setEditingId(null)
@@ -323,12 +323,12 @@ export default function MovimientosTableModal({ open, onClose, type = 'expense' 
             </thead>
             <tbody>
               {rows.map((m) => {
-                const monto  = m.amount ?? m.monto ?? 0
-                const desc   = m.desc ?? m.descripcion ?? ''
-                const cat    = m.cat ?? m.categoria_nombre ?? '—'
-                const method = m.method ?? m.cuenta_nombre ?? '—'
-                const icon   = m.icon ?? m.icono ?? (isIncome ? '💰' : '💸')
-                const date   = m.date ?? (m.fecha ? new Date(m.fecha).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' }) : '')
+                const monto  = m.monto ?? 0
+                const desc   = m.descripcion ?? ''
+                const cat    = m.categoria_nombre ?? '—'
+                const method = m.cuenta_nombre ?? '—'
+                const icon   = m.icono ?? (isIncome ? '💰' : '💸')
+                const date   = m.fecha ? new Date(m.fecha).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' }) : ''
                 const isEditing = editingId === m.id
 
                 if (isEditing) {

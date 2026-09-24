@@ -302,15 +302,15 @@ export default function FireRightPanel() {
     }
 
     const tasaPromedio = finMovAll
-      .filter(m => (m.type ?? m.tipo) === 'income' && (m.cat ?? m.categoria_nombre ?? '') !== 'Transferencia')
+      .filter(m => m.tipo === 'income' && (m.categoria_nombre ?? '') !== 'Transferencia')
       .length > 0
       ? (() => {
           const ingresos = finMovAll
-            .filter(m => (m.type ?? m.tipo) === 'income')
-            .reduce((s, m) => s + Math.abs(m.amount ?? m.monto ?? 0), 0)
+            .filter(m => m.tipo === 'income')
+            .reduce((s, m) => s + Math.abs(m.monto ?? 0), 0)
           const gastos = finMovAll
-            .filter(m => (m.type ?? m.tipo) === 'expense')
-            .reduce((s, m) => s + Math.abs(m.amount ?? m.monto ?? 0), 0)
+            .filter(m => m.tipo === 'expense')
+            .reduce((s, m) => s + Math.abs(m.monto ?? 0), 0)
           return ingresos > 0 ? Math.round(((ingresos - gastos) / ingresos) * 100) : 0
         })()
       : 0

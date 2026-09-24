@@ -113,11 +113,11 @@ export default function FinanzasRightPanel() {
 
   // ── KPIs ──────────────────────────────────────────────────────────────────
   const kpis = useMemo(() => {
-    const expenses = finMovimientos.filter(m => (m.type ?? m.tipo) === 'expense' && !isTransferencia(m))
-    const incomes  = finMovimientos.filter(m => (m.type ?? m.tipo) === 'income'  && !isTransferencia(m))
+    const expenses = finMovimientos.filter(m => m.tipo === 'expense' && !isTransferencia(m))
+    const incomes  = finMovimientos.filter(m => m.tipo === 'income'  && !isTransferencia(m))
 
-    const totalGastos   = expenses.reduce((a, m) => a + Math.abs(m.amount ?? m.monto ?? 0), 0)
-    const totalIngresos = incomes.reduce((a, m)  => a + Math.abs(m.amount ?? m.monto ?? 0), 0)
+    const totalGastos   = expenses.reduce((a, m) => a + Math.abs(m.monto ?? 0), 0)
+    const totalIngresos = incomes.reduce((a, m)  => a + Math.abs(m.monto ?? 0), 0)
 
     const [year, month] = selectedMes.split('-').map(Number)
     const daysInMonth   = new Date(year, month, 0).getDate()
@@ -129,8 +129,8 @@ export default function FinanzasRightPanel() {
 
     const catMap = {}
     expenses.forEach(m => {
-      const cat = m.cat ?? m.categoria_nombre ?? 'Otros'
-      catMap[cat] = (catMap[cat] ?? 0) + Math.abs(m.amount ?? m.monto ?? 0)
+      const cat = m.categoria_nombre ?? 'Otros'
+      catMap[cat] = (catMap[cat] ?? 0) + Math.abs(m.monto ?? 0)
     })
     const colorByName = buildFinCategoriaColorByName(finCategorias)
     const topEntry  = Object.entries(catMap).sort((a, b) => b[1] - a[1])[0]

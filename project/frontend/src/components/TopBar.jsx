@@ -85,7 +85,7 @@ export default function TopBar({ searchQuery = '', onSearchChange, searchInputRe
     const q = searchQuery.trim().toLowerCase()
     const timer = setTimeout(() => {
       const movs = finMovAll
-        .filter(m => (m.descripcion ?? m.desc ?? '').toLowerCase().includes(q) || (m.categoria_nombre ?? m.cat ?? '').toLowerCase().includes(q))
+        .filter(m => (m.descripcion ?? '').toLowerCase().includes(q) || (m.categoria_nombre ?? '').toLowerCase().includes(q))
         .slice(0, 8)
       const notas = (finNotas || [])
         .filter(n => n.contenido.toLowerCase().includes(q))
@@ -269,15 +269,15 @@ export default function TopBar({ searchQuery = '', onSearchChange, searchInputRe
                     onMouseLeave={ev => ev.currentTarget.style.background = 'transparent'}
                     onClick={() => { setFinResults(null); onSearchChange('') }}
                   >
-                    <span style={{ fontSize: 13 }}>{(m.tipo ?? m.type) === 'income' ? '💰' : '💸'}</span>
+                    <span style={{ fontSize: 13 }}>{m.tipo === 'income' ? '💰' : '💸'}</span>
                     <div className="flex-1 min-w-0">
-                      <div className="text-[12.5px] font-medium truncate">{m.descripcion ?? m.desc}</div>
+                      <div className="text-[12.5px] font-medium truncate">{m.descripcion}</div>
                       <div className="text-[10.5px] mono" style={{ color: 'var(--subtext)' }}>
-                        {m.fecha?.slice(0,10)} · {m.categoria_nombre ?? m.cat}
+                        {m.fecha?.slice(0,10)} · {m.categoria_nombre}
                       </div>
                     </div>
-                    <span className="mono tnum text-[11.5px] shrink-0" style={{ color: (m.tipo ?? m.type) === 'income' ? 'var(--income)' : 'var(--expense)' }}>
-                      {Math.abs(m.monto ?? m.amount ?? 0).toLocaleString('es-AR', { minimumFractionDigits: 0 })}
+                    <span className="mono tnum text-[11.5px] shrink-0" style={{ color: m.tipo === 'income' ? 'var(--income)' : 'var(--expense)' }}>
+                      {Math.abs(m.monto ?? 0).toLocaleString('es-AR', { minimumFractionDigits: 0 })}
                     </span>
                   </button>
                 ))}

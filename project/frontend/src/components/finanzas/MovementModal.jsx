@@ -30,12 +30,6 @@ function nowLocalIso() {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-function formatShortDate(iso) {
-  if (!iso) return ''
-  const d = new Date(iso)
-  return d.toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })
-}
-
 export default function MovementModal() {
   const open          = useStore(s => s.movementOpen)
   const close         = useStore(s => s.closeMovement)
@@ -160,11 +154,6 @@ export default function MovementModal() {
       cuotas: cuotasNum > 1 ? cuotasNum : null,
       nota: nota.trim() || null,
       audit: audit || undefined,
-      // Legacy mock shape
-      type: tipo, amount: signed, currency: moneda, datetime: fecha,
-      date: formatShortDate(fecha), desc: descripcion.trim(),
-      icon: DEFAULT_ICON[tipo], method: cuentaSel.name,
-      cuentaId: cuentaSel.id, cat: categoria,
     }
 
     try {

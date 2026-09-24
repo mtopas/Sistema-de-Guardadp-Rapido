@@ -1,52 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeMovimiento, pickDefaultCategoria } from './finanzas.js'
+import { pickDefaultCategoria } from './finanzas.js'
 import {
   isFinCategoriaObjetivo,
   isFinCategoriaReservada,
   categoriaAplicaATipo,
   filterCategoriasPorTipo,
 } from './finCategorias.js'
-
-describe('normalizeMovimiento', () => {
-  it('normaliza el esquema viejo (mock: type/amount/date/desc/cat/method/icon)', () => {
-    const oldSchema = {
-      type: 'income', amount: 100, date: '2023-04-01', desc: 'Salary',
-      cat: 'Salary', method: 'Bank Transfer', icon: 'salary-icon',
-    }
-    expect(normalizeMovimiento(oldSchema)).toEqual({
-      id: undefined, tipo: 'income', monto: 100, fecha: '2023-04-01',
-      descripcion: 'Salary', categoria_nombre: 'Salary', cuenta_nombre: 'Bank Transfer',
-      moneda: 'ARS', cuotas: null, nota: null, icono: 'salary-icon',
-    })
-  })
-
-  it('normaliza el esquema nuevo (API real: tipo/monto/fecha/descripcion/categoria_nombre)', () => {
-    const newSchema = {
-      tipo: 'income', monto: 100, fecha: '2023-04-01', descripcion: 'Salary',
-      categoria_nombre: 'Salary', cuenta_nombre: 'Bank Transfer', icono: 'salary-icon',
-    }
-    expect(normalizeMovimiento(newSchema)).toEqual({
-      id: undefined, tipo: 'income', monto: 100, fecha: '2023-04-01',
-      descripcion: 'Salary', categoria_nombre: 'Salary', cuenta_nombre: 'Bank Transfer',
-      moneda: 'ARS', cuotas: null, nota: null, icono: 'salary-icon',
-    })
-  })
-
-  it('si conviven ambos esquemas para el mismo campo, gana el campo viejo (orden real del ?? en el código: m.type antes que m.tipo)', () => {
-    const mixedSchema = { type: 'income', tipo: 'expense', monto: 100, fecha: '2023-04-01' }
-    // OJO: "type" (viejo) está presente => gana sobre "tipo" (nuevo), aunque digan cosas
-    // distintas. No es "el esquema nuevo gana", es literalmente el orden del `??` en la fuente.
-    expect(normalizeMovimiento(mixedSchema).tipo).toBe('income')
-  })
-
-  it('usa los defaults documentados cuando no viene ningún campo', () => {
-    expect(normalizeMovimiento({})).toEqual({
-      id: undefined, tipo: 'expense', monto: 0, fecha: '', descripcion: '',
-      categoria_nombre: '', cuenta_nombre: '', moneda: 'ARS', cuotas: null,
-      nota: null, icono: '',
-    })
-  })
-})
 
 describe('isFinCategoriaObjetivo', () => {
   it('true para un objetivo_id válido, incluso 0 (id válido, aunque sea falsy)', () => {

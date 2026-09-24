@@ -22,16 +22,16 @@ export default function CuotasCard() {
       .filter(m => {
         const cuotas = m.cuotas ?? 0
         if (cuotas <= 1) return false
-        const startRaw = m.fecha ?? m.datetime ?? new Date().toISOString()
+        const startRaw = m.fecha ?? new Date().toISOString()
         const endDate  = addMonths(startRaw, cuotas - 1)
         return !endDate || endDate >= now
       })
       .map(m => {
         const cuotas    = m.cuotas
-        const startRaw  = m.fecha ?? m.datetime ?? new Date().toISOString()
+        const startRaw  = m.fecha ?? new Date().toISOString()
         const startDate = new Date(startRaw)
         const endDate   = addMonths(startRaw, cuotas - 1)
-        const montoTotal = Math.abs(m.amount ?? m.monto ?? 0)
+        const montoTotal = Math.abs(m.monto ?? 0)
         const montoCuota = cuotas > 0 ? montoTotal / cuotas : montoTotal
 
         const fmt = d => d && !isNaN(d.getTime())
@@ -40,7 +40,7 @@ export default function CuotasCard() {
 
         return {
           id: m.id,
-          desc: m.desc ?? m.descripcion ?? '',
+          desc: m.descripcion ?? '',
           start: fmt(startDate),
           end: fmt(endDate),
           montoCuota,

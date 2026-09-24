@@ -223,14 +223,9 @@ export const useStore = create((set, get) => ({
       })
       if (!res.ok) throw new Error('not ok')
       const data = await res.json()
-      const row = {
-        ...data,
-        desc: data.descripcion ?? '',
-        cat: data.categoria_nombre ?? '',
-      }
       set(state => ({
-        finMovimientos:    [row, ...state.finMovimientos],
-        finMovimientosAll: [row, ...state.finMovimientosAll],
+        finMovimientos:    [data, ...state.finMovimientos],
+        finMovimientosAll: [data, ...state.finMovimientosAll],
       }))
       get().fetchFinEmergencia()
       if (DEBUG) console.log('addFinMovimiento (API):', data)

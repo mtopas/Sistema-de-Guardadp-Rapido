@@ -7,32 +7,24 @@ import { fmtARS, isTransferencia, filtrarMovimientos } from '../../data/finanzas
 import { buildFinCategoriaColorByName, getFinCategoriaColor } from '../../data/finCategoriaColors'
 import { API_URL } from '../../config'
 
-// Normalize field access across mock (type/amount/date/cat/desc/method) and API schemas
-function getVal(mov, field) {
+export function getVal(mov, field) {
   switch (field) {
-    case 'tipo':   return mov.type   ?? mov.tipo             ?? 'expense'
-    case 'monto':  return mov.amount ?? mov.monto            ?? 0
-    case 'fecha':  return mov.date   ?? mov.fecha            ?? ''
-    case 'cat':    return mov.cat    ?? mov.categoria_nombre ?? ''
-    case 'desc':   return mov.desc   ?? mov.descripcion      ?? ''
-    case 'method': return mov.method ?? mov.metodo ?? mov.cuenta_nombre ?? ''
+    case 'tipo':   return mov.tipo ?? 'expense'
+    case 'monto':  return mov.monto ?? 0
+    case 'fecha':  return mov.fecha ?? ''
+    case 'cat':    return mov.categoria_nombre ?? ''
+    case 'desc':   return mov.descripcion ?? ''
+    case 'method': return mov.cuenta_nombre ?? ''
     case 'moneda': return mov.moneda ?? 'ARS'
     case 'cuotas': return mov.cuotas ?? ''
     default:       return ''
   }
 }
 
-// Build the patch key using whatever key the movement already uses
-function patchKey(mov, field) {
-  switch (field) {
-    case 'tipo':   return mov.type   !== undefined ? 'type'   : 'tipo'
-    case 'monto':  return mov.amount !== undefined ? 'amount' : 'monto'
-    case 'fecha':  return mov.date   !== undefined ? 'date'   : 'fecha'
-    case 'cat':    return mov.cat    !== undefined ? 'cat'    : 'categoria_nombre'
-    case 'desc':   return mov.desc   !== undefined ? 'desc'   : 'descripcion'
-    case 'method': return mov.method !== undefined ? 'method' : mov.metodo !== undefined ? 'metodo' : 'cuenta_nombre'
-    default:       return field
-  }
+export const PATCH_KEY = {
+  tipo: 'tipo', monto: 'monto', fecha: 'fecha',
+  cat: 'categoria_nombre', desc: 'descripcion', method: 'cuenta_nombre',
+  moneda: 'moneda', cuotas: 'cuotas',
 }
 
 function fmtFecha(raw) {
@@ -139,7 +131,7 @@ export default function DatosTab() {
       .slice()
       .sort((a, b) => {
         const ts = v => { const d = new Date(v ?? 0); return isNaN(d) ? 0 : d.getTime() }
-        return ts(b.date ?? b.fecha) - ts(a.date ?? a.fecha)
+        return ts(b.fecha) - ts(a.fecha)
       }),
     [movAll, filtros]
   )
@@ -168,7 +160,7 @@ export default function DatosTab() {
     // Debounce rapid PATCH calls by 300ms
     clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
-      updateMov(mov.id, { [patchKey(mov, field)]: value })
+      updateMov(mov.id, { [PATCH_KEY[field]]: value })
     }, 300)
     setEditing(null)
   }, [editing, editVal, updateMov])
@@ -176,7 +168,7 @@ export default function DatosTab() {
   const commitDirect = useCallback((mov, field, value) => {
     clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
-      updateMov(mov.id, { [patchKey(mov, field)]: value })
+      updateMov(mov.id, { [PATCH_KEY[field]]: value })
     }, 300)
   }, [updateMov])
 

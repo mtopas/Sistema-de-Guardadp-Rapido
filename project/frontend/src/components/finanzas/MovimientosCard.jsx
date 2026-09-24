@@ -18,8 +18,8 @@ export default function MovimientosListCard({ type = 'expense', filterCat = null
   }, [finMovimientos, type, finCategorias])
 
   const items = useMemo(() => {
-    let base = finMovimientos.filter(m => (m.type ?? m.tipo) === type)
-    if (filterCat) base = base.filter(m => (m.cat ?? m.categoria_nombre ?? '') === filterCat)
+    let base = finMovimientos.filter(m => m.tipo === type)
+    if (filterCat) base = base.filter(m => (m.categoria_nombre ?? '') === filterCat)
     return base.slice(0, filterCat ? 8 : 4)
   }, [finMovimientos, type, filterCat])
 
@@ -45,12 +45,12 @@ export default function MovimientosListCard({ type = 'expense', filterCat = null
             </div>
           )}
           {items.map((m, i) => {
-            const monto  = m.amount ?? m.monto ?? 0
-            const desc   = m.desc ?? m.descripcion ?? ''
-            const cat    = m.cat ?? m.categoria_nombre ?? ''
-            const method = m.method ?? m.cuenta_nombre ?? ''
-            const date   = m.date ?? (m.fecha ? new Date(m.fecha).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' }) : '')
-            const icon   = m.icon ?? m.icono ?? (type === 'income' ? '💰' : '💸')
+            const monto  = m.monto ?? 0
+            const desc   = m.descripcion ?? ''
+            const cat    = m.categoria_nombre ?? ''
+            const method = m.cuenta_nombre ?? ''
+            const date   = m.fecha ? new Date(m.fecha).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' }) : ''
+            const icon   = m.icono ?? (type === 'income' ? '💰' : '💸')
             const isIncome = type === 'income'
             const catColor = catColors[cat] ?? null
 

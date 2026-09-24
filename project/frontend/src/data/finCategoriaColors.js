@@ -52,10 +52,7 @@ export function getFinCategoriaColor(colorByName, catName, fallbackIndex = 0) {
 export function buildCategories(movimientos, type, finCategorias = null) {
   const colorByName = buildFinCategoriaColorByName(finCategorias ?? [])
 
-  const filtered = movimientos.filter(m => {
-    const t = m.type ?? m.tipo
-    return t === type && !isTransferencia(m)
-  })
+  const filtered = movimientos.filter(m => m.tipo === type && !isTransferencia(m))
 
   if (filtered.length === 0) {
     return { cats: [], total: 0, colorByName }
@@ -63,8 +60,8 @@ export function buildCategories(movimientos, type, finCategorias = null) {
 
   const map = {}
   filtered.forEach(m => {
-    const cat = m.cat ?? m.categoria_nombre ?? 'Otros'
-    const amt = Math.abs(m.amount ?? m.monto ?? 0)
+    const cat = m.categoria_nombre ?? 'Otros'
+    const amt = Math.abs(m.monto ?? 0)
     if (!map[cat]) map[cat] = { name: cat, amount: 0 }
     map[cat].amount += amt
   })

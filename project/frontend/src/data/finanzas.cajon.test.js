@@ -3,41 +3,33 @@ import { isTransferencia, movimientoAsignadoACajon, contribucionCategoria, contr
 
 describe('Finanzas', () => {
   it('should correctly identify transferencia movements', () => {
-    expect(isTransferencia({ cat: 'transferencia' })).toBe(true);
     expect(isTransferencia({ categoria_nombre: 'Transferencia' })).toBe(true);
-    expect(isTransferencia({ cat: '  transferencia  ' })).toBe(true);
     expect(isTransferencia({ categoria_nombre: '  transferencia  ' })).toBe(true);
-    expect(isTransferencia({ cat: 'otra categoria' })).toBe(false);
     expect(isTransferencia({ categoria_nombre: 'otra categoria' })).toBe(false);
   });
 
   it('should correctly match movements to a drawer by category or description', () => {
     expect(movimientoAsignadoACajon({ categoria_nombre: 'FIRE' }, 'FIRE')).toBe(true);
-    expect(movimientoAsignadoACajon({ cat: 'FIRE' }, 'FIRE')).toBe(true);
     expect(movimientoAsignadoACajon({ categoria_nombre: 'FIRE' }, 'fire')).toBe(true);
-    expect(movimientoAsignadoACajon({ cat: 'FIRE' }, 'fire')).toBe(true);
     expect(movimientoAsignadoACajon({ categoria_nombre: 'FIRE' }, 'otra categoria')).toBe(false);
-    expect(movimientoAsignadoACajon({ cat: 'FIRE' }, 'otra categoria')).toBe(false);
     expect(movimientoAsignadoACajon({ categoria_nombre: 'otra categoria' }, 'FIRE')).toBe(false);
-    expect(movimientoAsignadoACajon({ cat: 'otra categoria' }, 'FIRE')).toBe(false);
     // El matcher es genérico: matchea CUALQUIER nombre de cajón, no solo "FIRE".
     expect(movimientoAsignadoACajon({ categoria_nombre: 'otra categoria' }, 'otra categoria')).toBe(true);
-    expect(movimientoAsignadoACajon({ cat: 'otra categoria' }, 'otra categoria')).toBe(true);
     expect(movimientoAsignadoACajon({ categoria_nombre: 'otra categoria' }, 'otro cajon distinto')).toBe(false);
   });
 
   it('should correctly calculate contribution by category', () => {
     expect(contribucionCategoria({ tipo: 'income', monto: 100 })).toBe(-100);
     expect(contribucionCategoria({ tipo: 'expense', monto: 100 })).toBe(100);
-    expect(contribucionCategoria({ tipo: 'income', amount: -100 })).toBe(-100);
-    expect(contribucionCategoria({ tipo: 'expense', amount: -100 })).toBe(100);
+    expect(contribucionCategoria({ tipo: 'income', monto: -100 })).toBe(-100);
+    expect(contribucionCategoria({ tipo: 'expense', monto: -100 })).toBe(100);
   });
 
   it('should correctly calculate contribution for FIRE category', () => {
     expect(contribucionFire({ categoria_nombre: 'FIRE', tipo: 'income', monto: 100 })).toBe(-100);
     expect(contribucionFire({ categoria_nombre: 'FIRE', tipo: 'expense', monto: 100 })).toBe(100);
-    expect(contribucionFire({ categoria_nombre: 'FIRE', tipo: 'income', amount: -100 })).toBe(-100);
-    expect(contribucionFire({ categoria_nombre: 'FIRE', tipo: 'expense', amount: -100 })).toBe(100);
+    expect(contribucionFire({ categoria_nombre: 'FIRE', tipo: 'income', monto: -100 })).toBe(-100);
+    expect(contribucionFire({ categoria_nombre: 'FIRE', tipo: 'expense', monto: -100 })).toBe(100);
     expect(contribucionFire({ categoria_nombre: 'otra categoria', tipo: 'income', monto: 100 })).toBe(0);
     expect(contribucionFire({ categoria_nombre: 'otra categoria', tipo: 'expense', monto: 100 })).toBe(0);
     // Descripción "FIRE" con categoría distinta también cuenta (mismo matcher que categoría).
@@ -73,10 +65,5 @@ describe('Finanzas', () => {
     expect(saldoFondoEmergencia([
       { categoria_nombre: 'otra categoria', descripcion: 'fondo de emergencia', tipo: 'expense', monto: 300 },
     ])).toBe(300);
-
-    // Formato legado (cat/amount/type) también funciona vía los normalizadores existentes.
-    expect(saldoFondoEmergencia([
-      { cat: NOMBRE_FONDO_EMERGENCIA, type: 'expense', amount: 150 },
-    ])).toBe(150);
   });
 });

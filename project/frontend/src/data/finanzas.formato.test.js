@@ -147,12 +147,12 @@ describe('Contribuciones y fechas', () => {
   describe('contribucionFireUSD', () => {
     it('should return 0 for non-FIRE movements', () => {
       expect(contribucionFireUSD({ categoria_nombre: 'otra', tipo: 'expense', monto: 100 }, 1000)).toBe(0);
-      expect(contribucionFireUSD({ cat: 'otra', tipo: 'income', amount: 100 }, 1000)).toBe(0);
+      expect(contribucionFireUSD({ categoria_nombre: 'otra', tipo: 'income', monto: 100 }, 1000)).toBe(0);
     });
 
     it('should handle FIRE movement in USD (no division)', () => {
       expect(contribucionFireUSD({ categoria_nombre: 'FIRE', tipo: 'expense', monto: 100, moneda: 'USD' }, 1000)).toBe(100);
-      expect(contribucionFireUSD({ categoria_nombre: 'FIRE', tipo: 'income', amount: 100, moneda: 'USD' }, 1000)).toBe(-100);
+      expect(contribucionFireUSD({ categoria_nombre: 'FIRE', tipo: 'income', monto: 100, moneda: 'USD' }, 1000)).toBe(-100);
     });
 
     it('should handle FIRE movement in ARS (divide by dolar)', () => {
@@ -174,7 +174,7 @@ describe('Contribuciones y fechas', () => {
       // Monto negativo en expense = suma positiva
       expect(contribucionFireUSD({ categoria_nombre: 'FIRE', tipo: 'expense', monto: -100, moneda: 'USD' }, 1000)).toBe(100);
       // Monto negativo en income = suma negativa
-      expect(contribucionFireUSD({ categoria_nombre: 'FIRE', tipo: 'income', amount: -100, moneda: 'USD' }, 1000)).toBe(-100);
+      expect(contribucionFireUSD({ categoria_nombre: 'FIRE', tipo: 'income', monto: -100, moneda: 'USD' }, 1000)).toBe(-100);
     });
 
     it('should default moneda to ARS if not specified', () => {

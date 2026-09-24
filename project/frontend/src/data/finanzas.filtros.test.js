@@ -9,11 +9,6 @@ const movs = [
   { id: 5, tipo: 'expense', monto: 300,  fecha: '2026-03-15', categoria_nombre: 'Comida', cuenta_nombre: 'Banco' },
 ]
 
-// Mismos movimientos, esquema viejo (mock: type/amount/date/cat/method)
-const movsMock = movs.map(m => ({
-  id: m.id, type: m.tipo, amount: m.monto, date: m.fecha, cat: m.categoria_nombre, method: m.cuenta_nombre,
-}))
-
 describe('filtrarMovimientos', () => {
   it('sin filtros devuelve todo tal cual', () => {
     expect(filtrarMovimientos(movs, {})).toHaveLength(5)
@@ -52,11 +47,6 @@ describe('filtrarMovimientos', () => {
   it('combina varios filtros a la vez (AND)', () => {
     const r = filtrarMovimientos(movs, { categoria: 'Comida', cuenta: 'Banco' })
     expect(r.map(m => m.id)).toEqual([5])
-  })
-
-  it('funciona igual con el esquema viejo (mock: type/amount/date/cat/method)', () => {
-    const r = filtrarMovimientos(movsMock, { categoria: 'comida', tipo: 'expense' })
-    expect(r.map(m => m.id)).toEqual([1, 5])
   })
 
   it('categoría/cuenta que no matchean nada da array vacío', () => {

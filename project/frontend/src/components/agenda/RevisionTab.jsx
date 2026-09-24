@@ -162,8 +162,8 @@ export default function RevisionTab() {
     const fecha = m.fecha?.slice(0, 10)
     return fecha && fecha >= mondayISO && fecha <= sundayISO
   })
-  const ingresosWeek = movsSemana.filter(m => (m.tipo || m.type) === 'income' || (m.tipo || m.type) === 'ingreso').reduce((s, m) => s + Math.abs(m.monto ?? m.amount ?? 0), 0)
-  const gastosWeek   = movsSemana.filter(m => (m.tipo || m.type) === 'expense' || (m.tipo || m.type) === 'gasto').reduce((s, m) => s + Math.abs(m.monto ?? m.amount ?? 0), 0)
+  const ingresosWeek = movsSemana.filter(m => m.tipo === 'income').reduce((s, m) => s + Math.abs(m.monto ?? 0), 0)
+  const gastosWeek   = movsSemana.filter(m => m.tipo === 'expense').reduce((s, m) => s + Math.abs(m.monto ?? 0), 0)
 
   const sparkData = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(monday)

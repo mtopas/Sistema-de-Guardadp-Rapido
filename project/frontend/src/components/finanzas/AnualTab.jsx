@@ -24,13 +24,13 @@ export function buildMonthly(movimientos, year) {
   }))
   movimientos.forEach(m => {
     if (isTransferencia(m)) return
-    const tipo  = m.type  ?? m.tipo
+    const tipo  = m.tipo
     if (movimientoAnio(m) !== String(year)) return
     if (tipo !== 'income' && tipo !== 'expense') return
-    const raw   = m.date ?? m.fecha ?? ''
+    const raw   = m.fecha ?? ''
     const idx   = parseInt(String(raw).slice(5, 7), 10) - 1
     if (idx < 0 || idx > 11) return
-    const monto = Math.abs(m.amount ?? m.monto ?? 0)
+    const monto = Math.abs(m.monto ?? 0)
     if (tipo === 'income') months[idx].ingresos += monto
     else                   months[idx].gastos   += monto
   })
@@ -351,10 +351,10 @@ function CategoryTable({ movimientos, year, lang, finCategorias }) {
     const map = {}
     movimientos.forEach(m => {
       if (isTransferencia(m)) return
-      if ((m.type ?? m.tipo) !== 'expense') return
+      if (m.tipo !== 'expense') return
       if (movimientoAnio(m) !== String(year)) return
-      const cat   = m.cat ?? m.categoria_nombre ?? (lang === 'en' ? 'Other' : 'Otro')
-      const monto = Math.abs(m.amount ?? m.monto ?? 0)
+      const cat   = m.categoria_nombre ?? (lang === 'en' ? 'Other' : 'Otro')
+      const monto = Math.abs(m.monto ?? 0)
       map[cat] = (map[cat] ?? 0) + monto
     })
     const total = Object.values(map).reduce((a, b) => a + b, 0)

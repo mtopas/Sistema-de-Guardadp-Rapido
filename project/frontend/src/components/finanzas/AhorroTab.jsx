@@ -1451,7 +1451,7 @@ export default function AhorroTab() {
 
   const legacyAhorroCount = useMemo(() => (
     finMovimientosAll.filter(m =>
-      (m.cat ?? m.categoria_nombre ?? '').trim().toLowerCase() === 'ahorro'
+      (m.categoria_nombre ?? '').trim().toLowerCase() === 'ahorro'
     ).length
   ), [finMovimientosAll])
 

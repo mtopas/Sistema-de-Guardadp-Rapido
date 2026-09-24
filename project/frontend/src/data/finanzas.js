@@ -49,20 +49,20 @@ export function fmtDolarQuote(n) {
 
 const INTERNAL = new Set(['transferencia'])
 export const isTransferencia = (mov) => {
-  const cat = (mov.cat ?? mov.categoria_nombre ?? '').toLowerCase().trim()
+  const cat = (mov.categoria_nombre ?? '').toLowerCase().trim()
   return INTERNAL.has(cat)
 }
 
 export const CATEGORIA_FIRE = 'FIRE'
 
-/** Nombre de categoría del movimiento (normalizado). API usa categoria_nombre; mock legacy cat. */
+/** Nombre de categoría del movimiento (normalizado). */
 export function nombreCategoriaMovimiento(mov) {
-  return String(mov?.categoria_nombre || mov?.cat || '').trim().toLowerCase()
+  return String(mov?.categoria_nombre || '').trim().toLowerCase()
 }
 
-/** Descripción del movimiento (normalizada). API usa descripcion; mock legacy desc. */
+/** Descripción del movimiento (normalizada). */
 export function descripcionMovimiento(mov) {
-  return String(mov?.descripcion || mov?.desc || '').trim().toLowerCase()
+  return String(mov?.descripcion || '').trim().toLowerCase()
 }
 
 /**
@@ -81,8 +81,8 @@ export function isCategoriaFire(mov) {
 
 /** Contribución firmada: gasto suma al cajón, ingreso resta (puede quedar negativo). */
 export function contribucionCategoria(mov) {
-  const monto = Math.abs(Number(mov?.amount ?? mov?.monto ?? 0))
-  const tipo = mov?.type ?? mov?.tipo
+  const monto = Math.abs(Number(mov?.monto ?? 0))
+  const tipo = mov?.tipo
   return tipo === 'income' ? -monto : monto
 }
 
@@ -95,8 +95,8 @@ export function contribucionFire(mov) {
 
 export function contribucionFireUSD(mov, dolar) {
   if (!isCategoriaFire(mov)) return 0
-  const monto = Math.abs(Number(mov?.amount ?? mov?.monto ?? 0))
-  const tipo  = mov?.type ?? mov?.tipo
+  const monto = Math.abs(Number(mov?.monto ?? 0))
+  const tipo  = mov?.tipo
   const signo = tipo === 'income' ? -1 : 1
   const enUSD = (mov?.moneda ?? 'ARS').toUpperCase() === 'USD'
     ? monto
@@ -191,7 +191,7 @@ export function ahorroFireResidual(mov, _objetivoNombres) {
 
 /** Mes calendario YYYY-MM sin bug de timezone en fechas ISO cortas. */
 export function mesMovimiento(mov) {
-  const raw = String(mov?.date ?? mov?.fecha ?? '')
+  const raw = String(mov?.fecha ?? '')
   const m = raw.match(/^(\d{4})-(\d{2})/)
   if (m) return `${m[1]}-${m[2]}`
   const d = new Date(raw)
@@ -201,7 +201,7 @@ export function mesMovimiento(mov) {
 
 /** Año calendario del movimiento (ISO o corto). */
 export function movimientoAnio(mov) {
-  const raw = mov?.date ?? mov?.fecha ?? ''
+  const raw = mov?.fecha ?? ''
   const match = String(raw).match(/^(\d{4})/)
   return match ? match[1] : null
 }
@@ -238,7 +238,7 @@ export function filtrarMovimientos(movs, filtros = {}) {
   return (movs || []).filter(m => {
     if (categoriaKey && nombreCategoriaMovimiento(m) !== categoriaKey) return false
     if (cuentaKey) {
-      const cuentaMov = String(m.method ?? m.metodo ?? m.cuenta_nombre ?? '').trim().toLowerCase()
+      const cuentaMov = String(m.cuenta_nombre ?? '').trim().toLowerCase()
       if (cuentaMov !== cuentaKey) return false
     }
     if (tipo) {
@@ -247,27 +247,12 @@ export function filtrarMovimientos(movs, filtros = {}) {
         if (!xfer) return false
       } else {
         if (xfer) return false
-        if ((m.type ?? m.tipo ?? 'expense') !== tipo) return false
+        if ((m.tipo ?? 'expense') !== tipo) return false
       }
     }
-    const fecha = String(m.date ?? m.fecha ?? '').slice(0, 10)
+    const fecha = String(m.fecha ?? '').slice(0, 10)
     if (desde && (!fecha || fecha < desde)) return false
     if (hasta && (!fecha || fecha > hasta)) return false
     return true
   })
 }
-
-/** Normalize a movimiento to consistent shape regardless of mock vs API schema. */
-export const normalizeMovimiento = (m) => ({
-  id:               m.id,
-  tipo:             m.type   ?? m.tipo   ?? 'expense',
-  monto:            m.amount ?? m.monto  ?? 0,
-  fecha:            m.date   ?? m.fecha  ?? '',
-  descripcion:      m.desc   ?? m.descripcion ?? '',
-  categoria_nombre: m.cat    ?? m.categoria_nombre ?? '',
-  cuenta_nombre:    m.method ?? m.cuenta_nombre ?? '',
-  moneda:           m.moneda ?? m.currency ?? 'ARS',
-  cuotas:           m.cuotas ?? null,
-  nota:             m.nota   ?? null,
-  icono:            m.icon   ?? m.icono  ?? '',
-})

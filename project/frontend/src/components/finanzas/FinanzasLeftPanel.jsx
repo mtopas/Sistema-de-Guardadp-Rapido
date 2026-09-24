@@ -78,14 +78,14 @@ export default function FinanzasLeftPanel() {
   // Derive ingresos and gastos from real movements (exclude internal transfers)
   const ingresosMes = useMemo(() => {
     return finMovimientos
-      .filter(m => (m.type ?? m.tipo) === 'income' && !isTransferencia(m))
-      .reduce((a, m) => a + Math.abs(m.amount ?? m.monto ?? 0), 0)
+      .filter(m => m.tipo === 'income' && !isTransferencia(m))
+      .reduce((a, m) => a + Math.abs(m.monto ?? 0), 0)
   }, [finMovimientos])
 
   const gastosMes = useMemo(() => {
     return finMovimientos
-      .filter(m => (m.type ?? m.tipo) === 'expense' && !isTransferencia(m))
-      .reduce((a, m) => a + Math.abs(m.amount ?? m.monto ?? 0), 0)
+      .filter(m => m.tipo === 'expense' && !isTransferencia(m))
+      .reduce((a, m) => a + Math.abs(m.monto ?? 0), 0)
   }, [finMovimientos])
 
   const tasaAhorro = ingresosMes > 0

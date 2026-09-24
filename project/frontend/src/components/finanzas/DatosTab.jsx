@@ -1,10 +1,11 @@
 import { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { Trash2, X } from 'lucide-react'
+import { Trash2, X, Copy } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
 import { fmtARS, isTransferencia, filtrarMovimientos } from '../../data/finanzas'
 import { buildFinCategoriaColorByName, getFinCategoriaColor } from '../../data/finCategoriaColors'
+import { API_URL } from '../../config'
 
 // Normalize field access across mock (type/amount/date/cat/desc/method) and API schemas
 function getVal(mov, field) {
@@ -112,6 +113,26 @@ export default function DatosTab() {
   const setFiltro = (campo, valor) => setFiltros(f => ({ ...f, [campo]: valor }))
   const limpiarFiltros = () => setFiltros({ categoria: '', cuenta: '', tipo: '', desde: '', hasta: '' })
   const hayFiltrosActivos = Object.values(filtros).some(Boolean)
+
+  // ── Duplicados (GET /fin/movimientos/duplicados) ───────────────────────────
+  const [duplicados, setDuplicados] = useState(null) // null = nunca buscado; [] = buscado, sin resultados
+  const [buscandoDuplicados, setBuscandoDuplicados] = useState(false)
+
+  const buscarDuplicados = useCallback(async () => {
+    setBuscandoDuplicados(true)
+    try {
+      const res = await fetch(`${API_URL}/fin/movimientos/duplicados`)
+      if (!res.ok) throw new Error('not ok')
+      const data = await res.json()
+      setDuplicados(Array.isArray(data) ? data : [])
+    } catch {
+      setDuplicados([])
+    } finally {
+      setBuscandoDuplicados(false)
+    }
+  }, [])
+
+  const cerrarDuplicados = () => setDuplicados(null)
 
   const rows = useMemo(() =>
     filtrarMovimientos(movAll, filtros)
@@ -393,10 +414,83 @@ export default function DatosTab() {
             <X size={11} /> {t(lang, 'datosFiltroLimpiar')}
           </button>
         )}
+        <button
+          type="button"
+          onClick={buscarDuplicados}
+          disabled={buscandoDuplicados}
+          className="flex items-center gap-1 text-[11px] px-2.5 py-[7px] rounded-lg border"
+          style={{ borderColor: 'var(--border)', color: 'var(--subtext)', opacity: buscandoDuplicados ? 0.6 : 1 }}
+        >
+          <Copy size={11} /> {buscandoDuplicados ? t(lang, 'datosDuplicadosBtnCargando') : t(lang, 'datosDuplicadosBtn')}
+        </button>
         <div className="text-[11px] ml-auto" style={{ color: 'var(--subtext)' }}>
           {rows.length} {t(lang, 'datosFiltroResultados')}
         </div>
       </div>
+
+      {duplicados !== null && (
+        <div
+          className="flex flex-col gap-2 px-3 py-2.5 rounded-xl border"
+          style={{ borderColor: 'var(--border)', background: 'var(--panel-bg)' }}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[11px] font-semibold" style={{ color: 'var(--text)' }}>
+                {t(lang, 'datosDuplicadosTitulo')} {duplicados.length > 0 ? `(${duplicados.length})` : ''}
+              </span>
+              <span className="text-[10px]" style={{ color: 'var(--subtext)' }}>
+                {t(lang, 'datosDuplicadosDesc')}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={cerrarDuplicados}
+              className="flex items-center gap-1 text-[11px] px-2.5 py-[7px] rounded-lg border"
+              style={{ borderColor: 'var(--border)', color: 'var(--subtext)' }}
+            >
+              <X size={11} /> {t(lang, 'datosDuplicadosCerrar')}
+            </button>
+          </div>
+
+          {duplicados.length === 0 ? (
+            <p className="text-[11px]" style={{ color: 'var(--subtext)' }}>
+              {t(lang, 'datosDuplicadosNinguno')}
+            </p>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {duplicados.map(mov => {
+                const tipo  = getVal(mov, 'tipo')
+                const color = tipo === 'income' ? '#22c55e' : '#ef4444'
+                return (
+                  <div
+                    key={mov.id}
+                    className="flex items-center gap-3 text-[11px] px-2 py-1.5 rounded-lg"
+                    style={{ background: 'color-mix(in oklch, var(--subtext) 8%, transparent)' }}
+                  >
+                    <span style={{ fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>{fmtFecha(getVal(mov, 'fecha'))}</span>
+                    <span style={{ fontFamily: 'var(--font-mono)', color, whiteSpace: 'nowrap' }}>{fmtARS(Math.abs(getVal(mov, 'monto')))}</span>
+                    <span className="truncate" style={{ color: 'var(--subtext)' }}>{getVal(mov, 'cat') || '—'}</span>
+                    <span className="truncate flex-1">{getVal(mov, 'desc') || '—'}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        deleteMov(mov.id)
+                        setDuplicados(d => (d || []).filter(m => m.id !== mov.id))
+                      }}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--subtext)', padding: 4, lineHeight: 0 }}
+                      onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
+                      onMouseLeave={e => (e.currentTarget.style.color = 'var(--subtext)')}
+                      aria-label="Eliminar movimiento duplicado"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="panel-strong" style={{ width: '100%', overflow: 'hidden' }}>
       <div

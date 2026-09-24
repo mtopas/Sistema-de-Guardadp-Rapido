@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isTransferencia, movimientoAsignadoACajon, contribucionCategoria, contribucionFire, acumuladoPorCategoriaNombre } from './finanzas.js';
+import { isTransferencia, movimientoAsignadoACajon, contribucionCategoria, contribucionFire, acumuladoPorCategoriaNombre, saldoFondoEmergencia, NOMBRE_FONDO_EMERGENCIA } from './finanzas.js';
 
 describe('Finanzas', () => {
   it('should correctly identify transferencia movements', () => {
@@ -53,5 +53,30 @@ describe('Finanzas', () => {
     expect(acumuladoPorCategoriaNombre([{ categoria_nombre: 'FIRE', tipo: 'income', monto: 100 }, { categoria_nombre: 'otra categoria', tipo: 'expense', monto: 50 }], 'FIRE')).toBe(-100);
     expect(acumuladoPorCategoriaNombre([{ categoria_nombre: 'FIRE', tipo: 'income', monto: 100 }, { categoria_nombre: 'otra categoria', tipo: 'expense', monto: 50 }], '')).toBe(0);
     expect(acumuladoPorCategoriaNombre([{ categoria_nombre: 'FIRE', tipo: 'income', monto: 100 }, { categoria_nombre: 'otra categoria', tipo: 'expense', monto: 50 }], undefined)).toBe(0);
+  });
+
+  it('should calculate the emergency fund balance client-side (replaces deprecated GET /fin/emergencia)', () => {
+    // Reemplazo del endpoint deprecated (Finanzas-Roadmap.md): mismo cálculo que cualquier
+    // otro cajón por categoría/descripción homónima, aplicado al objetivo seed "Fondo de emergencia".
+    expect(saldoFondoEmergencia([])).toBe(0);
+    expect(saldoFondoEmergencia(undefined)).toBe(0);
+
+    const movs = [
+      { categoria_nombre: NOMBRE_FONDO_EMERGENCIA, tipo: 'expense', monto: 1000 },
+      { categoria_nombre: NOMBRE_FONDO_EMERGENCIA, tipo: 'income', monto: 200 },
+      { categoria_nombre: 'otra categoria', tipo: 'expense', monto: 5000 },
+    ];
+    // 1000 (gasto suma) - 200 (ingreso resta) = 800; el movimiento de "otra categoria" no suma.
+    expect(saldoFondoEmergencia(movs)).toBe(800);
+
+    // Matchea por descripción también (mismo patrón que FIRE/objetivos), case-insensitive.
+    expect(saldoFondoEmergencia([
+      { categoria_nombre: 'otra categoria', descripcion: 'fondo de emergencia', tipo: 'expense', monto: 300 },
+    ])).toBe(300);
+
+    // Formato legado (cat/amount/type) también funciona vía los normalizadores existentes.
+    expect(saldoFondoEmergencia([
+      { cat: NOMBRE_FONDO_EMERGENCIA, type: 'expense', amount: 150 },
+    ])).toBe(150);
   });
 });

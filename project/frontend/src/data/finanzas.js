@@ -113,6 +113,18 @@ export function acumuladoPorCategoriaNombre(movs, nombreCategoria) {
   }, 0)
 }
 
+/** Nombre del objetivo/categoría seed del fondo de emergencia (ver app/db/database.py). */
+export const NOMBRE_FONDO_EMERGENCIA = 'Fondo de emergencia'
+
+/**
+ * Saldo del fondo de emergencia calculado en cliente desde finMovimientosAll — reemplaza
+ * al deprecated GET /fin/emergencia. Misma lógica que cualquier otro objetivo/cajón
+ * (ver acumuladoPorCategoriaNombre): reusa el patrón ya usado por FIRE y objetivos.
+ */
+export function saldoFondoEmergencia(movs) {
+  return acumuladoPorCategoriaNombre(movs, NOMBRE_FONDO_EMERGENCIA)
+}
+
 /** Meses calendario (inclusivo) desde refDate hasta el mes de fecha_limite. Ej: ene → 1/dic = 12. */
 export function mesesCalendarioHasta(fechaLimite, refDate = new Date()) {
   const m = String(fechaLimite ?? '').match(/^(\d{4})-(\d{2})/)

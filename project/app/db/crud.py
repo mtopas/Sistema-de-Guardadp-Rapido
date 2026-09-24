@@ -85,6 +85,7 @@ def _hoja_dict(f):
         "icono": f[11] if len(f) > 11 else None,
         "fecha_actualizado": f[12] if len(f) > 12 else None,
         "link_preview": _parse_preview(f[13]) if len(f) > 13 else None,
+        "color": f[14] if len(f) > 14 else None,
     }
 
 
@@ -259,12 +260,12 @@ def eliminar_categoria(categoria_id: int, forzar: bool = False) -> str:
 _HOJA_SELECT = """
     SELECT h.id, h.contenido, h.fecha, h.categoria_id, c.nombre,
            h.tipo, h.apuntes, h.lugar, h.latitud, h.longitud, h.fecha_recordatorio,
-           h.icono, h.fecha_actualizado, h.link_preview
+           h.icono, h.fecha_actualizado, h.link_preview, h.color
     FROM hojas h
     JOIN categorias c ON c.id = h.categoria_id
 """
 
-_UPDATABLE_HOJA = frozenset({"contenido", "categoria_id", "tipo", "apuntes", "icono", "lugar"})
+_UPDATABLE_HOJA = frozenset({"contenido", "categoria_id", "tipo", "apuntes", "icono", "lugar", "color"})
 
 
 def crear_hoja(
@@ -277,6 +278,7 @@ def crear_hoja(
     longitud: Optional[float] = None,
     fecha_recordatorio: Optional[str] = None,  # aceptado por compat de firma; sin uso real, se descarta (ver Milestone 2)
     icono: Optional[str] = None,
+    color: Optional[str] = None,
     link_preview: Optional[dict] = None,
     origen: str = "app",
 ) -> int:
@@ -351,11 +353,11 @@ def crear_hoja(
         """
         INSERT INTO hojas
             (contenido, fecha, categoria_id, tipo, apuntes, lugar, latitud, longitud,
-             icono, fecha_actualizado, link_preview, vault_id, ruta, mtime)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             icono, color, fecha_actualizado, link_preview, vault_id, ruta, mtime)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (contenido, ahora, categoria_id, tipo, apuntes_final_html, lugar, latitud, longitud,
-         icono, ahora, preview_json, vault_id, ruta_rel, mtime),
+         icono, color, ahora, preview_json, vault_id, ruta_rel, mtime),
     )
     conn.commit()
     hid = cursor.lastrowid
@@ -372,7 +374,7 @@ def obtener_hojas():
     cursor.execute(
         """
         SELECT h.id, h.contenido, h.fecha, h.categoria_id, c.nombre,
-               h.tipo, h.apuntes, h.lugar, h.latitud, h.longitud, h.fecha_recordatorio, h.icono, h.fecha_actualizado, h.link_preview
+               h.tipo, h.apuntes, h.lugar, h.latitud, h.longitud, h.fecha_recordatorio, h.icono, h.fecha_actualizado, h.link_preview, h.color
         FROM hojas h
         JOIN categorias c ON c.id = h.categoria_id
         ORDER BY c.id ASC, h.id ASC
@@ -389,7 +391,7 @@ def obtener_hoja_por_id(hoja_id: int):
     cursor.execute(
         """
         SELECT h.id, h.contenido, h.fecha, h.categoria_id, c.nombre,
-               h.tipo, h.apuntes, h.lugar, h.latitud, h.longitud, h.fecha_recordatorio, h.icono, h.fecha_actualizado, h.link_preview
+               h.tipo, h.apuntes, h.lugar, h.latitud, h.longitud, h.fecha_recordatorio, h.icono, h.fecha_actualizado, h.link_preview, h.color
         FROM hojas h
         JOIN categorias c ON c.id = h.categoria_id
         WHERE h.id = ?
@@ -470,7 +472,7 @@ def actualizar_hoja(hoja_id: int, campos: dict) -> Optional[dict]:
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT contenido, categoria_id, tipo, apuntes, icono, lugar, latitud, longitud, "
+        "SELECT contenido, categoria_id, tipo, apuntes, icono, color, lugar, latitud, longitud, "
         "vault_id, ruta, fecha FROM hojas WHERE id = ?",
         (hoja_id,),
     )
@@ -478,7 +480,7 @@ def actualizar_hoja(hoja_id: int, campos: dict) -> Optional[dict]:
     if row is None:
         conn.close()
         return None
-    (contenido_actual, categoria_id_actual, tipo_actual, apuntes_actual, icono_actual,
+    (contenido_actual, categoria_id_actual, tipo_actual, apuntes_actual, icono_actual, color_actual,
      lugar_actual, latitud_actual, longitud_actual, vault_id, ruta_actual, creado_en) = row
 
     if not vault_id or not ruta_actual:
@@ -490,6 +492,7 @@ def actualizar_hoja(hoja_id: int, campos: dict) -> Optional[dict]:
     tipo = safe.get("tipo", tipo_actual)
     apuntes_html = safe.get("apuntes", apuntes_actual)
     icono = safe.get("icono", icono_actual)
+    color = safe.get("color", color_actual)
     lugar = safe.get("lugar", lugar_actual)
 
     ruta_abs_actual = VAULT_ROOT / ruta_actual
@@ -554,7 +557,7 @@ def actualizar_hoja(hoja_id: int, campos: dict) -> Optional[dict]:
 
     sets = {
         "contenido": contenido, "categoria_id": categoria_id_nuevo, "tipo": tipo,
-        "apuntes": apuntes_final_html, "icono": icono, "lugar": lugar,
+        "apuntes": apuntes_final_html, "icono": icono, "color": color, "lugar": lugar,
         "fecha_actualizado": ahora, "ruta": ruta_rel, "mtime": nuevo_mtime,
     }
     cols = ", ".join(f"{k} = ?" for k in sets)
@@ -958,9 +961,13 @@ def fin_eliminar_categoria(cat_id: int) -> bool:
 
 
 def fin_buscar_categoria_por_nombre(nombre: str) -> Optional[int]:
+    """Case-insensitive y con trim: 'Comida' y 'comida ' matchean la misma categoría."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id FROM fin_categorias WHERE nombre = ? LIMIT 1", (nombre,))
+    cursor.execute(
+        "SELECT id FROM fin_categorias WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?)) LIMIT 1",
+        (nombre,),
+    )
     row = cursor.fetchone()
     conn.close()
     return row[0] if row else None

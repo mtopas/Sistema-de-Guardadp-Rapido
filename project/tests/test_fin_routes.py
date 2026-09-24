@@ -132,3 +132,56 @@ def test_get_fin_movimientos_resumen_filters_transferencias(client, tmp_app_db):
 
     # El resumen debería excluir la transferencia, así que solo debe contar 100 en gastos
     assert isinstance(data, dict)
+
+
+# ---------------------------------------------------------------------------
+# fin_buscar_categoria_por_nombre — matching case-insensitive + trim
+# ---------------------------------------------------------------------------
+
+@pytest.mark.integration
+def test_buscar_categoria_por_nombre_case_insensitive(client, tmp_app_db):
+    """'Comida' y 'comida' deben resolver al mismo id de categoría."""
+    cat_id = crud.fin_crear_categoria("Comida", "#FF0000", "expense")
+    assert crud.fin_buscar_categoria_por_nombre("comida") == cat_id
+    assert crud.fin_buscar_categoria_por_nombre("COMIDA") == cat_id
+    assert crud.fin_buscar_categoria_por_nombre("Comida") == cat_id
+
+
+@pytest.mark.integration
+def test_buscar_categoria_por_nombre_trim(client, tmp_app_db):
+    """Espacios alrededor del nombre no deben crear un match distinto."""
+    cat_id = crud.fin_crear_categoria("Transporte", "#00FF00", "expense")
+    assert crud.fin_buscar_categoria_por_nombre("  Transporte  ") == cat_id
+    assert crud.fin_buscar_categoria_por_nombre(" transporte") == cat_id
+
+
+@pytest.mark.integration
+def test_buscar_categoria_por_nombre_no_match_devuelve_none(client, tmp_app_db):
+    """Si no existe ninguna categoría con ese nombre, devuelve None."""
+    assert crud.fin_buscar_categoria_por_nombre("NoExiste") is None
+
+
+@pytest.mark.integration
+def test_post_movimiento_no_duplica_categoria_por_capitalizacion(client, tmp_app_db):
+    """POST /fin/movimientos con distinta capitalización reutiliza la categoría existente
+    en vez de auto-crear una nueva (cajón duplicado)."""
+    cat_id = crud.fin_crear_categoria("Comida", "#FF0000", "expense")
+
+    response = client.post(
+        "/fin/movimientos",
+        json={
+            "tipo": "expense",
+            "monto": 500,
+            "fecha": "2026-09-15",
+            "descripcion": "Almuerzo",
+            "categoria_nombre": "comida",
+        },
+    )
+    assert response.status_code == 200
+    mov = response.json()
+    assert mov["categoria_id"] == cat_id
+
+    # No se debe haber creado una segunda categoría "comida"
+    categorias = client.get("/fin/categorias?include_ocultas=true").json()
+    nombres_comida = [c for c in categorias if c["name"].strip().lower() == "comida"]
+    assert len(nombres_comida) == 1

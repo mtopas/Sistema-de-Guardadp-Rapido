@@ -3,6 +3,7 @@ import { API_URL, DEBUG } from '../config'
 import { categoriaDescendantIds } from '../utils/categoriaColors'
 import { applyTheme, DEFAULT_THEME, DEFAULT_TONE, DEFAULT_FONT_PAIR, FONT_PAIRS, THEMES, TONES, ECLIPSE_ACCENTS, pathToSection, SECTION_ORDER } from '../utils/themes'
 import { JARVIS_EVENTS_PAGE_SIZE, JARVIS_EVENTS_MAX_LIMIT } from '../utils/jarvisPalette'
+import { saldoFondoEmergencia } from '../data/finanzas'
 
 // Multi-chat (Mejoras_Jarvis.md punto 3) reemplazó el modelo viejo de "un solo
 // chat de escritorio guardado en localStorage" por chats reales en el
@@ -192,15 +193,11 @@ export const useStore = create((set, get) => ({
     await get().fetchFinMovimientos(mes)
   },
 
-  fetchFinEmergencia: async () => {
-    try {
-      const res = await fetch(`${API_URL}/fin/emergencia`)
-      if (!res.ok) throw new Error('not ok')
-      const { saldo } = await res.json()
-      set({ finEmergenciaSaldo: saldo ?? 0 })
-    } catch {
-      set({ finEmergenciaSaldo: 0 })
-    }
+  /** Recalcula finEmergenciaSaldo en cliente desde finMovimientosAll -- ya no llama
+   * a GET /fin/emergencia (deprecated, ver Finanzas-Roadmap.md). Se llama cada vez
+   * que finMovimientosAll cambia (fetch inicial + mutaciones optimistas). */
+  fetchFinEmergencia: () => {
+    set({ finEmergenciaSaldo: saldoFondoEmergencia(get().finMovimientosAll) })
   },
 
   fetchFinMovimientosAll: async () => {
@@ -210,6 +207,7 @@ export const useStore = create((set, get) => ({
       const data = await res.json()
       if (finPayloadEqual(get().finMovimientosAll, data)) return
       set({ finMovimientosAll: data })
+      get().fetchFinEmergencia()
       if (DEBUG) console.log('fetchFinMovimientosAll:', data.length)
     } catch {
       if (DEBUG) console.log('fetchFinMovimientosAll: API error, keeping current state')
@@ -234,6 +232,7 @@ export const useStore = create((set, get) => ({
         finMovimientos:    [row, ...state.finMovimientos],
         finMovimientosAll: [row, ...state.finMovimientosAll],
       }))
+      get().fetchFinEmergencia()
       if (DEBUG) console.log('addFinMovimiento (API):', data)
       get().fetchFinMovimientosAll()
       get().fetchFinMovimientos(get().selectedMes)
@@ -251,6 +250,7 @@ export const useStore = create((set, get) => ({
         finMovimientos:    [full, ...state.finMovimientos],
         finMovimientosAll: [full, ...state.finMovimientosAll],
       }))
+      get().fetchFinEmergencia()
       get().showToast('No se pudo guardar el movimiento -- revisá tu conexión', 'error')
       if (DEBUG) console.log('addFinMovimiento (mock):', full)
     }
@@ -273,6 +273,7 @@ export const useStore = create((set, get) => ({
       finMovimientosAll: state.finMovimientosAll.filter(m => m.id !== id),
     }))
     if (!ok) get().showToast('No se pudo eliminar el movimiento en el servidor -- revisá tu conexión', 'error')
+    get().fetchFinEmergencia()
     get().fetchFinCuentas()
     if (DEBUG) console.log('deleteFinMovimiento:', id)
   },
@@ -285,6 +286,7 @@ export const useStore = create((set, get) => ({
       finMovimientos:    state.finMovimientos.map(m    => m.id === id ? { ...m, ...merged } : m),
       finMovimientosAll: state.finMovimientosAll.map(m => m.id === id ? { ...m, ...merged } : m),
     }))
+    get().fetchFinEmergencia()
     try {
       const res = await fetch(`${API_URL}/fin/movimientos/${id}`, {
         method: 'PATCH',
@@ -1209,6 +1211,53 @@ export const useStore = create((set, get) => ({
       get().showToast('No se pudo guardar el hábito -- revisá tu conexión', 'error')
     }
     if (DEBUG) console.log('upsertHabitoRegistro:', key, valor)
+  },
+
+  // Batch upsert -- usado por "Marcar todos" en Agenda HOY (sección Hábitos
+  // de hoy) para no disparar un PUT por hábito. Mismo endpoint que usa el
+  // backend en POST /habitos/registros/batch (app/main.py).
+  // items: [{ habitoId, fecha, valor, nota? }]
+  batchUpsertHabitoRegistros: async (items) => {
+    if (!items.length) return
+    // optimistic: upsert cada uno en el slice local, igual que upsertHabitoRegistro
+    set(s => {
+      let registros = s.habitosRegistros
+      for (const { habitoId, fecha, valor, nota } of items) {
+        const existing = registros.find(r => r.habito_id === habitoId && r.fecha === fecha)
+        if (existing) {
+          registros = registros.map(r =>
+            r.habito_id === habitoId && r.fecha === fecha ? { ...r, valor, nota: nota ?? r.nota } : r
+          )
+        } else {
+          registros = [...registros, {
+            id: `reg_${Date.now()}_${habitoId}`, habito_id: habitoId, fecha, valor,
+            nota: nota ?? null, creado_en: new Date().toISOString(),
+          }]
+        }
+      }
+      return { habitosRegistros: registros }
+    })
+    try {
+      const res = await fetch(`${API_URL}/habitos/registros/batch`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          registros: items.map(({ habitoId, fecha, valor, nota }) => ({ habito_id: habitoId, fecha, valor, nota })),
+        }),
+      })
+      if (!res.ok) throw new Error('not ok')
+      const data = await res.json()
+      set(s => {
+        let registros = s.habitosRegistros
+        for (const reg of data) {
+          registros = registros.map(r =>
+            r.habito_id === reg.habito_id && r.fecha === reg.fecha ? reg : r
+          )
+        }
+        return { habitosRegistros: registros }
+      })
+    } catch {
+      get().showToast('No se pudieron guardar los hábitos -- revisá tu conexión', 'error')
+    }
   },
 
   deleteHabitoRegistro: async (registroId, habitoId, fecha) => {

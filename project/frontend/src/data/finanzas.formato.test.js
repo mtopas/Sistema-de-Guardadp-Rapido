@@ -69,11 +69,15 @@ describe('Formateo de moneda y cantidades', () => {
 
     it('should format between 1000 and 1_000_000 as K', () => {
       expect(fmtARSShort(5000)).toBe('$5,00K');
-      // 999_999 / 1000 = 999.999 → redondea a 1000.00 con 2 decimales
-      expect(fmtARSShort(999_999)).toBe('$1.000,00K');
-      expect(fmtARSShort(999_999.99)).toBe('$1.000,00K');
       // Justo debajo del umbral de redondeo
       expect(fmtARSShort(999_950)).toBe('$999,95K');
+    });
+
+    it('should switch to M when the K-rounded value would display as 1000 (fix 2026-09-24)', () => {
+      // 999_999 / 1000 = 999.999 → redondeaba a "1.000,00K" (parecía 1M sin
+      // serlo) -- ahora se muestra en M directamente. Ver Cerebro/estado-actual.md.
+      expect(fmtARSShort(999_999)).toBe('$1,00M');
+      expect(fmtARSShort(999_999.99)).toBe('$1,00M');
     });
 
     it('should format at exact 1_000_000 boundary as M', () => {

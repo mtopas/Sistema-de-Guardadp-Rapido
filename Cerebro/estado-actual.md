@@ -1,5 +1,34 @@
 # Estado Actual de Jarvis
-Última actualización: 2026-09-23
+Última actualización: 2026-09-24
+
+## FIX: redondeo de `fmtARSShort` cerca del límite de 1M (2026-09-24)
+
+Resuelve el hallazgo cosmético documentado en `PROXIMAMENTE.md` (Finanzas): `fmtARSShort(999_999)`
+daba `"$1.000,00K"` porque `999999/1000 = 999.999` redondea a `1000.00` con 2 decimales — un
+valor real de $999.999 se veía idéntico a haber cruzado el millón.
+
+**Fix**: antes de decidir la rama K, se calcula si el valor ya redondeado a 2 decimales en K
+llegaría a 1000 (`Math.round((abs/1000)*100)/100 >= 1000`); si es así, se usa la rama M
+directamente. `fmtARSShort(999_999)` ahora da `"$1,00M"` (consistente con el resto de la UI,
+que ya redondea a 2 decimales en M para cualquier valor cercano al millón).
+
+**Test actualizado**: `finanzas.formato.test.js` — los 2 asserts que documentaban el bug como
+comportamiento esperado (`toBe('$1.000,00K')`) se reemplazaron por un test nuevo que confirma
+el comportamiento correcto (`toBe('$1,00M')`).
+
+**Hallazgo nuevo, sin arreglar, fuera de alcance de este fix**: `habitos.test.js` tiene un test
+(`calcMonthPct` — "counts partial values correctly") que no fija una fecha de referencia y usa
+`new Date()` real internamente vía `calcMonthPct` — es inherentemente frágil, se rompe cada vez
+que cambia el día (falló hoy al pasar de 23 a 24/09, el `pct` esperado cambia porque
+`maxDay` cambia). Mismo patrón de bug que se evitó explícitamente en el resto de la suite de
+Hábitos (siempre fijar `refDate`). No se tocó en esta sesión, queda para quien lo retome.
+
+**Verificado**: suite completa — 245 backend sin cambios, frontend 137/138 (el único fallo es
+el de `habitos.test.js` de arriba, no relacionado). Carpeta de backup del incidente de
+seguridad (`D:\sgr-backup-pre-purge-20260923`) borrada, ya no hacía falta.
+
+Impacto: `project/frontend/src/data/finanzas.js` (`fmtARSShort`),
+`project/frontend/src/data/finanzas.formato.test.js`.
 
 ## IMPLEMENTADO: ToolSpec v1 + Tool Registry + Tool Executor — 3 tools read-only (Agenda, Hábitos, Bóveda) (2026-09-23)
 

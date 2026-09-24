@@ -20,7 +20,12 @@ export function fmtARSShort(n) {
   const x = Number(n) || 0
   const sign = x < 0 ? '−' : ''
   const abs = Math.abs(x)
-  if (abs >= 1_000_000) {
+  // El redondeo a 2 decimales de toLocaleString puede llevar "999.999K" a
+  // mostrarse como "1.000,00K" (parece 1M sin serlo) -- si el valor en K ya
+  // redondea a 1000 o más, mostrarlo en M directamente en vez de dejar que
+  // el bug de presentación sugiera que se cruzó el millón sin haberlo hecho.
+  const redondeaAUnMillon = Math.round((abs / 1_000) * 100) / 100 >= 1000
+  if (abs >= 1_000_000 || redondeaAUnMillon) {
     return `${sign}$${(abs / 1_000_000).toLocaleString('es-AR', FIN_MONEY_OPTS)}M`
   }
   if (abs >= 1_000) {

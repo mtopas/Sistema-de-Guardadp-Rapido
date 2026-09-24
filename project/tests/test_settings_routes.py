@@ -8,6 +8,7 @@ import pytest
 from fastapi import BackgroundTasks
 from fastapi.testclient import TestClient
 
+from app.config import SGR_VERSION
 from app.main import app, descargar_respaldo
 from app.db.database import get_connection
 
@@ -48,6 +49,15 @@ def test_status_reports_real_counts_and_remote_backup_is_forbidden(client, tmp_a
         assert client.get('/settings/backup').status_code == 403
     finally:
         status_file.unlink(missing_ok=True)
+
+
+@pytest.mark.integration
+def test_status_reports_real_sgr_version_not_fastapi_default(client):
+    """SGR_VERSION (app/config.py) debe llegar a /settings/status via FastAPI(version=...) --
+    antes de esto la app quedaba con el default de FastAPI ('0.1.0' generico, sin relacion a SGR)."""
+    assert app.version == SGR_VERSION
+    status = client.get('/settings/status').json()
+    assert status['version'] == SGR_VERSION
 
 
 @pytest.mark.integration

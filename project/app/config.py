@@ -27,6 +27,10 @@ _api_host = "127.0.0.1" if SGR_HOST in ("0.0.0.0", "::", "[::]") else SGR_HOST
 API_BASE_URL = os.getenv("API_BASE_URL", f"http://{_api_host}:{SGR_PORT}")
 MAX_IMAGE_SIZE_MB = 5
 
+# Versión de SGR expuesta en FastAPI(version=...) y por /settings/status -> UI (Settings > Información).
+# Se actualiza a mano en cada release relevante; ver CHANGELOG.md en la raíz del repo.
+SGR_VERSION = os.getenv("SGR_VERSION", "0.1.0")
+
 import builtins as _builtins
 _original_print = _builtins.print
 def print(*args, **kwargs):

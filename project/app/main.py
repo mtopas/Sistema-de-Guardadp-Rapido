@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator, model_validator
 
-from app.config import DEBUG, DB_PATH, VAULT_ROOT
+from app.config import DEBUG, DB_PATH, VAULT_ROOT, SGR_VERSION
 from app.paths import data_root, dist_directory, uploads_directory
 from app.vault.guard import ensure_vault_mounted
 from app.db.crud import (
@@ -400,7 +400,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=lifespan, version=SGR_VERSION)
 
 # Orígenes de confianza del frontend -- una sola lista, reusada tanto por CORS
 # como por la detección de origen (app vs telegram) de POST /hojas (Milestone 2).
@@ -741,6 +741,7 @@ async def crear_hoja_endpoint(hoja: HojaCreate, background_tasks: BackgroundTask
             longitud=hoja.longitud,
             fecha_recordatorio=hoja.fecha_recordatorio,
             icono=hoja.icono,
+            color=hoja.color,
             link_preview=preview,
             origen=_detectar_origen(request),
         )

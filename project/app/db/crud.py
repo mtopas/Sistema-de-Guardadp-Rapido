@@ -3149,3 +3149,32 @@ def habitos_registros_batch_upsert(items: list) -> list:
     conn.commit()
     conn.close()
     return results
+
+
+# ---------------------------------------------------------------------------
+# Feedback
+# ---------------------------------------------------------------------------
+
+def feedback_obtener() -> list:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, contenido, fecha FROM feedback ORDER BY fecha DESC")
+    rows = cursor.fetchall()
+    conn.close()
+    return [{"id": r[0], "contenido": r[1], "fecha": r[2]} for r in rows]
+
+
+def feedback_crear(contenido: str) -> dict:
+    conn = get_connection()
+    cursor = conn.cursor()
+    fecha = datetime.now().isoformat()
+    cursor.execute(
+        "INSERT INTO feedback (contenido, fecha) VALUES (?, ?)",
+        (contenido.strip(), fecha),
+    )
+    fid = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    if DEBUG:
+        print(f"feedback_crear: id={fid}")
+    return {"id": fid, "contenido": contenido.strip(), "fecha": fecha}

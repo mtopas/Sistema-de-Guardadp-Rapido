@@ -13,11 +13,13 @@ class HojaCreate(BaseModel):
     longitud: Optional[float] = None
     fecha_recordatorio: Optional[str] = None
     icono: Optional[str] = None
+    color: Optional[str] = None
 
 
 class HojaPatch(BaseModel):
     apuntes:     Optional[str] = None
     icono:       Optional[str] = None
+    color:       Optional[str] = None
     contenido:   Optional[str] = None
     categoria_id: Optional[int] = None
     tipo:        Optional[str] = None

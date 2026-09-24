@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { LEAF_ICON_LIST, LEAF_ICON_MAP, DEFAULT_LEAF_ICON } from '../utils/leafIcons'
+import { BRANCH_COLORS } from '../utils/themes'
 
-export default function IconPicker({ value, onChange, accentColor, tipo }) {
+export default function IconPicker({ value, onChange, accentColor, tipo, colorValue, onColorChange }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
 
@@ -54,6 +55,25 @@ export default function IconPicker({ value, onChange, accentColor, tipo }) {
           className="absolute z-50 mt-1 p-2 rounded-xl border shadow-2xl"
           style={{ background: 'var(--surface)', borderColor: 'var(--border)', width: '240px' }}
         >
+          {onColorChange && (
+            <div className="flex flex-wrap gap-1 pb-2 mb-2 border-b" style={{ borderColor: 'var(--border)' }}>
+              {BRANCH_COLORS.map(c => (
+                <button
+                  key={c}
+                  type="button"
+                  title={c}
+                  onClick={() => onColorChange(c)}
+                  className="w-6 h-6 rounded-md transition-all"
+                  style={{
+                    background: c,
+                    outline: colorValue === c ? '2px solid var(--text)' : 'none',
+                    outlineOffset: 1,
+                  }}
+                  aria-label={`Color ${c}`}
+                />
+              ))}
+            </div>
+          )}
           <div className="grid grid-cols-8 gap-1">
             {LEAF_ICON_LIST.map(({ key, Icon }) => {
               const selected = (value || DEFAULT_LEAF_ICON[tipo] || 'FileText') === key

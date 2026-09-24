@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Trash2, Save, Calendar, MapPin, PenLine } from 'lucide-react'
 import { useEditor, EditorContent } from '@tiptap/react'
@@ -7,8 +7,9 @@ import Underline from '@tiptap/extension-underline'
 import { useStore } from '../store/useStore'
 import LinkPreview from '../components/LinkPreview'
 import TopBar from '../components/TopBar'
+import IconPicker from '../components/IconPicker'
+import CategoryPicker from '../components/CategoryPicker'
 import { getCategoriaColor } from '../utils/categoriaColors'
-import { getLeafIcon } from '../utils/leafIcons'
 import { extractTags } from '../utils/tags'
 import { DEBUG } from '../config'
 
@@ -42,17 +43,20 @@ export default function DetailScreen() {
   const hojas         = useStore(s => s.hojas)
   const categorias    = useStore(s => s.categorias)
   const eliminarHoja  = useStore(s => s.eliminarHoja)
-  const updateApuntes = useStore(s => s.updateApuntes)
+  const updateHoja    = useStore(s => s.updateHoja)
   const showToast     = useStore(s => s.showToast)
 
   const hoja = hojas.find(h => h.id === parseInt(id))
-
-  const color = hoja ? getCategoriaColor(categorias, hoja.categoria_id) : 'var(--accent)'
 
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [isDirty,       setIsDirty]       = useState(false)
   const [saving,        setSaving]        = useState(false)
   const [searchQuery,   setSearchQuery]   = useState('')
+
+  const [title,       setTitle]       = useState('')
+  const [categoriaId, setCategoriaId] = useState(null)
+  const [icono,       setIcono]       = useState('')
+  const [colorSel,    setColorSel]    = useState(null)
 
   const editor = useEditor({
     extensions: [StarterKit, Underline],
@@ -61,20 +65,52 @@ export default function DetailScreen() {
     onUpdate: () => setIsDirty(true),
   })
 
+  // Reinicializa el estado local (y el editor) solo cuando cambia la hoja
+  // vista, no en cada re-render optimista disparado por el propio guardado.
+  useEffect(() => {
+    if (!hoja) return
+    setTitle(hoja.contenido || '')
+    setCategoriaId(hoja.categoria_id ?? null)
+    setIcono(hoja.icono || '')
+    setColorSel(hoja.color || null)
+    editor?.commands.setContent(hoja.apuntes || '')
+    setIsDirty(false)
+    setConfirmDelete(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hoja?.id, editor])
+
+  const categoriaColor = getCategoriaColor(categorias, categoriaId ?? hoja?.categoria_id)
+  const color = colorSel || categoriaColor
+
   const handleSave = useCallback(async () => {
-    if (!editor || saving) return
+    if (!editor || saving || !hoja) return
+    const trimmedTitle = title.trim()
+    if (!trimmedTitle) {
+      showToast('El título no puede estar vacío', 'error')
+      return
+    }
+    if (!categoriaId) {
+      showToast('Elegí una categoría', 'error')
+      return
+    }
     setSaving(true)
     try {
-      await updateApuntes(hoja.id, editor.getHTML())
+      await updateHoja(hoja.id, {
+        contenido: trimmedTitle,
+        categoria_id: categoriaId,
+        icono: icono || null,
+        color: colorSel || null,
+        apuntes: editor.getHTML(),
+      })
       setIsDirty(false)
-      showToast('Apuntes guardados')
-      if (DEBUG) console.log('apuntes saved for hoja:', hoja.id)
+      showToast('Hoja guardada')
+      if (DEBUG) console.log('hoja saved:', hoja.id)
     } catch (_) {
       showToast('Error al guardar', 'error')
     } finally {
       setSaving(false)
     }
-  }, [editor, hoja, saving])
+  }, [editor, hoja, saving, title, categoriaId, icono, colorSel])
 
   const handleDelete = async () => {
     if (!confirmDelete) { setConfirmDelete(true); return }
@@ -85,9 +121,7 @@ export default function DetailScreen() {
 
   if (!hoja) return <div className="flex flex-col h-full" style={{ background: 'var(--bg)' }}><TopBar searchQuery={searchQuery} onSearchChange={setSearchQuery} /><div className="flex-1 grid place-items-center text-sm" style={{ color: 'var(--subtext)' }}>Hoja no encontrada.</div></div>
 
-  const LeafIcon = getLeafIcon(hoja.icono, hoja.tipo)
-  const tags     = extractTags(hoja.contenido, hoja.apuntes)
-  const title    = hoja.contenido.replace(/https?:\/\/\S+/g, '').trim() || hoja.contenido
+  const tags = extractTags(hoja.contenido, hoja.apuntes)
 
   return (
     <div className="flex flex-col h-full" style={{ background: 'var(--bg)' }}>
@@ -106,28 +140,6 @@ export default function DetailScreen() {
         </button>
 
         <div className="flex-1 min-w-0"><span className="block text-[10px] uppercase tracking-[0.12em]" style={{ color: 'var(--subtext)' }}>Bóveda / {hoja.categoria_nombre || 'Sin categoría'}</span><span className="block text-xs truncate font-medium mt-0.5" style={{ color }}>Editor de hoja</span></div>
-
-        {isDirty && (
-          <button onClick={handleSave} disabled={saving}
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg text-white transition-all active:scale-95 disabled:opacity-50"
-            style={{ background: color }}
-          >
-            <Save size={12} />
-            {saving ? 'Guardando...' : 'Guardar'}
-          </button>
-        )}
-
-        <button onClick={handleDelete}
-          className="text-sm px-2.5 py-1.5 rounded-lg transition-colors"
-          style={confirmDelete
-            ? { background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }
-            : { color: 'var(--subtext)' }
-          }
-          onMouseEnter={e => { if (!confirmDelete) e.currentTarget.style.color = '#f87171' }}
-          onMouseLeave={e => { if (!confirmDelete) e.currentTarget.style.color = 'var(--subtext)' }}
-        >
-          {confirmDelete ? 'Confirmar' : <Trash2 size={16} />}
-        </button>
       </div>
 
       {/* Body */}
@@ -138,15 +150,23 @@ export default function DetailScreen() {
         {/* Hero card */}
         <div className="rounded-lg border px-5 py-4 flex items-start gap-4"
           style={{ background: 'var(--surface)', borderColor: `${color}45` }}>
-          <div className="w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
-            style={{ background: color + '22' }}>
-            <LeafIcon size={22} style={{ color }} />
-          </div>
+          <IconPicker
+            value={icono}
+            onChange={key => { setIcono(key); setIsDirty(true) }}
+            accentColor={color}
+            tipo={hoja.tipo}
+            colorValue={colorSel}
+            onColorChange={c => { setColorSel(c); setIsDirty(true) }}
+          />
           <div className="flex-1 min-w-0">
-            <p className="text-base font-medium leading-snug mb-3"
-              style={{ color: 'var(--text)', fontFamily: 'var(--font-serif)' }}>
-              {title}
-            </p>
+            <input
+              type="text"
+              value={title}
+              onChange={e => { setTitle(e.target.value); setIsDirty(true) }}
+              className="w-full text-base font-medium leading-snug mb-3 bg-transparent outline-none border-b border-transparent focus:border-current"
+              style={{ color: 'var(--text)', fontFamily: 'var(--font-serif)' }}
+              placeholder="Título de la hoja"
+            />
             {/* Tags */}
             {tags.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mb-3">
@@ -199,18 +219,6 @@ export default function DetailScreen() {
             </h3>
           </div>
 
-          {/* Read-only preview */}
-          {hoja.apuntes && hoja.apuntes.replace(/<[^>]*>/g, '').trim() && (
-            <div className="rounded-xl px-4 py-3 mb-3"
-              style={{ background: color + '0e', border: `1px solid ${color}25` }}>
-              <div
-                className="apuntes-preview"
-                style={{ color: 'var(--text)' }}
-                dangerouslySetInnerHTML={{ __html: hoja.apuntes }}
-              />
-            </div>
-          )}
-
           {/* Editor */}
           <div className="rounded-lg overflow-hidden border transition-colors"
             style={{ borderColor: color + '40', background: 'var(--surface)' }}>
@@ -225,11 +233,38 @@ export default function DetailScreen() {
       <aside className="hidden xl:block border rounded-lg h-fit p-4" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
         <h2 className="text-[11px] uppercase tracking-[0.12em] font-semibold" style={{ color: 'var(--subtext)' }}>Información</h2>
         <dl className="mt-4 space-y-3 text-xs">
-          <div><dt style={{ color: 'var(--subtext)' }}>Categoría</dt><dd className="mt-1 font-medium" style={{ color: 'var(--text)' }}>{hoja.categoria_nombre || 'Sin categoría'}</dd></div>
+          <div>
+            <dt style={{ color: 'var(--subtext)' }}>Categoría</dt>
+            <dd className="mt-1">
+              <CategoryPicker value={categoriaId} onChange={id => { setCategoriaId(id); setIsDirty(true) }} />
+            </dd>
+          </div>
           <div><dt style={{ color: 'var(--subtext)' }}>Tipo</dt><dd className="mt-1 font-medium capitalize" style={{ color }}>{hoja.tipo || 'texto'}</dd></div>
           <div><dt style={{ color: 'var(--subtext)' }}>Creada</dt><dd className="mt-1" style={{ color: 'var(--text-2)' }}>{new Date(hoja.fecha).toLocaleDateString('es-AR')}</dd></div>
           {tags.length > 0 && <div><dt style={{ color: 'var(--subtext)' }}>Etiquetas</dt><dd className="mt-1.5 flex flex-wrap gap-1">{tags.map(tag => <span key={tag} className="px-1.5 py-0.5 border text-[10px]" style={{ borderColor: 'var(--border)', color: 'var(--text-2)', borderRadius: 5 }}>#{tag}</span>)}</dd></div>}
         </dl>
+
+        <div className="mt-4 pt-4 border-t space-y-2" style={{ borderColor: 'var(--border)' }}>
+          {isDirty && (
+            <button onClick={handleSave} disabled={saving}
+              className="w-full flex items-center justify-center gap-1.5 text-xs px-3 py-2 rounded-lg text-white transition-all active:scale-95 disabled:opacity-50"
+              style={{ background: color }}
+            >
+              <Save size={12} />
+              {saving ? 'Guardando...' : 'Guardar'}
+            </button>
+          )}
+          <button onClick={handleDelete}
+            className="w-full flex items-center justify-center gap-1.5 text-xs px-3 py-2 rounded-lg transition-colors"
+            style={confirmDelete
+              ? { background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }
+              : { color: 'var(--subtext)', border: '1px solid var(--border)' }
+            }
+          >
+            <Trash2 size={12} />
+            {confirmDelete ? 'Confirmar eliminación' : 'Eliminar hoja'}
+          </button>
+        </div>
       </aside>
       </div>
       </div>

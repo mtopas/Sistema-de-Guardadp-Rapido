@@ -608,6 +608,11 @@ def _apply_migrations(cursor):
         if DEBUG:
             print("migration: hojas.icono added")
 
+    if "color" not in hoja_cols:
+        cursor.execute("ALTER TABLE hojas ADD COLUMN color TEXT")
+        if DEBUG:
+            print("migration: hojas.color added")
+
     if "fecha_actualizado" not in hoja_cols:
         cursor.execute("ALTER TABLE hojas ADD COLUMN fecha_actualizado TEXT")
         cursor.execute("UPDATE hojas SET fecha_actualizado = fecha WHERE fecha_actualizado IS NULL")

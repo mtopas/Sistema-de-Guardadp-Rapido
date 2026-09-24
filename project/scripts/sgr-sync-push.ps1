@@ -11,6 +11,8 @@ param([switch]$Silent)
 function Write-Info($msg) { if (-not $Silent) { Write-Host "  $msg" -ForegroundColor Cyan } }
 function Write-OK($msg)   { if (-not $Silent) { Write-Host "  $msg" -ForegroundColor Green } }
 
+try {
+
 # Subir DB via multipart usando System.Net.Http (sin dependencia de curl)
 Write-Info "Subiendo app.db al homelab ..."
 
@@ -47,4 +49,9 @@ try {
     Write-OK "Uploads subidos."
 } catch {
     Write-Warning "  No se pudieron subir uploads (no critico): $_"
+}
+Write-SgrSyncStatus 'push' $true
+} catch {
+    Write-SgrSyncStatus 'push' $false
+    throw
 }

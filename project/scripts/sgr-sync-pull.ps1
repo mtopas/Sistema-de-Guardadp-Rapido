@@ -13,6 +13,8 @@ function Write-OK($msg)   { if (-not $Silent) { Write-Host "  $msg" -ForegroundC
 $headers = @{}
 if ($SyncToken) { $headers["X-Sync-Token"] = $SyncToken }
 
+try {
+
 # 1. Verificar conectividad
 Write-Info "Verificando conexion con $HomelabApiUrl ..."
 try {
@@ -55,4 +57,9 @@ try {
     Write-OK "Uploads sincronizados."
 } catch {
     Write-Warning "  No se pudieron sincronizar uploads (no critico): $_"
+}
+Write-SgrSyncStatus 'pull' $true
+} catch {
+    Write-SgrSyncStatus 'pull' $false
+    throw
 }

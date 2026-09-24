@@ -104,6 +104,17 @@ export const useStore = create((set, get) => ({
   currentSection: startSection,
   lang:       savedLang,
   userName:   savedUserName,
+  agendaNotificationsEnabled: localStorage.getItem('sgr-agenda-notifications') === 'on',
+  agendaReminderMinutes: Number(localStorage.getItem('sgr-agenda-reminder-minutes')) || 15,
+  setAgendaNotificationsEnabled: (enabled) => {
+    localStorage.setItem('sgr-agenda-notifications', enabled ? 'on' : 'off')
+    set({ agendaNotificationsEnabled: enabled })
+  },
+  setAgendaReminderMinutes: (minutes) => {
+    const value = [5, 15, 30, 60].includes(Number(minutes)) ? Number(minutes) : 15
+    localStorage.setItem('sgr-agenda-reminder-minutes', String(value))
+    set({ agendaReminderMinutes: value })
+  },
   toast:      null,
 
   // --- Capture modal (floating, replaces /capture screen) ---
@@ -1211,9 +1222,35 @@ export const useStore = create((set, get) => ({
   },
 
   // --- User name ---
-  setUserName: (name) => {
-    localStorage.setItem('sgr-username', name)
-    set({ userName: name })
+  fetchProfile: async () => {
+    try {
+      const res = await fetch(`${API_URL}/settings/profile`)
+      if (!res.ok) throw new Error('profile unavailable')
+      const data = await res.json()
+      if (!data.nombre && savedUserName) {
+        await get().setUserName(savedUserName)
+      } else {
+        localStorage.setItem('sgr-username', data.nombre)
+        set({ userName: data.nombre })
+      }
+    } catch { /* Keep the previously saved local name until the API responds. */ }
+  },
+  setUserName: async (name) => {
+    try {
+      const res = await fetch(`${API_URL}/settings/profile`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nombre: name }),
+      })
+      if (!res.ok) throw new Error('profile save failed')
+      const data = await res.json()
+      localStorage.setItem('sgr-username', data.nombre)
+      set({ userName: data.nombre })
+      return true
+    } catch {
+      get().showToast('No se pudo guardar el nombre', 'error')
+      return false
+    }
   },
 
   // --- Language ---
@@ -1314,8 +1351,10 @@ export const useStore = create((set, get) => ({
       const data = await res.json()
       set({ feedbackList: data })
       if (DEBUG) console.log('fetchFeedback:', data.length)
+      return data
     } catch {
       if (DEBUG) console.log('fetchFeedback: API error, keeping current state')
+      return null
     }
   },
 
@@ -1329,11 +1368,37 @@ export const useStore = create((set, get) => ({
       if (!res.ok) throw new Error('not ok')
       const data = await res.json()
       set(state => ({ feedbackList: [data, ...state.feedbackList] }))
+      return data
     } catch {
-      const item = { id: `f_${Date.now()}`, contenido, fecha: new Date().toISOString() }
-      set(state => ({ feedbackList: [item, ...state.feedbackList] }))
+      get().showToast('No se pudo guardar el feedback', 'error')
+      return null
     }
-    if (DEBUG) console.log('addFeedback:', contenido)
+  },
+  updateFeedback: async (id, contenido) => {
+    try {
+      const res = await fetch(`${API_URL}/feedback/${id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contenido }),
+      })
+      if (!res.ok) throw new Error('feedback update failed')
+      const data = await res.json()
+      set(state => ({ feedbackList: state.feedbackList.map(item => item.id === id ? data : item) }))
+      return data
+    } catch {
+      get().showToast('No se pudo editar el feedback', 'error')
+      return null
+    }
+  },
+  deleteFeedback: async (id) => {
+    try {
+      const res = await fetch(`${API_URL}/feedback/${id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('feedback delete failed')
+      set(state => ({ feedbackList: state.feedbackList.filter(item => item.id !== id) }))
+      return true
+    } catch {
+      get().showToast('No se pudo eliminar el feedback', 'error')
+      return false
+    }
   },
 
   // --- Categorias ---

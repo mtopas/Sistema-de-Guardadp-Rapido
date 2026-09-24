@@ -58,6 +58,13 @@ def init_db():
         )
     """)
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            clave TEXT PRIMARY KEY,
+            valor TEXT NOT NULL
+        )
+    """)
+
     # --- Finanzas tables ---
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS fin_cuentas (

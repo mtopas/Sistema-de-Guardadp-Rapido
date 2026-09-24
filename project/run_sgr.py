@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import http.client
+import json
 import os
 import queue
 import shutil
@@ -19,6 +20,7 @@ import threading
 import time
 import uuid
 import webbrowser
+from datetime import datetime
 from urllib.error import URLError
 from urllib.parse import urlparse
 from urllib.request import Request as _HttpReq, urlopen
@@ -122,6 +124,21 @@ def _db_hash(path: str) -> str:
         for chunk in iter(lambda: f.read(65536), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _record_sync(db_path: str, direction: str, ok: bool) -> None:
+    """Deja un registro legible para la pantalla de Ajustes."""
+    if not db_path:
+        return
+    destination = os.path.join(os.path.dirname(db_path), "sync-status.json")
+    temporary = destination + ".tmp"
+    try:
+        payload = {"direction": direction, "ok": ok, "at": datetime.now().astimezone().isoformat()}
+        with open(temporary, "w", encoding="utf-8") as output:
+            json.dump(payload, output)
+        os.replace(temporary, destination)
+    except OSError:
+        pass
 
 
 def _pull_db(homelab_url: str, db_path: str) -> bool:
@@ -316,7 +333,9 @@ def _run_window(host: str, port: int, url: str) -> None:
                     "SGR — Sync",
                     "Se detectaron cambios locales.\n\n¿Subir al homelab?",
                 ):
-                    if not _push_db(homelab_url, db_path):
+                    pushed = _push_db(homelab_url, db_path)
+                    _record_sync(db_path, "push", pushed)
+                    if not pushed:
                         messagebox.showerror(
                             "SGR — Sync",
                             "No se pudo subir al homelab.\nDatos locales intactos.",
@@ -339,6 +358,7 @@ def _run_window(host: str, port: int, url: str) -> None:
         """Polling del resultado del pull (corre en el hilo principal via root.after)."""
         try:
             ok = pull_q.get_nowait()
+            _record_sync(db_path, "pull", ok)
             if ok:
                 lbl_sync.config(text="Sincronizado. Iniciando SGR...")
                 root.after(500, _enter_run)

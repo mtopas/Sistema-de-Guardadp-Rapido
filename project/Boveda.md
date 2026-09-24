@@ -58,7 +58,7 @@ mybot/bot.py ── requests ──► /categorias, /hojas, /upload
 | `/` | `BrowseScreen` | Full-screen; sin sidebar Bóveda |
 | `/hoja/:id` | `DetailScreen` | Con `Sidebar` |
 | `/capture` | `CaptureScreen` (legacy) | PWA share target |
-| `/settings` | `SettingsScreen` | Con sidebar |
+| `/settings` | `SettingsScreen` | Pantalla propia, sin sidebar Bóveda |
 
 ---
 

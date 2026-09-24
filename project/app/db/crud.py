@@ -3191,3 +3191,27 @@ def feedback_crear(contenido: str) -> dict:
     if DEBUG:
         print(f"feedback_crear: id={fid}")
     return {"id": fid, "contenido": contenido.strip(), "fecha": fecha}
+
+
+def feedback_actualizar(fid: int, contenido: str) -> dict | None:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE feedback SET contenido = ? WHERE id = ?", (contenido.strip(), fid))
+    if cursor.rowcount == 0:
+        conn.close()
+        return None
+    cursor.execute("SELECT id, contenido, fecha FROM feedback WHERE id = ?", (fid,))
+    row = cursor.fetchone()
+    conn.commit()
+    conn.close()
+    return {"id": row[0], "contenido": row[1], "fecha": row[2]}
+
+
+def feedback_eliminar(fid: int) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM feedback WHERE id = ?", (fid,))
+    deleted = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted

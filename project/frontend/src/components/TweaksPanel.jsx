@@ -105,7 +105,12 @@ export default function TweaksPanel() {
       }
     }
     window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
+    const openFromSettings = () => setOpen(true)
+    window.addEventListener('sgr:open-tweaks', openFromSettings)
+    return () => {
+      window.removeEventListener('keydown', handler)
+      window.removeEventListener('sgr:open-tweaks', openFromSettings)
+    }
   }, [])
 
   // Keep panel inside viewport on open / resize

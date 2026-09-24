@@ -81,13 +81,15 @@ Componente  →  useStore (acción)  →  fetch(API)  →  crud.py  →  SQLite
 | `/finanzas` | `FinanzasScreen` — 5 tabs | 3 columnas: izq / centro / der (der solo xl) |
 | `/agenda` | `AgendaScreen` — 4 tabs | 3 columnas: izq / centro / der (der solo xl) |
 | `/habitos` | `HabitosScreen` — 3 tabs | 3 columnas: izq / centro / der (der solo xl) |
-| `/settings` | `SettingsScreen` | Con sidebar |
+| `/settings` | `SettingsScreen` — datos, perfil, avisos, apariencia, feedback e información | Pantalla propia, sin sidebar Bóveda |
 
 Modales globales en `App.jsx`: `CaptureModal` (Bóveda), `MovementModal` (Finanzas), `TweaksPanel` (temas/tono/fuentes, Ctrl+M).
 Modal Agenda en `AgendaScreen`: `EventoModal` (CTA TopBar o clic en día), `HorarioFacultadModal` (botón Facultad en tabs bar).
 Modal Hábitos en `HabitosScreen`: `NuevoHabitoModal` (CTA TopBar `openHabitoModal` o botón panel izq), `CompletarModal` (click en celda de grilla, inline).
 
 `Layout.jsx`: en `/`, `/finanzas`, `/agenda` y `/habitos` oculta el sidebar de Bóveda y delega scroll al módulo. Gestiona accent Arcoíris por ruta (`ARCOIRIS_ACCENTS`).
+
+**Ajustes:** el nombre para mostrar se guarda en `app_settings` dentro de `app.db` (con migración del valor local anterior). Feedback se puede crear, editar y eliminar desde la pantalla. Los avisos del navegador se habilitan explícitamente allí y permiten elegir anticipación. `/settings/status` muestra la copia de datos y el último resultado de sincronización registrado por el launcher o los scripts de sync; `/settings/backup` descarga, solo en la app local, una copia de las bases internas y los archivos cargados. El vault externo de Bóveda requiere su propio respaldo.
 
 ### Módulo Bóveda
 

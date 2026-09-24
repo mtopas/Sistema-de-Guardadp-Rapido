@@ -34,10 +34,12 @@ export default function FeedbackModal() {
     const text = input.trim()
     if (!text || sending) return
     setSending(true)
-    await addFeedback(text)
+    const result = await addFeedback(text)
     setSending(false)
-    setInput('')
-    showToast(t(lang, 'feedbackSent') || 'Gracias por el feedback')
+    if (result) {
+      setInput('')
+      showToast(t(lang, 'feedbackSent') || 'Gracias por el feedback')
+    }
   }
 
   const handleKeyDown = e => {

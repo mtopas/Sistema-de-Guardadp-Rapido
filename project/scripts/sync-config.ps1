@@ -24,6 +24,18 @@ $SyncToken = ""
 ## Derivados (no editar)
 $HomelabApiUrl = "http://${HomelabHost}:${HomelabApiPort}"
 
+function Write-SgrSyncStatus($direction, $ok) {
+    $statusPath = Join-Path (Split-Path $LocalDb -Parent) 'sync-status.json'
+    $temporaryPath = "$statusPath.tmp"
+    try {
+        @{ direction = $direction; ok = [bool]$ok; at = (Get-Date).ToString('o') } |
+            ConvertTo-Json -Compress | Set-Content -LiteralPath $temporaryPath -Encoding UTF8
+        Move-Item -LiteralPath $temporaryPath -Destination $statusPath -Force
+    } catch {
+        Write-Warning "No se pudo guardar el estado de sincronizacion: $_"
+    }
+}
+
 ## scp: buscar en ubicaciones conocidas si no esta en el PATH
 if (-not (Get-Command scp -ErrorAction SilentlyContinue)) {
     $scpCandidates = @(

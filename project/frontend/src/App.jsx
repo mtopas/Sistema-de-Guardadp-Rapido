@@ -14,6 +14,7 @@ import AgendaScreen   from './screens/AgendaScreen'
 import HabitosScreen  from './screens/HabitosScreen'
 import JarvisScreen   from './screens/JarvisScreen'
 import JarvisCaptureModal from './components/jarvis/JarvisCaptureModal'
+import AgendaNotificationWatcher from './components/AgendaNotificationWatcher'
 
 // Lazy-load screens with heavy deps (D3, TipTap) to keep the initial bundle lean
 const BrowseScreen = lazy(() => import('./screens/BrowseScreen'))
@@ -28,6 +29,7 @@ export default function App() {
   const fetchFinConfig            = useStore(s => s.fetchFinConfig)
   const fetchFinNotas             = useStore(s => s.fetchFinNotas)
   const fetchFeedback             = useStore(s => s.fetchFeedback)
+  const fetchProfile              = useStore(s => s.fetchProfile)
   const fetchFinEmergencia        = useStore(s => s.fetchFinEmergencia)
   const fetchAgendaCalendarios    = useStore(s => s.fetchAgendaCalendarios)
   const fetchAgendaEventos        = useStore(s => s.fetchAgendaEventos)
@@ -49,6 +51,7 @@ export default function App() {
     fetchFinConfig()
     fetchFinNotas()
     fetchFeedback()
+    fetchProfile()
     fetchFinEmergencia()
     fetchAgendaCalendarios()
     fetchAgendaEventos()
@@ -88,6 +91,7 @@ export default function App() {
       <FeedbackModal />
       <MovementModal />
       <JarvisCaptureModal />
+      <AgendaNotificationWatcher />
     </BrowserRouter>
   )
 }

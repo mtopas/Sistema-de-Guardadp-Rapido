@@ -1,12 +1,15 @@
 # entrypoints (FastAPI)
 
 import os
+import json
 import re
 import shutil
 import sqlite3
 import tempfile
 import time
 import uuid
+import zipfile
+from datetime import datetime
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -42,6 +45,8 @@ from app.db.crud import (
     # Feedback
     feedback_obtener,
     feedback_crear,
+    feedback_actualizar,
+    feedback_eliminar,
     # Finanzas
     fin_obtener_cuentas,
     fin_crear_cuenta,
@@ -151,6 +156,10 @@ except ImportError:
 
 class FeedbackCreate(BaseModel):
     contenido: str
+
+
+class ProfileUpdate(BaseModel):
+    nombre: str
 
 
 # --- Pydantic models for Finanzas ---
@@ -519,6 +528,124 @@ def crear_feedback(body: FeedbackCreate):
     if not body.contenido.strip():
         raise HTTPException(status_code=400, detail="El contenido no puede estar vacío")
     return feedback_crear(body.contenido)
+
+
+@app.patch("/feedback/{fid}")
+def editar_feedback(fid: int, body: FeedbackCreate):
+    if not body.contenido.strip():
+        raise HTTPException(status_code=400, detail="El contenido no puede estar vacío")
+    updated = feedback_actualizar(fid, body.contenido)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Feedback no encontrado")
+    return updated
+
+
+@app.delete("/feedback/{fid}")
+def borrar_feedback(fid: int):
+    if not feedback_eliminar(fid):
+        raise HTTPException(status_code=404, detail="Feedback no encontrado")
+    return {"ok": True}
+
+
+@app.get("/settings/profile")
+def obtener_perfil():
+    from app.db.database import get_connection
+    conn = get_connection()
+    row = conn.execute("SELECT valor FROM app_settings WHERE clave = 'display_name'").fetchone()
+    conn.close()
+    return {"nombre": row[0] if row else ""}
+
+
+@app.put("/settings/profile")
+def guardar_perfil(body: ProfileUpdate):
+    from app.db.database import get_connection
+    nombre = body.nombre.strip()
+    if len(nombre) > 80:
+        raise HTTPException(status_code=400, detail="El nombre debe tener hasta 80 caracteres")
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO app_settings (clave, valor) VALUES ('display_name', ?) "
+        "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
+        (nombre,),
+    )
+    conn.commit()
+    conn.close()
+    return {"nombre": nombre}
+
+
+@app.get("/settings/status")
+def estado_ajustes(request: Request):
+    from app.db.database import get_connection
+    conn = get_connection()
+    tables = {"hojas": "hojas", "movimientos": "fin_movimientos", "eventos": "agenda_eventos", "habitos": "habitos", "feedback": "feedback"}
+    counts = {key: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for key, table in tables.items()}
+    conn.close()
+    status_path = Path(DB_PATH).parent / "sync-status.json"
+    try:
+        sync = json.loads(status_path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        sync = None
+    client_host = request.client.host if request.client else ""
+    return {
+        "source": "local" if client_host in ("127.0.0.1", "::1") else "servidor",
+        "db_path": str(Path(DB_PATH).resolve()),
+        "counts": counts,
+        "sync": sync,
+        "homelab_configured": bool(os.getenv("HOMELAB_HOST", "").strip()),
+        "backup_available": client_host in ("127.0.0.1", "::1"),
+        "version": app.version,
+    }
+
+
+@app.get("/settings/backup")
+def descargar_respaldo(request: Request, background_tasks: BackgroundTasks):
+    """Copia de las bases internas y uploads; el vault externo queda aparte."""
+    if not request.client or request.client.host not in ("127.0.0.1", "::1"):
+        raise HTTPException(status_code=403, detail="La descarga solo está disponible en la app local")
+    from app.db.database import get_connection
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as db_temp:
+        db_snapshot = Path(db_temp.name)
+    jarvis_snapshot = None
+    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as zip_temp:
+        zip_path = Path(zip_temp.name)
+    try:
+        source = get_connection()
+        target = sqlite3.connect(db_snapshot)
+        try:
+            source.backup(target)
+        finally:
+            target.close()
+            source.close()
+        if _JARVIS_AVAILABLE:
+            from jarvis.config import JARVIS_DB_PATH
+            if Path(JARVIS_DB_PATH).is_file():
+                with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as jarvis_temp:
+                    jarvis_snapshot = Path(jarvis_temp.name)
+                jarvis_source = sqlite3.connect(str(JARVIS_DB_PATH))
+                jarvis_target = sqlite3.connect(jarvis_snapshot)
+                try:
+                    jarvis_source.backup(jarvis_target)
+                finally:
+                    jarvis_target.close()
+                    jarvis_source.close()
+        upload_root = uploads_directory().resolve()
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.write(db_snapshot, "database/app.db")
+            if jarvis_snapshot:
+                archive.write(jarvis_snapshot, "database/jarvis.db")
+            for path in upload_root.rglob("*"):
+                if path.is_file() and not path.is_symlink() and path.resolve().is_relative_to(upload_root):
+                    archive.write(path, Path("uploads") / path.relative_to(upload_root))
+    except Exception:
+        zip_path.unlink(missing_ok=True)
+        raise
+    finally:
+        db_snapshot.unlink(missing_ok=True)
+        if jarvis_snapshot:
+            jarvis_snapshot.unlink(missing_ok=True)
+    background_tasks.add_task(zip_path.unlink, missing_ok=True)
+    date_label = datetime.now().strftime("%Y-%m-%d_%H-%M")
+    return FileResponse(zip_path, media_type="application/zip", filename=f"SGR-respaldo-{date_label}.zip", background=background_tasks)
 
 
 # --- Categorias ---

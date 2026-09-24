@@ -54,6 +54,7 @@ export default function TopBar({ searchQuery = '', onSearchChange, searchInputRe
   const location    = useLocation()
   const userName     = useStore(s => s.userName)
   const lang         = useStore(s => s.lang)
+  const agendaReminderMinutes = useStore(s => s.agendaReminderMinutes)
   const openCapture      = useStore(s => s.openCapture)
   const openMovement     = useStore(s => s.openMovement)
   const openAgendaEvento = useStore(s => s.openAgendaEvento)
@@ -68,7 +69,6 @@ export default function TopBar({ searchQuery = '', onSearchChange, searchInputRe
   const [bellOpen, setBellOpen]             = useState(false)
   const [pendingHabitos, setPendingHabitos]   = useState([])
   const [agendaNotifPending, setAgendaNotifPending] = useState([])
-  const notifShownRef = useRef(new Set())
   const bellRef = useRef(null)
   const searchRef = useRef(null)
   const [agendaResults, setAgendaResults] = useState(null)
@@ -131,36 +131,21 @@ export default function TopBar({ searchQuery = '', onSearchChange, searchInputRe
     return () => document.removeEventListener('mousedown', h)
   }, [bellOpen])
 
-  // Request browser notification permission once
-  useEffect(() => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission()
-    }
-  }, [])
-
   // Poll for upcoming agenda events every minute
   useEffect(() => {
     if (!isAgenda) return
     const checkNotifs = async () => {
       try {
-        const res = await fetch(`${API_URL}/agenda/notificaciones/pending?ventana_min=15`)
+        const res = await fetch(`${API_URL}/agenda/notificaciones/pending?ventana_min=${agendaReminderMinutes}`)
         if (!res.ok) return
         const data = await res.json()
         setAgendaNotifPending(data)
-        if ('Notification' in window && Notification.permission === 'granted') {
-          data.forEach(e => {
-            if (!notifShownRef.current.has(e.id)) {
-              notifShownRef.current.add(e.id)
-              new Notification(e.titulo, { body: `Empieza a las ${e.fecha_inicio?.slice(11, 16) || ''}` })
-            }
-          })
-        }
       } catch { /* noop */ }
     }
     checkNotifs()
     const id = setInterval(checkNotifs, 60000)
     return () => clearInterval(id)
-  }, [isAgenda])
+  }, [isAgenda, agendaReminderMinutes])
 
   async function handleBellClick() {
     if (isAgenda) { setBellOpen(v => !v); return }

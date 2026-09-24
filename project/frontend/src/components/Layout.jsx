@@ -25,7 +25,8 @@ export default function Layout({ children }) {
   const isAgenda         = path.startsWith('/agenda')
   const isHabitos        = path.startsWith('/habitos')
   const isJarvis         = path.startsWith('/jarvis')
-  const hideSidebar      = isBrowse || isBovedaDetail || isFinanzas || isAgenda || isHabitos || isJarvis
+  const isSettings       = path === '/settings'
+  const hideSidebar      = isBrowse || isBovedaDetail || isFinanzas || isAgenda || isHabitos || isJarvis || isSettings
   const managesOwnLayout = isBrowse || isBovedaDetail || isFinanzas || isAgenda || isHabitos || isJarvis
 
   return (

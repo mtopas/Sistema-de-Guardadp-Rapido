@@ -142,6 +142,10 @@ Telegram, `SGR_SYNC_TOKEN` obligatorio.
   índice `categorias/hojas` en `app.db`, y DOS colecciones semánticas separadas
   (`app/semantic.py` de SGR y `jarvis_memory` de Jarvis) — un buscador híbrido único
   (FTS5 + embedding + recencia) resolvería inconsistencias entre `/buscar`, `/pregunta` y `/jq`.
+  Versión chica de este problema (de `Testeos-Ollama.md`, 2026-06-07, verificado que sigue
+  igual el 2026-09-24): `/pregunta` del bot (RAG) y `/buscar` (keyword) son mecanismos
+  totalmente independientes — si el RAG no encuentra nada, `/pregunta` no cae a `/buscar` como
+  fallback, aunque el contenido sí exista por texto exacto.
 - Cada `GET` de Bóveda puede recorrer el vault completo (`rglob`) — mover la indexación a un
   watcher/poller fuera del request, con tabla de estado (`archivo, hash, mtime, último error`).
 - Historial de notas aprovechando que la Bóveda ya tiene Git propio (diff, restaurar versión) —
@@ -150,6 +154,16 @@ Telegram, `SGR_SYNC_TOKEN` obligatorio.
   unir duplicados, convertir en proyecto/persona) — parcialmente cubierto ya por el triage
   automático de Jarvis, pero sin UI web dedicada.
 - Links internos estables por `vault_id` en vez de ID autoincremental del índice.
+- **De `AGREGAR-CORREGIR.txt` (2026-06-20, migrado al borrar ese archivo):**
+  - Click derecho en una categoría hoy expande la categoría Y abre una hoja asociada al mismo
+    tiempo — comportamiento confuso, debería ser una sola acción a la vez.
+  - Breve descripción/preview debajo del título de cada hoja en el listado de una categoría
+    (hoy solo se ve el título como link).
+  - Más utilidades/interactividad en el grafo de la Bóveda (más allá del zoom/pan ya evaluado
+    como quick win en el informe de julio).
+  - Al crear una hoja tipo link, usar como título el que se extrae de la metadata del link
+    (hoy existe algo de extracción de preview en `POST /hojas` — sin confirmar si ya se usa
+    como título real de la hoja o solo para la vista previa).
 
 ### Diferido — Finanzas
 - Montos como `REAL`/float — migrar a enteros (centavos) para evitar error de redondeo
@@ -162,6 +176,18 @@ Telegram, `SGR_SYNC_TOKEN` obligatorio.
 - Presupuesto mensual por categoría, gastos recurrentes como entidades (no inferidos por
   texto), forecast 30/60/90 días.
 - Reglas de clasificación personales entrenables antes de recurrir al LLM en cada captura.
+- **De `Testeos-Ollama.md` (2026-06-07, migrado al borrar ese archivo — los otros hallazgos ya
+  se arreglaron, ver `Cerebro/estado-actual.md` 2026-09-24):** `/objetivo` en el bot muestra
+  "ahorrado" negativo como una barra de progreso confusa (más de 10 bloques de retroceso) en
+  vez de algo tipo "Retiros netos: $X" — verificado que sigue así el 2026-09-24.
+- ~~**Cuadro de filtros en la tab Datos**~~ **Implementado, 2026-09-24** (sesión
+  "ArreglosFront-Finanzas/Agenda") — `filtrarMovimientos()` en `data/finanzas.js` + UI en
+  `DatosTab.jsx` (categoría, cuenta, tipo, rango de fechas). Ver `Cerebro/estado-actual.md`.
+- **De `AGREGAR-CORREGIR.txt` (2026-06-20, migrado al borrar ese archivo):**
+  - "Indicadores del mes" en el Dashboard (grilla de 4 KPIs: gasto promedio diario, categoría
+    top, tasa de ahorro, días sin gastar) — al usuario le sigue pareciendo poco útil/feo
+    visualmente (confirmado 2026-09-24), sin definir todavía qué lo reemplazaría. No se tocó:
+    decisión de diseño pendiente, no un bug.
 
 ### Diferido — Agenda
 - Recurrencia con JSON propio en vez de RFC 5545 (`RRULE`/`EXDATE`/`RECURRENCE-ID`) — el
@@ -173,6 +199,28 @@ Telegram, `SGR_SYNC_TOKEN` obligatorio.
   la Revisión semanal.
 - Vínculos reales entre módulos (tarea "Pagar tarjeta" ligada a una obligación financiera
   concreta, evento ligado a una nota por `vault_id`).
+- ~~**Crear/editar/borrar calendario desde la UI**~~ **Implementado, 2026-09-24** (sesión
+  "ArreglosFront-Finanzas/Agenda") — `CalendarioModal.jsx` + `PATCH
+  /agenda/calendarios/{id}/reasignar-eventos` para el caso "mover eventos al borrar". Ver
+  `Cerebro/estado-actual.md`.
+- **De `AGREGAR-CORREGIR.txt` (2026-06-20, migrado al borrar ese archivo):**
+  - Horario Facultad: los campos "Aula / descripción" y "Materia" se salen de su contenedor
+    (overflow CSS) — sin verificar si sigue así.
+  - Poder elegir un color por materia en Horario Facultad.
+  - ~~Si cambiás el calendario de un evento ya creado, el color en la vista no se
+    actualiza.~~ **Arreglado, 2026-09-24** — `updateAgendaEvento` en el store no recalculaba
+    `calendario_color`/`calendario_nombre` al cambiar `calendario_id`.
+  - Vista mensual: se ven 6 semanas en vez de 5 (aparece una semana entera del mes siguiente
+    de más) — sin verificar si sigue así.
+  - Rueda del mouse para desplazarse de mes en la vista mensual.
+  - Poder elegir un color propio por evento, distinto (opcional) del color del calendario.
+  - Resaltado más visible del día de hoy en la vista mensual (ej. círculo).
+  - "Próximos eventos" debería ordenarse del más cercano al más lejano.
+  - ~~El tick/check del calendario no está centrado (CSS, cosmético).~~ **Arreglado,
+    2026-09-24.**
+  - Bot `/dia <fecha>`: reporte de que devolvía "Sin eventos"/"Sin tareas" con una fecha
+    explícita aunque había datos reales — sin verificar si sigue. Pedido de cambiar el formato:
+    `/dia dd` busca ese día en el mes actual, `/dia dd-mm-aaaa` para otras fechas.
 
 ### Diferido — Hábitos
 - Motor de hábitos único en backend (`is_scheduled`, streak, stats) — hoy la lógica está
@@ -193,7 +241,10 @@ Telegram, `SGR_SYNC_TOKEN` obligatorio.
   frase puntual), con "no lo sé" explícito si no hay evidencia suficiente.
 - Brief diario y revisión semanal cross-módulo (agenda + hábitos + finanzas + Bóveda por
   clasificar) — el LLM redacta sobre un JSON agregado determinístico, no calcula totales él
-  mismo.
+  mismo. Mismo concepto que "Fase 6" de `PLAN-NEXTLEVEL.md` (2026-06, migrado acá al borrar ese
+  archivo): `GET /resumen/semanal?desde=&hasta=` agregando Agenda (`/agenda/revision`) +
+  Finanzas (`/fin/movimientos/resumen`) + Hábitos (registros/rachas 7 días) + Bóveda (hojas de
+  la semana); comando `/semana` en el bot; sección con botón "Regenerar" en `RevisionTab`.
 - Panel de calidad/operación (salud de Ollama, backlog de jobs, cobertura de embeddings,
   presupuesto, última consolidación).
 - Dividir `audit/service.py` y `consolidation.py` (ya grandes) por caso de uso: mantenimiento,
@@ -213,6 +264,42 @@ Telegram, `SGR_SYNC_TOKEN` obligatorio.
   literalmente `scp`/`tar` manual cada vez (documentado en `HOMELAB.md`, funciona pero es 100%
   manual).
 - Observabilidad mínima: logs estructurados, rotación, alguna señal tipo Uptime Kuma.
+
+### Diferido — Infraestructura / distribución para terceros
+
+**Fecha:** 2026-09-24 (migrado de `PLAN-NEXTLEVEL.md` — "Fase 2", mayo 2026 — al borrar ese
+archivo por estar mayormente superado; esta fase seguía sin implementar)
+
+Distinto del punto de "Deploy reproducible" de Homelab de arriba (ese es sobre *tu* homelab
+real): esto es sobre que un tercero pueda correr SGR sin tocar nada a mano —
+`git clone` → `cp .env.example .env` (editar token) → `docker-compose up -d` → sistema
+funcionando. Requiere `Dockerfile` para backend (FastAPI+uvicorn), frontend (multi-stage:
+build Vite → nginx sirviendo `dist/`) y bot (Python); `docker-compose.yml` con los 3 servicios
++ perfil opcional `ollama`; volúmenes para `database/`/`uploads/` fuera de los containers;
+`README.md` raíz orientado al instalador (3 comandos, screenshot, badge de licencia). Solo
+tiene sentido si en algún momento se decide priorizar distribución a terceros — hoy nadie más
+corre SGR.
+
+### Diferido — Notificaciones unificadas
+
+**Fecha:** 2026-09-24 (migrado de `PLAN-NEXTLEVEL.md` — "Fase 3", mayo 2026 — al borrar ese
+archivo por estar mayormente superado; esta fase seguía sin implementar)
+
+Es la idea que más se repite en los documentos de auditoría externa de esta semana (aparece
+también en el roadmap de 90 días diferido más abajo) — sistema de alertas cross-módulo
+entregado por dos canales: campana web en TopBar y mensajes Telegram. Diseño propuesto:
+
+- Tabla unificada `notificaciones_pendientes(id, modulo, ref_id, tipo, fire_at, canal,
+  enviado, payload_json)`.
+- `POST /notificaciones/evaluar` regenera alertas de Finanzas e inserta recordatorios de
+  hábitos/agenda; scheduler como servicio Docker o `lifespan` FastAPI (`asyncio.sleep(60)`).
+- Entrega Telegram: job del bot que consulta `GET /notificaciones/pendientes?canal=telegram`
+  cada minuto, con inline keyboards ✅ Hecho / 🕐 Posponer / 📖 Abrir en web.
+- Campana web: `GET /notificaciones/pendientes?canal=web`, store con `notificaciones[]` +
+  `fetchNotificaciones()` + `marcarLeida(id)`, toggles por canal en `/settings`.
+- Cubriría: recordatorios de hojas (Bóveda), alertas financieras (Finanzas), eventos/tareas/
+  revisión (Agenda), hábito con hora + racha en riesgo (Hábitos) — hoy la única "campana" real
+  es un badge sin handler en Finanzas.
 
 ### No conviene hacer (según la auditoría, y coincide con el criterio de esta sesión)
 Migrar a PostgreSQL, microservicios, sync bidireccional de SQLite completo, más agentes

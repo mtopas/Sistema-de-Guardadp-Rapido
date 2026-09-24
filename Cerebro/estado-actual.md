@@ -1,6 +1,97 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-24
 
+## IMPLEMENTADO: CRUD de calendarios en Agenda + filtros en Finanzas → Datos (2026-09-24)
+
+Sesión "ArreglosFront-Finanzas/Agenda", dos features de frontend independientes pedidas desde
+`PROXIMAMENTE.md` ("Diferido — Agenda" y "Diferido — Finanzas", entradas de `AGREGAR-CORREGIR.txt`
+migradas el mismo día).
+
+**Parte 1 — CRUD de calendarios (Agenda):**
+- El backend (`POST`/`PATCH`/`DELETE /agenda/calendarios`) ya existía; el store
+  (`useStore.js`) también tenía `addAgendaCalendario`/`updateAgendaCalendario`/
+  `deleteAgendaCalendario` completos — lo que faltaba era la UI en `MesTab.jsx` (el botón
+  "+ Nuevo" llamaba a un estado muerto que nada renderizaba).
+- `CalendarioModal.jsx` nuevo (mismo patrón que `EventoModal`/`AgendaModalShell`): crear,
+  renombrar/cambiar color, eliminar. Al eliminar con otros calendarios existentes, ofrece
+  elegir entre "eliminar sus eventos" (default, cascada ya soportada por el schema — FK
+  `ON DELETE CASCADE`) o "mover eventos a" otro calendario.
+- Backend nuevo para el caso "mover": `PATCH /agenda/calendarios/{id}/reasignar-eventos?destino_id=`
+  (`agenda_reasignar_eventos_calendario` en `crud.py`) — UPDATE masivo por `calendario_id`,
+  no dependía de qué eventos estuvieran cargados en el store (ventana de fechas visible), a
+  diferencia de reasignar uno por uno desde el cliente.
+- Bug de color cacheado arreglado: `updateAgendaEvento` en el store no recalculaba
+  `calendario_color`/`calendario_nombre` al cambiar `calendario_id` de un evento existente —
+  ahora los busca en `agendaCalendarios` y los mergea en el patch optimista.
+- Bug cosmético del tick de calendario no centrado: `grid place-items-center` → `flex
+  items-center justify-center` + `lineHeight: 1` en el glyph (offset de baseline del ✓).
+- Punto de entrada: botón "+ Nuevo" (crear), ícono de lápiz on-hover + click derecho por fila
+  (editar/eliminar, reusa `AgendaContextMenu.jsx`).
+
+**Parte 2 — Filtros en Finanzas → Datos:**
+- `filtrarMovimientos(movs, { categoria, cuenta, tipo, desde, hasta })` nueva en
+  `data/finanzas.js` — función pura, reusa `isTransferencia`/`nombreCategoriaMovimiento`
+  existentes (no reinventa qué es transferencia). `tipo: 'income'|'expense'` excluye
+  movimientos marcados como transferencia aunque su campo `tipo` coincida; `tipo:
+  'transferencia'` trae solo esos, sin importar income/expense.
+- `DatosTab.jsx`: cuadro de filtros arriba de la tabla (categoría, cuenta, tipo, rango de
+  fechas, contador de resultados, botón limpiar). Opera sobre `finMovimientosAll` antes de
+  ordenar/virtualizar — no toca el store, todo local al componente.
+
+**Tests nuevos**: `data/finanzas.filtros.test.js` (10 tests, función pura `filtrarMovimientos`,
+incluye caso mixto esquema viejo/nuevo y el caso trampa de transferencias con `tipo` income/
+expense). No se agregó test de integración del store para el fix de `updateAgendaEvento`: el
+`vitest.config.js` del repo corre en `environment: 'node'` sin jsdom, y `useStore.js` toca
+`localStorage`/`window`/`document` a nivel de módulo — importar el store en un test node-only
+rompe. La lógica del fix es un merge de 3 líneas, no ameritaba cambiar la config de test para
+esto solo.
+
+Suite completa: 147 tests pasando (7 archivos). Build de frontend (`npm run build`) y `import
+app.main` del backend verificados sin errores.
+
+## Handoff de la sesión "ORQ SGR" (2026-09-24) — limpieza de docs raíz + cierre de tandas
+
+Resumen para quien retome como orquestador. El trabajo de fondo de esta semana (plan de
+testing completo Finanzas/Hábitos/Bóveda/Agenda/Jarvis + integración de rutas HTTP, incidente
+de seguridad del token de Telegram resuelto, Tool Registry v1 con 4 tools) ya está documentado
+en sus propias entradas de este mismo archivo y en `Cerebro/decisiones-implementacion.md`. Esta
+entrada es específica de la limpieza de documentos sueltos en la raíz del repo, hecha hoy.
+
+**Completado hoy:**
+- E2E con Playwright: 2 flujos reales en verde (Agenda, Bóveda) — ver commits `04e26ac`,
+  `73190c5`, `af5e791`, `a09682f`.
+- 3 bugs del bot clásico (`mybot/`) arreglados + 18 tests — commit `b17b474`. Quedan 2
+  hallazgos reales sin arreglar (ver "Diferido — Finanzas" y "Diferido — Bóveda" en
+  `PROXIMAMENTE.md`, migrados desde `Testeos-Ollama.md`).
+- Cuarta tool del Tool Registry (`fin.get_month_summary`) — commit previo de hoy.
+- Limpieza de 9 documentos sueltos en la raíz del repo (`AGREGAR-CORREGIR.txt`,
+  `Mejoras_Jarvis.md`, `PLAN-FIRE.md`, `PLAN-NEXTLEVEL.md`, `SGR_Documentacion_Completa.txt`,
+  `SGR-JARVIS-Catalogo-de-Features-2026-09-21.md`, `Testeos-Ollama.md` — borrados tras extraer
+  lo que seguía vigente a `PROXIMAMENTE.md`/`decisiones-implementacion.md`). Confirmado que una
+  carpeta vieja (`D:\Sistema-de-Guardadp-Rapido`, pre-rename, congelada desde el 22/09) causaba
+  confusión — el usuario ya la borró.
+- Sesión "ArreglosFront-Finanzas/Agenda" corriendo en paralelo (CRUD de calendarios en Agenda +
+  filtros en Finanzas → Datos) — ver prompt en el handoff de esta conversación si hace falta
+  el detalle completo; cuando cierre, va a dejar su propia entrada acá.
+
+**Pendiente, sin resolver, para la próxima sesión que retome esto:**
+1. **`SGR-Informe-Siguiente-Nivel.md`** (raíz del repo) — todavía sin triar. Es el documento
+   más importante de los que quedan: identifica un **riesgo real de pérdida de datos** (el
+   push del sync `.exe` ↔ homelab puede pisar escrituras del bot sin avisar, sin guard de
+   divergencia) que ya está parcialmente anotado en `PROXIMAMENTE.md` ("Diferido — riesgo de
+   pérdida de datos en el sync") pero el informe tiene mucho más detalle (plan de 30 días,
+   matriz de priorización, checklist de "producto profesional") que todavía no se evaluó punto
+   por punto. Hacer el mismo ejercicio que con `PLAN-NEXTLEVEL.md`: qué ya está hecho (algunos
+   ítems de testing ya se cerraron esta semana), qué migra a `PROXIMAMENTE.md`, qué se
+   descarta.
+2. **`SGR-JARVIS-Laboratorio-de-Repositorios-2026-09-21.md`** (raíz del repo) — era el diseño
+   de una carpeta `D:\Jarvis-Research` que parecía no existir; resuelto: la búsqueda anterior
+   leyó por error el checkout viejo ya borrado, no la ubicación real. Falta la verificación
+   final: confirmar dónde vive `D:\Jarvis-Research` de verdad y si el archivo puede borrarse
+   (documento de diseño ya materializado) o si tiene contenido sin implementar.
+3. Backup de la limpieza previa del incidente de seguridad — ya resuelto (carpeta borrada el
+   23/09), no necesita seguimiento.
+
 ## IMPLEMENTADO: cuarta tool del Tool Registry — Finanzas (2026-09-24)
 
 Cierra el hueco dejado a propósito en la tanda del 23/09 ("Finanzas queda deliberadamente

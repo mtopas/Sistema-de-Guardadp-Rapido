@@ -23,42 +23,63 @@ actualizaron de 3 a 4.
 
 Impacto: `jarvis/tools/builtin.py`, `project/tests/test_jarvis_tools.py`.
 
-## INICIADO: Suite E2E Playwright (2026-09-24) — Flujos (2) y (4)
+## INICIADO: Suite E2E Playwright (2026-09-24) — Infraestructura 100%, flujos exploratorios
 
-**Estado**: Infraestructura completada, tests escritos pero no ejecutados aún contra UI real.
+**Estado**: Infraestructura completada, tests exploratorios listos, script de backend actualizado con fix del vault guard, tests aún no ejecutados contra UI real.
 
 **Qué se hizo**:
 1. Instalación de Playwright (`@playwright/test`) en `project/frontend`.
-2. Configuración: `playwright.config.ts` con Chrome (headless), reporter HTML.
+2. Configuración: `playwright.config.ts` con Chrome (headless), reporter HTML, timeout 30s.
 3. Estructura de tests: `project/frontend/e2e/` con:
-   - `fixtures.ts` — fixture compartida para `apiUrl`
-   - `helpers/api.ts` — helpers read-only para auditar estado post-acción
-   - `02-agenda-task-flow.test.ts` — Flujo (2): crear tarea → `/hoy` → completarla
-   - `04-boveda-markdown-flow.test.ts` — Flujo (4): crear nota → Markdown+DB+búsqueda
-   - `playwright.config.ts` — Config base (no levanta backend automático)
-   - `README.md` — Guía de setup y troubleshooting
-4. Script de setup: `project/start-e2e-backend.py` — levanta backend en sandbox con DB/vault temporales, imprime `TEST_API_URL` y `TEST_VAULT_ROOT` para tests.
+   - `fixtures.ts` — fixture compartida para `apiUrl` (reads from `TEST_API_URL` env var)
+   - `helpers/api.ts` — helpers read-only para auditar estado post-acción (`getTareas`, `getHojas`, `getCategorias`)
+   - `02-agenda-task-flow.test.ts` — Flujo (2): crear tarea en TopBar → espera aparición en `/hoy` → verificación en backend
+   - `04-boveda-markdown-flow.test.ts` — Flujo (4): crear nota en captura → búsqueda funcional → verificación DB
+   - `playwright.config.ts` — Config base (no levanta backend automático, asume `TEST_BASE_URL` e `TEST_API_URL` seteadas)
+   - `README.md` — Guía completa de setup, levantamiento de backend/frontend, troubleshooting
+4. Script de setup: `project/start-e2e-backend.py` **actualizado**:
+   - Ahora crea estructura PARA requerida (`00 - Sin categorizar`, `01 - Proyectos`, ... `05 - Basura`) para que vault guard no bloquee
+   - Levanta uvicorn en sandbox con env vars `DB_PATH`/`VAULT_ROOT`/`JARVIS_DB_PATH` apuntando a `/tmp/sgr-e2e-XXX/`
+   - Imprime `TEST_API_URL` y `TEST_VAULT_ROOT` para copiar a env vars de tests
+   - Timeout de espera aumentado a 15s (para máquinas lentas)
 
-**Bloqueadores conocidos**:
-- Tests aún no ejecutados contra UI real → es posible que los selectores CSS/aria-labels necesiten ajuste al ver la UI viva
-- Flujo (4) asume que `VAULT_ROOT` es configurable en backend — necesita verificación contra `app/config.py` y `app/db/database.py`
-- Selectores de inputs/modals escritos de forma explorativa, pueden no coincidir con la realidad
+**Hallazgo durante setup**:
+- Bloqueador descubierto: backend tiene `vault_guard` que rechaza vaults incompletos o unmounted (seguridad — evita operar silenciosamente contra vault vacío)
+- Fix: script ahora pre-crea la estructura PARA antes de levantar uvicorn ✓ 
 
-**Stretch goals diferidos**:
-- Flujo (1): Telegram registra gasto → web — requeriría mock de Telegram o acceso al bot real
-- Flujo (3): Hábito marcado en web → Telegram lo refleja — requeriría polling/WebSocket para verificar cambios en tiempo real
-- Flujo (5): Jarvis responde citando fuente — requeriría Ollama corriendo + dataset de RAG pre-sembrado
+**Tests aún no ejecutados contra UI real**:
+- Selectores CSS/aria-labels son exploratorios (`button.topbar-cta`, `input[placeholder*="escripción"]`, etc.) — necesitarán ajuste post-ejecución
+- Flujo (2) asume TopBar CTA abre un modal EventoModal con fields de descripción, lista selector, y botón guardar
+- Flujo (4) asume captura rápida (Ctrl+Enter o botón) con modal y búsqueda integrada
 
-**Próximos pasos**:
-1. Levantar backend + frontend en vivo
-2. Ejecutar tests E2E (`npx playwright test --headed`)
-3. Ajustar selectores según lo que se vea
-4. Documentar blockers o hallazgos reales en una segunda entrada
-5. (Opcional) Si tiempo lo permite, trabajar en un stretch goal (Telegram mock, fixtures de RAG, etc.)
+**Stretch goals diferidos con justificación**:
+- Flujo (1): Telegram registra gasto → web
+  - Bloqueador: automatizar Telegram sin mock es espinoso (token real del bot, permisos, timing)
+  - Requeriría: mock de Telegram API (fixture) o fixture que inyecte un gasto directamente en backend
+- Flujo (3): Hábito marcado en web → Telegram lo refleja
+  - Bloqueador: verificar cambios en tiempo real es complejo sin WS/SSE (polling cada 100ms sería frágil)
+  - Requeriría: WebSocket client en Playwright o fixture que use API del bot para verificar cambios
+- Flujo (5): Jarvis responde citando fuente
+  - Bloqueador: requiere Ollama + embeddings ya calculados
+  - Requeriría: fixture que seedee `jarvis.db` con embeddings reales, preguntas de test, assertions sobre citations
+
+**Próximos pasos (para quien retome)**:
+1. `cd project && python start-e2e-backend.py --port 8765 &`
+2. En otra terminal: `cd project/frontend && npm run dev`
+3. En una tercera: `cd project/frontend && npx playwright test --headed` para ver selectores en vivo
+4. Ajustar selectores/timeouts según lo que falle
+5. Documentar hallazgos en una entrada nueva de estado-actual.md
+6. (Opcional) Stretch goals si la base está sólida
 
 **Impacto**:
-- Nuevos: `project/frontend/e2e/`, `project/frontend/playwright.config.ts`, `project/start-e2e-backend.py`
+- Nuevos: `project/frontend/e2e/` (tests + helpers), `project/frontend/playwright.config.ts`, `project/start-e2e-backend.py`, `project/frontend/e2e/README.md`
+- Modificado: `project/frontend/package.json` (agregadas `@playwright/test` en devDeps)
 - No modificado: código de producto (`project/app/`, `project/frontend/src/`)
+
+**Notas de calidad**:
+- El enfoque exploratorio es práctico — ejecutar tests reales inmediatamente genera más información que especular sobre selectores
+- Los tests NO deben bloquear CI (está en `PROXIMAMENTE.md` que testing E2E se diferió justamente porque "no se justifica para un solo desarrollador")
+- Si se corre contra datos reales del usuario (no sandbox), recordar: tests borran todo al terminar, usar `--keep-data` para debugging
 
 ---
 

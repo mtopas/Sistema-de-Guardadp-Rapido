@@ -1,0 +1,201 @@
+{
+  "_readme": "Fixtures compartidos para los tests de paridad de hábitos (frontend habitosUtils.js, backend app/db/crud.py, bot mybot/agenda_handlers.py). 'today' está fijo en 2026-09-23 (miércoles) para que los tres lados calculen sobre el mismo 'hoy' -- mismo valor que ya usa project/frontend/src/components/habitos/habitos.test.js vía vi.setSystemTime. Los valores 'expected_*' fueron precalculados a mano (ver script de simulación de la sesión que los generó) replicando el algoritmo exacto de cada lado -- cuando los tres coinciden se usa 'expected' único; cuando divergen, se listan expected_frontend/expected_backend/expected_bot por separado y se documenta en 'note'. dias_semana va como string JSON (o null), igual que en la DB real -- las tres implementaciones esperan ese formato, no una lista cruda.",
+
+  "today": "2026-09-23",
+
+  "schedule_cases": [
+    {
+      "name": "diario_activo",
+      "habito": { "frecuencia_tipo": "diario", "dias_semana": null, "activo": true },
+      "expected": {
+        "2026-09-20": true, "2026-09-21": true, "2026-09-22": true, "2026-09-23": true,
+        "2026-09-24": true, "2026-09-25": true, "2026-09-26": true
+      }
+    },
+    {
+      "name": "diario_inactivo",
+      "habito": { "frecuencia_tipo": "diario", "dias_semana": null, "activo": false },
+      "expected_frontend_bot": {
+        "2026-09-20": false, "2026-09-21": false, "2026-09-22": false, "2026-09-23": false,
+        "2026-09-24": false, "2026-09-25": false, "2026-09-26": false
+      },
+      "expected_backend": {
+        "2026-09-20": true, "2026-09-21": true, "2026-09-22": true, "2026-09-23": true,
+        "2026-09-24": true, "2026-09-25": true, "2026-09-26": true
+      },
+      "note": "DIVERGENCIA: _habito_is_scheduled() en crud.py (extraída de la clausura de habitos_stats) nunca chequea habito['activo'] -- frontend (isScheduled) y bot (_is_scheduled) devuelven false siempre para un hábito inactivo, backend lo trata como si siempre estuviera programado. Ver TestHabitosParidadBackend.test_inactive_habit_activo_ignored_by_backend en test_habitos_paridad.py."
+    },
+    {
+      "name": "semanal_mon_wed",
+      "habito": { "frecuencia_tipo": "semanal", "dias_semana": "[1,3]", "activo": true },
+      "expected": {
+        "2026-09-20": false, "2026-09-21": true, "2026-09-22": false, "2026-09-23": true,
+        "2026-09-24": false, "2026-09-25": false, "2026-09-26": false
+      }
+    },
+    {
+      "name": "semanal_weekend",
+      "habito": { "frecuencia_tipo": "semanal", "dias_semana": "[0,6]", "activo": true },
+      "expected": {
+        "2026-09-20": true, "2026-09-21": false, "2026-09-22": false, "2026-09-23": false,
+        "2026-09-24": false, "2026-09-25": false, "2026-09-26": true
+      }
+    },
+    {
+      "name": "semanal_friday",
+      "habito": { "frecuencia_tipo": "semanal", "dias_semana": "[5]", "activo": true },
+      "expected": {
+        "2026-09-20": false, "2026-09-21": false, "2026-09-22": false, "2026-09-23": false,
+        "2026-09-24": false, "2026-09-25": true, "2026-09-26": false
+      }
+    }
+  ],
+
+  "streak_cases": [
+    {
+      "name": "daily_no_gaps",
+      "description": "Hábito diario, completado todos los días desde su creación hasta hoy.",
+      "habito": { "frecuencia_tipo": "diario", "dias_semana": null, "activo": true, "creado_en": "2026-09-01T00:00:00" },
+      "registros": [
+        { "fecha": "2026-09-01", "valor": 1.0 }, { "fecha": "2026-09-02", "valor": 1.0 },
+        { "fecha": "2026-09-03", "valor": 1.0 }, { "fecha": "2026-09-04", "valor": 1.0 },
+        { "fecha": "2026-09-05", "valor": 1.0 }, { "fecha": "2026-09-06", "valor": 1.0 },
+        { "fecha": "2026-09-07", "valor": 1.0 }, { "fecha": "2026-09-08", "valor": 1.0 },
+        { "fecha": "2026-09-09", "valor": 1.0 }, { "fecha": "2026-09-10", "valor": 1.0 },
+        { "fecha": "2026-09-11", "valor": 1.0 }, { "fecha": "2026-09-12", "valor": 1.0 },
+        { "fecha": "2026-09-13", "valor": 1.0 }, { "fecha": "2026-09-14", "valor": 1.0 },
+        { "fecha": "2026-09-15", "valor": 1.0 }, { "fecha": "2026-09-16", "valor": 1.0 },
+        { "fecha": "2026-09-17", "valor": 1.0 }, { "fecha": "2026-09-18", "valor": 1.0 },
+        { "fecha": "2026-09-19", "valor": 1.0 }, { "fecha": "2026-09-20", "valor": 1.0 },
+        { "fecha": "2026-09-21", "valor": 1.0 }, { "fecha": "2026-09-22", "valor": 1.0 },
+        { "fecha": "2026-09-23", "valor": 1.0 }
+      ],
+      "expected": { "racha_actual": 23, "racha_max": 23, "pct_mes": 100 }
+    },
+    {
+      "name": "weekly_monday_unscheduled_gap_ok",
+      "description": "Hábito semanal (solo lunes); los 6 días no programados entre cada lunes no rompen la racha.",
+      "habito": { "frecuencia_tipo": "semanal", "dias_semana": "[1]", "activo": true, "creado_en": "2026-09-01T00:00:00" },
+      "registros": [
+        { "fecha": "2026-09-07", "valor": 1.0 },
+        { "fecha": "2026-09-14", "valor": 1.0 },
+        { "fecha": "2026-09-21", "valor": 1.0 }
+      ],
+      "expected": { "racha_actual": 3, "racha_max": 3 }
+    },
+    {
+      "name": "weekly_mon_wed_fri_no_gaps",
+      "description": "Hábito semanal lun/mié/vie, completado en las 10 fechas programadas hasta hoy (hoy = miércoles, completado).",
+      "habito": { "frecuencia_tipo": "semanal", "dias_semana": "[1,3,5]", "activo": true, "creado_en": "2026-09-01T00:00:00" },
+      "registros": [
+        { "fecha": "2026-09-02", "valor": 1.0 }, { "fecha": "2026-09-04", "valor": 1.0 },
+        { "fecha": "2026-09-07", "valor": 1.0 }, { "fecha": "2026-09-09", "valor": 1.0 },
+        { "fecha": "2026-09-11", "valor": 1.0 }, { "fecha": "2026-09-14", "valor": 1.0 },
+        { "fecha": "2026-09-16", "valor": 1.0 }, { "fecha": "2026-09-18", "valor": 1.0 },
+        { "fecha": "2026-09-21", "valor": 1.0 }, { "fecha": "2026-09-23", "valor": 1.0 }
+      ],
+      "expected": { "racha_actual": 10, "racha_max": 10 }
+    },
+    {
+      "name": "broken_by_explicit_zero",
+      "description": "Racha rota por un día programado con valor = 0 (2026-09-20); hoy y los dos días previos están completos.",
+      "habito": { "frecuencia_tipo": "diario", "dias_semana": null, "activo": true, "creado_en": "2026-09-01T00:00:00" },
+      "registros": [
+        { "fecha": "2026-09-20", "valor": 0.0 },
+        { "fecha": "2026-09-21", "valor": 1.0 },
+        { "fecha": "2026-09-22", "valor": 1.0 },
+        { "fecha": "2026-09-23", "valor": 1.0 }
+      ],
+      "expected": { "racha_actual": 3 }
+    },
+    {
+      "name": "broken_by_missing_registro",
+      "description": "Racha rota por un día programado SIN registro (2026-09-20, sin fila en absoluto); hoy y los dos días previos están completos.",
+      "habito": { "frecuencia_tipo": "diario", "dias_semana": null, "activo": true, "creado_en": "2026-09-01T00:00:00" },
+      "registros": [
+        { "fecha": "2026-09-21", "valor": 1.0 },
+        { "fecha": "2026-09-22", "valor": 1.0 },
+        { "fecha": "2026-09-23", "valor": 1.0 }
+      ],
+      "expected": { "racha_actual": 3 }
+    },
+    {
+      "name": "partial_values_sustain_streak",
+      "description": "valor = 0.5 (parcial) sostiene la racha igual que 1.0 en los tres lados (el criterio es valor > 0, no valor >= 1).",
+      "habito": { "frecuencia_tipo": "diario", "dias_semana": null, "activo": true, "creado_en": "2026-09-01T00:00:00" },
+      "registros": [
+        { "fecha": "2026-09-21", "valor": 0.5 },
+        { "fecha": "2026-09-22", "valor": 0.5 },
+        { "fecha": "2026-09-23", "valor": 0.5 }
+      ],
+      "expected": { "racha_actual": 3, "racha_max": 3 }
+    },
+    {
+      "name": "newly_created_respects_floor",
+      "description": "Hábito creado ayer (2026-09-22): un registro anterior a creado_en (2026-09-15) no debe contarse ni siquiera visitarse.",
+      "habito": { "frecuencia_tipo": "diario", "dias_semana": null, "activo": true, "creado_en": "2026-09-22T08:00:00" },
+      "registros": [
+        { "fecha": "2026-09-15", "valor": 1.0 },
+        { "fecha": "2026-09-22", "valor": 1.0 },
+        { "fecha": "2026-09-23", "valor": 1.0 }
+      ],
+      "expected": { "racha_actual": 2, "racha_max": 2 }
+    },
+    {
+      "name": "DIVERGENCE_today_pending",
+      "description": "Hábito diario con racha de 2 días (21 y 22), hoy (23) programado pero SIN completar todavía.",
+      "habito": { "frecuencia_tipo": "diario", "dias_semana": null, "activo": true, "creado_en": "2026-09-01T00:00:00" },
+      "registros": [
+        { "fecha": "2026-09-21", "valor": 1.0 },
+        { "fecha": "2026-09-22", "valor": 1.0 }
+      ],
+      "expected_frontend": 0,
+      "expected_backend": 0,
+      "expected_bot": 2,
+      "note": "DIVERGENCIA REAL: calcStreak (frontend) y streak_cur (backend, habitos_stats) rompen la racha en la primera iteración si HOY está programado y no completado (su condición 'elif d <= today: break' es cierta también cuando d === today, pese a que el comentario en habitosUtils.js dice 'día... en el pasado'). _calc_racha (bot) tiene un caso explícito 'elif iso == today.isoformat(): pass' que día de hoy incompleto NO rompe la racha, sigue contando hacia atrás. Resultado: frontend/backend devuelven 0, el bot devuelve 2 con los mismos datos exactos."
+    }
+  ],
+
+  "month_pct_cases": [
+    {
+      "name": "month_pct_mixed",
+      "description": "Setiembre 2026, hábito semanal lun/mié/vie, mezcla de completo/parcial/sin registro entre días programados y no programados.",
+      "habito": { "frecuencia_tipo": "semanal", "dias_semana": "[1,3,5]", "activo": true, "creado_en": "2026-09-01T00:00:00" },
+      "registros": [
+        { "fecha": "2026-09-02", "valor": 1.0 },
+        { "fecha": "2026-09-04", "valor": 1.0 },
+        { "fecha": "2026-09-07", "valor": 0.5 },
+        { "fecha": "2026-09-09", "valor": 0.5 },
+        { "fecha": "2026-09-14", "valor": 1.0 },
+        { "fecha": "2026-09-16", "valor": 0.5 },
+        { "fecha": "2026-09-21", "valor": 1.0 },
+        { "fecha": "2026-09-23", "valor": 1.0 }
+      ],
+      "year": 2026,
+      "month": 9,
+      "expected_pct_mes": 65
+    },
+    {
+      "name": "month_pct_zero",
+      "description": "Hábito diario sin ningún registro en el mes -> 0%.",
+      "habito": { "frecuencia_tipo": "diario", "dias_semana": null, "activo": true, "creado_en": "2026-09-01T00:00:00" },
+      "registros": [],
+      "year": 2026,
+      "month": 9,
+      "expected_pct_mes": 0
+    }
+  ],
+
+  "inactive_habit_ignored_by_backend": {
+    "description": "Hábito diario, activo = false, con 4 días consecutivos (incluido hoy) marcados como completos. Documenta la misma divergencia que 'diario_inactivo' en schedule_cases pero a través de habitos_stats() completo (racha_actual, racha_max, pct_mes), no solo is_scheduled.",
+    "habito": { "frecuencia_tipo": "diario", "dias_semana": null, "activo": false, "creado_en": "2026-09-01T00:00:00" },
+    "registros": [
+      { "fecha": "2026-09-20", "valor": 1.0 },
+      { "fecha": "2026-09-21", "valor": 1.0 },
+      { "fecha": "2026-09-22", "valor": 1.0 },
+      { "fecha": "2026-09-23", "valor": 1.0 }
+    ],
+    "expected_frontend_bot": { "racha_actual": 0, "racha_max": 0, "pct_mes": 0 },
+    "note": "DIVERGENCIA REAL (misma causa raíz que 'diario_inactivo'): habitos_stats() en crud.py nunca filtra por habito['activo'], así que para este hábito inactivo con 4 días completos el backend calcula racha_actual=4, racha_max=4, pct_mes=17 (round(4/23*100)) -- ver test_inactive_habit_activo_ignored_by_backend, que llama a crud.habitos_stats() real y comprueba estos valores en vivo (no hardcodeados a mano) en vez de asumirlos, precisamente porque el punto del test es confirmar que el bug sigue ahí."
+  }
+}

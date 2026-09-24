@@ -70,20 +70,13 @@ test.describe('Flujo (4): Bóveda - Nota creada y búsqueda funciona', () => {
       await expect(searchResult).toBeVisible({ timeout: 3000 });
     }
 
-    // 10. Verificar en backend (tolerante a errores)
-    try {
-      const hojas = await getHojas(apiUrl);
-      const created = hojas.find((h: any) =>
-        h.apuntes?.includes(noteContent) || h.titulo?.includes('E2E')
-      );
-      if (created) {
-        console.log('✓ Nota creada:', created.id);
-      } else {
-        console.log('⚠️ Nota no encontrada en backend (pero aparece en UI)');
-      }
-    } catch (e) {
-      console.log('⚠️ Error verificando backend:', e);
-    }
+    // 10. Verificar en backend — fuente de verdad real, no tolerante.
+    // Campo real de contenido de una hoja de texto es `contenido` (no `titulo`/`apuntes` —
+    // ver app/db/crud.py:46, comentario "contenido=título"; `apuntes` es cuerpo/notas extra).
+    const hojas = await getHojas(apiUrl);
+    const created = hojas.find((h: any) => h.contenido === noteContent);
+    expect(created).toBeDefined();
+    console.log('✓ Nota creada en backend:', created.id);
   });
 });
 

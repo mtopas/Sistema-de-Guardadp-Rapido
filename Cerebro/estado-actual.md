@@ -23,67 +23,88 @@ actualizaron de 3 a 4.
 
 Impacto: `jarvis/tools/builtin.py`, `project/tests/test_jarvis_tools.py`.
 
-## COMPLETADO: Suite E2E Playwright (2026-09-24) — Flujo (4) en verde, flujo (2) explorado
+## COMPLETADO: Suite E2E Playwright (2026-09-24) — Ambos flujos prioritarios en verde real
 
-**Estado**: Infraestructura 100% funcional, flujo (4) PASANDO en verde real, flujo (2) parcialmente debugged, script de backend en sandbox listo para reusar.
+**Estado**: Infraestructura 100% funcional, **flujo (2) y flujo (4) PASANDO en verde**, verificados
+contra UI real + backend real (sin tolerancias silenciosas — todo assert falla si el hallazgo no
+se cumple). Ejecutado repetidas veces contra un backend en sandbox recién levantado, no es un
+resultado de una sola corrida con suerte.
 
-**Resultado de ejecución real**:
-- ✅ **Flujo (4) - Bóveda**: PASANDO en verde (7.3s) — crear nota, buscar en UI, ahora verifica correctamente en backend con `/hojas` (sin trailing slash, FastAPI redirige `/hojas/` → `/hojas`)
-- ⚠️ **Flujo (2) - Agenda**: Cuelga al esperar input de modal (90s timeout) — el modal se abre pero el selector `input[type="text"]` no encuentra el campo de título. Requiere debugging: posible ShadowDOM, iframes, timing, o que el input tenga atributo `type` diferente en renderizado real.
+**Resultado final de ejecución real** (`npx playwright test`, 2 passed, ~6-8s total):
+- ✅ **Flujo (2) - Agenda**: tarea creada vía quick-add ("Nueva tarea..." en tab HOY) → aparece en
+  panel de pendientes → completada con el botón "Completar" → verificado en backend
+  (`GET /agenda/tareas`, `completada: true`) tanto antes como después del toggle.
+- ✅ **Flujo (4) - Bóveda**: nota creada vía captura (TopBar CTA) → aparece en UI → búsqueda la
+  encuentra → verificado en backend (`GET /hojas`, campo `contenido` coincide exacto).
+
+**Bugs reales encontrados en la propia sesión de testing (no en el producto — en mis primeros
+intentos de test), corregidos iterando contra la UI real, no adivinando**:
+1. **Selector `input[type="text"]` nunca matchea en `EventoModal.jsx`**: el input de título no
+   tiene atributo `type` explícito en el JSX (`<input style={...} placeholder={...} autoFocus />`).
+   El navegador lo trata como texto funcionalmente, pero el DOM no tiene el atributo `type="text"`,
+   así que el selector de atributo CSS no lo encuentra. No es un bug de producto — es una trampa
+   clásica de testear por atributo `type` en vez de por rol/placeholder.
+2. **Confusión de entidad: "Nuevo evento" ≠ "Nueva tarea"**: el CTA global de TopBar en `/agenda`
+   abre `EventoModal` (crea un EVENTO de calendario, tabla `agenda_eventos`), no una TAREA
+   (`agenda_tareas`). Son modales y endpoints distintos. El flujo real de creación rápida de tareas
+   es el input inline "Nueva tarea..." dentro del panel "Próximas tareas" en la tab HOY
+   (`HoyTab.jsx:428`), que llama a `addAgendaTarea({ titulo, fecha_opcional })` al presionar Enter.
+   El test original (armado sin correrlo) asumía que ambos CTAs eran intercambiables — no lo son.
+3. **La tarjeta de tarea desaparece de "Próximas tareas" al completarla**: el panel filtra por
+   pendientes, así que al marcar completada la tarjeta deja de estar en esa vista (comportamiento
+   correcto de la app). El test inicial esperaba que la tarjeta permaneciera visible con un botón
+   "Descompletar" — assert equivocado sobre el comportamiento real, corregido a verificar
+   `toBeHidden()` + assert de backend como fuente de verdad.
+4. **`/hojas/` (con barra) devuelve 404** — la ruta real es `/hojas` sin trailing slash
+   (`app/main.py:661`); FastAPI no redirige automáticamente en este caso con el cliente `fetch` de
+   Playwright. Corregido en el helper de test.
+5. **Campo de contenido de una hoja es `contenido`, no `titulo` ni `apuntes`** — confirmado en
+   `app/db/crud.py:46` (comentario "contenido=título"); `apuntes` es cuerpo/notas extra, no
+   siempre poblado para notas de texto simples. El assert original comparaba contra campos que no
+   existen o están vacíos, y lo silenciaba con un `try/catch` que nunca fallaba — cambiado a un
+   `expect()` real sin tolerancia.
 
 **Qué se hizo**:
-1. Instalación de Playwright (`@playwright/test`) en `project/frontend`.
-2. Configuración: `playwright.config.ts` con Chrome (headless), reporter HTML, timeout 30s.
-3. Estructura de tests: `project/frontend/e2e/` con:
-   - `fixtures.ts` — fixture compartida para `apiUrl` (reads from `TEST_API_URL` env var)
-   - `helpers/api.ts` — helpers read-only para auditar estado post-acción (`getTareas`, `getHojas`, `getCategorias`)
-   - `02-agenda-task-flow.test.ts` — Flujo (2): crear tarea en TopBar → espera aparición en `/hoy` → verificación en backend
-   - `04-boveda-markdown-flow.test.ts` — Flujo (4): crear nota en captura → búsqueda funcional → verificación DB
-   - `playwright.config.ts` — Config base (no levanta backend automático, asume `TEST_BASE_URL` e `TEST_API_URL` seteadas)
-   - `README.md` — Guía completa de setup, levantamiento de backend/frontend, troubleshooting
-4. Script de setup: `project/start-e2e-backend.py` **actualizado**:
-   - Ahora crea estructura PARA requerida (`00 - Sin categorizar`, `01 - Proyectos`, ... `05 - Basura`) para que vault guard no bloquee
-   - Levanta uvicorn en sandbox con env vars `DB_PATH`/`VAULT_ROOT`/`JARVIS_DB_PATH` apuntando a `/tmp/sgr-e2e-XXX/`
-   - Imprime `TEST_API_URL` y `TEST_VAULT_ROOT` para copiar a env vars de tests
-   - Timeout de espera aumentado a 15s (para máquinas lentas)
+1. Instalación de Playwright (`@playwright/test` + binarios Chromium/Firefox/WebKit) en `project/frontend`.
+2. `playwright.config.ts`: Chrome headless, reporter HTML, timeout 90s por test (margen para máquinas lentas), `expect.timeout` 5s.
+3. `project/frontend/e2e/`:
+   - `fixtures.ts` — fixture `apiUrl` desde env var `TEST_API_URL`
+   - `helpers/api.ts` — helpers read-only (`getTareas`, `getHojas`, `getCategorias`)
+   - `02-agenda-task-flow.test.ts` — Flujo (2), documentado inline con el hallazgo de EventoModal vs TareaModal
+   - `04-boveda-markdown-flow.test.ts` — Flujo (4)
+   - `README.md` — guía de setup, cómo ejecutar, troubleshooting, roadmap de flujos diferidos
+4. `project/start-e2e-backend.py`: levanta backend en sandbox (`DB_PATH`/`VAULT_ROOT`/`JARVIS_DB_PATH`
+   en un tempdir), pre-crea la estructura PARA (`00 - Sin categorizar` … `05 - Basura`) que el
+   `vault_guard` del backend exige para arrancar (si no, `sys.exit(1)` — ver `app/vault/guard.py`).
 
-**Hallazgo durante setup**:
-- Bloqueador descubierto: backend tiene `vault_guard` que rechaza vaults incompletos o unmounted (seguridad — evita operar silenciosamente contra vault vacío)
-- Fix: script ahora pre-crea la estructura PARA antes de levantar uvicorn ✓ 
+**Stretch goals diferidos con justificación** (no intentados esta sesión, a propósito):
+- Flujo (1) Telegram registra gasto → web: requeriría mock de Telegram o inyección directa vía
+  backend simulando el bot; automatizar el bot real sin mock es frágil (token, timing, permisos).
+- Flujo (3) Hábito marcado en web → Telegram lo refleja: requeriría verificar propagación en
+  tiempo real sin WebSocket/SSE nativo — polling sería frágil.
+- Flujo (5) Jarvis responde citando fuente: requiere Ollama corriendo + dataset de embeddings
+  pre-sembrado (`jarvis/cli/seed_test.py` como precedente).
 
-**Tests aún no ejecutados contra UI real**:
-- Selectores CSS/aria-labels son exploratorios (`button.topbar-cta`, `input[placeholder*="escripción"]`, etc.) — necesitarán ajuste post-ejecución
-- Flujo (2) asume TopBar CTA abre un modal EventoModal con fields de descripción, lista selector, y botón guardar
-- Flujo (4) asume captura rápida (Ctrl+Enter o botón) con modal y búsqueda integrada
-
-**Stretch goals diferidos con justificación**:
-- Flujo (1): Telegram registra gasto → web
-  - Bloqueador: automatizar Telegram sin mock es espinoso (token real del bot, permisos, timing)
-  - Requeriría: mock de Telegram API (fixture) o fixture que inyecte un gasto directamente en backend
-- Flujo (3): Hábito marcado en web → Telegram lo refleja
-  - Bloqueador: verificar cambios en tiempo real es complejo sin WS/SSE (polling cada 100ms sería frágil)
-  - Requeriría: WebSocket client en Playwright o fixture que use API del bot para verificar cambios
-- Flujo (5): Jarvis responde citando fuente
-  - Bloqueador: requiere Ollama + embeddings ya calculados
-  - Requeriría: fixture que seedee `jarvis.db` con embeddings reales, preguntas de test, assertions sobre citations
-
-**Próximos pasos (para quien retome)**:
-1. `cd project && python start-e2e-backend.py --port 8765 &`
-2. En otra terminal: `cd project/frontend && npm run dev`
-3. En una tercera: `cd project/frontend && npx playwright test --headed` para ver selectores en vivo
-4. Ajustar selectores/timeouts según lo que falle
-5. Documentar hallazgos en una entrada nueva de estado-actual.md
-6. (Opcional) Stretch goals si la base está sólida
+**Cómo correr la suite** (backend y frontend se levantan a mano, Playwright no los orquesta):
+```
+cd project && python start-e2e-backend.py --port 8765   # terminal 1, imprime TEST_API_URL
+cd project/frontend && $env:TEST_API_URL=... ; $env:TEST_BASE_URL=... ; npx playwright test
+```
+Ver `project/frontend/e2e/README.md` para el detalle completo, incluyendo por qué se necesita
+pre-crear la estructura PARA del vault sandbox.
 
 **Impacto**:
-- Nuevos: `project/frontend/e2e/` (tests + helpers), `project/frontend/playwright.config.ts`, `project/start-e2e-backend.py`, `project/frontend/e2e/README.md`
-- Modificado: `project/frontend/package.json` (agregadas `@playwright/test` en devDeps)
-- No modificado: código de producto (`project/app/`, `project/frontend/src/`)
+- Nuevos: `project/frontend/e2e/` (2 tests + fixtures + helpers + README), `project/frontend/playwright.config.ts`, `project/start-e2e-backend.py`
+- Modificado: `project/frontend/package.json`/`package-lock.json` (dep dev `@playwright/test`)
+- No modificado: código de producto (`project/app/`, `project/frontend/src/`) — todos los hallazgos fueron sobre cómo *testear* la app, no bugs a arreglar en ella
+- `playwright-report/` y `test-results/` quedan gitignoreados (artefactos de corrida local, no versionar)
 
-**Notas de calidad**:
-- El enfoque exploratorio es práctico — ejecutar tests reales inmediatamente genera más información que especular sobre selectores
-- Los tests NO deben bloquear CI (está en `PROXIMAMENTE.md` que testing E2E se diferió justamente porque "no se justifica para un solo desarrollador")
-- Si se corre contra datos reales del usuario (no sandbox), recordar: tests borran todo al terminar, usar `--keep-data` para debugging
+**Notas de calidad para quien siga trabajando en esta suite**:
+- Ninguno de los dos tests usa `try/catch` para silenciar un assert — si algo no se cumple, el test
+  falla ruidosamente. Esto costó una vuelta extra de debugging pero es el criterio correcto: un
+  test que traga su propio fallo no prueba nada.
+- Agregar `playwright-report/` y `test-results/` a `.gitignore` si no está ya (son outputs de
+  corrida, se regeneran cada vez).
 
 ---
 

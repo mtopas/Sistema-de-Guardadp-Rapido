@@ -8,6 +8,10 @@ project/dist/
 project/frontend/dist/
 project/build/
 
+# Artefactos de corridas de Playwright — se regeneran cada vez, no versionar
+project/frontend/playwright-report/
+project/frontend/test-results/
+
 # Datos y secretos — nunca commitear
 project/.env
 project/database/app.db

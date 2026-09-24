@@ -1,77 +1,61 @@
 import { test, expect } from './fixtures';
 
+/**
+ * Flujo E2E (2): Tarea creada en web → aparece en `/hoy` → callback la completa.
+ *
+ * Nota de diseño (hallazgo de la sesión): el CTA global de TopBar ("Nuevo evento") abre
+ * EventoModal, que crea un EVENTO de calendario, no una TAREA — son entidades distintas
+ * (agenda_eventos vs agenda_tareas). El flujo real de creación rápida de tareas es el
+ * input "quick-add" dentro del panel de tareas pendientes en la tab HOY
+ * (HoyTab.jsx:428, aria-label = i18n key 'agendaTareaRapida'), que llama a
+ * `addAgendaTarea({ titulo, fecha_opcional })` al presionar Enter.
+ * Completar se hace con el botón aria-label="Completar" en TareaPendienteCard (HoyTab.jsx:66),
+ * que llama a `updateAgendaTarea(tarea.id, { completada: true })`.
+ */
+
 test.describe('Flujo (2): Agenda - Tarea creada, vista en /hoy, completada', () => {
-  test.use({ timeout: 90000 });
+  test.use({ timeout: 30000 });
 
-  test('crear tarea, verificar en /hoy y completarla', async ({ page, apiUrl }) => {
-    // 1. Navegar a /agenda
-    await page.goto('/agenda');
+  test('crear tarea vía quick-add, verificar en /hoy y completarla', async ({ page, apiUrl }) => {
+    // 1. Navegar directo a la tab "hoy" de Agenda
+    await page.goto('/agenda?tab=hoy');
     await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
-    await page.waitForTimeout(1000);
 
-    // 2. Hacer click en el botón CTA
-    const ctaBtn = page.locator('button.topbar-cta').first();
-    await expect(ctaBtn).toBeVisible({ timeout: 5000 });
-    await ctaBtn.click();
+    // 2. Encontrar el input de quick-add de tareas por su placeholder real (i18n: agendaTareaRapida)
+    const taskInput = page.locator('input[placeholder="Nueva tarea..."]').first();
+    await expect(taskInput).toBeVisible({ timeout: 10000 });
 
-    // 3. Esperar modal
-    const modal = page.locator('[role="dialog"]').first();
-    await modal.waitFor({ state: 'visible', timeout: 5000 });
-
-    // 4. Llenar título (primer input, autofocused)
-    const titleInput = modal.locator('input[type="text"]').first();
+    // 3. Escribir el nombre de la tarea y confirmar con Enter
     const taskName = `Tarea E2E ${Date.now()}`;
-    await titleInput.fill(taskName);
+    await taskInput.fill(taskName);
+    await taskInput.press('Enter');
 
-    // 5. Llenar descripción opcional
-    const descInput = modal.locator('textarea').first();
-    if (await descInput.isVisible({ timeout: 1000 }).catch(() => false)) {
-      await descInput.fill('Test E2E description');
-    }
-
-    // 6. Guardar — buscar botón en footer del modal
-    // El footer está al final del modal, buscar cualquier button con "guard" en el texto
-    const footerButtons = modal.locator('button');
-    let saveBtn = null;
-    const buttonCount = await footerButtons.count();
-
-    // Buscar el último botón que no sea "Cancelar"
-    for (let i = buttonCount - 1; i >= 0; i--) {
-      const btn = footerButtons.nth(i);
-      const text = await btn.textContent().catch(() => '');
-      if (text.toLowerCase().includes('guardar') || text.toLowerCase().includes('crear') || text.toLowerCase().includes('ok')) {
-        saveBtn = btn;
-        break;
-      }
-    }
-
-    if (!saveBtn) {
-      // Fallback: buscar por aria-label o simplemente el penúltimo botón (después de Cancelar)
-      saveBtn = footerButtons.nth(buttonCount - 1);
-    }
-
-    await expect(saveBtn).toBeTruthy();
-    await saveBtn.click();
-
-    // 7. Esperar a que el modal se cierre
-    await modal.waitFor({ state: 'hidden', timeout: 3000 }).catch(() => {});
-    await page.waitForTimeout(500);
-
-    // 8. Verificar que la tarea aparezca
+    // 4. Esperar a que la tarea aparezca en la lista de pendientes
     const taskDisplay = page.locator(`text=${taskName}`).first();
     await expect(taskDisplay).toBeVisible({ timeout: 5000 });
 
-    // 9. Verificar en backend
-    try {
-      const tareas = await getTareas(apiUrl);
-      const created = tareas.find((t: any) =>
-        t.titulo?.includes(taskName) || t.descripcion?.includes(taskName)
-      );
-      expect(created).toBeDefined();
-      console.log('✓ Tarea creada:', created?.id);
-    } catch (e) {
-      console.log('⚠️ No se pudo verificar en backend:', e);
-    }
+    // 5. Verificar en backend que la tarea se guardó
+    const tareasAfterCreate = await getTareas(apiUrl);
+    const created = tareasAfterCreate.find((t: any) => t.titulo === taskName);
+    expect(created).toBeDefined();
+    expect(created.completada).toBeFalsy();
+
+    // 6. Marcar como completada — click en el botón "Completar" de esa tarjeta
+    const taskCard = taskDisplay.locator('xpath=ancestor::div[contains(@class, "panel-strong")]').first();
+    const completeBtn = taskCard.locator('button[aria-label="Completar"]').first();
+    await expect(completeBtn).toBeVisible({ timeout: 3000 });
+    await completeBtn.click();
+
+    // 7. La lista "Próximas tareas" filtra por pendientes — al completarse, la tarjeta
+    // desaparece de esta vista (comportamiento real de la app, confirmado viendo el DOM
+    // tras el click: pasa a "Sin tareas próximas"). Verificamos que deje de estar visible.
+    await expect(taskDisplay).toBeHidden({ timeout: 3000 });
+
+    // 8. Verificar en backend que quedó completada — fuente de verdad del callback
+    const tareasAfterComplete = await getTareas(apiUrl);
+    const completedTask = tareasAfterComplete.find((t: any) => t.id === created.id);
+    expect(completedTask).toBeDefined();
+    expect(completedTask.completada).toBeTruthy();
   });
 });
 

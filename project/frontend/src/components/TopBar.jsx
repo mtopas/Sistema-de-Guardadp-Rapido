@@ -59,6 +59,7 @@ export default function TopBar({ searchQuery = '', onSearchChange, searchInputRe
   const openAgendaEvento = useStore(s => s.openAgendaEvento)
   const openHabitoModal  = useStore(s => s.openHabitoModal)
   const openJarvisCapture = useStore(s => s.openJarvisCapture)
+  const openFeedback     = useStore(s => s.openFeedback)
   const initial      = userName ? userName.trim()[0].toUpperCase() : '?'
 
   const isHabitos  = location.pathname.startsWith('/habitos')
@@ -518,8 +519,12 @@ export default function TopBar({ searchQuery = '', onSearchChange, searchInputRe
         <div className="w-px h-6" style={{ background: 'var(--border)' }} />
 
         <div className="flex items-center gap-2.5 pl-1">
-          <div
-            className="w-9 h-9 rounded-full grid place-items-center shrink-0 topbar-avatar"
+          <button
+            type="button"
+            onClick={openFeedback}
+            aria-label={t(lang, 'feedbackTitle') || 'Feedback'}
+            title={t(lang, 'feedbackTitle') || 'Feedback'}
+            className="w-9 h-9 rounded-full grid place-items-center shrink-0 topbar-avatar transition-transform duration-150 hover:scale-[1.06] active:scale-95 cursor-pointer"
             style={{
               background: 'var(--header-avatar-bg, var(--cta-bg))',
               color: 'var(--cta-text)',
@@ -527,10 +532,11 @@ export default function TopBar({ searchQuery = '', onSearchChange, searchInputRe
               fontStyle: 'italic',
               fontSize: 12,
               fontWeight: 600,
+              border: 'none',
             }}
           >
             {initial}
-          </div>
+          </button>
           <div className="hidden lg:flex flex-col leading-tight min-w-0">
             <div className="text-[12.5px] font-medium truncate" style={{ color: 'var(--text)' }}>
               {userName || '—'}

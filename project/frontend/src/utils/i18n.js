@@ -23,6 +23,9 @@ export const TRANSLATIONS = {
     bovedaDeleteCatMenu: 'Eliminar categoría',
     bovedaCatHasHojas: 'La categoría tiene hojas — movelas o eliminálas primero.',
     bovedaCatHasSubcats: 'La categoría tiene subcategorías — eliminálas primero.',
+    feedbackTitle: 'Feedback', feedbackPlaceholder: 'Contanos qué pensás, qué falta, qué rompiste...',
+    feedbackSend: 'Enviar', feedbackSending: 'Enviando...', feedbackSent: 'Gracias por el feedback',
+    feedbackHistoryTitle: 'Ya enviado', feedbackEmpty: 'Todavía no mandaste feedback.',
     // Finanzas
     finanzas: 'Finanzas',
     dashboard: 'Dashboard', movements: 'Movimientos', patrimony: 'Patrimonio', fireProjection: 'Proyección FIRE',
@@ -371,6 +374,9 @@ export const TRANSLATIONS = {
     bovedaDeleteCatMenu: 'Delete category',
     bovedaCatHasHojas: 'This category has notes — move or delete them first.',
     bovedaCatHasSubcats: 'This category has subcategories — delete them first.',
+    feedbackTitle: 'Feedback', feedbackPlaceholder: 'Tell us what you think, what\'s missing, what broke...',
+    feedbackSend: 'Send', feedbackSending: 'Sending...', feedbackSent: 'Thanks for the feedback',
+    feedbackHistoryTitle: 'Already sent', feedbackEmpty: 'You haven\'t sent feedback yet.',
     // Finanzas
     finanzas: 'Finances',
     dashboard: 'Dashboard', movements: 'Movements', patrimony: 'Net worth', fireProjection: 'FIRE Projection',

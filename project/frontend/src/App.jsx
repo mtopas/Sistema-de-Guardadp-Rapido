@@ -5,6 +5,7 @@ import Layout from './components/Layout'
 import Toast from './components/Toast'
 import TweaksPanel from './components/TweaksPanel'
 import CaptureModal from './components/CaptureModal'
+import FeedbackModal from './components/FeedbackModal'
 import MovementModal from './components/finanzas/MovementModal'
 import CaptureScreen  from './screens/CaptureScreen'
 import SettingsScreen from './screens/SettingsScreen'
@@ -26,6 +27,7 @@ export default function App() {
   const fetchFinCategorias        = useStore(s => s.fetchFinCategorias)
   const fetchFinConfig            = useStore(s => s.fetchFinConfig)
   const fetchFinNotas             = useStore(s => s.fetchFinNotas)
+  const fetchFeedback             = useStore(s => s.fetchFeedback)
   const fetchFinEmergencia        = useStore(s => s.fetchFinEmergencia)
   const fetchAgendaCalendarios    = useStore(s => s.fetchAgendaCalendarios)
   const fetchAgendaEventos        = useStore(s => s.fetchAgendaEventos)
@@ -46,6 +48,7 @@ export default function App() {
     fetchFinCategorias()
     fetchFinConfig()
     fetchFinNotas()
+    fetchFeedback()
     fetchFinEmergencia()
     fetchAgendaCalendarios()
     fetchAgendaEventos()
@@ -82,6 +85,7 @@ export default function App() {
       <Toast />
       <TweaksPanel />
       <CaptureModal />
+      <FeedbackModal />
       <MovementModal />
       <JarvisCaptureModal />
     </BrowserRouter>

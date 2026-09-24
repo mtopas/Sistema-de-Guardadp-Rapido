@@ -39,6 +39,9 @@ from app.db.crud import (
     obtener_hoja_por_id,
     obtener_hojas,
     obtener_hojas_recientes,
+    # Feedback
+    feedback_obtener,
+    feedback_crear,
     # Finanzas
     fin_obtener_cuentas,
     fin_crear_cuenta,
@@ -142,6 +145,12 @@ try:
     _JARVIS_AVAILABLE = True
 except ImportError:
     _JARVIS_AVAILABLE = False
+
+
+# --- Pydantic models for Feedback ---
+
+class FeedbackCreate(BaseModel):
+    contenido: str
 
 
 # --- Pydantic models for Finanzas ---
@@ -496,6 +505,20 @@ def api_meta():
         "data_root": str(data_root()),
         "counts": counts,
     }
+
+
+# --- Feedback ---
+
+@app.get("/feedback")
+def listar_feedback():
+    return feedback_obtener()
+
+
+@app.post("/feedback")
+def crear_feedback(body: FeedbackCreate):
+    if not body.contenido.strip():
+        raise HTTPException(status_code=400, detail="El contenido no puede estar vacío")
+    return feedback_crear(body.contenido)
 
 
 # --- Categorias ---

@@ -50,6 +50,14 @@ def init_db():
         )
     """)
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS feedback (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            contenido TEXT NOT NULL,
+            fecha     TEXT NOT NULL
+        )
+    """)
+
     # --- Finanzas tables ---
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS fin_cuentas (

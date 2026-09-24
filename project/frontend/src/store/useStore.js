@@ -128,6 +128,12 @@ export const useStore = create((set, get) => ({
   openHabitoModal:  () => set({ habitoModalOpen: true }),
   closeHabitoModal: () => set({ habitoModalOpen: false }),
 
+  // --- Feedback modal (triggered from avatar en TopBar) ---
+  feedbackOpen:  false,
+  openFeedback:  () => set({ feedbackOpen: true }),
+  closeFeedback: () => set({ feedbackOpen: false }),
+  feedbackList:  [],
+
   // Finanzas state
   selectedMes:        currentMes(),
   finActiveTab:       'dashboard',
@@ -1298,6 +1304,36 @@ export const useStore = create((set, get) => ({
     if (s._toastTimer) clearTimeout(s._toastTimer)
     const id = setTimeout(() => set({ toast: null, _toastTimer: null }), 2500)
     set({ toast: { message, type }, _toastTimer: id })
+  },
+
+  // --- Feedback ---
+  fetchFeedback: async () => {
+    try {
+      const res = await fetch(`${API_URL}/feedback`)
+      if (!res.ok) throw new Error('not ok')
+      const data = await res.json()
+      set({ feedbackList: data })
+      if (DEBUG) console.log('fetchFeedback:', data.length)
+    } catch {
+      if (DEBUG) console.log('fetchFeedback: API error, keeping current state')
+    }
+  },
+
+  addFeedback: async (contenido) => {
+    try {
+      const res = await fetch(`${API_URL}/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contenido }),
+      })
+      if (!res.ok) throw new Error('not ok')
+      const data = await res.json()
+      set(state => ({ feedbackList: [data, ...state.feedbackList] }))
+    } catch {
+      const item = { id: `f_${Date.now()}`, contenido, fecha: new Date().toISOString() }
+      set(state => ({ feedbackList: [item, ...state.feedbackList] }))
+    }
+    if (DEBUG) console.log('addFeedback:', contenido)
   },
 
   // --- Categorias ---

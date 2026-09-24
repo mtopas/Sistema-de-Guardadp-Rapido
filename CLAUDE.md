@@ -316,7 +316,13 @@ antes de tocar `jarvis/vault/`, `jarvis/db/`, o `project/app/vault/`.
 - El worker de background no hace requests externos en 0.1
 - Toda escritura al memory store incluye `source_id` (provenance obligatorio, no nulo)
 - Los permisos viven en un policy store separado que el LLM no puede escribir (Memoria ≠ Permiso)
-- Blast radius 0.1: worker solo puede leer conversaciones y escribir en memory store
+- Blast radius: el worker puede leer conversaciones, escribir en memory store, y (desde 0.3,
+  `jarvis/ingestion/agenda.py`) leer vía HTTP local la propia API de SGR (`/agenda/*`,
+  `/habitos/*`, `/hojas/*`) sin tocar `app.db`/`D:\Boveda` directo. `jarvis/tools/` (2026-09-23,
+  ToolSpec v1 + Tool Registry + Tool Executor) generaliza ese mismo patrón de lectura HTTP local
+  para invocación explícita bajo demanda — sigue siendo solo lectura, invocado únicamente por el
+  propio worker contra su propia API en localhost, sin identidad/scopes reales todavía (ver
+  docstring de `jarvis/tools/__init__.py`).
 
 ### Antes de implementar Jarvis
 

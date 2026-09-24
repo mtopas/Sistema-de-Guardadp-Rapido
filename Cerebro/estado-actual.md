@@ -1,6 +1,69 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-23
 
+## IMPLEMENTADO: ToolSpec v1 + Tool Registry + Tool Executor — 3 tools read-only (Agenda, Hábitos, Bóveda) (2026-09-23)
+
+Primera versión de un contrato genérico para que Jarvis invoque operaciones sobre SGR de forma
+estructurada y auditable, aprobada en `Cerebro/decisiones-implementacion.md` (2026-09-22,
+"PROPUESTA APROBADA: ToolSpec v1 + Tool Registry + Tool Executor"). Nuevo submódulo
+`jarvis/tools/` (no `project/app/`), documentación completa de arquitectura y "cómo agregar una
+tool nueva" en el docstring de `jarvis/tools/__init__.py`.
+
+**Piezas**:
+- `jarvis/tools/spec.py` — `ToolSpec` (dataclass inmutable) + `RiskLevel` + `validate_spec()`.
+  Campos que el `ToolSpec` real de OpenJarvis no tiene (`version`, `risk`, `idempotent`) están
+  documentados en el propio módulo como diseño propio de SGR, no como adaptación literal.
+- `jarvis/tools/schema.py` — `validate_args()`: JSON-Schema-lite de objeto plano (string/
+  integer/number/boolean + minimum/maximum/enum), sin sumar la dependencia `jsonschema` (no
+  hacía falta para el alcance de estas 3 tools).
+- `jarvis/tools/registry.py` — `ToolRegistry`: valida al registrar, rechaza duplicados
+  (name+version) y specs mal formadas. Registrar nunca concede permisos de ejecución.
+- `jarvis/tools/executor.py` — `ToolExecutor`: valida argumentos contra el schema antes de
+  llamar al handler, revalida `read_only` como defensa en profundidad (nunca confía en que
+  "está en el Registry" implique "es segura de correr"), nunca deja pasar una excepción cruda
+  (errores estructurados con `code`/`message`: `not_found`/`not_read_only`/
+  `invalid_arguments`/`timeout`/`http_error`/`execution_error`), propaga un `trace_id` (uuid4)
+  de punta a punta en el `ToolResult`. No imita el patrón de OpenJarvis de medir timeout
+  después de ejecutar — usa el timeout nativo de `requests` (mismo patrón que
+  `jarvis/ingestion/agenda.py::_fetch_recent_events()`), que corta la conexión real.
+- `jarvis/tools/builtin.py` — las 3 tools: `agenda.list_events` (GET `/agenda/eventos`),
+  `habitos.list_pending_today` (GET `/habitos/pendientes-hoy`), `boveda.list_recent_notes`
+  (GET `/hojas/recientes`). Finanzas queda deliberadamente afuera de esta tanda.
+
+**Decisión sobre `jarvis/worker/task_manifest.py`**: queda separado del Registry a propósito,
+sin migrar ni tocarse en esta sesión. `TaskManifest` sigue gobernando el blast radius del
+worker de background en sí (call sites ya desplegados en `audit/service.py`, `ingestion/*.py`,
+etc.); el Tool Registry es un contrato nuevo y ortogonal para invocación explícita bajo demanda
+(pensado para un futuro loop de tool-calling de un LLM, todavía no implementado). Revisar
+convivencia recién si el worker empieza a invocar tools a través del Registry en vez de HTTP
+directo como hoy — detalle completo en el docstring de `jarvis/tools/__init__.py`.
+
+**Blast radius de CLAUDE.md actualizado** en el mismo cambio (sección "Invariantes — nunca
+violar en código Jarvis"): refleja que desde 0.3 el worker también lee vía HTTP la API propia
+de SGR, no solo conversaciones — el Tool Registry generaliza ese patrón ya aprobado, no
+introduce una expansión nueva.
+
+**Tests**: `project/tests/test_jarvis_tools.py`, **35 tests nuevos**, 100% PASS — spec inválida
+(name vacío, timeout ≤0, risk no-enum, parameters mal formados, property con tipo inválido,
+required apuntando a propiedad inexistente), `validate_args` (válidos, tipo incorrecto, fuera de
+rango, argumento no reconocido, requerido faltante), Registry (registro válido, duplicado
+rechazado, spec mal formada rechazada, `get()` de no-registrada), Executor (bloquea no-
+registrada, bloquea no-read-only sin llamar al handler, bloquea argumentos inválidos sin llamar
+al handler, ejecución exitosa, `trace_id` de punta a punta, timeout/error HTTP/excepción
+inesperada capturados como error estructurado) y las 3 tools built-in (registro conjunto,
+propiedades read-only/risk/idempotent/requires_confirmation, `requests.get` mockeado — URL y
+params correctos por tool, rechazo de `limit` fuera de rango sin llegar a pegarle a la red,
+timeout/error HTTP de backend real propagados). Suite completa del repo corrida una sola vez
+tras escribir todo: **245/245 PASS**, sin regresiones.
+
+**Queda para una sesión futura** (explícitamente fuera de esta tanda, no adelantado): identidad/
+scopes reales si se expone a un canal externo, MCP, Agent Router/Model Router, policy engine
+real, más tools (Finanzas incluida), tools de escritura.
+
+Impacto: `jarvis/tools/` (nuevo — `__init__.py`, `spec.py`, `schema.py`, `registry.py`,
+`executor.py`, `builtin.py`), `project/tests/test_jarvis_tools.py` (nuevo), `CLAUDE.md` (línea
+de blast radius).
+
 ## IMPLEMENTADO: tanda "integración de rutas HTTP" del plan de testing — Agenda, Hábitos, Bóveda (2026-09-23)
 
 Cierra el hueco documentado en la tanda 4 de Jarvis: hasta ahora solo Finanzas tenía tests

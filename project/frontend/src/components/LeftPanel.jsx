@@ -1,5 +1,5 @@
-import { useState, useCallback, useMemo } from 'react'
-import { ChevronDown, ChevronRight, Plus, FolderPlus, ChevronsUpDown } from 'lucide-react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
+import { ChevronDown, ChevronRight, Plus, FolderPlus, ChevronsUpDown, Sparkles } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { extractTags } from '../utils/tags'
 import { buildCategoriaColorMap } from '../utils/categoriaColors'
@@ -12,6 +12,7 @@ import EditHojaModal from './EditHojaModal'
 import DeleteHojaModal from './DeleteHojaModal'
 import DeleteCategoriaModal from './DeleteCategoriaModal'
 import { getHojaDisplayTitle } from '../utils/hojaUtils'
+import { API_URL } from '../config'
 
 const LS_TREE_KEY = 'sgr-boveda-tree-open'
 
@@ -265,6 +266,13 @@ export default function LeftPanel({ onOpenHoja, onHojaDeleted, searchQuery = '' 
   const [addingRoot, setAddingRoot] = useState(false)
   const [rootName, setRootName] = useState('')
 
+  // Toggle búsqueda keyword (filtro local sobre `hojas`) vs semántica
+  // (GET /hojas/buscar-semantico, embeddings + ChromaDB — ver app/main.py).
+  const [semanticMode, setSemanticMode] = useState(false)
+  const [semanticResults, setSemanticResults] = useState(null) // null = sin resultados todavía / no aplica
+  const [semanticLoading, setSemanticLoading] = useState(false)
+  const semanticDebounceRef = useRef(null)
+
   const toggleOpen = useCallback((catId) => {
     setOpenState(prev => {
       const next = new Set(prev)
@@ -328,15 +336,46 @@ export default function LeftPanel({ onOpenHoja, onHojaDeleted, searchQuery = '' 
     },
   ], [])
 
-  const filteredHojas = useMemo(() =>
-    searchQuery
+  // Búsqueda semántica: debounce 350ms, cancela resultados viejos si cambia
+  // la query o se apaga el modo antes de que vuelva el fetch.
+  useEffect(() => {
+    if (!semanticMode || !searchQuery.trim()) {
+      setSemanticResults(null)
+      setSemanticLoading(false)
+      return
+    }
+    let cancelled = false
+    setSemanticLoading(true)
+    if (semanticDebounceRef.current) clearTimeout(semanticDebounceRef.current)
+    semanticDebounceRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`${API_URL}/hojas/buscar-semantico?q=${encodeURIComponent(searchQuery)}&top_k=30`)
+        if (!res.ok) throw new Error('semantic search failed')
+        const data = await res.json()
+        if (!cancelled) setSemanticResults(data)
+      } catch {
+        if (!cancelled) setSemanticResults([])
+      } finally {
+        if (!cancelled) setSemanticLoading(false)
+      }
+    }, 350)
+    return () => {
+      cancelled = true
+      if (semanticDebounceRef.current) clearTimeout(semanticDebounceRef.current)
+    }
+  }, [semanticMode, searchQuery])
+
+  const filteredHojas = useMemo(() => {
+    if (semanticMode && searchQuery.trim()) {
+      return semanticResults ?? []
+    }
+    return searchQuery
       ? hojas.filter(h =>
           h.contenido.toLowerCase().includes(searchQuery.toLowerCase()) ||
           h.categoria_nombre?.toLowerCase().includes(searchQuery.toLowerCase())
         )
-      : hojas,
-    [hojas, searchQuery]
-  )
+      : hojas
+  }, [hojas, searchQuery, semanticMode, semanticResults])
 
   const allIds = useMemo(() => new Set(categorias.map(c => c.id)), [categorias])
   const allOpen = allIds.size > 0 && [...allIds].every(id => openState.has(id))
@@ -391,6 +430,30 @@ export default function LeftPanel({ onOpenHoja, onHojaDeleted, searchQuery = '' 
           </button>
         </div>
       </div>
+
+      {/* Toggle búsqueda keyword / semántica — solo relevante mientras hay query */}
+      {searchQuery.trim() && (
+        <div className="flex items-center gap-1.5 px-4 pb-2 flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => setSemanticMode(v => !v)}
+            aria-pressed={semanticMode}
+            title={semanticMode ? 'Búsqueda semántica (por significado)' : 'Búsqueda por palabra clave'}
+            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10.5px] font-medium transition-colors"
+            style={{
+              background: semanticMode ? 'color-mix(in oklch, var(--accent) 18%, transparent)' : 'var(--surface)',
+              color: semanticMode ? 'var(--accent)' : 'var(--subtext)',
+              border: `1px solid ${semanticMode ? 'var(--accent)' : 'var(--border)'}`,
+            }}
+          >
+            <Sparkles size={11} />
+            {semanticMode ? 'Semántica' : 'Palabra clave'}
+          </button>
+          {semanticMode && semanticLoading && (
+            <span className="text-[10px]" style={{ color: 'var(--subtext)' }}>buscando…</span>
+          )}
+        </div>
+      )}
 
       {/* Tree */}
       <ScrollArea className="flex-1" contentClassName="px-2 pb-3 space-y-0.5">

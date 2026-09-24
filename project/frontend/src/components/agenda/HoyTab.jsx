@@ -140,6 +140,7 @@ export default function HoyTab() {
   const habitosRegistros      = useStore(s => s.habitosRegistros)
   const upsertHabitoRegistro  = useStore(s => s.upsertHabitoRegistro)
   const deleteHabitoRegistro  = useStore(s => s.deleteHabitoRegistro)
+  const batchUpsertHabitoRegistros = useStore(s => s.batchUpsertHabitoRegistros)
   const showToast             = useStore(s => s.showToast)
 
   const setAgendaHoyViewISO = useStore(s => s.setAgendaHoyViewISO)
@@ -286,6 +287,23 @@ export default function HoyTab() {
       upsertHabitoRegistro(habito.id, viewISO, 1.0, null)
     }
   }, [registrosMap, viewISO, deleteHabitoRegistro, upsertHabitoRegistro])
+
+  // "Marcar todos" -- hábitos de hoy (sin hora) que faltan completar, en una
+  // sola llamada batch en vez de un upsert por hábito (POST /habitos/registros/batch).
+  const habitosHoyPendientes = useMemo(() =>
+    habitosHoy.filter(h => {
+      const reg = registrosMap[`${h.id}-${viewISO}`]
+      return !(reg && reg.valor > 0)
+    }),
+    [habitosHoy, registrosMap, viewISO]
+  )
+
+  const handleMarcarTodosHabitos = useCallback(() => {
+    if (!habitosHoyPendientes.length) return
+    batchUpsertHabitoRegistros(
+      habitosHoyPendientes.map(h => ({ habitoId: h.id, fecha: viewISO, valor: 1.0, nota: null }))
+    )
+  }, [habitosHoyPendientes, viewISO, batchUpsertHabitoRegistros])
 
   const handleToggle = useCallback((tarea) => {
     updateAgendaTarea(tarea.id, { completada: !tarea.completada })
@@ -494,7 +512,20 @@ export default function HoyTab() {
         {/* Hábitos de hoy (sin hora) */}
         {habitosHoy.length > 0 && (
           <div className="px-4 pb-4 border-t" style={{ borderColor: 'var(--border)' }}>
-            <div className="label mt-3 mb-2">{t(lang, 'habitosDeHoy')}</div>
+            <div className="flex items-center justify-between mt-3 mb-2">
+              <div className="label">{t(lang, 'habitosDeHoy')}</div>
+              {habitosHoyPendientes.length > 1 && (
+                <button
+                  type="button"
+                  onClick={handleMarcarTodosHabitos}
+                  className="text-[10.5px] font-medium px-1.5 py-0.5 rounded-md transition-colors"
+                  style={{ color: 'var(--accent)' }}
+                  title="Marcar todos los hábitos de hoy como completos"
+                >
+                  Marcar todos
+                </button>
+              )}
+            </div>
             <div className="flex flex-col gap-1">
               {habitosHoy.map(h => {
                 const reg     = registrosMap[`${h.id}-${viewISO}`]

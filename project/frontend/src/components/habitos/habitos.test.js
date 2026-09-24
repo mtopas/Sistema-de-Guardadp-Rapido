@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, beforeAll, vi } from 'vitest'
 import {
   isScheduled,
   calcStreak,
@@ -7,6 +7,42 @@ import {
   buildRegistrosMap,
   toISODate,
 } from './habitosUtils.js'
+
+// useStore.js toca APIs de browser al cargar el módulo (localStorage, document,
+// window.location) para inicializar tema/tono/idioma -- el vitest de este proyecto
+// corre en environment 'node' (ver vitest.config.js) para no pagar el costo de jsdom
+// en tests de funciones puras como los de arriba. Se stubean acá las APIs mínimas que
+// el store toca al importarse, y se importa dinámicamente recién en beforeAll para que
+// el stub ya esté en pie antes de que el módulo se evalúe (los `import` estáticos se
+// hoistean por encima de cualquier código, así que no alcanza con stubear más abajo).
+let useStore
+beforeAll(async () => {
+  if (typeof globalThis.localStorage === 'undefined') {
+    const backing = {}
+    globalThis.localStorage = {
+      getItem:    k => (k in backing ? backing[k] : null),
+      setItem:    (k, v) => { backing[k] = String(v) },
+      removeItem: k => { delete backing[k] },
+    }
+  }
+  if (typeof globalThis.window === 'undefined') {
+    globalThis.window = { location: { pathname: '/agenda' } }
+  }
+  if (typeof globalThis.document === 'undefined') {
+    const styleProps = {}
+    globalThis.document = {
+      documentElement: {
+        style: {
+          setProperty:      (k, v) => { styleProps[k] = v },
+          removeProperty:   k => { delete styleProps[k] },
+          getPropertyValue: k => styleProps[k] || '',
+        },
+        dataset: {},
+      },
+    }
+  }
+  ;({ useStore } = await import('../../store/useStore.js'))
+})
 
 describe('habitosUtils', () => {
   // Varios tests de este archivo asumen implícitamente una fecha de "hoy" fija
@@ -378,6 +414,91 @@ describe('habitosUtils', () => {
     it('handles empty registros array', () => {
       const map = buildRegistrosMap([])
       expect(Object.keys(map).length).toBe(0)
+    })
+  })
+
+  // Agrega POST /habitos/registros/batch como consumidor real desde el
+  // frontend (usado por "Marcar todos" en Agenda HOY, agenda/HoyTab.jsx) --
+  // antes el endpoint existía en el backend sin ningún caller en el store.
+  describe('useStore.batchUpsertHabitoRegistros', () => {
+    const originalFetch = global.fetch
+
+    beforeEach(() => {
+      useStore.setState({ habitosRegistros: [] })
+    })
+
+    afterEach(() => {
+      global.fetch = originalFetch
+    })
+
+    it('does nothing for an empty items list (no fetch call)', async () => {
+      global.fetch = vi.fn()
+      await useStore.getState().batchUpsertHabitoRegistros([])
+      expect(global.fetch).not.toHaveBeenCalled()
+    })
+
+    it('optimistically upserts every item, then reconciles with the server response', async () => {
+      const serverRows = [
+        { id: 101, habito_id: 1, fecha: '2026-09-23', valor: 1, nota: null, creado_en: '2026-09-23T10:00:00' },
+        { id: 102, habito_id: 2, fecha: '2026-09-23', valor: 1, nota: null, creado_en: '2026-09-23T10:00:00' },
+      ]
+      global.fetch = vi.fn(async (url, opts) => {
+        expect(url).toContain('/habitos/registros/batch')
+        const body = JSON.parse(opts.body)
+        expect(body).toEqual({
+          registros: [
+            { habito_id: 1, fecha: '2026-09-23', valor: 1.0, nota: null },
+            { habito_id: 2, fecha: '2026-09-23', valor: 1.0, nota: null },
+          ],
+        })
+        return { ok: true, json: async () => serverRows }
+      })
+
+      const promise = useStore.getState().batchUpsertHabitoRegistros([
+        { habitoId: 1, fecha: '2026-09-23', valor: 1.0, nota: null },
+        { habitoId: 2, fecha: '2026-09-23', valor: 1.0, nota: null },
+      ])
+
+      // Optimistic update happens synchronously before the fetch resolves.
+      const optimistic = useStore.getState().habitosRegistros
+      expect(optimistic).toHaveLength(2)
+      expect(optimistic.find(r => r.habito_id === 1)).toMatchObject({ habito_id: 1, fecha: '2026-09-23', valor: 1.0 })
+
+      await promise
+
+      const final = useStore.getState().habitosRegistros
+      expect(final).toEqual(expect.arrayContaining(serverRows))
+      expect(final).toHaveLength(2)
+    })
+
+    it('merges into an existing registro instead of duplicating it', async () => {
+      useStore.setState({
+        habitosRegistros: [{ id: 5, habito_id: 1, fecha: '2026-09-23', valor: 0.5, nota: 'parcial', creado_en: '2026-09-23T08:00:00' }],
+      })
+      global.fetch = vi.fn(async () => ({
+        ok: true,
+        json: async () => [{ id: 5, habito_id: 1, fecha: '2026-09-23', valor: 1.0, nota: 'parcial', creado_en: '2026-09-23T08:00:00' }],
+      }))
+
+      await useStore.getState().batchUpsertHabitoRegistros([
+        { habitoId: 1, fecha: '2026-09-23', valor: 1.0 },
+      ])
+
+      const final = useStore.getState().habitosRegistros
+      expect(final).toHaveLength(1)
+      expect(final[0]).toMatchObject({ id: 5, habito_id: 1, valor: 1.0 })
+    })
+
+    it('keeps the optimistic update and shows a toast when the request fails', async () => {
+      global.fetch = vi.fn(async () => ({ ok: false }))
+
+      await useStore.getState().batchUpsertHabitoRegistros([
+        { habitoId: 1, fecha: '2026-09-23', valor: 1.0 },
+      ])
+
+      const state = useStore.getState()
+      expect(state.habitosRegistros).toHaveLength(1)
+      expect(state.toast).toMatchObject({ type: 'error' })
     })
   })
 })

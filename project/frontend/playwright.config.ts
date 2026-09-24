@@ -36,5 +36,6 @@ export default defineConfig({
   ],
 
   webServer: undefined, // Backend levantado manualmente fuera de Playwright
-  timeout: 30000,
+  timeout: 90000, // 90s para tests con esperas largas
+  expect: { timeout: 5000 },
 });

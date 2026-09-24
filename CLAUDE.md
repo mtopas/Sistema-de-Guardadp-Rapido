@@ -247,6 +247,7 @@ Reglas que aplican desde ahora, para cualquier agente que trabaje en este repo:
 - Una unidad lógica de cambio por commit (no mezclar higiene de docs con features sin relación).
 - Evitar mensajes de una palabra ("Retruco", "A", "Bugs") — el propio autor no puede reconstruir qué pasó ahí seis meses después sin abrir el diff completo.
 - Sin prefijos tipo `feat:`/`fix:` (no hace falta esa ceremonia en un repo de un solo desarrollador); si el mensaje corto no es autoexplicativo, agregar 1-2 líneas de cuerpo con el motivo.
+- **Nunca agregar `Co-Authored-By: Claude...` ni una línea `Claude-Session: ...`** al final del mensaje (decisión explícita del usuario, 2026-09-24) — aplica a cualquier sesión, incluidas las delegadas.
 
 ### Ramas
 

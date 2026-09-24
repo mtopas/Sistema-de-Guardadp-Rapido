@@ -1,18 +1,22 @@
 """
-Tools built-in de la primera tanda (2026-09-23) -- Agenda, Hábitos, Bóveda, en ese orden de
-prioridad de producto (Cerebro/decisiones-implementacion.md, 2026-09-22). Finanzas queda
-deliberadamente afuera de esta tanda, no descartada.
+Tools built-in. Primera tanda (2026-09-23): Agenda, Hábitos, Bóveda, en ese orden de
+prioridad de producto (Cerebro/decisiones-implementacion.md, 2026-09-22) -- Finanzas quedó
+deliberadamente afuera de esa tanda, no descartada. Cuarta tool (2026-09-24): Finanzas,
+resumen agregado del mes (nunca el detalle de movimientos crudo, ver esa tool más abajo).
 
-Las 3 son GET read-only contra la propia API HTTP local de SGR (JARVIS_SGR_API_BASE,
+Todas son GET read-only contra la propia API HTTP local de SGR (JARVIS_SGR_API_BASE,
 localhost, sin auth) -- mismo patrón ya usado y desplegado desde 0.3 en
 jarvis/ingestion/agenda.py::_fetch_recent_events(): requests.get(..., params=..., timeout=...)
 + resp.raise_for_status() antes de leer el JSON. Cero blast radius nuevo, generaliza ese patrón
 ya aprobado (ver esa entrada de Cerebro/decisiones-implementacion.md para el detalle completo).
 
 Endpoints reales usados, confirmados contra project/app/main.py:
-  - GET /agenda/eventos?desde=&hasta=   (ambos opcionales, la API pone sus propios defaults)
-  - GET /habitos/pendientes-hoy?fecha=  (opcional, default hoy)
-  - GET /hojas/recientes?limit=         (opcional, 1-100, default 20)
+  - GET /agenda/eventos?desde=&hasta=          (ambos opcionales, la API pone sus propios defaults)
+  - GET /habitos/pendientes-hoy?fecha=         (opcional, default hoy)
+  - GET /hojas/recientes?limit=                (opcional, 1-100, default 20)
+  - GET /fin/movimientos/resumen?mes=          (opcional, default mes actual; agregados
+    ingresos/gastos/por_categoria, excluye transferencias -- nunca /fin/movimientos crudo,
+    que expondría cada movimiento individual con montos y descripciones)
 """
 from typing import Any
 
@@ -129,10 +133,43 @@ BOVEDA_LIST_RECENT_NOTES = ToolSpec(
 )
 
 
+def _fin_get_month_summary(arguments: dict[str, Any], trace_id: str) -> dict:
+    return {"resumen": _get("/fin/movimientos/resumen", arguments)}
+
+
+FIN_GET_MONTH_SUMMARY = ToolSpec(
+    name="fin.get_month_summary",
+    version="1.0.0",
+    description=(
+        "Resumen agregado de Finanzas para un mes dado (`mes` opcional, ISO YYYY-MM, default "
+        "mes actual): ingresos, gastos y desglose por categoría. Excluye transferencias. "
+        "Nunca expone el detalle de movimientos individuales."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "mes": {
+                "type": "string",
+                "description": "Mes ISO (YYYY-MM). Opcional, default mes actual.",
+            },
+        },
+        "required": [],
+        "additionalProperties": False,
+    },
+    read_only=True,
+    risk=RiskLevel.LOW,
+    idempotent=True,
+    requires_confirmation=False,
+    timeout_seconds=_HTTP_TIMEOUT,
+    category="finanzas",
+)
+
+
 def register_builtin_tools(registry: ToolRegistry) -> None:
-    """Registra las 3 tools de esta tanda en `registry`. Llamar dos veces sobre el mismo
+    """Registra las 4 tools built-in en `registry`. Llamar dos veces sobre el mismo
     registry lanza ValueError (tool duplicada, ver registry.py) -- a propósito, no es
     idempotente: cada ToolRegistry se puebla una sola vez."""
     registry.register(AGENDA_LIST_EVENTS, _agenda_list_events)
     registry.register(HABITOS_LIST_PENDING_TODAY, _habitos_list_pending_today)
     registry.register(BOVEDA_LIST_RECENT_NOTES, _boveda_list_recent_notes)
+    registry.register(FIN_GET_MONTH_SUMMARY, _fin_get_month_summary)

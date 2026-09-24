@@ -11,6 +11,30 @@ Formato de cada entrada:
 
 ---
 
+## 2026-09-24 — Identidad/scopes reales para el Tool Registry: postergado hasta que haya una razón concreta
+
+Contexto: con el Tool Registry ya implementado (3 tools read-only: Agenda, Hábitos, Bóveda,
+ver entrada `2026-09-22 — PROPUESTA APROBADA: ToolSpec v1...`), quedaba pendiente decidir si
+sumar identidad/scopes/permisos reales ahora o más adelante. Hoy el único actor que invoca
+tools es el propio worker de Jarvis contra su propia API en localhost, sin login — no hay
+ningún "quién" que distinguir todavía.
+
+Decisión: se posterga a propósito. Construir identidad/scopes ahora sería permisos de mentira
+sobre un sistema de un solo actor — no hay nada real que autorizar o denegar de forma distinta
+entre "el worker" y "el worker". Se retoma cuando exista una razón concreta: exponer tools a
+algo más que el propio worker (otro agente, MCP, acceso remoto), momento en el que el hallazgo
+P0 de la auditoría externa ("no habilitar tools remotas antes de corregir identidad/scopes")
+vuelve a ser relevante — hoy no aplica porque nada de esto es remoto.
+
+Diferencia con spec: ninguna — es una decisión de secuenciación de la evolución de Jarvis, no
+de arquitectura Jarvis 0.1-0.3.
+
+Impacto: ninguno en código. Referencia para cuando se retome la evolución del Tool Registry
+(MCP, Agent Router, Policy Engine — todo lo que estaba explícitamente diferido en la propuesta
+original del 22/09).
+
+---
+
 ## 2026-09-23 — GitGuardian detectó un Telegram Bot Token real en el historial público — segunda purga (distinta de la del 22/09)
 
 Contexto: GitGuardian avisó por mail (secreto tipo "Telegram Bot Token", repo

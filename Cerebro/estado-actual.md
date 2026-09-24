@@ -1,6 +1,67 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-24
 
+## IMPLEMENTADO: cuarta tool del Tool Registry — Finanzas (2026-09-24)
+
+Cierra el hueco dejado a propósito en la tanda del 23/09 ("Finanzas queda deliberadamente
+afuera de esta tanda, no descartada"). Ver también la decisión del mismo día de postergar
+identidad/scopes hasta que haya una razón concreta (`Cerebro/decisiones-implementacion.md`).
+
+**Tool nueva**: `fin.get_month_summary` (`jarvis/tools/builtin.py`) — envuelve `GET
+/fin/movimientos/resumen?mes=` (agregados ingresos/gastos/por_categoria, excluye
+transferencias). Deliberadamente NO se expuso `/fin/movimientos` crudo (expondría cada
+movimiento individual con montos y descripciones) — mismo criterio de "agregado, no detalle"
+que ya se había recomendado al elegir candidatos para esta tool en la sesión de verificación
+original.
+
+**Tests nuevos**: 2 (`test_jarvis_tools.py`) — llama al endpoint correcto con `mes`, y no manda
+el param `mes` vacío cuando no se pasa (evita que la API lo interprete distinto de "no vino").
+Los tests genéricos de "las N tools built-in" (registro, read-only/riesgo/idempotencia) se
+actualizaron de 3 a 4.
+
+**Verificado**: suite completa, 247/247 backend en verde (era 245, +2 de esta tool).
+
+Impacto: `jarvis/tools/builtin.py`, `project/tests/test_jarvis_tools.py`.
+
+## INICIADO: Suite E2E Playwright (2026-09-24) — Flujos (2) y (4)
+
+**Estado**: Infraestructura completada, tests escritos pero no ejecutados aún contra UI real.
+
+**Qué se hizo**:
+1. Instalación de Playwright (`@playwright/test`) en `project/frontend`.
+2. Configuración: `playwright.config.ts` con Chrome (headless), reporter HTML.
+3. Estructura de tests: `project/frontend/e2e/` con:
+   - `fixtures.ts` — fixture compartida para `apiUrl`
+   - `helpers/api.ts` — helpers read-only para auditar estado post-acción
+   - `02-agenda-task-flow.test.ts` — Flujo (2): crear tarea → `/hoy` → completarla
+   - `04-boveda-markdown-flow.test.ts` — Flujo (4): crear nota → Markdown+DB+búsqueda
+   - `playwright.config.ts` — Config base (no levanta backend automático)
+   - `README.md` — Guía de setup y troubleshooting
+4. Script de setup: `project/start-e2e-backend.py` — levanta backend en sandbox con DB/vault temporales, imprime `TEST_API_URL` y `TEST_VAULT_ROOT` para tests.
+
+**Bloqueadores conocidos**:
+- Tests aún no ejecutados contra UI real → es posible que los selectores CSS/aria-labels necesiten ajuste al ver la UI viva
+- Flujo (4) asume que `VAULT_ROOT` es configurable en backend — necesita verificación contra `app/config.py` y `app/db/database.py`
+- Selectores de inputs/modals escritos de forma explorativa, pueden no coincidir con la realidad
+
+**Stretch goals diferidos**:
+- Flujo (1): Telegram registra gasto → web — requeriría mock de Telegram o acceso al bot real
+- Flujo (3): Hábito marcado en web → Telegram lo refleja — requeriría polling/WebSocket para verificar cambios en tiempo real
+- Flujo (5): Jarvis responde citando fuente — requeriría Ollama corriendo + dataset de RAG pre-sembrado
+
+**Próximos pasos**:
+1. Levantar backend + frontend en vivo
+2. Ejecutar tests E2E (`npx playwright test --headed`)
+3. Ajustar selectores según lo que se vea
+4. Documentar blockers o hallazgos reales en una segunda entrada
+5. (Opcional) Si tiempo lo permite, trabajar en un stretch goal (Telegram mock, fixtures de RAG, etc.)
+
+**Impacto**:
+- Nuevos: `project/frontend/e2e/`, `project/frontend/playwright.config.ts`, `project/start-e2e-backend.py`
+- No modificado: código de producto (`project/app/`, `project/frontend/src/`)
+
+---
+
 ## FIX: `habitos.test.js` fijaba "hoy" implícitamente — se rompía cada día real (2026-09-24)
 
 Resuelve el hallazgo de la entrada anterior (fix de `fmtARSShort`): no era solo un test

@@ -14,6 +14,7 @@ import requests
 from jarvis.tools.builtin import (
     AGENDA_LIST_EVENTS,
     BOVEDA_LIST_RECENT_NOTES,
+    FIN_GET_MONTH_SUMMARY,
     HABITOS_LIST_PENDING_TODAY,
     register_builtin_tools,
 )
@@ -271,10 +272,10 @@ class TestToolExecutor:
         assert "boom" in result.error["message"]
 
 
-# ── Tools built-in (Agenda / Hábitos / Bóveda) ────────────────────────────────
+# ── Tools built-in (Agenda / Hábitos / Bóveda / Finanzas) ─────────────────────
 
 class TestBuiltinTools:
-    def test_register_builtin_tools_registra_las_3(self):
+    def test_register_builtin_tools_registra_las_4(self):
         registry = ToolRegistry()
         register_builtin_tools(registry)
         names = {s.name for s in registry.list_tools()}
@@ -282,10 +283,14 @@ class TestBuiltinTools:
             "agenda.list_events",
             "habitos.list_pending_today",
             "boveda.list_recent_notes",
+            "fin.get_month_summary",
         }
 
-    def test_las_3_son_read_only_bajo_riesgo_e_idempotentes(self):
-        for spec in (AGENDA_LIST_EVENTS, HABITOS_LIST_PENDING_TODAY, BOVEDA_LIST_RECENT_NOTES):
+    def test_las_4_son_read_only_bajo_riesgo_e_idempotentes(self):
+        for spec in (
+            AGENDA_LIST_EVENTS, HABITOS_LIST_PENDING_TODAY,
+            BOVEDA_LIST_RECENT_NOTES, FIN_GET_MONTH_SUMMARY,
+        ):
             assert spec.read_only is True
             assert spec.risk == RiskLevel.LOW
             assert spec.idempotent is True
@@ -348,6 +353,41 @@ class TestBuiltinTools:
         called_url = mock_get.call_args.args[0]
         assert called_url.endswith("/hojas/recientes")
         assert mock_get.call_args.kwargs["params"] == {"limit": 5}
+
+    @patch("jarvis.tools.builtin.requests.get")
+    def test_fin_get_month_summary_llama_al_endpoint_correcto(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"ingresos": 1000, "gastos": 500, "por_categoria": []}
+        mock_get.return_value = mock_resp
+
+        registry = ToolRegistry()
+        register_builtin_tools(registry)
+        executor = ToolExecutor(registry)
+
+        result = executor.execute("fin.get_month_summary", "1.0.0", {"mes": "2026-09"})
+
+        assert result.ok is True
+        assert result.data == {"resumen": {"ingresos": 1000, "gastos": 500, "por_categoria": []}}
+        called_url = mock_get.call_args.args[0]
+        assert called_url.endswith("/fin/movimientos/resumen")
+        assert mock_get.call_args.kwargs["params"] == {"mes": "2026-09"}
+
+    @patch("jarvis.tools.builtin.requests.get")
+    def test_fin_get_month_summary_sin_mes_no_manda_el_param(self, mock_get):
+        """`mes` es opcional -- si no se pasa, no debe ir como param vacío (la API lo
+        interpretaría distinto de "no vino")."""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"ingresos": 0, "gastos": 0, "por_categoria": []}
+        mock_get.return_value = mock_resp
+
+        registry = ToolRegistry()
+        register_builtin_tools(registry)
+        executor = ToolExecutor(registry)
+
+        result = executor.execute("fin.get_month_summary", "1.0.0", {})
+
+        assert result.ok is True
+        assert mock_get.call_args.kwargs["params"] == {}
 
     @patch("jarvis.tools.builtin.requests.get")
     def test_boveda_rechaza_limit_fuera_de_rango_antes_de_pegarle_a_la_red(self, mock_get):

@@ -1,6 +1,45 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-24
 
+## IMPLEMENTADO: fallback de búsqueda por palabras clave en `/pregunta` de Bóveda (2026-09-24)
+
+Commit `47a7226` (rama `claude/boveda-fallback-vywk2t`, sesión en la nube, mergeado a `master`).
+`mybot/assistant.py::_gather_boveda()` hacía solo búsqueda semántica; si no encontraba nada,
+le pedía al usuario que corra `/buscar` a mano. Ahora cae a `GET /hojas?q=` (keyword) antes de
+rendirse — nueva función `embeddings.py::search_keyword()`. 3 tests nuevos
+(`test_bot_assistant.py`). Verificado por el orquestador: 307 backend + 1 skip, sin tocar
+frontend.
+
+## IMPLEMENTADO: tests de paridad de Hábitos (frontend/backend/bot) — 2 divergencias reales encontradas (2026-09-24)
+
+Commit `7ad651c` (rama `claude/sgr-project-setup-yyggmo`, sesión en la nube, mergeado a
+`master`). No se unificó la lógica (decisión ya tomada) — se agregó una red de seguridad:
+fixture compartido (`project/tests/fixtures/habitos_paridad.json`) consumido por tests en los
+tres lados (`habitos.paridad.test.js`, `test_habitos_paridad.py`, `test_bot_habitos_paridad.py`,
+54 tests nuevos en total). `_habito_is_scheduled()` se extrajo de la clausura interna de
+`habitos_stats()` en `crud.py` para que sea testeable — mecánico, sin cambio de comportamiento.
+
+**Dos divergencias reales encontradas, documentadas en los tests (no corregidas, era el
+alcance):**
+1. **"Hoy pendiente" rompe la racha en frontend/backend pero no en el bot.** Con una racha
+   previa y el día de hoy programado pero sin completar todavía: `calcStreak` (frontend,
+   `habitosUtils.js`) y `streak_cur` (backend, `habitos_stats()` en `crud.py`) rompen la racha a
+   0 ese mismo día; `_calc_racha` del bot (`agenda_handlers.py`) perdona el día de hoy y sigue
+   contando hacia atrás. El comentario del bot dice "Port de `calcStreak`" pero en este caso
+   puntual no lo es — puede ser que el bot tenga el comportamiento correcto (¿por qué romper la
+   racha si todavía podés completar el hábito hoy?) y front/backend estén mal, o al revés — sin
+   decidir.
+2. **El backend ignora `activo` — bug real en producción, no solo inconsistencia.**
+   `habitos_stats()` nunca chequea si el hábito está activo/archivado: para uno inactivo con
+   registros viejos, frontend y bot devuelven racha/pct en 0 (correcto, un hábito inactivo nunca
+   está "programado" para ellos), pero el backend sigue calculando como si estuviera activo.
+   `GET /habitos/{id}/stats` no filtra por `activo` — afecta cualquier vista que muestre stats de
+   un hábito archivado.
+
+**Pendiente:** decidir qué comportamiento es el correcto en cada divergencia y alinear los otros
+lados (o documentar como intencional si corresponde); decidir si `GET /habitos/{id}/stats`
+debería filtrar hábitos inactivos.
+
 ## IMPLEMENTADO: 7 quick wins del triage de julio + edición completa de hoja en DetailScreen (2026-09-24)
 
 Hecho por sesiones worker en paralelo (prompts armados por el orquestador, ejecutados por el

@@ -2117,6 +2117,7 @@ def _expand_recurring(evento: dict, desde: str, hasta: str) -> list:
     hasta_rule = regla.get("hasta")
 
     base_str  = evento["fecha_inicio"][:10]
+    base_day  = date.fromisoformat(base_str).day
     time_part = evento["fecha_inicio"][10:]       # e.g. "T08:00:00" or ""
     duration  = None
     if evento.get("fecha_fin"):
@@ -2143,7 +2144,7 @@ def _expand_recurring(evento: dict, desde: str, hasta: str) -> list:
         elif frecuencia == "semanal":
             scheduled = (not dias) or (cur.weekday() in dias)
         elif frecuencia == "mensual":
-            scheduled = cur.day == date.fromisoformat(base_str).day
+            scheduled = cur.day == min(base_day, _calendar.monthrange(cur.year, cur.month)[1])
 
         if scheduled and cur >= range_start:
             occ = dict(evento)
@@ -2156,7 +2157,12 @@ def _expand_recurring(evento: dict, desde: str, hasta: str) -> list:
             m, y = cur.month + 1, cur.year
             if m > 12:
                 m, y = 1, y + 1
-            day = min(cur.day, _calendar.monthrange(y, m)[1])
+            # Clampear siempre contra el día ORIGINAL del evento (base_day), nunca
+            # contra cur.day -- si no, un evento del día 31 que clampea a 28 en
+            # febrero se queda pegado en 28 para siempre (marzo, mayo, etc. nunca
+            # vuelven a dar 31), porque cur.day ya venía arrastrando el clampeo del
+            # mes anterior. Mismo criterio que ya usa _generar_fechas_recurrencia_tarea.
+            day = min(base_day, _calendar.monthrange(y, m)[1])
             cur = date(y, m, day)
         else:
             cur += timedelta(days=1)

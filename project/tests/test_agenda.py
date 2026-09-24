@@ -160,10 +160,14 @@ class TestExpandRecurring:
         fechas = [o["fecha_inicio"][:10] for o in resultado]
         assert fechas == ["2026-09-24", "2026-09-29"]
 
-    def test_mensual_clampeo_arrastra_dia(self):
-        """Mensual usa cur.day (clampeado), no base.day original.
-
-        Caso: 31/01 → 28/02 → 28/03 (se queda pegado en 28, a diferencia de _generar_fechas_recurrencia_tarea).
+    def test_mensual_clampeo_usa_dia_original(self):
+        """Mensual clampea siempre contra base.day (el día original del evento),
+        nunca contra cur.day -- fix del 2026-09-23 (ver Cerebro/estado-actual.md):
+        antes, un evento del día 31 quedaba pegado en 28 para siempre después de
+        pasar por febrero, porque el avance de mes a mes arrastraba el día ya
+        clampeado del mes anterior en vez de recalcular desde el día original.
+        Ahora se comporta igual que _generar_fechas_recurrencia_tarea: clampea
+        para el mes que no llega al día 31, y vuelve a 31 en el que sí llega.
         """
         evento = {
             "id": 1,
@@ -174,15 +178,10 @@ class TestExpandRecurring:
         resultado = _expand_recurring(evento, "2026-01-31", "2026-05-31")
         fechas = [o["fecha_inicio"][:10] for o in resultado]
 
-        # Enero 31 se incluye (está en rango)
-        # Febrero: mes siguiente a enero, cur.day=31 → clampea a 28
-        # Marzo: mes siguiente a febrero, cur.day=28 (ya clampeado) → clampea a 28
-        # Abril: mes siguiente a marzo, cur.day=28 → clampea a 30
-        # Mayo: mes siguiente a abril, cur.day=30 → 31 (mayo tiene 31 días)
-        # Enero 31 (31==31) incluido
-        # Febrero clampeado a 28 (28!=31) -> se queda pegado en 28 para siempre
-        # Evento solo en enero (primer mes)
-        assert fechas == ["2026-01-31"]
+        # Enero 31 (día original) -> Febrero clampeado a 28 (no tiene 31) ->
+        # Marzo vuelve a 31 (sí tiene 31, ya no arrastra el clampeo de febrero) ->
+        # Abril clampeado a 30 -> Mayo vuelve a 31.
+        assert fechas == ["2026-01-31", "2026-02-28", "2026-03-31", "2026-04-30", "2026-05-31"]
 
     def test_rango_excluye_fuera_de_limite(self):
         """Occurrences fuera de [desde, hasta] no aparecen."""

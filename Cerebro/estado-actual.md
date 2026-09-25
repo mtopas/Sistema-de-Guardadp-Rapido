@@ -1,6 +1,43 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-25
 
+## IMPLEMENTADO Y COMMITEADO: hallazgos de la auditoría de Bóveda (2026-09-25)
+
+Commit `21c27c1`. Resuelve el diagnóstico completo de `audit_boveda.txt` (auditoría de solo
+lectura previa): PATCH de ícono/color/categoría deja de reescribir el `.md` entero
+(`actualizar_documento()` en `writer.py`, toca solo frontmatter); `build_frontmatter_text()`
+serializa el dict completo con `yaml.safe_dump()` en vez de una lista fija de campos —
+preserva tags/metadatos manuales que antes se perdían. `_cuerpo_sin_titulo` ya no descarta el
+prefacio antes del primer H1. El sync del vault preserva la identidad SQLite de una fila cuando
+el frontmatter trae un id corregido en el mismo archivo (busca por `ruta` antes de asumir fila
+nueva) y ya no borra una hoja cuyo archivo sigue en disco. Categorías suman un sidecar
+`.sgr-categoria.yaml` para que ícono/color sobrevivan una reconstrucción del índice — mismo
+problema que ya tenían los colores propios de hoja. Búsqueda semántica: `top_k` de `LeftPanel`
+ya no manda un valor que el backend rechazaba (era 30, límite real 20); indexa apuntes además
+de contenido/categoría; reconcilia Chroma cuando el vault cambia por fuera de la API. Fotos:
+`DetailScreen` renderiza la imagen guardada (antes TipTap no tenía extensión `Image`); la URL
+ya no queda hardcodeada al host que sirvió la API — se resuelve con `API_URL` del cliente, sirve
+también por Tailscale. Links: el bot separa la URL del comentario que la acompaña;
+`EditHojaModal` edita la URL real para hojas tipo `link` (no el título con URLs recortadas) y
+valida que siga siendo una URL antes de guardar. `eliminarHoja`/`fetchHojas`/`fetchCategorias`
+ahora comprueban `res.ok`.
+
+Verificado por el orquestador: 346 backend (1 skip) + 176 frontend en verde, build limpio.
+Revisadas manualmente las partes de mayor riesgo (sync del vault, frontmatter YAML, sidecar de
+categorías) antes de commitear — sin encontrar nada mal hecho.
+
+**Deuda pendiente real**: no se agregaron tests automatizados nuevos para este lote pese a
+tocar escritura de archivos del vault (área sensible a pérdida de datos). Queda como pendiente
+cerrar aparte, no bloqueó el commit.
+
+**Faltan implementar** (mismo patrón de auditoría, prompts ya escritos en
+`audit_finanzas.txt`/`audit_habitos.txt`/`audit_agenda.txt` en la raíz del repo, con
+aclaraciones del usuario en MAYÚSCULAS sobre los puntos ambiguos): Finanzas (6 hallazgos de
+impacto alto son números de plata reales — exigencia de tests con casos antes/después, no solo
+suite en verde), Hábitos (con 2 decisiones ya tomadas: no marcar hábitos futuros, extender la
+grilla horaria en vez de restringir hábitos), Agenda (con 1 decisión ya tomada: materializar
+ocurrencias de eventos recurrentes como filas independientes, mismo patrón que Tareas).
+
 ## IMPLEMENTADO Y COMMITEADO: 24 hallazgos de la auditoría de Jarvis (2026-09-24/25) — pendiente deploy al homelab
 
 La lista que sigue describe el estado observado durante la auditoría de solo lectura. Los 24

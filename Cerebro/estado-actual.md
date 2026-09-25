@@ -1,5 +1,61 @@
 # Estado Actual de Jarvis
-Última actualización: 2026-09-24
+Última actualización: 2026-09-25
+
+## AUDITORÍA: revisión completa de Jarvis, solo lectura (2026-09-24/25) — 23 hallazgos, ninguno corregido todavía
+
+Sesión externa (no el orquestador), solo lectura, sin ejecutar código ni tocar el homelab.
+Cobertura: prácticamente todo `jarvis/` + integraciones en `project/mybot/`/`project/frontend/
+src/components/jarvis/`/`project/app/main.py`. Contrastado contra este mismo archivo y
+`decisiones-implementacion.md` para no marcar como bug algo ya diferido a propósito (loop de
+tools, retry manual de `ERROR`). **No inspeccionó `jarvis.db` real ni corrió tests.** Módulos
+sin revisar: migraciones completas de `jarvis/db/database.py`, acciones individuales de
+`jarvis/audit/service.py`, `jarvis/cli/`, `observability.py`, `embeddings/store.py`,
+`privacy/trust.py`, `ingestion/agenda_patterns.py` completo, ruteo completo de `mybot/bot.py`,
+estilos/componentes visuales.
+
+**⚠️ Riesgo activo más grave, distinto a los dos bugs que ya veníamos rastreando (propuestas
+que expiran, conteo PEOPLE):** `jarvis/audit/service.py:426,673`,
+`jarvis/worker/consolidation.py:426` y `jarvis/ingestion/inbox_triage.py:289` pasan contenido de
+memoria a `call_reason()` **sin pasar por el Privacy Gateway** — a diferencia de la consulta RAG,
+que sí lo aplica. `call_reason()` usa modelo externo por default si hay presupuesto. Contenido
+marcado `local_only`/`confidential`, o con secretos/PII, puede salir a un modelo externo desde
+auditoría/consolidación/triage. Viola el invariante de `CLAUDE.md` sobre privacidad — **no
+verificado en producción real (la sesión no inspeccionó `jarvis.db`), pero la lectura de código
+es concluyente sobre que el camino existe**.
+
+**5 hallazgos de impacto Alto (ninguno corregido):**
+1. Fuga de privacidad de arriba (jobs sin Privacy Gateway).
+2. "Olvidar" una entrada (`valid_to`) no impide que el worker la reprocese y escriba un archivo
+   nuevo en la Bóveda — `memory/service.py:316`, `worker/processor.py:33,132`.
+3. Deduplicación de captura solo mira contenido+usuario: recapturar con "Solo local" activado
+   devuelve la entrada vieja sin cambiar `local_only` — sigue siendo elegible para consultas
+   externas — `memory/service.py:66,71`.
+4. Recapturar un texto ya olvidado devuelve el ID de la fila olvidada sin crear una nueva ni
+   encolarla — la UI puede confirmar una captura que nunca será memoria vigente — mismo código
+   que el punto 3.
+5. La edición de memoria actualiza SQLite antes que el archivo de la Bóveda; si falla la
+   escritura del archivo, queda solo un warning y la API responde éxito — la fuente de verdad
+   declarada queda desactualizada — `memory/service.py:221,228,246`.
+6. Consolidación semanal se registra como corrida aunque alguna etapa falle; combinado con la
+   ventana de 7 días de ingestión de Agenda, una falla transitoria puede dejar eventos fuera sin
+   reintento — `worker/consolidation.py:232`, `config.py:174,271`.
+
+(6 ítems, no 5 — la sesión los contó como 5 "líneas de acción" agrupando dos temas relacionados;
+quedan documentados los 6 hallazgos reales de impacto alto tal como los listó.)
+
+**12 hallazgos de impacto Medio y 6 de impacto Bajo**: incluyen reintentos que pueden duplicar
+archivos en el vault, aceptación silenciosa de preguntas abiertas sin respuesta en auditoría web,
+captura de Telegram sin timeout si no hay `job_queue`, el flag `JARVIS_PASSIVE_CAPTURE_ENABLED`
+cortando de paso otras cosas no relacionadas, conteos de memoria de entidades que incluyen
+entradas ya olvidadas, filtros web rotos por `value=""` faltante, respuesta de chat que puede
+aparecer en el chat equivocado si cambiás de chat mientras responde, heartbeat del worker con
+falsos negativos de "caído", `worker_alive` que no baja a `false` si `/jarvis/health` falla, y
+más — lista completa con evidencia archivo:línea en la transcripción de la sesión que hizo esta
+auditoría (2026-09-24/25), no reproducida completa acá por espacio.
+
+**Pendiente de decidir:** con qué se sigue. Candidato obvio para primero: la fuga de privacidad
+(punto 1) — es el único que compromete directamente un invariante de seguridad ya declarado, el
+resto es confiabilidad/UX.
 
 ## IMPLEMENTADO: fallback de búsqueda por palabras clave en `/pregunta` de Bóveda (2026-09-24)
 

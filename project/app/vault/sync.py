@@ -268,11 +268,16 @@ def sincronizar_vault(vault_root: Path, conn: sqlite3.Connection) -> dict:
         stats["notas"] += 1
 
     # --- Borrar lo que ya no existe en disco (borradas/renombradas fuera de la app) ---
-    ids_hojas_borrar = [
-        row[1] for vid, row in existentes_hojas.items()
-        if vid not in vault_ids_vistos
-        and cursor.execute("SELECT ruta FROM hojas WHERE id = ?", (row[1],)).fetchone()[0] not in rutas_en_disco
-    ]
+    # fetchone() puede dar None si la fila ya no existe (ej. otra sincronización
+    # concurrente la borró primero) -- tratarla como "ya no está, nada que hacer"
+    # en vez de asumir que sigue viva.
+    ids_hojas_borrar = []
+    for vid, row in existentes_hojas.items():
+        if vid in vault_ids_vistos:
+            continue
+        fila_actual = cursor.execute("SELECT ruta FROM hojas WHERE id = ?", (row[1],)).fetchone()
+        if fila_actual is None or fila_actual[0] not in rutas_en_disco:
+            ids_hojas_borrar.append(row[1])
     if ids_hojas_borrar:
         placeholders = ",".join("?" * len(ids_hojas_borrar))
         cursor.execute(f"DELETE FROM hojas WHERE id IN ({placeholders})", ids_hojas_borrar)

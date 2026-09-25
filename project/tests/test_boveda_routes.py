@@ -118,3 +118,74 @@ def test_get_hojas_recientes_con_datos(client):
     response = client.get("/hojas/recientes")
     assert response.status_code == 200
     assert len(response.json()) >= 1
+
+
+@pytest.mark.integration
+def test_sincronizar_vault_no_revienta_si_fila_desaparece_durante_el_sync(
+    tmp_app_db, tmp_vault,
+):
+    """Bug real visto en el homelab (2026-09-25): entre el snapshot inicial de
+    filas existentes y el chequeo puntual por id (mismo sincronizar_vault()),
+    la fila puede haber desaparecido -- por ejemplo, otra sincronización
+    concurrente disparada por otro request ya la borró primero. fetchone()
+    devuelve None en ese caso; antes indexar [0] sobre eso tiraba
+    TypeError: 'NoneType' object is not subscriptable y crasheaba
+    GET /categorias en producción. No debe volver a pasar."""
+    from app.db.database import get_connection
+    from app.vault import sync as vault_sync
+
+    (tmp_vault / "00 - Sin categorizar").mkdir(parents=True, exist_ok=True)
+
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO categorias (nombre, ruta, estructural) VALUES (?, ?, 1)",
+        ("00 - Sin categorizar", "00 - Sin categorizar"),
+    )
+    cat_id = conn.execute(
+        "SELECT id FROM categorias WHERE nombre = ?", ("00 - Sin categorizar",)
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO hojas (contenido, fecha, categoria_id, tipo, vault_id, ruta) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        ("Nota huérfana", "2026-01-01", cat_id, "texto",
+         "vault-id-fantasma", "00 - Sin categorizar/fantasma.md"),
+    )
+    conn.commit()
+    conn.close()
+
+    calls = {"n": 0}
+
+    class _CursorVacio:
+        def fetchone(self):
+            return None
+
+    class _CursorProxy:
+        """sqlite3.Cursor es un tipo inmutable de C -- no se puede monkeypatchear
+        su método execute directo, así que envolvemos la instancia real."""
+        def __init__(self, real):
+            self._real = real
+
+        def execute(self, sql, params=()):
+            if sql.strip().startswith("SELECT ruta FROM hojas WHERE id"):
+                calls["n"] += 1
+                return _CursorVacio()  # simula que otra sync concurrente ya la borró
+            return self._real.execute(sql, params)
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+    class _ConnProxy:
+        def __init__(self, real):
+            self._real = real
+
+        def cursor(self):
+            return _CursorProxy(self._real.cursor())
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+    conn2 = get_connection()
+    vault_sync.sincronizar_vault(tmp_vault, _ConnProxy(conn2))  # no debe lanzar TypeError
+    conn2.close()
+
+    assert calls["n"] >= 1

@@ -1,6 +1,26 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-25
 
+## IMPLEMENTADO Y COMMITEADO: cierre completo de la auditoría de Bóveda (2026-09-25)
+
+Commit `3bc88be`, sobre lo ya commiteado/deployado en `21c27c1` + el hotfix `91202a3`. Cierra
+lo que quedaba: `eliminar_categoria`/`eliminar_hoja` crean la categoría estructural "05 -
+Basura" si el sync todavía no la había visto (antes podía dejar `categoria_id` sin asignar);
+`crear_nota`/`mover_a_categoria` normalizan con `.as_posix()` en vez de `str(Path(...))` —en
+Windows devolvía separadores `\` que rompían el emparejamiento posterior del sync;
+`CaptureModal` llama `handleSaveAgenda()` en la sección Agenda (antes caía siempre a
+`handleSave()` de Bóveda) y el atajo de teclado depende de todos los campos del formulario
+activo. Documentación (`README.md`, `Boveda.md`, `Boveda-Roadmap.md`, `PROXIMAMENTE.md`)
+actualizada para reflejar el estado real (grafo SVG radial con zoom/pan real, no D3 force;
+toggle de búsqueda semántica y fallback con umbral de relevancia ya resueltos). Test nuevo
+dedicado `project/tests/test_boveda_audit_fixes.py`. Verificado por el orquestador: 354
+backend (1 skip) + 176 frontend en verde, build limpio, diffs revisados uno por uno antes de
+commitear.
+
+**Con esto, la auditoría de Bóveda queda cerrada por completo** (los 27 hallazgos originales,
+más el bug de producción encontrado durante el primer deploy). Pendiente: deploy de este último
+batch al homelab.
+
 ## IMPLEMENTADO Y COMMITEADO: hallazgos de la auditoría de Bóveda (2026-09-25)
 
 Commit `21c27c1`. Resuelve el diagnóstico completo de `audit_boveda.txt` (auditoría de solo

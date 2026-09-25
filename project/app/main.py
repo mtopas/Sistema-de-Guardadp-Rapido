@@ -390,10 +390,17 @@ async def lifespan(app: FastAPI):
             print(f"[semantic] {count} hojas indexadas al arrancar")
     except Exception as _exc:
         print(f"[semantic] backfill omitido: {_exc}")
-    # Jarvis — inicializa jarvis.db si el paquete está instalado
+    # Jarvis — inicializa jarvis.db si el paquete está instalado. Patrón strangler
+    # (CLAUDE.md): un fallo acá deshabilita Jarvis, nunca debe tumbar el resto del
+    # backend (Bóveda/Finanzas/Agenda/Hábitos tienen que seguir funcionando).
+    global _JARVIS_AVAILABLE
     if _JARVIS_AVAILABLE:
-        _jarvis_init_db()
-        print("[jarvis] jarvis.db inicializada")
+        try:
+            _jarvis_init_db()
+            print("[jarvis] jarvis.db inicializada")
+        except Exception as _exc:
+            _JARVIS_AVAILABLE = False
+            print(f"[jarvis] ⚠ init_db falló, Jarvis deshabilitado para esta sesión: {_exc}")
     yield
 
 
@@ -745,8 +752,12 @@ async def crear_hoja_endpoint(hoja: HojaCreate, background_tasks: BackgroundTask
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     # Indexar en background — no bloquea la respuesta
-    cat = next((c["nombre"] for c in obtener_categorias() if c["id"] == hoja.categoria_id), "")
-    background_tasks.add_task(semantic.index_hoja, hid, hoja.contenido, cat, hoja.tipo)
+    creada = obtener_hoja_por_id(hid)
+    if creada:
+        background_tasks.add_task(
+            semantic.index_hoja, hid, creada["contenido"], creada["categoria_nombre"],
+            creada["tipo"], creada.get("apuntes") or "",
+        )
     return {"mensaje": "Hoja guardada", "id": hid, "link_preview": preview}
 
 
@@ -776,6 +787,7 @@ def buscar_hojas_semantico(q: str = Query(..., min_length=1), top_k: int = Query
     Búsqueda semántica sobre hojas via embeddings + ChromaDB.
     Devuelve hits enriquecidos con los datos completos de la hoja desde SQLite.
     """
+    semantic.backfill_missing(obtener_hojas())
     hits = semantic.search_hojas(q, top_k=top_k)
     if not hits:
         return []
@@ -796,14 +808,7 @@ def reindexar_hojas(background_tasks: BackgroundTasks):
 
 
 def _reindexar_todo(hojas: list):
-    count = 0
-    for h in hojas:
-        ok = semantic.index_hoja(
-            h["id"], h.get("contenido") or "",
-            h.get("categoria_nombre") or "", h.get("tipo") or "texto",
-        )
-        if ok:
-            count += 1
+    count = semantic.backfill_missing(hojas, force=True)
     print(f"[semantic] reindexar_todo: {count}/{len(hojas)} hojas indexadas")
 
 
@@ -843,6 +848,7 @@ def actualizar_hoja_endpoint(hoja_id: int, data: HojaPatch, background_tasks: Ba
             hoja.get("contenido", ""),
             hoja.get("categoria_nombre", ""),
             hoja.get("tipo", "texto"),
+            hoja.get("apuntes") or "",
         )
     return {"mensaje": "Hoja actualizada", "fecha_actualizado": result.get("fecha_actualizado")}
 

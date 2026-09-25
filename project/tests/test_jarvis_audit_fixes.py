@@ -174,7 +174,10 @@ def test_disabling_passive_capture_keeps_proposal_sweeps(monkeypatch):
     expire_audit.assert_called_once()
 
 
-def test_backend_startup_fails_if_jarvis_schema_does_not_initialize(monkeypatch):
+def test_backend_startup_survives_broken_jarvis_schema_but_disables_jarvis(monkeypatch):
+    """Patrón strangler (CLAUDE.md): un fallo de Jarvis nunca debe tumbar el resto
+    del backend. Antes esto sí lanzaba y abortaba el arranque completo -- decisión
+    explícita del usuario (2026-09-25) de revertir eso a "deshabilitar solo Jarvis"."""
     from app import main as app_main
 
     monkeypatch.setattr(app_main, "ensure_vault_mounted", Mock())
@@ -188,8 +191,8 @@ def test_backend_startup_fails_if_jarvis_schema_does_not_initialize(monkeypatch)
         async with app_main.lifespan(app_main.app):
             pass
 
-    with pytest.raises(OSError, match="schema rota"):
-        asyncio.run(start())
+    asyncio.run(start())  # no debe lanzar -- el resto del backend sigue disponible
+    assert app_main._JARVIS_AVAILABLE is False
 
 
 def test_repeated_question_remains_in_rag_history(monkeypatch):

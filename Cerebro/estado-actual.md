@@ -1,12 +1,34 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-09-25
 
-## AUDITORÍA: revisión completa de Jarvis (2026-09-24/25) — 24 hallazgos
+## IMPLEMENTADO Y COMMITEADO: 24 hallazgos de la auditoría de Jarvis (2026-09-24/25) — pendiente deploy al homelab
 
-La lista que sigue describe el estado observado durante la auditoría de solo lectura.
-El hallazgo de privacidad y los otros 23 se corrigieron después en el código local;
-el detalle de cambios y verificación está en `D:\SGR\audit_jarvis.txt`. Los cambios
-todavía requieren despliegue para afectar al sistema en ejecución.
+La lista que sigue describe el estado observado durante la auditoría de solo lectura. Los 24
+hallazgos se corrigieron (commit `e0f02d8`, ya commiteado y pusheado a `origin/master`); el
+detalle de cada corrección está en `D:\SGR\audit_jarvis.txt` (sección "REPORTE DE
+CORRECCIONES" al final). Verificado por el orquestador después de recibir el reporte: **346
+tests backend (1 skip) + 176 frontend en verde**, build limpio. **Nota importante de alcance**:
+al prompt original solo se le pidió resolver el hallazgo #1 (fuga de privacidad) — la sesión
+resolvió los 24 sin que se le pidiera para el resto, decisión suya, no instrucción explícita.
+Se revisó igual y no se encontró nada mal hecho salvo el punto siguiente.
+
+**Corrección del orquestador sobre el fix del hallazgo #18** (arranque del backend si
+`init_db()` de Jarvis falla): la sesión lo resolvió haciendo que **todo el backend** aborte el
+arranque si Jarvis falla al inicializar — viola el patrón strangler que `CLAUDE.md` declara
+explícitamente ("SGR sigue funcionando durante toda la construcción [de Jarvis]"). Revertido a
+pedido del usuario (2026-09-25): si `init_db()` de Jarvis falla, el backend arranca igual y
+`_JARVIS_AVAILABLE` pasa a `False` para esa sesión — Bóveda/Finanzas/Agenda/Hábitos siguen
+funcionando, solo Jarvis queda degradado. Test correspondiente
+(`test_backend_startup_fails_if_jarvis_schema_does_not_initialize`) reescrito para reflejar el
+comportamiento correcto (`project/tests/test_jarvis_audit_fixes.py`). Nota: el router de
+`/jarvis/*` sigue montado igual (se decide a nivel de import, antes del `lifespan`) — con
+`init_db()` fallada, las rutas de Jarvis van a devolver errores al consultar una DB sin
+inicializar en vez de un 503 limpio; no se implementó un guard por-request para eso, quedó
+fuera de esta corrección puntual.
+
+**Pendiente real:** deploy al homelab (build + `docker-compose up -d --no-build`, mismo proceso
+que deploys anteriores) — el código está en `master` pero no está corriendo en producción
+todavía.
 
 Sesión externa (no el orquestador), solo lectura, sin ejecutar código ni tocar el homelab.
 Cobertura: prácticamente todo `jarvis/` + integraciones en `project/mybot/`/`project/frontend/
@@ -28,7 +50,7 @@ auditoría/consolidación/triage. Viola el invariante de `CLAUDE.md` sobre priva
 verificado en producción real (la sesión no inspeccionó `jarvis.db`), pero la lectura de código
 fue concluyente sobre que el camino existía**. Corregido localmente con el Privacy Gateway.
 
-**6 hallazgos de impacto Alto (corregidos localmente):**
+**6 hallazgos de impacto Alto (corregidos y commiteados):**
 1. Fuga de privacidad de arriba (jobs sin Privacy Gateway).
 2. "Olvidar" una entrada (`valid_to`) no impide que el worker la reprocese y escriba un archivo
    nuevo en la Bóveda — `memory/service.py:316`, `worker/processor.py:33,132`.
@@ -45,7 +67,7 @@ fue concluyente sobre que el camino existía**. Corregido localmente con el Priv
    ventana de 7 días de ingestión de Agenda, una falla transitoria puede dejar eventos fuera sin
    reintento — `worker/consolidation.py:232`, `config.py:174,271`.
 
-**12 hallazgos de impacto Medio y 6 de impacto Bajo (corregidos localmente)**: incluyen reintentos que pueden duplicar
+**12 hallazgos de impacto Medio y 6 de impacto Bajo (corregidos y commiteados)**: incluyen reintentos que pueden duplicar
 archivos en el vault, aceptación silenciosa de preguntas abiertas sin respuesta en auditoría web,
 captura de Telegram sin timeout si no hay `job_queue`, el flag `JARVIS_PASSIVE_CAPTURE_ENABLED`
 cortando de paso otras cosas no relacionadas, conteos de memoria de entidades que incluyen

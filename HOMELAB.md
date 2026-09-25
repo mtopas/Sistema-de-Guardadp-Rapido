@@ -266,6 +266,7 @@ Sin `sudo` (grupo `docker`):
 | :--- | :--- |
 | Levantar stack | `cd ~/project && docker-compose up -d` |
 | Rebuild + reiniciar (código SGR o Jarvis) | `docker build --network=host -t sgr-app:latest -f Dockerfile .. && docker-compose up -d --no-build` |
+| **Cambio en `.env`** (tokens, config) | `docker-compose up -d --no-build <servicio>` — **NO** `docker-compose restart` |
 | Ver contenedores | `docker-compose ps` |
 | Logs en vivo (todos) | `docker-compose logs -f` |
 | Logs del bot | `docker-compose logs -f bot` |
@@ -679,6 +680,21 @@ wmic process where "name='python.exe'" get ProcessId,CommandLine
 Si hay instancias locales sueltas y el homelab es la fuente "online": matarlas (`Stop-Process -Id
 <pid> -Force`). El conflicto tarda unos segundos en drenar del lado de Telegram después de matar al
 competidor — no asumir que sigue roto si el error persiste por ~30-60s más.
+
+### `docker-compose restart` no aplica cambios de `.env` (`telegram.error.InvalidToken` que "no se arregla")
+
+Confirmado en vivo (2026-09-24/25, cambio de `TELEGRAM_BOT_TOKEN`/`BOT_ALLOWED_CHAT_IDS`):
+`docker-compose restart <servicio>` reinicia el proceso con las variables de entorno que el
+contenedor **ya tenía cacheadas** desde la última vez que se creó (`docker-compose up`) — un
+cambio en `.env` no se aplica, aunque `docker-compose config` sí muestre el valor nuevo (ese
+comando lee `.env` en vivo, pero eso no significa que el contenedor corriendo lo esté usando).
+Síntoma: editás `.env`, reiniciás con `restart`, y el error persiste exactamente igual, como si
+el archivo no se hubiera guardado — genera falsas sospechas de que el edit falló cuando en
+realidad el archivo está bien.
+
+**Fix:** para que un cambio de `.env` se refleje de verdad, `docker-compose up -d --no-build
+<servicio>` (recrea el contenedor) — nunca `docker-compose restart <servicio>` para esto.
+`restart` sirve solo para reintentar tras un crash transitorio sin cambios de config real.
 
 ### `litellm` sin techo real en `jarvis/pyproject.toml` (pese a lo documentado en `Cerebro/`)
 

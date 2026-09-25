@@ -1,11 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowRight, Calendar, FileText, Image as ImageIcon, Link as LinkIcon, Pencil, Tag } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { buildCategoriaColorMap } from '../utils/categoriaColors'
 import { extractTags } from '../utils/tags'
 import { getLeafIcon } from '../utils/leafIcons'
-import { getHojaDisplayTitle } from '../utils/hojaUtils'
+import { getHojaDisplayTitle, getHojaImageUrl } from '../utils/hojaUtils'
 import EditHojaModal from './EditHojaModal'
 
 function relativeDate(value) {
@@ -31,13 +31,16 @@ function NoteType({ tipo, color }) {
 export default function RightPanel({ selectedHojaId, onSelectHoja }) {
   const navigate = useNavigate()
   const hojas = useStore(s => s.hojas)
+  const hojasRecientes = useStore(s => s.hojasRecientes)
+  const fetchHojasRecientes = useStore(s => s.fetchHojasRecientes)
   const categorias = useStore(s => s.categorias)
   const [editHoja, setEditHoja] = useState(null)
 
   const colorMap = useMemo(() => buildCategoriaColorMap(categorias), [categorias])
-  const latestHojas = useMemo(() => [...hojas]
+  useEffect(() => { fetchHojasRecientes() }, [hojas, fetchHojasRecientes])
+  const latestHojas = useMemo(() => [...(hojasRecientes.length ? hojasRecientes : hojas)]
     .sort((a, b) => new Date(b.fecha_actualizado || b.fecha) - new Date(a.fecha_actualizado || a.fecha))
-    .slice(0, 7), [hojas])
+    .slice(0, 7), [hojas, hojasRecientes])
   const selected = useMemo(() => hojas.find(hoja => hoja.id === selectedHojaId) || null, [hojas, selectedHojaId])
   const selectedColor = selected ? (colorMap[selected.categoria_id] || 'var(--accent)') : 'var(--accent)'
   const selectedTags = selected ? extractTags(selected.contenido, selected.apuntes) : []
@@ -71,6 +74,7 @@ export default function RightPanel({ selectedHojaId, onSelectHoja }) {
           <div className="min-h-0 overflow-y-auto px-4 pb-4">
             <div className="flex items-start gap-3 mb-4"><span className="w-10 h-10 flex items-center justify-center flex-none" style={{ color: selectedColor, background: `color-mix(in oklch, ${selectedColor} 16%, transparent)`, borderRadius: 8 }}><LeafIcon size={19} /></span><div className="min-w-0 flex-1"><h3 className="text-sm leading-snug font-semibold" style={{ color: 'var(--text)' }}>{getHojaDisplayTitle(selected)}</h3><p className="mt-1 text-[11px]" style={{ color: 'var(--subtext)' }}>{selected.categoria_nombre || 'Sin categoría'}</p></div></div>
             <p className="text-xs leading-relaxed line-clamp-6" style={{ color: 'var(--text-2)' }}>{plainText(selected.apuntes) || 'Esta hoja todavía no tiene contenido adicional.'}</p>
+            {getHojaImageUrl(selected) && <img src={getHojaImageUrl(selected)} alt="" className="mt-3 max-h-36 max-w-full object-contain rounded-lg" />}
             {selected.link_url && <a href={selected.link_url} target="_blank" rel="noreferrer" className="mt-3 inline-flex max-w-full items-center gap-1.5 truncate text-xs" style={{ color: selectedColor }}><LinkIcon size={13} />{selected.link_url}</a>}
             <div className="mt-4 pt-3 border-t space-y-2" style={{ borderColor: 'var(--border)' }}><p className="flex items-center gap-2 text-[11px]" style={{ color: 'var(--subtext)' }}><Calendar size={13} />Actualizada {relativeDate(selected.fecha_actualizado || selected.fecha)}</p>{selectedTags.length > 0 && <div className="flex items-start gap-2"><Tag size={13} className="mt-0.5 flex-none" style={{ color: 'var(--subtext)' }} /><div className="flex flex-wrap gap-1">{selectedTags.slice(0, 6).map(tag => <span key={tag} className="px-1.5 py-0.5 text-[10px] border" style={{ color: 'var(--text-2)', borderColor: 'var(--border)', borderRadius: 5 }}>{tag}</span>)}</div></div>}</div>
             <div className="mt-4 grid grid-cols-2 gap-2"><button type="button" onClick={() => navigate(`/hoja/${selected.id}`)} className="h-9 text-xs font-semibold" style={{ color: 'var(--cta-text)', background: 'var(--cta-bg)', borderRadius: 7 }}>Abrir hoja</button><button type="button" onClick={() => setEditHoja(selected)} className="h-9 text-xs font-medium border inline-flex items-center justify-center gap-1.5" style={{ color: 'var(--text-2)', borderColor: 'var(--border)', borderRadius: 7 }}><Pencil size={13} />Editar</button></div>

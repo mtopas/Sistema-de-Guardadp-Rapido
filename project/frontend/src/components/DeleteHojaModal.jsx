@@ -14,10 +14,14 @@ export default function DeleteHojaModal({ hoja, onClose, onDeleted }) {
   const title = getHojaDisplayTitle(hoja) || '—'
 
   const handleDelete = async () => {
-    await eliminarHoja(hoja.id)
-    showToast(t(lang, 'deleted'), 'success')
-    onDeleted?.(hoja.id)
-    onClose()
+    try {
+      await eliminarHoja(hoja.id)
+      showToast(t(lang, 'deleted'), 'success')
+      onDeleted?.(hoja.id)
+      onClose()
+    } catch (e) {
+      showToast(e.message || 'No se pudo eliminar la hoja', 'error')
+    }
   }
 
   return createPortal(

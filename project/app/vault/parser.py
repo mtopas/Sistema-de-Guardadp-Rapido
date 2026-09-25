@@ -48,6 +48,8 @@ class NotaParseada:
     lugar: Optional[str] = None
     latitud: Optional[float] = None
     longitud: Optional[float] = None
+    color: Optional[str] = None
+    link_preview: Optional[dict] = None
 
 
 def derive_titulo(body: str, path: Path) -> str:
@@ -84,25 +86,8 @@ def build_frontmatter_text(data: dict) -> str:
     origen/tags[/url]); los opcionales (icono/lugar/latitud/longitud) solo si
     vienen con valor no-None.
     """
-    tags = data.get("tags") or []
-    tags_yaml = "[" + ", ".join(tags) + "]" if tags else "[]"
-    lines = [
-        "---",
-        f"id: {data['id']}",
-        f"tipo: {data['tipo']}",
-        f"creado_en: {data['creado_en']}",
-        f"actualizado_en: {data['actualizado_en']}",
-        f"origen: {data['origen']}",
-        f"tags: {tags_yaml}",
-    ]
-    if data.get("tipo") == "link" and data.get("url"):
-        lines.append(f"url: {data['url']}")
-    for campo in _CAMPOS_OPCIONALES:
-        valor = data.get(campo)
-        if valor is not None and valor != "":
-            lines.append(f"{campo}: {valor}")
-    lines.append("---\n")
-    return "\n".join(lines)
+    clean = {key: value for key, value in data.items() if value is not None and value != ""}
+    return "---\n" + yaml.safe_dump(clean, allow_unicode=True, sort_keys=False) + "---\n"
 
 
 def assign_missing_id(path: Path, raw_text: str, dry_run: bool) -> tuple[str, dict, str, bool]:
@@ -183,6 +168,8 @@ def parse_nota(path: Path, dry_run: bool, logger=None) -> tuple[NotaParseada, bo
         lugar=data.get("lugar"),
         latitud=_float_or_none(data.get("latitud")),
         longitud=_float_or_none(data.get("longitud")),
+        color=data.get("color"),
+        link_preview=data.get("link_preview") if isinstance(data.get("link_preview"), dict) else None,
     )
     return nota, id_asignado
 

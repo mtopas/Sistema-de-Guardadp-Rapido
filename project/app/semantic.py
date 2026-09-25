@@ -16,6 +16,9 @@ from __future__ import annotations
 
 import logging
 import os
+import hashlib
+import html
+import re
 from pathlib import Path
 
 import httpx
@@ -81,13 +84,25 @@ def embed_text(text: str) -> list[float] | None:
         return None
 
 
+def _texto_indexado(contenido: str, categoria_nombre: str, apuntes: str) -> str:
+    cuerpo = html.unescape(re.sub(r"<[^>]+>", " ", apuntes or ""))
+    cuerpo = re.sub(r"\s+", " ", cuerpo).strip()
+    return f"{contenido or ''} [{categoria_nombre or ''}]\n{cuerpo}"
+
+
+def _firma_hoja(contenido: str, categoria_nombre: str, tipo: str, apuntes: str) -> str:
+    texto = _texto_indexado(contenido, categoria_nombre, apuntes)
+    return hashlib.sha256(f"{tipo}\n{texto}".encode("utf-8")).hexdigest()
+
+
 # ── Operaciones sobre el índice ────────────────────────────────────────────────
 
 def index_hoja(hoja_id: int, contenido: str,
-               categoria_nombre: str = "", tipo: str = "texto") -> bool:
+               categoria_nombre: str = "", tipo: str = "texto",
+               apuntes: str = "") -> bool:
     """Indexa (o re-indexa) una hoja. Devuelve False si falla."""
     try:
-        text = f"{contenido} [{categoria_nombre}]"
+        text = _texto_indexado(contenido, categoria_nombre, apuntes)
         vec = embed_text(text)
         if vec is None:
             return False
@@ -99,6 +114,7 @@ def index_hoja(hoja_id: int, contenido: str,
                 "categoria": categoria_nombre or "",
                 "tipo":      tipo or "texto",
                 "contenido": contenido[:300],
+                "firma": _firma_hoja(contenido, categoria_nombre, tipo, apuntes),
             }],
         )
         if DEBUG:
@@ -156,17 +172,28 @@ def search_hojas(query: str, top_k: int = 5) -> list[dict]:
         return []
 
 
-def backfill_missing(hojas: list[dict]) -> int:
+def backfill_missing(hojas: list[dict], *, force: bool = False) -> int:
     """
     Indexa las hojas que no estén en ChromaDB.
     Devuelve la cantidad indexada (0 si Ollama no disponible).
     """
-    if not hojas or not _ollama_available():
-        return 0
     try:
         col      = _get_collection()
-        existing = set(col.get(include=[])["ids"])
-        missing  = [h for h in hojas if str(h["id"]) not in existing]
+        indexed = col.get(include=["metadatas"])
+        existing = dict(zip(indexed["ids"], indexed["metadatas"]))
+        valid_ids = {str(h["id"]) for h in hojas}
+        stale = [doc_id for doc_id in existing if doc_id not in valid_ids]
+        if stale:
+            col.delete(ids=stale)
+        if not _ollama_available():
+            return 0
+        missing = [
+            h for h in hojas
+            if force or (existing.get(str(h["id"])) or {}).get("firma") != _firma_hoja(
+                h.get("contenido") or "", h.get("categoria_nombre") or "",
+                h.get("tipo") or "texto", h.get("apuntes") or "",
+            )
+        ]
         count    = 0
         for h in missing:
             ok = index_hoja(
@@ -174,6 +201,7 @@ def backfill_missing(hojas: list[dict]) -> int:
                 h.get("contenido") or "",
                 h.get("categoria_nombre") or "",
                 h.get("tipo") or "texto",
+                h.get("apuntes") or "",
             )
             if ok:
                 count += 1

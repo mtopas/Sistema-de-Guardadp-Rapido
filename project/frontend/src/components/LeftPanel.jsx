@@ -254,6 +254,7 @@ export default function LeftPanel({ onOpenHoja, onHojaDeleted, searchQuery = '' 
   const lang            = useStore(s => s.lang)
   const openCaptureWith = useStore(s => s.openCaptureWith)
   const crearCategoria  = useStore(s => s.crearCategoria)
+  const showToast = useStore(s => s.showToast)
 
   const [openState, setOpenState] = useState(() => loadOpenState())
   const [contextMenu, setContextMenu] = useState(null)
@@ -349,7 +350,7 @@ export default function LeftPanel({ onOpenHoja, onHojaDeleted, searchQuery = '' 
     if (semanticDebounceRef.current) clearTimeout(semanticDebounceRef.current)
     semanticDebounceRef.current = setTimeout(async () => {
       try {
-        const res = await fetch(`${API_URL}/hojas/buscar-semantico?q=${encodeURIComponent(searchQuery)}&top_k=30`)
+        const res = await fetch(`${API_URL}/hojas/buscar-semantico?q=${encodeURIComponent(searchQuery)}&top_k=20`)
         if (!res.ok) throw new Error('semantic search failed')
         const data = await res.json()
         if (!cancelled) setSemanticResults(data)
@@ -451,6 +452,16 @@ export default function LeftPanel({ onOpenHoja, onHojaDeleted, searchQuery = '' 
           </button>
           {semanticMode && semanticLoading && (
             <span className="text-[10px]" style={{ color: 'var(--subtext)' }}>buscando…</span>
+          )}
+          {semanticMode && (
+            <button type="button" className="text-[10px] underline" style={{ color: 'var(--accent)' }}
+              onClick={async () => {
+                try {
+                  const res = await fetch(API_URL + '/hojas/reindexar', { method: 'POST' })
+                  if (!res.ok) throw new Error('No se pudo iniciar el reindexado')
+                  showToast('Reindexado iniciado', 'success')
+                } catch (e) { showToast(e.message, 'error') }
+              }}>Reindexar</button>
           )}
         </div>
       )}

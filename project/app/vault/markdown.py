@@ -15,8 +15,6 @@ import re
 import markdown as _markdown
 from markdownify import markdownify as _markdownify
 
-from app.config import API_BASE_URL
-
 IMG_ADJUNTO_PATH_RE = re.compile(r"!\[[^\]]*\]\(_adjuntos/([^)]+)\)")
 
 
@@ -44,6 +42,6 @@ def construir_apuntes_html_foto(imagen_ref_md: str | None, md_apuntes: str) -> s
     m = IMG_ADJUNTO_PATH_RE.search(imagen_ref_md or "")
     if not m:
         return html
-    url_abs = f"{API_BASE_URL}/adjuntos/{m.group(1)}"
-    img_tag = f'<img src="{url_abs}" alt="" style="max-width:100%;border-radius:8px;margin-top:8px;">'
+    url_rel = f"/adjuntos/{m.group(1)}"
+    img_tag = f'<img src="{url_rel}" alt="" style="max-width:100%;border-radius:8px;margin-top:8px;">'
     return img_tag + html

@@ -70,6 +70,7 @@ def _parse_preview(raw):
 
 
 def _hoja_dict(f):
+    link_url = re.search(r"https?://\S+", f[1] or "") if f[5] == "link" else None
     return {
         "id": f[0],
         "contenido": f[1],
@@ -86,6 +87,7 @@ def _hoja_dict(f):
         "fecha_actualizado": f[12] if len(f) > 12 else None,
         "link_preview": _parse_preview(f[13]) if len(f) > 13 else None,
         "color": f[14] if len(f) > 14 else None,
+        "link_url": link_url.group(0).rstrip(".,;:!?)\"'»") if link_url else None,
     }
 
 
@@ -167,6 +169,10 @@ def crear_categoria(
         return None
     try:
         vault_writer.crear_carpeta_categoria(VAULT_ROOT, ruta)
+        if icono or inherited_color:
+            vault_writer.escribir_meta_categoria(
+                VAULT_ROOT, ruta, icono=icono, color=inherited_color,
+            )
         cursor.execute(
             "INSERT INTO categorias (nombre, padre_id, icono, color, ruta, estructural) VALUES (?, ?, ?, ?, ?, 0)",
             (nombre_limpio, padre_id, icono, inherited_color, ruta),
@@ -264,6 +270,7 @@ _HOJA_SELECT = """
     FROM hojas h
     JOIN categorias c ON c.id = h.categoria_id
 """
+_VISIBLE_HOJA = "(c.ruta IS NULL OR (c.ruta != '05 - Basura' AND c.ruta NOT LIKE '05 - Basura/%'))"
 
 _UPDATABLE_HOJA = frozenset({"contenido", "categoria_id", "tipo", "apuntes", "icono", "lugar", "color"})
 
@@ -334,6 +341,10 @@ def crear_hoja(
         frontmatter["url"] = contenido.strip()
     if icono:
         frontmatter["icono"] = icono
+    if color:
+        frontmatter["color"] = color
+    if link_preview:
+        frontmatter["link_preview"] = link_preview
     if lugar:
         frontmatter["lugar"] = lugar
     if latitud is not None:
@@ -377,6 +388,7 @@ def obtener_hojas():
                h.tipo, h.apuntes, h.lugar, h.latitud, h.longitud, h.fecha_recordatorio, h.icono, h.fecha_actualizado, h.link_preview, h.color
         FROM hojas h
         JOIN categorias c ON c.id = h.categoria_id
+        WHERE (c.ruta IS NULL OR (c.ruta != '05 - Basura' AND c.ruta NOT LIKE '05 - Basura/%'))
         ORDER BY c.id ASC, h.id ASC
         """
     )
@@ -394,7 +406,7 @@ def obtener_hoja_por_id(hoja_id: int):
                h.tipo, h.apuntes, h.lugar, h.latitud, h.longitud, h.fecha_recordatorio, h.icono, h.fecha_actualizado, h.link_preview, h.color
         FROM hojas h
         JOIN categorias c ON c.id = h.categoria_id
-        WHERE h.id = ?
+        WHERE h.id = ? AND (c.ruta IS NULL OR (c.ruta != '05 - Basura' AND c.ruta NOT LIKE '05 - Basura/%'))
         """,
         (hoja_id,),
     )
@@ -422,6 +434,17 @@ def actualizar_icono(hoja_id: int, icono: Optional[str]) -> str:
 def actualizar_link_preview(hoja_id: int, preview: Optional[dict]):
     conn = get_connection()
     cursor = conn.cursor()
+    cursor.execute("SELECT ruta FROM hojas WHERE id = ?", (hoja_id,))
+    row = cursor.fetchone()
+    if row and row[0]:
+        path = VAULT_ROOT / row[0]
+        data, body = vault_parser.split_frontmatter(path.read_text(encoding="utf-8"))
+        data = data or {}
+        if preview:
+            data["link_preview"] = preview
+        else:
+            data.pop("link_preview", None)
+        vault_writer.actualizar_documento(VAULT_ROOT, row[0], data, body)
     payload = json.dumps(preview) if preview else None
     cursor.execute("UPDATE hojas SET link_preview = ? WHERE id = ?", (payload, hoja_id))
     conn.commit()
@@ -437,12 +460,18 @@ def eliminar_hoja(hoja_id: int) -> Optional[str]:
     sincronizar_vault_si_hace_falta()
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT contenido, ruta FROM hojas WHERE id = ?", (hoja_id,))
+    cursor.execute(
+        "SELECT h.contenido, h.ruta, c.ruta FROM hojas h "
+        "JOIN categorias c ON c.id = h.categoria_id WHERE h.id = ?", (hoja_id,)
+    )
     row = cursor.fetchone()
     if not row:
         conn.close()
         return None
-    contenido, ruta = row
+    contenido, ruta, categoria_ruta = row
+    if categoria_ruta == vault_writer.BASURA_CARPETA or categoria_ruta.startswith(vault_writer.BASURA_CARPETA + "/"):
+        conn.close()
+        return None
     if ruta and (VAULT_ROOT / ruta).exists():
         ruta_nueva = vault_writer.mover_a_basura(VAULT_ROOT, ruta)
         nuevo_mtime = (VAULT_ROOT / ruta_nueva).stat().st_mtime
@@ -496,19 +525,11 @@ def actualizar_hoja(hoja_id: int, campos: dict) -> Optional[dict]:
     lugar = safe.get("lugar", lugar_actual)
 
     ruta_abs_actual = VAULT_ROOT / ruta_actual
-    origen_existente, url_existente, imagen_ref = "app", None, None
-    if ruta_abs_actual.exists():
-        try:
-            texto_actual = ruta_abs_actual.read_text(encoding="utf-8")
-            data_existente, _ = vault_parser.split_frontmatter(texto_actual)
-            if data_existente:
-                origen_existente = data_existente.get("origen") or "app"
-                url_existente = data_existente.get("url")
-            m = _IMG_ADJUNTO_RE.search(texto_actual)
-            if m:
-                imagen_ref = m.group(0)
-        except OSError:
-            pass
+    texto_actual = ruta_abs_actual.read_text(encoding="utf-8")
+    data_existente, cuerpo_actual = vault_parser.split_frontmatter(texto_actual)
+    frontmatter = dict(data_existente or {})
+    imagen_match = _IMG_ADJUNTO_RE.search(cuerpo_actual)
+    imagen_ref = imagen_match.group(0) if imagen_match else None
 
     ruta_rel = ruta_actual
     if categoria_id_nuevo != categoria_id_actual:
@@ -521,44 +542,62 @@ def actualizar_hoja(hoja_id: int, campos: dict) -> Optional[dict]:
 
     ahora = vault_parser.now_iso()
     titulo = (contenido or "").strip() or "Sin título"
-    # RightPanel.jsx re-antepone el <img> líder al guardar apuntes de una hoja
-    # foto (ver onUpdate en RightPanel.jsx) -- se saca antes de convertir a MD,
-    # la imagen ya vive en `imagen_ref` (leída del archivo más arriba).
-    apuntes_sin_img = apuntes_html
-    if tipo == "foto" and apuntes_sin_img:
-        apuntes_sin_img = _LEADING_IMG_TAG_RE.sub("", apuntes_sin_img, count=1)
-    md_apuntes = html_a_markdown(apuntes_sin_img) if apuntes_sin_img else ""
-    body_parts = [imagen_ref] if imagen_ref else []
-    if md_apuntes:
-        body_parts.append(md_apuntes)
-    body_md = "\n\n".join(body_parts)
+    h1 = vault_parser.H1_RE.search(cuerpo_actual)
+    cuerpo = cuerpo_actual
+    if "contenido" in safe:
+        if h1:
+            cuerpo = cuerpo[:h1.start()] + f"# {titulo}" + cuerpo[h1.end():]
+        else:
+            cuerpo = f"# {titulo}\n\n" + cuerpo
+    if "apuntes" in safe:
+        h1 = vault_parser.H1_RE.search(cuerpo)
+        apuntes_sin_img = apuntes_html or ""
+        if tipo == "foto":
+            apuntes_sin_img = _LEADING_IMG_TAG_RE.sub("", apuntes_sin_img, count=1)
+        md_apuntes = html_a_markdown(apuntes_sin_img)
+        prefijo = f"# {titulo}"
+        partes = [part for part in (imagen_ref, md_apuntes) if part]
+        cuerpo = prefijo + ("\n\n" + "\n\n".join(partes) if partes else "\n")
+        if not cuerpo.endswith("\n"):
+            cuerpo += "\n"
+        apuntes_final_html = (
+            construir_apuntes_html_foto(imagen_ref, md_apuntes) if tipo == "foto"
+            else markdown_a_html(md_apuntes)
+        )
+    else:
+        apuntes_final_html = apuntes_actual
 
-    frontmatter = {
-        "id": vault_id, "tipo": tipo, "creado_en": creado_en or ahora, "actualizado_en": ahora,
-        "origen": origen_existente, "tags": _extraer_tags(contenido, apuntes_html),
-    }
+    frontmatter.update({
+        "id": vault_id, "tipo": tipo, "creado_en": frontmatter.get("creado_en") or creado_en or ahora,
+        "actualizado_en": ahora, "origen": frontmatter.get("origen") or "app",
+    })
+    if "contenido" in safe or "apuntes" in safe:
+        tags_previos = frontmatter.get("tags") if isinstance(frontmatter.get("tags"), list) else []
+        frontmatter["tags"] = list(dict.fromkeys(
+            [*tags_previos, *_extraer_tags(contenido, apuntes_html)]
+        ))
     if tipo == "link":
-        frontmatter["url"] = contenido or url_existente
-    if icono:
-        frontmatter["icono"] = icono
-    if lugar:
-        frontmatter["lugar"] = lugar
-    if latitud_actual is not None:
-        frontmatter["latitud"] = latitud_actual
-    if longitud_actual is not None:
-        frontmatter["longitud"] = longitud_actual
+        url_match = re.search(r"https?://\S+", contenido or "")
+        frontmatter["url"] = url_match.group(0) if url_match else contenido
+    else:
+        frontmatter.pop("url", None)
+    for key, value in (("icono", icono), ("color", color), ("lugar", lugar),
+                       ("latitud", latitud_actual), ("longitud", longitud_actual)):
+        if value is None or value == "":
+            frontmatter.pop(key, None)
+        else:
+            frontmatter[key] = value
+    if "contenido" in safe and tipo == "link" and contenido != contenido_actual:
+        frontmatter.pop("link_preview", None)
 
-    vault_writer.actualizar_nota(VAULT_ROOT, ruta_rel, titulo, frontmatter, body_md)
+    vault_writer.actualizar_documento(VAULT_ROOT, ruta_rel, frontmatter, cuerpo)
     nuevo_mtime = (VAULT_ROOT / ruta_rel).stat().st_mtime
-    apuntes_final_html = (
-        construir_apuntes_html_foto(imagen_ref, md_apuntes) if tipo == "foto"
-        else (markdown_a_html(md_apuntes) if md_apuntes else "")
-    )
 
     sets = {
         "contenido": contenido, "categoria_id": categoria_id_nuevo, "tipo": tipo,
         "apuntes": apuntes_final_html, "icono": icono, "color": color, "lugar": lugar,
         "fecha_actualizado": ahora, "ruta": ruta_rel, "mtime": nuevo_mtime,
+        "link_preview": json.dumps(frontmatter["link_preview"]) if frontmatter.get("link_preview") else None,
     }
     cols = ", ".join(f"{k} = ?" for k in sets)
     cursor.execute(f"UPDATE hojas SET {cols} WHERE id = ?", list(sets.values()) + [hoja_id])
@@ -574,7 +613,7 @@ def buscar_hojas(q: Optional[str] = None, tipo: Optional[str] = None,
     sincronizar_vault_si_hace_falta()
     conn = get_connection()
     cursor = conn.cursor()
-    where = []
+    where = [_VISIBLE_HOJA]
     params = []
     if q:
         where.append("(h.contenido LIKE ? OR h.apuntes LIKE ?)")
@@ -599,7 +638,7 @@ def obtener_hojas_recientes(limit: int = 20) -> list:
     sincronizar_vault_si_hace_falta()
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute(_HOJA_SELECT + " ORDER BY h.fecha_actualizado DESC LIMIT ?", (limit,))
+    cursor.execute(_HOJA_SELECT + " WHERE " + _VISIBLE_HOJA + " ORDER BY h.fecha_actualizado DESC LIMIT ?", (limit,))
     rows = cursor.fetchall()
     conn.close()
     return [_hoja_dict(r) for r in rows]
@@ -665,6 +704,11 @@ def actualizar_categoria(categoria_id: int, campos: dict) -> Optional[dict]:
             ids = [categoria_id] + _categoria_descendant_ids(cursor, categoria_id)
             for cid in ids:
                 cursor.execute("UPDATE categorias SET color = ? WHERE id = ?", (color_val, cid))
+                cursor.execute("SELECT ruta, icono FROM categorias WHERE id = ?", (cid,))
+                meta_ruta, meta_icono = cursor.fetchone()
+                vault_writer.escribir_meta_categoria(
+                    VAULT_ROOT, meta_ruta, icono=meta_icono, color=color_val,
+                )
             if DEBUG:
                 print(f"actualizar_categoria: color={color_val} en ids={ids}")
 
@@ -674,6 +718,11 @@ def actualizar_categoria(categoria_id: int, campos: dict) -> Optional[dict]:
         if sets:
             cols = ", ".join(f"{k} = ?" for k in sets)
             cursor.execute(f"UPDATE categorias SET {cols} WHERE id = ?", list(sets.values()) + [categoria_id])
+        if "icono" in safe:
+            cursor.execute("SELECT color FROM categorias WHERE id = ?", (categoria_id,))
+            vault_writer.escribir_meta_categoria(
+                VAULT_ROOT, ruta_nueva, icono=safe["icono"], color=cursor.fetchone()[0],
+            )
         conn.commit()
     except sqlite3.IntegrityError:
         conn.rollback()

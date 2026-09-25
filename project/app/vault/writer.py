@@ -13,10 +13,12 @@ import shutil
 import uuid
 from pathlib import Path
 from typing import Optional
+import yaml
 
 from app.vault.parser import build_frontmatter_text, now_iso
 
 BASURA_CARPETA = "05 - Basura"
+CATEGORIA_META = ".sgr-categoria.yaml"
 
 _INVALIDOS_WINDOWS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -69,6 +71,11 @@ def actualizar_nota(vault_root: Path, ruta_rel: str, titulo: str, frontmatter: d
     _escribir_atomico(vault_root / ruta_rel, armar_texto_nota(frontmatter, titulo, body_md))
 
 
+def actualizar_documento(vault_root: Path, ruta_rel: str, frontmatter: dict, cuerpo: str) -> None:
+    """Actualiza el frontmatter sin normalizar ni descartar el cuerpo Markdown."""
+    _escribir_atomico(vault_root / ruta_rel, build_frontmatter_text(frontmatter) + cuerpo)
+
+
 def mover_a_categoria(vault_root: Path, ruta_rel_actual: str, categoria_ruta_nueva: str) -> str:
     """Mueve el archivo a otra carpeta de categoría. Devuelve la nueva ruta relativa."""
     origen = vault_root / ruta_rel_actual
@@ -90,6 +97,23 @@ def mover_a_basura(vault_root: Path, ruta_rel_actual: str) -> str:
 
 def crear_carpeta_categoria(vault_root: Path, categoria_ruta: str) -> None:
     (vault_root / categoria_ruta).mkdir(parents=True, exist_ok=True)
+
+
+def leer_meta_categoria(vault_root: Path, categoria_ruta: str) -> dict | None:
+    path = vault_root / categoria_ruta / CATEGORIA_META
+    if not path.exists():
+        return None
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(data, dict):
+        raise ValueError(f"{path}: metadatos de categoría inválidos")
+    return data
+
+
+def escribir_meta_categoria(vault_root: Path, categoria_ruta: str, *, icono=None, color=None) -> None:
+    path = vault_root / categoria_ruta / CATEGORIA_META
+    data = leer_meta_categoria(vault_root, categoria_ruta) or {}
+    data.update({"icono": icono, "color": color})
+    _escribir_atomico(path, yaml.safe_dump(data, allow_unicode=True, sort_keys=False))
 
 
 def mover_carpeta_categoria(vault_root: Path, ruta_vieja: str, ruta_nueva: str) -> None:

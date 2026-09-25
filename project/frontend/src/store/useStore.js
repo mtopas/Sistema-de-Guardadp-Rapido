@@ -95,6 +95,7 @@ const savedUserName = localStorage.getItem('sgr-username')  || ''
 
 export const useStore = create((set, get) => ({
   hojas:      [],
+  hojasRecientes: [],
   categorias: [],
   theme:          startTheme,
   tone:           startTone,
@@ -1449,7 +1450,9 @@ export const useStore = create((set, get) => ({
   fetchCategorias: async () => {
     try {
       const res = await fetch(`${API_URL}/categorias`)
+      if (!res.ok) throw new Error('GET /categorias: ' + res.status)
       const data = await res.json()
+      if (!Array.isArray(data)) throw new Error('Respuesta inválida de /categorias')
       set({ categorias: data })
       if (DEBUG) console.log('fetchCategorias:', data.length)
     } catch (e) {
@@ -1549,7 +1552,9 @@ export const useStore = create((set, get) => ({
   fetchHojas: async () => {
     try {
       const res = await fetch(`${API_URL}/hojas`)
+      if (!res.ok) throw new Error('GET /hojas: ' + res.status)
       const data = await res.json()
+      if (!Array.isArray(data)) throw new Error('Respuesta inválida de /hojas')
       set({ hojas: data })
       if (DEBUG) console.log('fetchHojas:', data.length)
     } catch (e) {
@@ -1557,6 +1562,16 @@ export const useStore = create((set, get) => ({
     }
   },
 
+  fetchHojasRecientes: async () => {
+    try {
+      const res = await fetch(API_URL + '/hojas/recientes?limit=7')
+      if (!res.ok) throw new Error('GET /hojas/recientes: ' + res.status)
+      const data = await res.json()
+      if (Array.isArray(data)) set({ hojasRecientes: data })
+    } catch (e) {
+      if (DEBUG) console.error('fetchHojasRecientes:', e)
+    }
+  },
   crearHoja: async (payload) => {
     // Optimistic: add a temporary entry immediately so the graph/list updates
     const tempId = `tmp_${Date.now()}`
@@ -1587,13 +1602,15 @@ export const useStore = create((set, get) => ({
   },
 
   eliminarHoja: async (id) => {
-    // Optimistic remove
+    const previas = get().hojas
     set(state => ({ hojas: state.hojas.filter(h => h.id !== id) }))
     try {
-      await fetch(`${API_URL}/hojas/${id}`, { method: 'DELETE' })
-    } catch {
-      // Restore on failure — refetch to get correct state
-      get().fetchHojas()
+      const res = await fetch(API_URL + '/hojas/' + id, { method: 'DELETE' })
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'No se pudo eliminar la hoja')
+      set(state => ({ hojasRecientes: state.hojasRecientes.filter(h => h.id !== id) }))
+    } catch (e) {
+      set({ hojas: previas })
+      throw e
     }
     if (DEBUG) console.log('eliminarHoja:', id)
   },

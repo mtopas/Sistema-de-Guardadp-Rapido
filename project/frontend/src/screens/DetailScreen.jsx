@@ -12,6 +12,7 @@ import CategoryPicker from '../components/CategoryPicker'
 import { getCategoriaColor } from '../utils/categoriaColors'
 import { extractTags } from '../utils/tags'
 import { DEBUG } from '../config'
+import { getHojaImageUrl, getHojaEditableApuntes } from '../utils/hojaUtils'
 
 function EditorToolbar({ editor, color }) {
   if (!editor) return null
@@ -60,7 +61,7 @@ export default function DetailScreen() {
 
   const editor = useEditor({
     extensions: [StarterKit, Underline],
-    content: hoja?.apuntes || '',
+    content: getHojaEditableApuntes(hoja),
     editorProps: { attributes: { class: 'outline-none min-h-[100px] text-sm leading-relaxed' } },
     onUpdate: () => setIsDirty(true),
   })
@@ -73,7 +74,7 @@ export default function DetailScreen() {
     setCategoriaId(hoja.categoria_id ?? null)
     setIcono(hoja.icono || '')
     setColorSel(hoja.color || null)
-    editor?.commands.setContent(hoja.apuntes || '')
+    editor?.commands.setContent(getHojaEditableApuntes(hoja))
     setIsDirty(false)
     setConfirmDelete(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -114,14 +115,19 @@ export default function DetailScreen() {
 
   const handleDelete = async () => {
     if (!confirmDelete) { setConfirmDelete(true); return }
-    await eliminarHoja(hoja.id)
-    showToast('Hoja eliminada')
-    navigate('/')
+    try {
+      await eliminarHoja(hoja.id)
+      showToast('Hoja eliminada')
+      navigate('/')
+    } catch (e) {
+      showToast(e.message || 'No se pudo eliminar la hoja', 'error')
+    }
   }
 
   if (!hoja) return <div className="flex flex-col h-full" style={{ background: 'var(--bg)' }}><TopBar searchQuery={searchQuery} onSearchChange={setSearchQuery} /><div className="flex-1 grid place-items-center text-sm" style={{ color: 'var(--subtext)' }}>Hoja no encontrada.</div></div>
 
   const tags = extractTags(hoja.contenido, hoja.apuntes)
+  const imageUrl = getHojaImageUrl(hoja)
 
   return (
     <div className="flex flex-col h-full" style={{ background: 'var(--bg)' }}>
@@ -212,6 +218,7 @@ export default function DetailScreen() {
 
         {/* Apuntes */}
         <div>
+          {imageUrl && <img src={imageUrl} alt={title || 'Foto guardada'} className="max-w-full max-h-[480px] object-contain rounded-lg mb-4" />}
           <div className="flex items-center gap-1.5 mb-2 px-1">
             <PenLine size={11} style={{ color: 'var(--subtext)' }} />
             <h3 className="text-[11px] uppercase tracking-widest" style={{ color: 'var(--subtext)' }}>

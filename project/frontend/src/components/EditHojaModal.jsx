@@ -20,7 +20,7 @@ export default function EditHojaModal({ hoja, onClose, onSaved }) {
 
   useEffect(() => {
     if (!hoja) return
-    setNombre(getHojaDisplayTitle(hoja))
+    setNombre(hoja.tipo === 'link' ? hoja.contenido : getHojaDisplayTitle(hoja))
     setCategoriaId(hoja.categoria_id ?? null)
     setIcono(hoja.icono || '')
     setTimeout(() => inputRef.current?.focus(), 50)
@@ -36,6 +36,10 @@ export default function EditHojaModal({ hoja, onClose, onSaved }) {
     const trimmed = nombre.trim()
     if (!trimmed) {
       showToast('El nombre no puede estar vacío', 'error')
+      return
+    }
+    if (hoja.tipo === 'link' && !/^https?:\/\/\S+$/i.test(trimmed)) {
+      showToast('Ingresá una URL completa para el enlace', 'error')
       return
     }
     if (!categoriaId) {

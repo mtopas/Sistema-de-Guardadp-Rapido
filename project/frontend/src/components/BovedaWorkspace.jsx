@@ -99,14 +99,14 @@ export default function BovedaWorkspace({ onOpenHoja, onHojaDeleted, searchQuery
   }, [hojas])
 
   const filteredHojas = useMemo(() => {
-    const normalized = `${searchQuery} ${query}`.trim().toLowerCase()
+    const terms = [searchQuery, query].map(q => q.trim().toLowerCase()).filter(Boolean)
     return hojas
       .filter(hoja => {
         const hojaTags = extractTags(hoja.contenido, hoja.apuntes)
         const matchingTag = !selectedTag || hojaTags.includes(selectedTag)
-        const matchingQuery = !normalized || [hoja.contenido, hoja.apuntes, hoja.categoria_nombre, ...hojaTags]
+        const matchingQuery = terms.every(term => [hoja.contenido, hoja.apuntes, hoja.categoria_nombre, ...hojaTags]
           .filter(Boolean)
-          .some(value => value.toLowerCase().includes(normalized))
+          .some(value => value.toLowerCase().includes(term)))
         return matchingTag && matchingQuery
       })
       .sort((a, b) => new Date(b.fecha_actualizado || b.fecha) - new Date(a.fecha_actualizado || a.fecha))
@@ -158,7 +158,7 @@ export default function BovedaWorkspace({ onOpenHoja, onHojaDeleted, searchQuery
 
         {view === 'grafo' && (
           <div className="min-h-0 flex-1 relative">
-            <NetworkGraph onOpenHoja={onOpenHoja} />
+            <NetworkGraph onOpenHoja={onOpenHoja} hojasFiltradas={filteredHojas} />
           </div>
         )}
 

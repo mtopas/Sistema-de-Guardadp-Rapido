@@ -102,8 +102,9 @@ const iconBtnStyle = {
 
 const TYPE_LABEL = { texto: 'Texto', link: 'Link', foto: 'Foto' }
 
-export default function NetworkGraph({ onOpenHoja }) {
-  const hojas      = useStore(s => s.hojas)
+export default function NetworkGraph({ onOpenHoja, hojasFiltradas }) {
+  const hojasStore = useStore(s => s.hojas)
+  const hojas = hojasFiltradas ?? hojasStore
   const categorias = useStore(s => s.categorias)
 
   const { branches, leaves, links, crossLinks } = useMemo(

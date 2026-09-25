@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+from html import escape
 import sys
 import time as _time
 from datetime import datetime, time as datetime_time, timezone
@@ -499,6 +500,14 @@ async def _save_draft(
             "Reenviá el mensaje."
         )
         return False
+
+    if tipo == "link":
+        url = _extract_url(draft)
+        if url:
+            comentario = draft.replace(url, "", 1).strip()
+            draft = url
+            if comentario:
+                apuntes = (apuntes or "") + f"<p>{escape(comentario)}</p>"
 
     r = _post_hoja(draft, cat["id"], tipo=tipo, apuntes=apuntes,
                    lugar=lugar, latitud=lat, longitud=lon)

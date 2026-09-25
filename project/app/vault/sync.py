@@ -16,6 +16,7 @@ import sqlite3
 from pathlib import Path
 
 from app.vault import parser
+from app.vault import writer
 from app.vault.markdown import markdown_a_html, construir_apuntes_html_foto
 
 logger = logging.getLogger("vault_sync")
@@ -92,7 +93,7 @@ def _cuerpo_sin_titulo(body: str) -> str:
     m = parser.H1_RE.search(body)
     if not m:
         return body.strip()
-    resto = body[m.end():]
+    resto = body[:m.start()] + body[m.end():]
     resto = _IMG_ADJUNTO_RE.sub("", resto, count=1)  # la imagen del adjunto no es "apuntes"
     return resto.strip()
 
@@ -106,7 +107,11 @@ def sincronizar_vault(vault_root: Path, conn: sqlite3.Connection) -> dict:
         return stats
 
     # --- Categorías: upsert por ruta, padres antes que hijos ---
-    existentes = {row[0]: row[1] for row in cursor.execute("SELECT ruta, id FROM categorias WHERE ruta IS NOT NULL")}
+    categorias_previas = {
+        row[0]: (row[1], row[2], row[3])
+        for row in cursor.execute("SELECT ruta, id, icono, color FROM categorias WHERE ruta IS NOT NULL")
+    }
+    existentes = {ruta: data[0] for ruta, data in categorias_previas.items()}
     rutas_vistas: set[str] = set()
     ruta_a_id: dict[str, int] = dict(existentes)
 
@@ -132,16 +137,30 @@ def sincronizar_vault(vault_root: Path, conn: sqlite3.Connection) -> dict:
         padre_ruta = rel.parent.as_posix() if rel.parent != Path(".") else None
         padre_id = ruta_a_id.get(padre_ruta) if padre_ruta else None
         estructural = 1 if _es_estructural(rel) else 0
+        try:
+            meta = writer.leer_meta_categoria(vault_root, rel_str)
+            if meta is None and rel_str in categorias_previas:
+                _, icono_previo, color_previo = categorias_previas[rel_str]
+                if icono_previo or color_previo:
+                    writer.escribir_meta_categoria(
+                        vault_root, rel_str, icono=icono_previo, color=color_previo,
+                    )
+                    meta = {"icono": icono_previo, "color": color_previo}
+        except (OSError, ValueError) as exc:
+            logger.error("%s: metadatos de categoría inválidos: %s", carpeta, exc)
+            meta = None
+        icono = meta.get("icono") if meta is not None else None
+        color = meta.get("color") if meta is not None else None
 
         if rel_str in existentes:
             cursor.execute(
-                "UPDATE categorias SET nombre = ?, padre_id = ?, ruta = ?, estructural = ? WHERE id = ?",
-                (nombre, padre_id, rel_str, estructural, existentes[rel_str]),
+                "UPDATE categorias SET nombre = ?, padre_id = ?, ruta = ?, estructural = ?, icono = COALESCE(?, icono), color = COALESCE(?, color) WHERE id = ?",
+                (nombre, padre_id, rel_str, estructural, icono, color, existentes[rel_str]),
             )
         else:
             cursor.execute(
-                "INSERT INTO categorias (nombre, padre_id, ruta, estructural) VALUES (?, ?, ?, ?)",
-                (nombre, padre_id, rel_str, estructural),
+                "INSERT INTO categorias (nombre, padre_id, ruta, estructural, icono, color) VALUES (?, ?, ?, ?, ?, ?)",
+                (nombre, padre_id, rel_str, estructural, icono, color),
             )
             ruta_a_id[rel_str] = cursor.lastrowid
         stats["carpetas"] += 1
@@ -152,10 +171,12 @@ def sincronizar_vault(vault_root: Path, conn: sqlite3.Connection) -> dict:
         for row in cursor.execute("SELECT vault_id, id, mtime FROM hojas WHERE vault_id IS NOT NULL")
     }
     vault_ids_vistos: set[str] = set()
+    rutas_en_disco: set[str] = set()
 
     for path in _iter_notas(vault_root):
         rel = path.relative_to(vault_root)
         rel_str = rel.as_posix()  # mismo fix que arriba -- nunca str(rel)
+        rutas_en_disco.add(rel_str)
         st = path.stat()
 
         try:
@@ -204,21 +225,32 @@ def sincronizar_vault(vault_root: Path, conn: sqlite3.Connection) -> dict:
         # la sincronización (bug real, ver Cerebro/decisiones-implementacion.md,
         # 2026-09-18) -- con esto, se loguea y se sigue con el resto del vault.
         try:
+            # Un id de frontmatter corregido en el mismo archivo conserva el id
+            # público de SQLite; la ruta física identifica la fila preexistente.
+            por_ruta = cursor.execute(
+                "SELECT id, vault_id FROM hojas WHERE ruta = ?", (rel_str,)
+            ).fetchone()
+            if por_ruta and por_ruta[1] != nota.id:
+                cursor.execute(
+                    "UPDATE hojas SET vault_id = ? WHERE id = ?", (nota.id, por_ruta[0])
+                )
             cursor.execute(
                 """
                 INSERT INTO hojas
                     (contenido, fecha, categoria_id, tipo, apuntes, lugar, latitud, longitud,
-                     icono, fecha_actualizado, vault_id, ruta, mtime)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     icono, color, link_preview, fecha_actualizado, vault_id, ruta, mtime)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(vault_id) DO UPDATE SET
                     contenido=excluded.contenido, fecha=excluded.fecha, categoria_id=excluded.categoria_id,
                     tipo=excluded.tipo, apuntes=excluded.apuntes, lugar=excluded.lugar,
                     latitud=excluded.latitud, longitud=excluded.longitud, icono=excluded.icono,
+                    color=excluded.color, link_preview=excluded.link_preview,
                     fecha_actualizado=excluded.fecha_actualizado, ruta=excluded.ruta, mtime=excluded.mtime
                 """,
                 (
                     contenido, fecha_creado, categoria_id, tipo, apuntes_html,
                     nota.lugar, nota.latitud, nota.longitud, nota.icono,
+                    nota.color, json.dumps(nota.link_preview) if nota.link_preview else None,
                     fecha_actualizado, nota.id, rel_str, st.st_mtime,
                 ),
             )
@@ -237,7 +269,9 @@ def sincronizar_vault(vault_root: Path, conn: sqlite3.Connection) -> dict:
 
     # --- Borrar lo que ya no existe en disco (borradas/renombradas fuera de la app) ---
     ids_hojas_borrar = [
-        row[1] for vid, row in existentes_hojas.items() if vid not in vault_ids_vistos
+        row[1] for vid, row in existentes_hojas.items()
+        if vid not in vault_ids_vistos
+        and cursor.execute("SELECT ruta FROM hojas WHERE id = ?", (row[1],)).fetchone()[0] not in rutas_en_disco
     ]
     if ids_hojas_borrar:
         placeholders = ",".join("?" * len(ids_hojas_borrar))

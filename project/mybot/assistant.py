@@ -310,7 +310,8 @@ def _gather_boveda(pregunta: str, api: str) -> dict | None:
     """
     hits = emb.search(pregunta, top_k=5, api_base=api)
     usa_keyword = False
-    if not hits:
+    mejor_score = max((float(h.get("score") or 0) for h in hits), default=0)
+    if mejor_score < 0.35:
         hits = emb.search_keyword(pregunta, api_base=api)
         usa_keyword = True
         if not hits:

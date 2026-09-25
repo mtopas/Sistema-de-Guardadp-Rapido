@@ -392,11 +392,8 @@ async def lifespan(app: FastAPI):
         print(f"[semantic] backfill omitido: {_exc}")
     # Jarvis — inicializa jarvis.db si el paquete está instalado
     if _JARVIS_AVAILABLE:
-        try:
-            _jarvis_init_db()
-            print("[jarvis] jarvis.db inicializada")
-        except Exception as _exc:
-            print(f"[jarvis] init_db omitida: {_exc}")
+        _jarvis_init_db()
+        print("[jarvis] jarvis.db inicializada")
     yield
 
 

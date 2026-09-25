@@ -27,7 +27,7 @@ function parseTags(entry) {
   }
 }
 
-export default function JarvisSourceModal({ entryId, onClose, onForgotten }) {
+export default function JarvisSourceModal({ entryId, onClose, onForgotten, onEdited }) {
   const { fetchJarvisEntry, editJarvisEntry, forgetJarvisEntry, showToast } = useStore(
     useShallow(s => ({
       fetchJarvisEntry:  s.fetchJarvisEntry,
@@ -81,6 +81,7 @@ export default function JarvisSourceModal({ entryId, onClose, onForgotten }) {
     if (updated) {
       setEntry(updated)
       setEditing(false)
+      onEdited?.()
       showToast('Entrada corregida', 'success')
     } else {
       showToast('No se pudo corregir la entrada', 'error')

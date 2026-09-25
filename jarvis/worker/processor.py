@@ -34,6 +34,9 @@ def process_entry(entry_id: str) -> None:
             logger.error("[processor] entry_id=%s no encontrada en DB", entry_id)
             _mark_error(entry_id, "Entry not found in DB")
             return
+        if entry.get("valid_to"):
+            _remove_from_queue(entry_id)
+            return
 
         MANIFEST.assert_allowed("classify_entry")
         tag_catalog = list_tag_catalog(entry.get("user_id") or JARVIS_DEFAULT_USER)
@@ -124,15 +127,14 @@ def process_entry(entry_id: str) -> None:
             )
 
         # Re-leer con tipo actualizado para el writer
-        updated_entry = dict(entry)
+        updated_entry = get_entry(entry_id)
         updated_entry["type"] = entry_type
         updated_entry["tags"] = json.dumps(tags)
 
         MANIFEST.assert_allowed("write_vault")
-        vault_rel_path = write_entry(updated_entry, title=title)
-
-        now = datetime.now(timezone.utc).isoformat()
-        update_entry(entry_id, vault_path=vault_rel_path, processed_at=now)
+        vault_rel_path = _write_if_active(updated_entry, title)
+        if vault_rel_path is None:
+            return
 
         try:
             from jarvis.vault.index_writer import sync_indexes_for_entry
@@ -211,6 +213,43 @@ def process_entry(entry_id: str) -> None:
         logger.exception("[processor] ERROR en entry_id=%s: %s", entry_id, exc)
         log_event("ERROR", str(exc)[:200], entry_id)
         _mark_error(entry_id, str(exc))
+
+
+def _write_if_active(entry: dict, title: str | None) -> str | None:
+    """Serializa la escritura del vault con forget_entry()."""
+    conn = get_connection()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT valid_to, vault_path FROM memory_entries WHERE id = ?", (entry["id"],)
+        ).fetchone()
+        if not row or row["valid_to"]:
+            conn.execute("DELETE FROM inbox_queue WHERE entry_id = ?", (entry["id"],))
+            conn.commit()
+            return None
+        entry["vault_path"] = row["vault_path"]
+        vault_rel_path = write_entry(entry, title=title)
+        conn.execute(
+            """UPDATE memory_entries SET vault_path = ?, processed_at = ?
+               WHERE id = ?""",
+            (vault_rel_path, datetime.now(timezone.utc).isoformat(), entry["id"]),
+        )
+        conn.commit()
+        return vault_rel_path
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _remove_from_queue(entry_id: str) -> None:
+    conn = get_connection()
+    try:
+        with conn:
+            conn.execute("DELETE FROM inbox_queue WHERE entry_id = ?", (entry_id,))
+    finally:
+        conn.close()
 
 
 def _classify(content: str, tag_catalog: list[str] | None = None) -> dict:

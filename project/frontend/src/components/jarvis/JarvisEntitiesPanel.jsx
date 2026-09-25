@@ -4,6 +4,7 @@ import { useStore } from '../../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import { MEMORY_TYPE_COLORS, JARVIS_ENTITY_CARD_MIN, rgba } from '../../utils/jarvisPalette'
 import { formatAge } from '../../utils/formatAge'
+import JarvisLinkedEntriesModal from './JarvisLinkedEntriesModal'
 
 const inputStyle = {
   background: 'rgba(150,170,255,0.06)', border: '1px solid rgba(150,170,255,0.14)',
@@ -15,9 +16,10 @@ function initials(name) {
 }
 
 export default function JarvisEntitiesPanel() {
-  const { jarvisEntities, setJarvisTab, jarvisQuery } = useStore(
+  const { jarvisEntities, fetchJarvisEntities, setJarvisTab, jarvisQuery } = useStore(
     useShallow(s => ({
       jarvisEntities: s.jarvisEntities,
+      fetchJarvisEntities: s.fetchJarvisEntities,
       setJarvisTab:   s.setJarvisTab,
       jarvisQuery:    s.jarvisQuery,
     }))
@@ -25,6 +27,7 @@ export default function JarvisEntitiesPanel() {
 
   const [searchText, setSearchText] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
+  const [selectedEntity, setSelectedEntity] = useState(null)
 
   const sorted = useMemo(() => {
     const copy = [...jarvisEntities]
@@ -54,7 +57,7 @@ export default function JarvisEntitiesPanel() {
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginBottom: 20 }}>
         <div style={{ fontSize: 22, fontWeight: 600 }}>Entidades reconocidas</div>
         <div className="jv-mono" style={{ fontSize: 11, color: 'var(--jv-mute)' }}>
-          personas y organizaciones extraídas de tus capturas
+          personas, organizaciones y lugares extraídos de tus capturas
         </div>
       </div>
 
@@ -77,9 +80,10 @@ export default function JarvisEntitiesPanel() {
             />
           </div>
           <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} className="text-[12px] py-2 px-2.5 outline-none" style={{backgroundColor: 'rgba(30,30,50,0.8)', border: '1px solid rgba(150,170,255,0.14)', color: '#eef2ff', borderRadius: 8}}>
-            <option style={{backgroundColor: 'rgba(20,20,40,0.95)', color: '#eef2ff'}}>Todas</option>
+            <option value="" style={{backgroundColor: 'rgba(20,20,40,0.95)', color: '#eef2ff'}}>Todas</option>
             <option value="person" style={{backgroundColor: 'rgba(20,20,40,0.95)', color: '#eef2ff'}}>Personas</option>
             <option value="organization" style={{backgroundColor: 'rgba(20,20,40,0.95)', color: '#eef2ff'}}>Organizaciones</option>
+            <option value="place" style={{backgroundColor: 'rgba(20,20,40,0.95)', color: '#eef2ff'}}>Lugares</option>
           </select>
         </div>
       )}
@@ -93,11 +97,11 @@ export default function JarvisEntitiesPanel() {
       <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${JARVIS_ENTITY_CARD_MIN}px, 1fr))`, gap: 12 }}>
         {filtered.map(e => {
           const color = e.entity_type === 'person' ? MEMORY_TYPE_COLORS.PEOPLE : MEMORY_TYPE_COLORS.PROJECT
-          const kind = e.entity_type === 'person' ? 'PERSONA' : 'ORGANIZACIÓN'
+          const kind = { person: 'PERSONA', organization: 'ORGANIZACIÓN', place: 'LUGAR' }[e.entity_type] || e.entity_type.toUpperCase()
           return (
             <div
               key={e.name}
-              onClick={() => ask(e.name)}
+              onClick={() => setSelectedEntity(e)}
               style={{
                 cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 11, padding: 16,
                 borderRadius: 14, background: 'rgba(10,13,26,0.7)',
@@ -137,6 +141,11 @@ export default function JarvisEntitiesPanel() {
           )
         })}
       </div>
+      {selectedEntity && <JarvisLinkedEntriesModal
+        title={selectedEntity.name} kind="entities" name={selectedEntity.name}
+        onClose={() => setSelectedEntity(null)} onAsk={() => { ask(selectedEntity.name); setSelectedEntity(null) }}
+        onChanged={fetchJarvisEntities}
+      />}
     </div>
   )
 }

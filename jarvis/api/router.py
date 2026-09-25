@@ -237,6 +237,34 @@ def inbox_endpoint(
         conn.close()
 
 
+@router.get("/inbox/stats")
+def inbox_stats_endpoint():
+    """Conteos de toda la cola, independientes del límite del listado."""
+    conn = get_connection()
+    try:
+        counts = {r["status"]: r["total"] for r in conn.execute(
+            "SELECT status, COUNT(*) AS total FROM inbox_queue GROUP BY status"
+        ).fetchall()}
+        last_done = conn.execute(
+            """SELECT iq.updated_at, me.type, me.content_raw FROM inbox_queue iq
+               JOIN memory_entries me ON me.id = iq.entry_id
+               WHERE iq.status = 'DONE' ORDER BY iq.updated_at DESC LIMIT 1"""
+        ).fetchone()
+        last_error = conn.execute(
+            """SELECT last_error FROM inbox_queue WHERE status = 'ERROR'
+               ORDER BY updated_at DESC LIMIT 1"""
+        ).fetchone()
+        return {
+            "pending": counts.get("PENDING", 0),
+            "processing": counts.get("PROCESSING", 0),
+            "errors": counts.get("ERROR", 0),
+            "last_done": dict(last_done) if last_done else None,
+            "last_error": last_error["last_error"] if last_error else None,
+        }
+    finally:
+        conn.close()
+
+
 @router.get("/budget")
 def budget_endpoint():
     """Estado del presupuesto diario (ACTIVE / LOW / EXHAUSTED) + desglose por modelo (B4)."""

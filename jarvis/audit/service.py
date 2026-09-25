@@ -111,6 +111,7 @@ from jarvis.config import (
 )
 from jarvis.db.database import get_connection
 from jarvis.llm.client import call_reason
+from jarvis.privacy.gateway import filter_context
 from jarvis.worker.task_manifest import MANIFEST
 
 logger = logging.getLogger(__name__)
@@ -408,10 +409,11 @@ JSON:"""
 
 
 def _review_block(entries: list[dict]) -> list[dict]:
-    if not entries:
+    safe_entries = filter_context(entries)
+    if not safe_entries:
         return []
     fragments = []
-    for e in entries:
+    for e in safe_entries:
         content = (e.get("content_processed") or e.get("content_raw") or "").strip()
         if len(content) > _MAX_FRAGMENT_CHARS:
             content = content[:_MAX_FRAGMENT_CHARS].rstrip() + "…"
@@ -665,9 +667,12 @@ def _process_entity_gaps(
 
 
 def _synthesize_entity_summary(name: str, entries: list[dict]) -> str | None:
+    safe_entries = filter_context(entries)
+    if not safe_entries:
+        return None
     fragments = "\n".join(
         f"- {(e.get('content_processed') or e.get('content_raw') or '').strip()[:_MAX_FRAGMENT_CHARS]}"
-        for e in entries
+        for e in safe_entries
     )
     try:
         raw = call_reason(
@@ -1109,6 +1114,8 @@ def accept_proposal(
         return None
 
     action_type = proposal["action_type"]
+    if action_type in ("clarify", "open_question") and not (reply_text or "").strip():
+        return None
     target_ids = json.loads(proposal["target_entry_ids"])
     payload = json.loads(proposal["payload"]) if proposal["payload"] else {}
     if payload_override:

@@ -4,7 +4,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from jarvis.config import JARVIS_DEFAULT_USER
+from jarvis.config import JARVIS_BOVEDA_PATH, JARVIS_DEFAULT_USER
 from jarvis.db.database import get_connection
 
 logger = logging.getLogger(__name__)
@@ -62,12 +62,22 @@ def capture_raw(
     conn = get_connection()
     try:
         with conn:
-            # Verificar duplicado por hash (mismo user, mismo contenido)
+            # Una entrada olvidada no impide capturar de nuevo el mismo texto.
             existing = conn.execute(
-                "SELECT id FROM memory_entries WHERE content_hash = ? AND user_id = ?",
+                """SELECT id FROM memory_entries
+                   WHERE content_hash = ? AND user_id = ? AND valid_to IS NULL
+                   ORDER BY recorded_at DESC LIMIT 1""",
                 (content_hash, uid),
             ).fetchone()
             if existing:
+                # Una recaptura nunca puede aflojar las restricciones existentes.
+                conn.execute(
+                    """UPDATE memory_entries
+                       SET local_only = MAX(local_only, ?),
+                           confidential = MAX(confidential, ?)
+                       WHERE id = ?""",
+                    (int(local_only), int(confidential), existing["id"]),
+                )
                 return existing["id"]
 
             conn.execute(
@@ -190,8 +200,8 @@ def edit_entry(
     código). No se puede corregir origin_trust/created_by/source_id -- esos
     describen CÓMO llegó la entrada, no algo que un editor deba poder reescribir.
 
-    Si cambia el contenido o el tipo, reescribe el .md del vault (el tipo
-    determina la subcarpeta) y regenera el embedding -- llamada síncrona y
+    Toda edición reescribe el .md del vault y, si cambia el contenido o tipo,
+    regenera el embedding -- llamada síncrona y
     bloqueante a propósito: es una acción de administración poco frecuente
     disparada por el usuario, no algo en el hot path del worker.
 
@@ -205,45 +215,66 @@ def edit_entry(
     if content is None and type is None and tags is None:
         return entry
 
-    old_vault_path = entry.get("vault_path")
     content_or_type_changed = content is not None or type is not None
-
-    update_entry(entry_id, type=type, content_processed=content, tags=tags)
-
+    old_vault_path = entry.get("vault_path")
+    old_file = JARVIS_BOVEDA_PATH / old_vault_path if old_vault_path else None
+    old_bytes = old_file.read_bytes() if old_file and old_file.exists() else None
+    written_path = None
+    old_tag_names = None
     if tags is not None:
-        from jarvis.tags.service import replace_tags_for_entry
+        from jarvis.tags.service import get_tags_for_entry
 
-        replace_tags_for_entry(entry_id, tags, entry.get("user_id") or JARVIS_DEFAULT_USER)
+        old_tag_names = get_tags_for_entry(entry_id)
 
-    updated = get_entry(entry_id)
+    try:
+        update_entry(entry_id, type=type, content_processed=content, tags=tags)
+        if tags is not None:
+            from jarvis.tags.service import replace_tags_for_entry
+
+            replace_tags_for_entry(entry_id, tags, entry.get("user_id") or JARVIS_DEFAULT_USER)
+
+        updated = get_entry(entry_id)
+        from jarvis.vault.writer import write_entry
+
+        # La escritura es obligatoria para confirmar la edición. El writer
+        # reemplaza el archivo de forma atómica; si falla, revertimos SQLite.
+        written_path = write_entry(updated)
+        update_entry(entry_id, vault_path=written_path)
+    except Exception:
+        conn = get_connection()
+        try:
+            with conn:
+                conn.execute(
+                    """UPDATE memory_entries SET type = ?, content_processed = ?, tags = ?, vault_path = ?
+                       WHERE id = ?""",
+                    (entry["type"], entry["content_processed"], entry["tags"], old_vault_path, entry_id),
+                )
+        finally:
+            conn.close()
+        if old_tag_names is not None:
+            replace_tags_for_entry(entry_id, old_tag_names, entry.get("user_id") or JARVIS_DEFAULT_USER)
+        if written_path:
+            written_file = JARVIS_BOVEDA_PATH / written_path
+            if old_bytes is None:
+                written_file.unlink(missing_ok=True)
+            else:
+                written_file.write_bytes(old_bytes)
+        raise
 
     if content_or_type_changed:
-        _resync_vault_and_embedding(updated, old_vault_path)
-    elif tags is not None:
-        _resync_vault_only(updated)
+        _resync_indexes_and_embedding(updated)
 
     return get_entry(entry_id)
 
 
-def _resync_vault_and_embedding(entry: dict, old_vault_path: str | None) -> None:
-    """Reescribe vault + embedding tras editar contenido/tipo. Best-effort:
-    la corrección en SQLite (fuente de verdad) ya se aplicó antes de llamar
-    esto -- si el vault o Chroma fallan acá, quedan desincronizados hasta el
-    próximo ciclo de consolidación/edición, pero la corrección real no se pierde.
-    """
+def _resync_indexes_and_embedding(entry: dict) -> None:
+    """Actualiza índices derivados tras una edición confirmada en el vault."""
     try:
-        from jarvis.vault.writer import delete_entry_file, write_entry
-
-        new_vault_path = write_entry(entry)
-        if old_vault_path and old_vault_path != new_vault_path:
-            delete_entry_file(old_vault_path)
-        update_entry(entry["id"], vault_path=new_vault_path)
-
         from jarvis.vault.index_writer import sync_indexes_for_entry
 
         sync_indexes_for_entry(entry["id"])
     except Exception as exc:
-        logger.warning("[jarvis.memory] Reescritura de vault falló para entry_id=%s: %s", entry["id"], exc)
+        logger.warning("[jarvis.memory] Sync de índices falló para entry_id=%s: %s", entry["id"], exc)
 
     try:
         from jarvis.embeddings.client import generate_embedding
@@ -273,18 +304,6 @@ def _resync_vault_and_embedding(entry: dict, old_vault_path: str | None) -> None
         logger.warning("[jarvis.memory] Regeneración de embedding falló para entry_id=%s: %s", entry["id"], exc)
 
 
-def _resync_vault_only(entry: dict) -> None:
-    """Solo tags cambiaron -- el frontmatter del .md los incluye, así que se
-    reescribe el archivo (mismo vault_path, no hay rename), pero no hace falta
-    tocar el embedding (no depende de tags)."""
-    try:
-        from jarvis.vault.writer import write_entry
-
-        write_entry(entry)
-    except Exception as exc:
-        logger.warning("[jarvis.memory] Reescritura de vault (solo tags) falló para entry_id=%s: %s", entry["id"], exc)
-
-
 def forget_entry(entry_id: str) -> bool:
     """"Olvidar" una entrada -- soft-delete vía valid_to (nunca un DELETE
     físico de la fila -- preserva auditoría, spec: Memoria != destrucción).
@@ -310,10 +329,25 @@ def forget_entry(entry_id: str) -> bool:
 
     Devuelve False si la entrada no existe o ya estaba olvidada/superseded.
     """
-    entry = get_entry(entry_id)
-    if not entry or entry.get("valid_to"):
-        return False
-    update_entry(entry_id, valid_to=datetime.now(timezone.utc).isoformat())
+    conn = get_connection()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT * FROM memory_entries WHERE id = ?", (entry_id,)).fetchone()
+        if not row or row["valid_to"]:
+            conn.rollback()
+            return False
+        entry = dict(row)
+        conn.execute(
+            "UPDATE memory_entries SET valid_to = ? WHERE id = ?",
+            (datetime.now(timezone.utc).isoformat(), entry_id),
+        )
+        conn.execute("DELETE FROM inbox_queue WHERE entry_id = ?", (entry_id,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
     vault_path = entry.get("vault_path")
     if vault_path:

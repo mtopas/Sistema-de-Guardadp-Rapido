@@ -270,7 +270,7 @@ Contenido de la nota:
 Destino:"""
 
 
-def _classify_destination(content: str) -> str | None:
+def _classify_destination(entry: dict) -> str | None:
     """None si el LLM respondió NO_SE, si la respuesta no es exactamente una
     de las 8 opciones permitidas, o si la llamada falló -- mismo criterio
     anti-alucinación que _synthesize_entity_summary()/_CREATE_PROMPT
@@ -279,6 +279,11 @@ def _classify_destination(content: str) -> str | None:
     error a reintentar.
     """
     from jarvis.llm.client import call_reason
+    from jarvis.privacy.gateway import filter_context
+
+    if not filter_context([entry]):
+        return None
+    content = (entry.get("content_processed") or entry.get("content_raw") or "").strip()
 
     truncated = content
     if len(truncated) > _MAX_CONTENT_CHARS_FOR_PROMPT:
@@ -319,7 +324,7 @@ def _process_candidate(candidate: dict, channel: str, chat_id, summary: dict) ->
     entry_id = entry["id"]
     content = candidate["content"]
 
-    dest = _classify_destination(content)
+    dest = _classify_destination(entry)
     if not dest:
         summary["skipped_no_data"] += 1
         summary["skipped_detail"].append({

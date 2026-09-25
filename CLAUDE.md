@@ -302,7 +302,7 @@ antes de tocar `jarvis/vault/`, `jarvis/db/`, o `project/app/vault/`.
 - Proceso Python separado (worker) hace polling a `jarvis.db`; sin Redis/Celery
 - DB Jarvis: `project/database/jarvis.db` (índice reconstruible desde `D:\Boveda`, no la fuente)
 - Todo llamado LLM va via **LiteLLM** — nunca openai.* ni ollama.* directamente
-- Modelos via LiteLLM: GPT-5.4 mini (razonamiento externo) + gemma3:12b (extracción local — ganador del bake-off 2026-08-26 contra llama3.2:3b, ver `Cerebro/decisiones-implementacion.md`)
+- Modelos via LiteLLM: `openai/gpt-4o-mini` por defecto para razonamiento externo (`JARVIS_REASON_MODEL` lo puede cambiar) + gemma3:12b para extracción local — ganador del bake-off 2026-08-26 contra llama3.2:3b, ver `Cerebro/decisiones-implementacion.md`.
 - Embeddings: `nomic-embed-text` via Ollama
 - Vector store: ChromaDB en 0.1 (índice reconstruible); pgvector en 0.2
 - Observabilidad: Langfuse (self-hosted, trazas LLM) + OpenTelemetry (infra + audit log)
@@ -332,4 +332,3 @@ antes de tocar `jarvis/vault/`, `jarvis/db/`, o `project/app/vault/`.
 2. Verificar que `estado-actual.md` no esté desactualizado revisando el git log de la sesión.
 3. Para cambios de arquitectura: revisar `jarvis/jarvis-spec.html` §15 y §25.
 4. Al terminar la sesión: actualizar `Cerebro/estado-actual.md` y agregar entrada en `Cerebro/decisiones-implementacion.md` si hubo decisiones que divergen del spec.
-

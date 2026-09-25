@@ -85,6 +85,7 @@ información cada semana. Este módulo queda exclusivo para eventos puntuales
 (se_repite=0) y tareas completadas (sin cambio, nunca tuvieron recurrencia).
 """
 import logging
+import uuid
 from datetime import date, datetime, timedelta, timezone
 
 import requests
@@ -100,6 +101,7 @@ from jarvis.worker.task_manifest import MANIFEST
 logger = logging.getLogger(__name__)
 
 _HTTP_TIMEOUT = 15
+_POLICY_CHECKPOINT = "agenda_ingestion_checkpoint"
 
 
 def run_agenda_ingestion(now: datetime | None = None, push: bool = True) -> dict:
@@ -114,6 +116,7 @@ def run_agenda_ingestion(now: datetime | None = None, push: bool = True) -> dict
 
     now = now or datetime.now(timezone.utc)
     local_now = datetime.now()  # ver punto 1 del docstring del módulo
+    window_start = _window_start(local_now)
 
     summary = {
         "events_scanned": 0, "tasks_scanned": 0, "proposed": 0, "errors": [],
@@ -126,7 +129,7 @@ def run_agenda_ingestion(now: datetime | None = None, push: bool = True) -> dict
     channel = "telegram" if chat_id else "desktop"
 
     try:
-        events = _fetch_recent_events(local_now)
+        events = _fetch_recent_events(local_now, window_start)
         summary["events_scanned"] = len(events)
         for evt in events:
             try:
@@ -142,7 +145,7 @@ def run_agenda_ingestion(now: datetime | None = None, push: bool = True) -> dict
         summary["errors"].append(f"eventos: {exc}")
 
     try:
-        tasks = _fetch_recent_completed_tasks(local_now)
+        tasks = _fetch_recent_completed_tasks(local_now, window_start)
         summary["tasks_scanned"] = len(tasks)
         for t in tasks:
             try:
@@ -156,6 +159,12 @@ def run_agenda_ingestion(now: datetime | None = None, push: bool = True) -> dict
     except Exception as exc:
         logger.warning("[jarvis.ingestion.agenda] No se pudo leer /agenda/tareas: %s", exc)
         summary["errors"].append(f"tareas: {exc}")
+
+    # Avanzar solo cuando ambas fuentes y todas las propuestas se procesaron.
+    # Si falló algo, la próxima corrida vuelve al mismo inicio de ventana;
+    # _already_proposed() evita duplicar las propuestas ya creadas.
+    if not summary["errors"]:
+        _save_checkpoint(local_now)
 
     # Empuja el próximo lote de la cola de propuestas de captura (throttle,
     # ver Cerebro/decisiones-implementacion.md, 2026-09-17) -- al final de la
@@ -178,8 +187,39 @@ def run_agenda_ingestion(now: datetime | None = None, push: bool = True) -> dict
 
 # ── Lectura de la Agenda (solo GET /agenda/eventos y GET /agenda/tareas) ────
 
-def _fetch_recent_events(local_now: datetime) -> list[dict]:
-    desde = (local_now - timedelta(days=JARVIS_AGENDA_INGESTION_WINDOW_DAYS)).isoformat()
+def _window_start(local_now: datetime) -> datetime:
+    """Conserva el inicio de una ventana fallida hasta una corrida exitosa."""
+    default_start = local_now - timedelta(days=JARVIS_AGENDA_INGESTION_WINDOW_DAYS)
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            """SELECT value FROM jarvis_policies WHERE policy_type = ?
+               ORDER BY rowid DESC LIMIT 1""",
+            (_POLICY_CHECKPOINT,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row:
+        return min(default_start, datetime.fromisoformat(row["value"]))
+    _save_checkpoint(default_start)
+    return default_start
+
+
+def _save_checkpoint(at: datetime) -> None:
+    conn = get_connection()
+    try:
+        with conn:
+            conn.execute(
+                """INSERT INTO jarvis_policies (id, policy_type, value, created_at)
+                   VALUES (?, ?, ?, ?)""",
+                (str(uuid.uuid4()), _POLICY_CHECKPOINT, at.isoformat(),
+                 datetime.now(timezone.utc).isoformat()),
+            )
+    finally:
+        conn.close()
+
+def _fetch_recent_events(local_now: datetime, window_start: datetime | None = None) -> list[dict]:
+    desde = (window_start or local_now - timedelta(days=JARVIS_AGENDA_INGESTION_WINDOW_DAYS)).isoformat()
     hasta = local_now.isoformat()
     resp = requests.get(
         f"{JARVIS_SGR_API_BASE}/agenda/eventos",
@@ -215,7 +255,7 @@ def _event_already_ended(evt: dict, local_now: datetime) -> bool:
         return False
 
 
-def _fetch_recent_completed_tasks(local_now: datetime) -> list[dict]:
+def _fetch_recent_completed_tasks(local_now: datetime, window_start: datetime | None = None) -> list[dict]:
     resp = requests.get(
         f"{JARVIS_SGR_API_BASE}/agenda/tareas",
         params={"pendientes": "false"},
@@ -224,7 +264,7 @@ def _fetch_recent_completed_tasks(local_now: datetime) -> list[dict]:
     resp.raise_for_status()
     tareas = resp.json()
 
-    cutoff = (local_now - timedelta(days=JARVIS_AGENDA_INGESTION_WINDOW_DAYS)).date()
+    cutoff = (window_start or local_now - timedelta(days=JARVIS_AGENDA_INGESTION_WINDOW_DAYS)).date()
     today = local_now.date()
     result = []
     for t in tareas:

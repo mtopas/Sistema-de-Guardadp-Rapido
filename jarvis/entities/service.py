@@ -277,7 +277,7 @@ def list_entities(user_id: str = JARVIS_DEFAULT_USER) -> list[dict]:
     try:
         rows = conn.execute(
             """SELECT e.entity_id, e.name, e.entity_type, e.last_seen, e.notes,
-                      COUNT(DISTINCT mee.entry_id) AS memory_count,
+                      COUNT(DISTINCT me.id) AS memory_count,
                       GROUP_CONCAT(DISTINCT me.type) AS types_csv
                FROM memory_entities e
                LEFT JOIN memory_entry_entities mee ON mee.entity_id = e.entity_id

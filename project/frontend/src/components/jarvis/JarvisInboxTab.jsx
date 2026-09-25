@@ -54,6 +54,11 @@ export default function JarvisInboxTab() {
               </div>
               <div style={{ fontSize: 13.5, color: 'rgba(230,236,255,0.82)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {i.content_raw}
+                {i.status === 'ERROR' && i.last_error && (
+                  <div title={i.last_error} style={{ fontSize: 11, color: INBOX_STATUS_COLORS.ERROR, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {i.last_error}
+                  </div>
+                )}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                 <div style={{ width: 6, height: 6, borderRadius: 2, background: typeColor }} />

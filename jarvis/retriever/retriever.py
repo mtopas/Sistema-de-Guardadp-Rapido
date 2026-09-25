@@ -160,8 +160,8 @@ def _merge_entity_first(entity_entries: list[dict], other_entries: list[dict], n
     entity_entries = sorted(
         entity_entries, key=lambda e: e.get("recorded_at") or "", reverse=True
     )
-    seen = {e["id"] for e in entity_entries}
-    merged = list(entity_entries)
+    merged = list(entity_entries[:n_results])
+    seen = {e["id"] for e in merged}
     for e in other_entries:
         if len(merged) >= n_results:
             break

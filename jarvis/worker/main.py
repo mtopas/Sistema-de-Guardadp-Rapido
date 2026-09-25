@@ -123,21 +123,20 @@ def _maybe_run_passive_capture() -> None:
     """
     global _passive_thread
 
-    if not JARVIS_PASSIVE_CAPTURE_ENABLED:
-        return
     if _passive_thread is not None and _passive_thread.is_alive():
         return
 
     def _run() -> None:
         try:
-            MANIFEST.assert_allowed("read_conversations")
-            MANIFEST.assert_allowed("propose_capture")
-            summary = scan_and_propose()
-            if summary["proposed"] or summary["errors"]:
-                logger.info(
-                    "[worker] Captura pasiva: %d conversación(es) revisadas, %d propuesta(s), %d error(es)",
-                    summary["scanned"], summary["proposed"], len(summary["errors"]),
-                )
+            if JARVIS_PASSIVE_CAPTURE_ENABLED:
+                MANIFEST.assert_allowed("read_conversations")
+                MANIFEST.assert_allowed("propose_capture")
+                summary = scan_and_propose()
+                if summary["proposed"] or summary["errors"]:
+                    logger.info(
+                        "[worker] Captura pasiva: %d conversación(es) revisadas, %d propuesta(s), %d error(es)",
+                        summary["scanned"], summary["proposed"], len(summary["errors"]),
+                    )
             expired = expire_stale_proposals()
             if expired:
                 logger.info("[worker] Captura pasiva: %d propuesta(s) expirada(s)", expired)
@@ -214,9 +213,20 @@ def main() -> None:
 
     _maybe_run_consolidation()
 
+    heartbeat_stop = threading.Event()
+
+    def _heartbeat_loop() -> None:
+        while not heartbeat_stop.is_set():
+            write_heartbeat()
+            heartbeat_stop.wait(JARVIS_WORKER_POLL_INTERVAL)
+
+    heartbeat_thread = threading.Thread(
+        target=_heartbeat_loop, name="jarvis-heartbeat", daemon=True
+    )
+    heartbeat_thread.start()
+
     try:
         while True:
-            write_heartbeat()
             pending = _fetch_pending()
             if pending:
                 for entry_id in pending:
@@ -228,6 +238,9 @@ def main() -> None:
                 time.sleep(JARVIS_WORKER_POLL_INTERVAL)
     except KeyboardInterrupt:
         logger.info("[worker] Detenido por usuario.")
+    finally:
+        heartbeat_stop.set()
+        heartbeat_thread.join(timeout=JARVIS_WORKER_POLL_INTERVAL)
 
 
 if __name__ == "__main__":

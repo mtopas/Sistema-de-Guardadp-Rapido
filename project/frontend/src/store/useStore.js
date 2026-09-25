@@ -1689,13 +1689,14 @@ export const useStore = create((set, get) => ({
   jarvisMessages:        [],
   jarvisLoading:         false,
   jarvisInbox:           [],
+  jarvisInboxStats:      { pending: 0, processing: 0, errors: 0, last_done: null, last_error: null },
   jarvisBudget:          { status: 'ACTIVE', spent_usd: 0, daily_budget_usd: 1.0 },
   jarvisCaptureOpen:     false,
   jarvisTab:             'chat', // 'chat' | 'inbox' | 'entities' | 'debug'
   jarvisTypeCounts:      {}, // {RAW: n, SEMANTIC: n, ...} — solo tipos presentes (GET /jarvis/stats/types)
   jarvisEntities:        [],
   jarvisProjects:        [],
-  jarvisHealth:          { worker_alive: true },
+  jarvisHealth:          { worker_alive: false },
   jarvisEvents:          [],
   jarvisEventsLimit:     JARVIS_EVENTS_PAGE_SIZE, // "cargar más" en el tab Debug
   jarvisProposals:       [], // captura pasiva por inactividad (pieza C) — GET /jarvis/proposals
@@ -1734,7 +1735,7 @@ export const useStore = create((set, get) => ({
   },
 
   switchJarvisChat: async (chatId) => {
-    set({ jarvisActiveChatId: chatId, jarvisMessages: [] })
+    set({ jarvisActiveChatId: chatId, jarvisMessages: [], jarvisLoading: false })
     try { localStorage.setItem('jarvis-active-chat-id', chatId) } catch { /* noop */ }
     try {
       const res = await fetch(`${API_URL}/jarvis/chats/${chatId}/messages`)
@@ -1742,7 +1743,9 @@ export const useStore = create((set, get) => ({
       const history = await res.json()
       // Historial persistido: sin `sources` (no se guardan por mensaje, solo
       // se muestran para respuestas recién generadas en esta sesión).
-      set({ jarvisMessages: history.map(m => ({ role: m.role, content: m.content, created_at: m.created_at })) })
+      if (get().jarvisActiveChatId === chatId) {
+        set({ jarvisMessages: history.map(m => ({ role: m.role, content: m.content, created_at: m.created_at })) })
+      }
     } catch (e) { if (DEBUG) console.error('switchJarvisChat:', e) }
   },
 
@@ -1755,7 +1758,7 @@ export const useStore = create((set, get) => ({
       })
       if (!res.ok) throw new Error('not ok')
       const chat = await res.json()
-      set({ jarvisChats: [chat, ...get().jarvisChats], jarvisActiveChatId: chat.id, jarvisMessages: [] })
+      set({ jarvisChats: [chat, ...get().jarvisChats], jarvisActiveChatId: chat.id, jarvisMessages: [], jarvisLoading: false })
       try { localStorage.setItem('jarvis-active-chat-id', chat.id) } catch { /* noop */ }
       return chat
     } catch {
@@ -1819,13 +1822,17 @@ export const useStore = create((set, get) => ({
         context_sent: data.context_sent,
         created_at: new Date().toISOString(),
       }
-      set({ jarvisMessages: [...get().jarvisMessages, assistantMsg], jarvisLoading: false })
+      set(state => state.jarvisActiveChatId === chatId
+        ? { jarvisMessages: [...state.jarvisMessages, assistantMsg], jarvisLoading: false }
+        : state)
       // Refresca la lista (título recién autogenerado en el primer mensaje,
       // orden por última actividad) sin bloquear la respuesta ya mostrada.
       get().fetchJarvisChats()
     } catch {
       const errMsg = { role: 'assistant', content: null, error: true, created_at: new Date().toISOString() }
-      set({ jarvisMessages: [...get().jarvisMessages, errMsg], jarvisLoading: false })
+      set(state => state.jarvisActiveChatId === chatId
+        ? { jarvisMessages: [...state.jarvisMessages, errMsg], jarvisLoading: false }
+        : state)
     }
   },
 
@@ -1849,6 +1856,11 @@ export const useStore = create((set, get) => ({
       if (!res.ok) throw new Error('not ok')
       set({ jarvisInbox: await res.json() })
     } catch (e) { if (DEBUG) console.error('fetchJarvisInbox:', e) }
+    try {
+      const res = await fetch(`${API_URL}/jarvis/inbox/stats`)
+      if (!res.ok) throw new Error('not ok')
+      set({ jarvisInboxStats: await res.json() })
+    } catch (e) { if (DEBUG) console.error('fetchJarvisInboxStats:', e) }
   },
 
   fetchJarvisBudget: async () => {
@@ -1872,7 +1884,10 @@ export const useStore = create((set, get) => ({
       const res = await fetch(`${API_URL}/jarvis/health`)
       if (!res.ok) throw new Error('not ok')
       set({ jarvisHealth: await res.json() })
-    } catch (e) { if (DEBUG) console.error('fetchJarvisHealth:', e) }
+    } catch (e) {
+      set({ jarvisHealth: { worker_alive: false } })
+      if (DEBUG) console.error('fetchJarvisHealth:', e)
+    }
   },
 
   fetchJarvisEvents: async () => {

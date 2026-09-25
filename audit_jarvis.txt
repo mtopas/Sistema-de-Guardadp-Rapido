@@ -1,0 +1,155 @@
+# Auditoría de Jarvis
+
+La sección siguiente conserva el diagnóstico original como registro histórico.
+Las correcciones realizadas están documentadas en "REPORTE DE CORRECCIONES"
+al final de este archivo.
+
+**Riesgo activo:** si el modelo externo está disponible, la auditoría, la consolidación y el triage pueden enviarle contenido marcado `local_only` o `confidential`, además de fragmentos con secretos o datos sensibles. Esas rutas no aplican el filtro de privacidad que sí usa la consulta RAG. También hay caminos en los que una entrada olvidada vuelve a escribirse en la Bóveda o una captura parece exitosa sin crear memoria vigente. Son conclusiones de lectura de código; no ejecuté el sistema ni comprobé que hayan ocurrido en producción.
+
+## Hallazgos
+
+[jobs de memoria] bug — Auditoría, consolidación y triage pasan contenido de memoria a `call_reason()` sin Privacy Gateway; `call_reason()` usa por defecto un modelo externo cuando hay presupuesto. — evidencia: `D:\SGR\jarvis\audit\service.py:426`, `D:\SGR\jarvis\audit\service.py:673`, `D:\SGR\jarvis\worker\consolidation.py:426`, `D:\SGR\jarvis\ingestion\inbox_triage.py:289` — impacto: alto
+
+[memoria/worker] bug — “Olvidar” una entrada pendiente marca `valid_to`, pero el worker no comprueba ese campo y puede procesarla después y escribir un archivo nuevo en la Bóveda. — evidencia: `D:\SGR\jarvis\memory\service.py:316`, `D:\SGR\jarvis\worker\processor.py:33`, `D:\SGR\jarvis\worker\processor.py:132` — impacto: alto
+
+[captura] bug — La deduplicación compara solo contenido y usuario: repetir una captura con “Solo local” activado devuelve la entrada anterior sin cambiar su `local_only`; el contenido sigue siendo elegible para consultas externas. — evidencia: `D:\SGR\jarvis\memory\service.py:66`, `D:\SGR\jarvis\memory\service.py:71` — impacto: alto
+
+[captura] bug — Recapturar exactamente un texto ya olvidado devuelve el ID de la fila olvidada, sin crear otra entrada ni encolarla; la interfaz puede confirmar una captura que no será memoria vigente. — evidencia: `D:\SGR\jarvis\memory\service.py:66`, `D:\SGR\jarvis\memory\service.py:71`, `D:\SGR\jarvis\memory\service.py:316` — impacto: alto
+
+[edición de memoria] bug — La edición actualiza SQLite antes de escribir la Bóveda; si falla la escritura del archivo, el error queda en un warning y la API devuelve éxito. El archivo declarado fuente de verdad queda desactualizado. — evidencia: `D:\SGR\jarvis\memory\service.py:221`, `D:\SGR\jarvis\memory\service.py:228`, `D:\SGR\jarvis\memory\service.py:246` — impacto: alto
+
+[consolidación/Agenda] bug — Se registra la corrida semanal incluso cuando alguna etapa falla. La ingestión de Agenda mira solo siete días hacia atrás; una falla transitoria puede dejar eventos fuera de la siguiente ventana sin reintento. — evidencia: `D:\SGR\jarvis\worker\consolidation.py:232`, `D:\SGR\jarvis\config.py:174`, `D:\SGR\jarvis\config.py:271` — impacto: alto
+
+[worker/vault] bug — En un reintento, el procesador vuelve a pasar un título a `write_entry()`. Esa función reutiliza `vault_path` solo si el título es `None`; si la clasificación devuelve otro título, puede crear un segundo archivo y dejar huérfano el primero. — evidencia: `D:\SGR\jarvis\worker\processor.py:132`, `D:\SGR\jarvis\vault\writer.py:147` — impacto: medio
+
+[auditoría web] inconsistencia — El banner exige una respuesta escrita para `clarify`, pero no para `open_question`. El backend trata ambas igual: aceptar una pregunta abierta sin texto la marca `ACCEPTED` sin guardar respuesta. — evidencia: `D:\SGR\project\frontend\src\components\jarvis\JarvisProposalBanner.jsx:78`, `D:\SGR\jarvis\audit\service.py:1120`, `D:\SGR\jarvis\audit\service.py:1205` — impacto: medio
+
+[bot/captura] bug — Si Telegram no dispone de `job_queue`, `/j` igualmente promete guardar la decisión tras tres minutos, pero no programa el timeout. Sin respuesta del usuario, esa captura queda sin guardar. — evidencia: `D:\SGR\project\mybot\jarvis_handlers.py:141`, `D:\SGR\project\mybot\jarvis_handlers.py:149`, `D:\SGR\project\mybot\jarvis_handlers.py:158` — impacto: medio
+
+[worker/propuestas] bug — Desactivar `JARVIS_PASSIVE_CAPTURE_ENABLED` también corta, por estar dentro del mismo método, la expiración y el envío de propuestas de auditoría y de capturas de Agenda. — evidencia: `D:\SGR\jarvis\worker\main.py:126`, `D:\SGR\jarvis\worker\main.py:152`, `D:\SGR\jarvis\worker\main.py:169`, `D:\SGR\jarvis\worker\main.py:189` — impacto: medio
+
+[entidades] bug — `memory_count` promete contar solo entradas vigentes, pero cuenta IDs de la tabla puente aunque la entrada asociada tenga `valid_to`; una entidad puede mostrar memorias que ya fueron olvidadas. — evidencia: `D:\SGR\jarvis\entities\service.py:272`, `D:\SGR\jarvis\entities\service.py:280`, `D:\SGR\jarvis\entities\service.py:284` — impacto: medio
+
+[retriever] bug — Al priorizar una entidad, la lista comienza con *todas* sus entradas y no se recorta a `n_results`; una consulta que pide ocho fragmentos puede mandar muchos más al prompt y aumentar costo o exceder contexto. — evidencia: `D:\SGR\jarvis\retriever\retriever.py:155`, `D:\SGR\jarvis\retriever\retriever.py:164`, `D:\SGR\jarvis\query\service.py:213` — impacto: medio
+
+[filtros web] bug — Las opciones “Todos los tipos/tags/proyectos” y “Todas” no tienen `value=""`. Al volver a elegirlas, se envía su texto como filtro: Explorar devuelve cero resultados y Entidades queda vacía. — evidencia: `D:\SGR\project\frontend\src\components\jarvis\JarvisBrowsePanel.jsx:146`, `D:\SGR\project\frontend\src\components\jarvis\JarvisBrowsePanel.jsx:150`, `D:\SGR\project\frontend\src\components\jarvis\JarvisEntitiesPanel.jsx:80` — impacto: medio
+
+[chat web] bug — Si se cambia de chat mientras una consulta está en curso, su respuesta se agrega a los mensajes del chat que esté activo al terminar, porque la actualización usa el estado global actual y no comprueba el ID al que se envió la pregunta. — evidencia: `D:\SGR\project\frontend\src\store\useStore.js:1737`, `D:\SGR\project\frontend\src\store\useStore.js:1807`, `D:\SGR\project\frontend\src\store\useStore.js:1822` — impacto: medio
+
+[estado del worker] inconsistencia — El heartbeat se escribe antes de procesar una entrada y solo vuelve a escribirse al terminarla; con tolerancia por defecto de 15 segundos y llamadas locales que pueden esperar 120 segundos, la interfaz puede anunciar “worker caído” mientras está trabajando. — evidencia: `D:\SGR\jarvis\worker\main.py:219`, `D:\SGR\jarvis\config.py:114`, `D:\SGR\jarvis\config.py:344` — impacto: medio
+
+[estado web] frontend-sin-backend — La interfaz inicializa `worker_alive` en `true` y conserva ese valor si falla `/jarvis/health`; cuando Jarvis no está montado o la API falla, puede seguir mostrando “worker activo”. — evidencia: `D:\SGR\project\frontend\src\store\useStore.js:1698`, `D:\SGR\project\frontend\src\store\useStore.js:1870`, `D:\SGR\project\frontend\src\store\useStore.js:1875` — impacto: medio
+
+[inbox/debug] backend-sin-frontend — La API devuelve `last_error`, pero Inbox no lo muestra; además Debug calcula cola y errores sobre solo las últimas 15 filas, por lo que puede mostrar cero aunque haya fallas más antiguas. — evidencia: `D:\SGR\jarvis\api\router.py:218`, `D:\SGR\project\frontend\src\store\useStore.js:1848`, `D:\SGR\project\frontend\src\components\jarvis\JarvisDebugPanel.jsx:35`, `D:\SGR\project\frontend\src\components\jarvis\JarvisInboxTab.jsx:37` — impacto: medio
+
+[API/arranque] incompleto — Si falla `init_db()` de Jarvis, el arranque solo imprime que se omitió; el router ya queda montado y puede recibir llamadas contra una base sin inicializar. — evidencia: `D:\SGR\project\app\main.py:394`, `D:\SGR\project\app\main.py:399`, `D:\SGR\project\app\main.py:419` — impacto: medio
+
+[Explorar] bug — Tras corregir una entrada, el modal actualiza su copia local, pero la lista y sus filtros no se refrescan; el texto o tipo anterior permanece visible hasta otra búsqueda. — evidencia: `D:\SGR\project\frontend\src\components\jarvis\JarvisSourceModal.jsx:82`, `D:\SGR\project\frontend\src\components\jarvis\JarvisBrowsePanel.jsx:95`, `D:\SGR\project\frontend\src\components\jarvis\JarvisBrowsePanel.jsx:307` — impacto: bajo
+
+[vault] bug — Cada reescritura de una nota del árbol PARA pone `actualizado_en` igual a `creado_en`; el metadato nunca refleja una edición posterior. — evidencia: `D:\SGR\jarvis\vault\writer.py:83`, `D:\SGR\jarvis\vault\writer.py:152` — impacto: bajo
+
+[conversación] bug — Para evitar duplicar la pregunta actual, se eliminan del historial *todos* los mensajes anteriores del usuario cuyo texto sea idéntico, no solo el último recién insertado. — evidencia: `D:\SGR\jarvis\query\service.py:82` — impacto: bajo
+
+[entidades web] inconsistencia — El backend admite entidades `place`, pero la tarjeta web etiqueta cualquier tipo que no sea `person` como “ORGANIZACIÓN”. — evidencia: `D:\SGR\jarvis\db\schema.py:201`, `D:\SGR\project\frontend\src\components\jarvis\JarvisEntitiesPanel.jsx:96` — impacto: bajo
+
+[API de detalle] backend-sin-frontend — Existen `GET /jarvis/entities/{name}` y `GET /jarvis/tags/{name}` para ver entradas vinculadas, pero la web usa solo los listados; al pulsar una entidad abre una pregunta de chat. — evidencia: `D:\SGR\jarvis\api\router.py:257`, `D:\SGR\jarvis\api\router.py:354`, `D:\SGR\project\frontend\src\components\jarvis\JarvisEntitiesPanel.jsx:48` — impacto: bajo
+
+[configuración/documentación] inconsistencia — `CLAUDE.md` describe GPT-5.4 mini como modelo externo, mientras que el valor por defecto real sigue siendo `openai/gpt-4o-mini` si no se configura la variable de entorno. — evidencia: `D:\SGR\CLAUDE.md:305`, `D:\SGR\jarvis\config.py:97` — impacto: bajo
+
+## Prioridad de revisión
+
+1. **Alto:** cerrar la salida de contenido privado desde los jobs; impedir el reprocesamiento de entradas olvidadas; corregir la deduplicación para privacidad y recapturas; asegurar que una edición confirmada llegue al archivo; evitar que una corrida fallida consuma la ventana de ingestión.
+2. **Medio:** resolver los reintentos que pueden duplicar archivos, la aceptación vacía de preguntas abiertas y la captura sin timeout; después, las propuestas bloqueadas por el flag pasivo, los conteos y límites de entidades, los filtros, el cambio de chat durante una consulta y los indicadores de estado/inbox.
+3. **Bajo:** refresco tras editar, fecha de actualización del vault, preguntas repetidas en el historial, etiqueta de lugares, endpoints de detalle sin consumidor y modelo por defecto desalineado con la documentación.
+
+Leí completos, sin hallar otros problemas en ellos, `budget/tracker.py`, `chats/service.py`, `events/service.py` y `stats/service.py`. Contrasté los hallazgos con `estado-actual.md` y `decisiones-implementacion.md`; no marqué como bugs las fases futuras explícitamente diferidas, como el loop de tools o el retry manual de entradas `ERROR`.
+
+**Cobertura pendiente:** no inspeccioné la base `jarvis.db` real ni ejecuté código o pruebas. No alcancé una revisión exhaustiva de todas las migraciones de `jarvis/db/database.py`, las acciones individuales de aceptación en `jarvis/audit/service.py`, los scripts de `jarvis/cli/`, `observability.py`, `embeddings/store.py`, `privacy/trust.py`, toda la síntesis de `ingestion/agenda_patterns.py`, el ruteo completo de `mybot/bot.py` ni los estilos y componentes visuales de Jarvis. No modifiqué archivos.
+
+---
+
+REPORTE DE CORRECCIONES — AUDITORÍA DE JARVIS
+Fecha: 2026-09-25
+Repositorio: D:\SGR
+
+Alcance
+Se resolvieron los 23 hallazgos restantes de la auditoría original (números 2 a 24).
+El hallazgo 1, fuga de privacidad en call_reason(), ya estaba corregido en los cambios
+locales anteriores y se preservó. No se hizo commit, push ni despliegue. No se tocó
+jarvis.db real: las pruebas usan bases y vault temporales.
+
+Correcciones de impacto alto
+2. Entrada olvidada reprocesada: forget_entry cancela la fila de inbox_queue en
+   una transacción; el worker comprueba valid_to antes de clasificar y antes de
+   escribir el archivo. La segunda comprobación y la escritura se serializan
+   con forget_entry (jarvis/memory/service.py, jarvis/worker/processor.py).
+3. Recaptura con privacidad: la deduplicación conserva y eleva local_only y
+   confidential; una recaptura nunca los desactiva (jarvis/memory/service.py).
+4. Recaptura olvidada: la búsqueda de duplicados considera solo entradas
+   vigentes, por lo que crea una nueva entrada y la encola (jarvis/memory/service.py).
+5. Edición desincronizada: el vault se reemplaza de forma atómica. Si falla la
+   escritura, se revierten los cambios de SQLite y la API devuelve error; los
+   índices derivados siguen siendo best-effort (jarvis/vault/writer.py,
+   jarvis/memory/service.py).
+6. Agenda fuera de ventana tras falla: la ingestión conserva un checkpoint de
+   inicio y solo lo avanza si ambas fuentes y sus propuestas terminan sin error.
+   La siguiente corrida amplía la ventana hasta el último punto exitoso; la
+   deduplicación existente evita repropuestas (jarvis/ingestion/agenda.py).
+
+Correcciones de impacto medio
+7. Reintentos del worker reutilizan vault_path aunque la nueva clasificación
+   proponga otro título; no crean un segundo archivo por ese motivo
+   (jarvis/worker/processor.py, jarvis/vault/writer.py).
+8. clarify/open_question sin respuesta ya no se acepta en backend; la web pide
+   texto para ambos tipos (jarvis/audit/service.py, JarvisProposalBanner.jsx).
+9. Sin job_queue de Telegram, /j guarda inmediatamente la captura en vez de
+   prometer un timeout que no se ejecutará (project/mybot/jarvis_handlers.py).
+10. Desactivar captura pasiva solo omite scan_and_propose; expiración y envío de
+    propuestas de auditoría y Agenda siguen corriendo (jarvis/worker/main.py).
+11. memory_count de entidades cuenta únicamente memory_entries vigentes
+    (jarvis/entities/service.py).
+12. El boost de entidad del retriever se recorta a n_results
+    (jarvis/retriever/retriever.py).
+13. Los filtros web “Todos” usan value="" y pueden limpiarse correctamente
+    (JarvisBrowsePanel.jsx, JarvisEntitiesPanel.jsx).
+14. Una respuesta tardía solo actualiza el chat que originó la consulta; el
+    cambio de chat también descarta cargas de historial atrasadas
+    (project/frontend/src/store/useStore.js).
+15. El heartbeat corre en un hilo independiente del procesamiento de entradas;
+    las llamadas LLM largas ya no lo congelan (jarvis/worker/main.py).
+16. La web inicia worker_alive en false y vuelve a false si falla /jarvis/health
+    (project/frontend/src/store/useStore.js).
+17. Inbox muestra last_error en las filas ERROR. Debug usa un nuevo endpoint
+    /jarvis/inbox/stats que cuenta toda la cola, no solo las últimas 15 filas
+    (jarvis/api/router.py, JarvisInboxTab.jsx, JarvisDebugPanel.jsx, useStore.js).
+18. Si init_db de Jarvis falla, falla el arranque del backend en vez de dejar
+    montado un router contra un esquema incompleto (project/app/main.py).
+
+Correcciones de impacto bajo
+19. Explorar y los conteos de tags se refrescan tras editar u olvidar una
+    entrada (JarvisBrowsePanel.jsx, JarvisSourceModal.jsx).
+20. En las reescrituras de notas PARA, actualizado_en refleja la reescritura
+    y no la fecha de creación (jarvis/vault/writer.py).
+21. Una pregunta repetida permanece en el historial RAG; solo se excluye el
+    último mensaje recién insertado (jarvis/query/service.py).
+22. Las entidades place se muestran como LUGAR y tienen filtro propio
+    (JarvisEntitiesPanel.jsx).
+23. La web consulta GET /jarvis/entities/{name} y GET /jarvis/tags/{name} en
+    un panel de entradas vinculadas; desde allí se abre cada fuente
+    (JarvisLinkedEntriesModal.jsx, JarvisEntitiesPanel.jsx, JarvisBrowsePanel.jsx).
+24. CLAUDE.md ahora documenta el default real openai/gpt-4o-mini y la variable
+    JARVIS_REASON_MODEL. Cerebro/estado-actual.md refleja el estado corregido.
+
+Verificación
+- Backend: 346 tests pasados, 1 omitido (suite completa).
+- Frontend: 176 tests pasados (suite completa).
+- Frontend: npm run build exitoso.
+- git diff --check sin errores de whitespace (solo avisos de conversión LF/CRLF).
+- Pruebas nuevas en project/tests/test_jarvis_audit_fixes.py y
+  project/frontend/src/store/useStore.jarvis.test.js; se conservan las pruebas
+  previas del Privacy Gateway en test_jarvis_privacy_reason_calls.py.
+
+Límites de la verificación
+No se ejecutaron jobs reales ni se validó contra la Bóveda, Agenda, Telegram o
+Jarvis del homelab. La recuperación de Agenda ocurre en la próxima corrida de
+consolidación; el checkpoint evita que se pierda la ventana durante una falla.

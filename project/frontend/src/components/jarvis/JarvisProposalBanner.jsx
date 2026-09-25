@@ -75,7 +75,7 @@ export default function JarvisProposalBanner() {
     if (ok) showToast('Descartado', 'success')
   }
 
-  const isClarify = isAudit && proposal.action_type === 'clarify'
+  const isClarify = isAudit && ['clarify', 'open_question'].includes(proposal.action_type)
   const badgeLabel = isAudit ? (AUDIT_ACTION_LABELS[proposal.action_type] || 'AUDITORÍA') : 'PROPUESTA DE CAPTURA'
 
   return (

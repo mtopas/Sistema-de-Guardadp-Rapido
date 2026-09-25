@@ -1,5 +1,6 @@
 import logging
 import re
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -80,7 +81,7 @@ def _build_para_frontmatter(entry: dict) -> str:
         f"id: {entry_id}",
         "tipo: texto",
         f"creado_en: {creado_en}",
-        f"actualizado_en: {creado_en}",
+        f"actualizado_en: {_now_iso_offset() if entry.get('vault_path') else creado_en}",
         f"origen: {origen}",
         f"tags: {tags_yaml}",
         "---\n",
@@ -128,6 +129,22 @@ def _tags_list(tags_raw) -> list:
     return tags_raw
 
 
+def _write_text_atomic(path: Path, content: str) -> None:
+    """No truncar la nota anterior si falla una reescritura."""
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent,
+            prefix=f".{path.name}.", suffix=".tmp", delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            handle.write(content)
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def write_entry(entry: dict, title: str | None = None) -> str:
     """Escribe la entrada como .md y devuelve la ruta relativa a
     JARVIS_BOVEDA_PATH (raíz común de todo D:\\Boveda, incluido su subárbol
@@ -144,14 +161,14 @@ def write_entry(entry: dict, title: str | None = None) -> str:
     is_synthesis = entry.get("authorship") == "jarvis_synthesis"
 
     existing_vault_path = entry.get("vault_path")
-    if title is None and existing_vault_path:
+    if existing_vault_path:
         abs_path = JARVIS_BOVEDA_PATH / existing_vault_path
         rel_to_root = existing_vault_path
         content_block = entry.get("content_processed") or entry.get("content_raw") or ""
         content_block += _linked_wikilinks_section(entry_id)
         frontmatter = _build_synth_frontmatter(entry) if is_synthesis else _build_para_frontmatter(entry)
         abs_path.parent.mkdir(parents=True, exist_ok=True)
-        abs_path.write_text(frontmatter + content_block, encoding="utf-8")
+        _write_text_atomic(abs_path, frontmatter + content_block)
         return rel_to_root
 
     display_title = title or _derive_title(entry.get("content_raw", ""))
@@ -177,7 +194,7 @@ def write_entry(entry: dict, title: str | None = None) -> str:
     content_block = entry.get("content_processed") or entry.get("content_raw") or ""
     content_block += _linked_wikilinks_section(entry_id)
 
-    abs_path.write_text(frontmatter + content_block, encoding="utf-8")
+    _write_text_atomic(abs_path, frontmatter + content_block)
     return rel_to_root
 
 

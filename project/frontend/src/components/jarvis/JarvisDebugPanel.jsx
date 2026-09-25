@@ -19,22 +19,18 @@ function timeLabel(iso) {
 }
 
 export default function JarvisDebugPanel() {
-  const { jarvisBudget, jarvisInbox, jarvisEvents, jarvisEventsLimit, loadMoreJarvisEvents } = useStore(
+  const { jarvisBudget, jarvisInboxStats, jarvisEvents, jarvisEventsLimit, loadMoreJarvisEvents } = useStore(
     useShallow(s => ({
       jarvisBudget:         s.jarvisBudget,
-      jarvisInbox:          s.jarvisInbox,
+      jarvisInboxStats:     s.jarvisInboxStats,
       jarvisEvents:         s.jarvisEvents,
       jarvisEventsLimit:    s.jarvisEventsLimit,
       loadMoreJarvisEvents: s.loadMoreJarvisEvents,
     }))
   )
 
-  // Cola/errores/último-procesado se derivan del lado del cliente a partir de
-  // jarvisInbox (Fase 6: "sin backend nuevo para esto" — el log real de abajo sí
-  // usa backend nuevo, pero es la Fase B5, un endpoint distinto).
-  const queuePending = jarvisInbox.filter(i => i.status === 'PENDING' || i.status === 'PROCESSING').length
-  const errored = jarvisInbox.filter(i => i.status === 'ERROR')
-  const lastDone = jarvisInbox.find(i => i.status === 'DONE')
+  const queuePending = jarvisInboxStats.pending + jarvisInboxStats.processing
+  const lastDone = jarvisInboxStats.last_done
 
   const stats = [
     {
@@ -46,13 +42,13 @@ export default function JarvisDebugPanel() {
     {
       label: 'COLA',
       value: String(queuePending),
-      sub: `${jarvisInbox.filter(i => i.status === 'PENDING').length} pending · ${jarvisInbox.filter(i => i.status === 'PROCESSING').length} processing`,
+      sub: `${jarvisInboxStats.pending} pending · ${jarvisInboxStats.processing} processing`,
       color: MEMORY_TYPE_COLORS.DECISION,
     },
     {
       label: 'ERRORES',
-      value: String(errored.length),
-      sub: errored[0]?.last_error?.slice(0, _TRUNCATE_LEN) || 'sin errores',
+      value: String(jarvisInboxStats.errors),
+      sub: jarvisInboxStats.last_error?.slice(0, _TRUNCATE_LEN) || 'sin errores',
       color: MEMORY_TYPE_COLORS.PEOPLE,
     },
     {

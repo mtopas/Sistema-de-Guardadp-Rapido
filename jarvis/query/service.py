@@ -78,8 +78,10 @@ def query(
 
     # Historial conversacional (spec §7: últimos 8-10 mensajes)
     history = get_recent_messages(conversation_id, limit=10)
-    # Excluir el último par user/assistant que aún no existe para evitar duplicar la pregunta
-    history = [m for m in history if not (m["role"] == "user" and m["content"] == question)]
+    # La pregunta recién insertada es solo el último mensaje; las anteriores
+    # con el mismo texto siguen siendo parte del historial.
+    if history and history[-1]["role"] == "user" and history[-1]["content"] == question:
+        history = history[:-1]
 
     # Entidades conocidas mencionadas en la pregunta (0.2 Slice 3) — sección aparte
     # "Lo que sé sobre [nombre]" con sus entradas vinculadas, también filtradas por

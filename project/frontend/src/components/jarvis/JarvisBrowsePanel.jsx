@@ -5,6 +5,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { MEMORY_TYPE_COLORS, MEMORY_TYPE_ORDER, rgba } from '../../utils/jarvisPalette'
 import { formatAge } from '../../utils/formatAge'
 import JarvisSourceModal from './JarvisSourceModal'
+import JarvisLinkedEntriesModal from './JarvisLinkedEntriesModal'
 
 // Pantalla "browse" (pieza F) — navegar/filtrar toda la memoria sin pasar por
 // el chat, equivalente a como Bóveda tiene su árbol de categorías en
@@ -60,6 +61,7 @@ export default function JarvisBrowsePanel() {
   const [q, setQ] = useState('')
   const [page, setPage] = useState(0)
   const [openSourceId, setOpenSourceId] = useState(null)
+  const [openTag, setOpenTag] = useState(null)
 
   useEffect(() => { fetchJarvisTags() }, [fetchJarvisTags])
 
@@ -87,12 +89,10 @@ export default function JarvisBrowsePanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [type, tag, projectId, dateFrom, dateTo, q, page, fetchJarvisBrowse])
 
-  // El modal de "olvidar" (JarvisSourceModal) hace un DELETE contra el backend
-  // pero no toca ningún estado del store -- sin este refetch, la entrada
-  // olvidada seguía apareciendo en la lista hasta el próximo cambio de filtro
-  // (el usuario reportó esto: "pongo para olvidar una entrada y no desaparece
-  // del panel"). Refresca la lista que esté visible según la vista actual.
-  function handleEntryForgotten() {
+  // Editar u olvidar en el modal cambia la entrada en el backend; refrescar
+  // la lista y los conteos de tags evita mostrar datos anteriores.
+  function handleEntryChanged() {
+    fetchJarvisTags()
     if (view === 'auditoria') {
       fetchJarvisAuditHistory()
       fetchJarvisIsolatedEntries()
@@ -143,15 +143,16 @@ export default function JarvisBrowsePanel() {
           />
         </div>
         <select value={type} onChange={e => setType(e.target.value)} className="text-[12px] py-2 px-2.5 outline-none" style={{backgroundColor: 'rgba(30,30,50,0.8)', border: '1px solid rgba(150,170,255,0.14)', color: '#eef2ff', borderRadius: 8}}>
-          <option style={{backgroundColor: 'rgba(20,20,40,0.95)', color: '#eef2ff'}}>Todos los tipos</option>
+          <option value="" style={{backgroundColor: 'rgba(20,20,40,0.95)', color: '#eef2ff'}}>Todos los tipos</option>
           {MEMORY_TYPE_ORDER.map(t => <option key={t} value={t} style={{backgroundColor: 'rgba(20,20,40,0.95)', color: '#eef2ff'}}>{t}</option>)}
         </select>
         <select value={tag} onChange={e => setTag(e.target.value)} className="text-[12px] py-2 px-2.5 outline-none" style={{backgroundColor: 'rgba(30,30,50,0.8)', border: '1px solid rgba(150,170,255,0.14)', color: '#eef2ff', borderRadius: 8}}>
-          <option style={{backgroundColor: 'rgba(20,20,40,0.95)', color: '#eef2ff'}}>Todos los tags</option>
+          <option value="" style={{backgroundColor: 'rgba(20,20,40,0.95)', color: '#eef2ff'}}>Todos los tags</option>
           {jarvisTags.map(t => <option key={t.tag_id} value={t.name} style={{backgroundColor: 'rgba(20,20,40,0.95)', color: '#eef2ff'}}>#{t.name} ({t.memory_count})</option>)}
         </select>
+        {tag && <button onClick={() => setOpenTag(tag)} className="text-[12px] px-2.5 py-2" style={{ color: '#7dd3fc' }}>Ver #{tag}</button>}
         <select value={projectId} onChange={e => setProjectId(e.target.value)} className="text-[12px] py-2 px-2.5 outline-none" style={{backgroundColor: 'rgba(30,30,50,0.8)', border: '1px solid rgba(150,170,255,0.14)', color: '#eef2ff', borderRadius: 8}}>
-          <option style={{backgroundColor: 'rgba(20,20,40,0.95)', color: '#eef2ff'}}>Todos los proyectos</option>
+          <option value="" style={{backgroundColor: 'rgba(20,20,40,0.95)', color: '#eef2ff'}}>Todos los proyectos</option>
           {jarvisProjects.map(p => <option key={p.id} value={p.id} style={{backgroundColor: 'rgba(20,20,40,0.95)', color: '#eef2ff'}}>{p.name}</option>)}
         </select>
         <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="text-[12px] py-2 px-2.5 outline-none" style={inputStyle} />
@@ -304,9 +305,11 @@ export default function JarvisBrowsePanel() {
         <JarvisSourceModal
           entryId={openSourceId}
           onClose={() => setOpenSourceId(null)}
-          onForgotten={handleEntryForgotten}
+          onForgotten={handleEntryChanged}
+          onEdited={handleEntryChanged}
         />
       )}
+      {openTag && <JarvisLinkedEntriesModal title={`#${openTag}`} kind="tags" name={openTag} onClose={() => setOpenTag(null)} onChanged={handleEntryChanged} />}
     </div>
   )
 }

@@ -131,6 +131,11 @@ async def _start_clarification(
     chat_id = msg.chat.id
     job_name = f"jarvis_clar_{chat_id}_{msg.message_id}"
 
+    if not context.job_queue:
+        logger.warning("[j] job_queue no disponible; captura inmediata sin aclaración (%s)", source_id)
+        await _do_capture(msg, content, source_id, _display_type(content, infer_type_hint(content)))
+        return
+
     context.user_data["jarvis_clarification"] = {
         "content": content,
         "source_id": source_id,
@@ -138,20 +143,13 @@ async def _start_clarification(
         "job_name": job_name,
     }
 
-    if context.job_queue:
-        context.job_queue.run_once(
-            _clarification_timeout,
-            JARVIS_CLARIFICATION_TIMEOUT_S,
-            chat_id=chat_id,
-            data={"content": content, "source_id": source_id, "chat_id": chat_id},
-            name=job_name,
-        )
-    else:
-        logger.warning(
-            "[j] job_queue no disponible -- sin timeout automático de aclaración (%s). "
-            "Instalá python-telegram-bot[job-queue].",
-            source_id,
-        )
+    context.job_queue.run_once(
+        _clarification_timeout,
+        JARVIS_CLARIFICATION_TIMEOUT_S,
+        chat_id=chat_id,
+        data={"content": content, "source_id": source_id, "chat_id": chat_id},
+        name=job_name,
+    )
 
     await msg.reply_text(
         f"🤔 {question}\n"

@@ -62,6 +62,7 @@ from jarvis.config import (
 )
 from jarvis.db.database import get_connection
 from jarvis.llm.client import call_reason
+from jarvis.privacy.gateway import filter_context
 from jarvis.worker.task_manifest import MANIFEST
 
 logger = logging.getLogger(__name__)
@@ -279,7 +280,8 @@ def _fetch_active_entries() -> list[dict]:
     try:
         rows = conn.execute(
             """SELECT id, type, user_id, content_raw, content_processed,
-                      recorded_at, valid_from, confidence, origin_trust
+                      recorded_at, valid_from, confidence, origin_trust,
+                      local_only, confidential
                FROM memory_entries
                WHERE valid_to IS NULL"""
         ).fetchall()
@@ -400,6 +402,8 @@ JSON:"""
 
 
 def _resolve_pair(entry_a: dict, entry_b: dict, similarity: float, summary: dict) -> None:
+    if len(filter_context([entry_a, entry_b])) != 2:
+        return
     from jarvis.tags.service import get_tags_for_entry
 
     content_a = entry_a.get("content_processed") or entry_a.get("content_raw") or ""

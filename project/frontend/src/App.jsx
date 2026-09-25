@@ -15,6 +15,7 @@ import HabitosScreen  from './screens/HabitosScreen'
 import JarvisScreen   from './screens/JarvisScreen'
 import JarvisCaptureModal from './components/jarvis/JarvisCaptureModal'
 import AgendaNotificationWatcher from './components/AgendaNotificationWatcher'
+import JarvisProposalWatcher from './components/jarvis/JarvisProposalWatcher'
 
 // Lazy-load screens with heavy deps (D3, TipTap) to keep the initial bundle lean
 const BrowseScreen = lazy(() => import('./screens/BrowseScreen'))
@@ -92,6 +93,7 @@ export default function App() {
       <MovementModal />
       <JarvisCaptureModal />
       <AgendaNotificationWatcher />
+      <JarvisProposalWatcher />
     </BrowserRouter>
   )
 }

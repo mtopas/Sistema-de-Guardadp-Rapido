@@ -193,8 +193,17 @@ JARVIS_PASSIVE_CAPTURE_INACTIVITY_MINUTES = int(
 # Minutos que una propuesta queda PENDING antes de expirar sola (nunca se
 # guarda por default al vencer -- lo contrario de la aclaración de DECISION,
 # que si guarda sin razón al vencer: acá el guardado en sí es lo opcional).
+# 720 (12h) en vez de los 30 min originales -- auditoría 2026-09-24
+# (Cerebro/estado-actual.md) encontró que el banner de propuestas solo
+# actualizaba con /jarvis abierta, así que una propuesta real podía expirar
+# sin que el usuario tuviera ninguna chance de verla. Con el polling ya
+# global (JarvisProposalWatcher.jsx, mismo día), el costo de una ventana más
+# larga baja: el usuario la va a ver la próxima vez que abra SGR ese día, sea
+# cuando sea, en vez de perderla si no está mirando Telegram/`/jarvis` en el
+# instante exacto. 12h cubre una sesión de trabajo/día típica sin dejar
+# propuestas viejas acumulándose por varios días.
 JARVIS_PASSIVE_PROPOSAL_TIMEOUT_MINUTES = int(
-    os.getenv("JARVIS_PASSIVE_PROPOSAL_TIMEOUT_MINUTES", "30")
+    os.getenv("JARVIS_PASSIVE_PROPOSAL_TIMEOUT_MINUTES", "720")
 )
 # Cuántas propuestas de jarvis_capture_proposals (passive_capture +
 # agenda_ingestion, incluidos los patrones de agenda_patterns.py) se empujan

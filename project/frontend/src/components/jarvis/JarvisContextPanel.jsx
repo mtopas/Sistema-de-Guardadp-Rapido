@@ -45,10 +45,14 @@ export default function JarvisContextPanel() {
         background: 'linear-gradient(180deg, rgba(8,10,22,0.5), rgba(6,8,16,0.24))',
       }}
     >
-      {/* En proceso */}
+      {/* Clasificación del Inbox de Bóveda (inbox_queue) -- NO son las propuestas
+          de captura pasiva (esas viven en jarvis_capture_proposals y se ven en
+          el banner arriba del chat, en cualquier pantalla). Auditoría 2026-09-24
+          encontró que el label anterior ("EN PROCESO") llevaba a confundir las
+          dos señales. */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div className="jv-mono" style={{ fontSize: 10, letterSpacing: '0.16em', color: 'var(--jv-mute)' }}>
-          EN PROCESO
+          CLASIFICANDO INBOX
         </div>
         {jarvisInbox.slice(0, JARVIS_CONTEXT_RECENT_COUNT).length === 0 && (
           <div style={{ fontSize: 11, color: 'var(--jv-mute)' }}>Sin actividad reciente</div>

@@ -3,13 +3,22 @@ import { useShallow } from 'zustand/react/shallow'
 import { MEMORY_TYPE_COLORS, MEMORY_TYPE_DESC, MEMORY_TYPE_ORDER, rgba } from '../../utils/jarvisPalette'
 
 export default function JarvisLeftPanel() {
-  const { jarvisTypeCounts, jarvisProjects, setJarvisTab } = useStore(
+  const { jarvisTypeCounts, jarvisProjects, jarvisEntities, setJarvisTab } = useStore(
     useShallow(s => ({
       jarvisTypeCounts: s.jarvisTypeCounts,
       jarvisProjects:   s.jarvisProjects,
+      jarvisEntities:   s.jarvisEntities,
       setJarvisTab:     s.setJarvisTab,
     }))
   )
+
+  // "PEOPLE" en TIPOS DE MEMORIA cuenta memory_entries.type='PEOPLE' (una
+  // clasificación de contenido rarísima), no personas conocidas -- auditoría
+  // 2026-09-24 (Cerebro/estado-actual.md) encontró que esto confundía al
+  // usuario ("PEOPLE: 1" cuando había 26 personas reales indexadas). El
+  // conteo real de personas ya existe en GET /jarvis/entities
+  // (jarvisEntities, mismo dato que usa JarvisEntitiesPanel.jsx).
+  const knownPeopleCount = jarvisEntities.filter(e => e.entity_type === 'person').length
 
   // heat es una decisión de escala visual del frontend (Fase B2: el backend
   // devuelve memory_count crudo, no un heat pre-normalizado).
@@ -68,6 +77,12 @@ export default function JarvisLeftPanel() {
             </div>
           )
         })}
+        <div
+          onClick={() => setJarvisTab('entities')}
+          style={{ cursor: 'pointer', fontSize: 10.5, color: 'var(--jv-mute)', padding: '2px 10px' }}
+        >
+          Personas conocidas: <span style={{ color: 'var(--jv-subtext)' }}>{knownPeopleCount}</span>
+        </div>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>

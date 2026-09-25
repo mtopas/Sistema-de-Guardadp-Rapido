@@ -16,10 +16,13 @@ import { useShallow } from 'zustand/react/shallow'
 import { JARVIS_LEFT_WIDTH, JARVIS_RIGHT_WIDTH, JARVIS_POLL_MS } from '../utils/jarvisPalette'
 
 export default function JarvisScreen() {
+  // fetchJarvisProposals/fetchJarvisAuditProposals ya no se llaman acá --
+  // JarvisProposalWatcher.jsx (montado globalmente en App.jsx) los pollea
+  // desde cualquier pantalla, no solo /jarvis. El banner inline de abajo
+  // sigue leyendo el mismo estado del store.
   const { jarvisTab,
           fetchJarvisTypeCounts, fetchJarvisProjects, fetchJarvisInbox, fetchJarvisBudget,
-          fetchJarvisEntities, fetchJarvisHealth, fetchJarvisEvents, fetchJarvisChats,
-          fetchJarvisProposals, fetchJarvisAuditProposals } = useStore(
+          fetchJarvisEntities, fetchJarvisHealth, fetchJarvisEvents, fetchJarvisChats } = useStore(
     useShallow(s => ({
       jarvisTab:                  s.jarvisTab,
       fetchJarvisTypeCounts:      s.fetchJarvisTypeCounts,
@@ -30,8 +33,6 @@ export default function JarvisScreen() {
       fetchJarvisHealth:          s.fetchJarvisHealth,
       fetchJarvisEvents:          s.fetchJarvisEvents,
       fetchJarvisChats:           s.fetchJarvisChats,
-      fetchJarvisProposals:       s.fetchJarvisProposals,
-      fetchJarvisAuditProposals:  s.fetchJarvisAuditProposals,
     }))
   )
 
@@ -49,8 +50,6 @@ export default function JarvisScreen() {
     fetchJarvisHealth()
     fetchJarvisEvents()
     fetchJarvisChats()
-    fetchJarvisProposals()
-    fetchJarvisAuditProposals()
     const id = setInterval(() => {
       fetchJarvisTypeCounts()
       fetchJarvisInbox()
@@ -58,11 +57,9 @@ export default function JarvisScreen() {
       fetchJarvisEntities()
       fetchJarvisHealth()
       fetchJarvisEvents()
-      fetchJarvisProposals()
-      fetchJarvisAuditProposals()
     }, JARVIS_POLL_MS)
     return () => clearInterval(id)
-  }, [fetchJarvisTypeCounts, fetchJarvisProjects, fetchJarvisInbox, fetchJarvisBudget, fetchJarvisEntities, fetchJarvisHealth, fetchJarvisEvents, fetchJarvisChats, fetchJarvisProposals, fetchJarvisAuditProposals])
+  }, [fetchJarvisTypeCounts, fetchJarvisProjects, fetchJarvisInbox, fetchJarvisBudget, fetchJarvisEntities, fetchJarvisHealth, fetchJarvisEvents, fetchJarvisChats])
 
   return (
     <div

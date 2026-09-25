@@ -139,11 +139,11 @@ Prefijos sin namespace (`/categorias`, `/hojas`).
 
 ### `NetworkGraph.jsx`
 
-- Grafo **estático SVG** (no D3 force): hub central "SGR", ramas = categorías raíz, leaves = hojas (máx. **14 por rama**).
+- Grafo **estático SVG** (no D3 force): hub central "SGR", ramas = categorías raíz, leaves = hojas (máx. **14 por rama**). Respeta el filtro de búsqueda compartido con la lista.
 - Formas: círculo = texto, cuadrado rotado = link, rect redondeado = foto.
 - **Cross-links** punteados entre hojas que comparten `#tag`.
 - Click en hoja → abre `RightPanel` vía `onOpenHoja`; tooltip hover (título + tipo + categoría).
-- Controles zoom: **decorativos**, sin lógica real.
+- Controles zoom y arrastre del fondo: transforman la vista SVG.
 - Aviso "+N" cuando hay más de 14 hojas por rama; ARIA en legend y SVG.
 
 ### `RightPanel.jsx`

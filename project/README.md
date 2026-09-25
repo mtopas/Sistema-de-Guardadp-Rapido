@@ -17,7 +17,7 @@ Aplicación local full-stack (español) para capturar conocimiento (**Bóveda**)
 | API | FastAPI, Pydantic, `uvicorn` |
 | Datos | SQLite (`database/app.db`), migraciones en `init_db()` al startup |
 | UI | React 18, Vite, React Router, Zustand, Tailwind (tokens vía CSS vars) |
-| Gráficos Bóveda | D3 (`NetworkGraph.jsx`) |
+| Gráficos Bóveda | SVG radial estático (`NetworkGraph.jsx`) |
 | Rich text | TipTap (apuntes en hojas) |
 | Iconos | `lucide-react` |
 | Referencia visual | `../ClaudeDesign/` (HTML estático; no es el runtime) |
@@ -96,11 +96,10 @@ Modal Hábitos en `HabitosScreen`: `NuevoHabitoModal` (CTA TopBar `openHabitoMod
 **Desde 2026-09-15, `D:\Boveda` (archivos Markdown, estructura PARA) es la fuente de verdad —
 `categorias`/`hojas` en `app.db` son un índice reconstruible, sincronizado por `app/vault/sync.py`
 (lee/escribe frontmatter vía `app/vault/parser.py`/`markdown.py`, guard de arranque en
-`app/vault/guard.py`).** El contrato HTTP (`/categorias`, `/hojas`) no cambió — frontend y bot
-siguen igual. Detalle completo: `Cerebro/decisiones-implementacion.md` (2026-09-11) y
-`Cerebro/decisiones/` (Milestone 2). **`Boveda.md` describe el modelo viejo (pre-fusión) y está
-desactualizado en las partes que asumen `categorias`/`hojas` como fuente propia — no confiar en
-ese archivo para el modelo de datos actual.**
+`app/vault/guard.py`).** El contrato HTTP (`/categorias`, `/hojas`) se conserva para frontend y bot.
+Detalle completo: `Cerebro/decisiones-implementacion.md` (2026-09-11) y
+`Cerebro/decisiones/` (Milestone 2). `Boveda.md` contiene el detalle de la interfaz y marca sus
+secciones históricas del modelo anterior.
 
 **Dominio:** `categorias` (`padre_id`) refleja la jerarquía de carpetas de `D:\Boveda` (árbol PARA
 + dominios: Facultad, Carrera Profesional, Salud, Desarrollo Personal); `hojas` (`tipo`: texto |
@@ -108,7 +107,15 @@ link | foto) refleja cada `.md` real, con columnas de vínculo (`vault_id`, `rut
 de `contenido`, `apuntes` HTML, geo, `icono` (estos 4 últimos opcionales en el frontmatter, no
 parte del contrato común — ver README de `D:\Boveda`).
 
-**Piezas clave:** `LeftPanel` (árbol + búsqueda), `NetworkGraph` (fuerza D3, datos desde store), `RightPanel` (detalle + TipTap), `CaptureModal` (autodetect `detectType.js`, Ctrl+Enter).
+**Piezas clave:** `LeftPanel` (árbol + búsqueda textual/semántica y reindexación),
+`NetworkGraph` (SVG radial de posiciones fijas, con zoom/pan y filtro compartido con la lista),
+`RightPanel` (detalle + TipTap y recientes desde API), `CaptureModal` (autodetect `detectType.js`, Ctrl+Enter).
+
+**Persistencia:** un PATCH de metadatos conserva cuerpo y campos manuales del frontmatter;
+categorías guardan icono/color en `.sgr-categoria.yaml` y las hojas guardan color/preview en su
+frontmatter. La eliminación mueve la nota a `05 - Basura`, excluida de las consultas públicas.
+Las rutas del índice usan `/` tanto en Windows como en el servidor. La búsqueda semántica indexa
+apuntes y reconcilia notas cambiadas o eliminadas antes de responder.
 
 **Temas:** `utils/themes.js` — mapas de variables CSS (`--bg`, `--accent`, …), **tonos** (`TONES`) y **pares tipográficos** (`FONT_PAIRS`, 6 presets). **Temas y tonos son por sección** (`sgr-theme-{section}`, `sgr-tone-{section}` en `localStorage`); la tipografía es global. `setCurrentSection` en el store aplica el tema de la sección al navegar. Tema Arcoíris cambia acento por ruta (lógica centralizada en `_applyArcoirisAccent` en el store).
 

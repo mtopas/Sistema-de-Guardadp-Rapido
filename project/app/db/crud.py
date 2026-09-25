@@ -233,12 +233,10 @@ def eliminar_categoria(categoria_id: int, forzar: bool = False) -> str:
 
     if rutas_hojas:
         nuevas = vault_writer.mover_notas_a_basura_y_borrar_carpeta(VAULT_ROOT, ruta, rutas_hojas)
-        cursor.execute("SELECT id FROM categorias WHERE ruta = ?", (vault_writer.BASURA_CARPETA,))
-        basura_row = cursor.fetchone()
-        basura_id = basura_row[0] if basura_row else None
+        basura_id = _asegurar_categoria_basura(cursor)
         for ruta_vieja, ruta_nueva in nuevas.items():
             cursor.execute(
-                "UPDATE hojas SET ruta = ?, categoria_id = COALESCE(?, categoria_id) WHERE ruta = ?",
+                "UPDATE hojas SET ruta = ?, categoria_id = ? WHERE ruta = ?",
                 (ruta_nueva, basura_id, ruta_vieja),
             )
     else:
@@ -258,6 +256,19 @@ def eliminar_categoria(categoria_id: int, forzar: bool = False) -> str:
 
 
 # --- Hojas ---
+
+def _asegurar_categoria_basura(cursor) -> int:
+    """Crea la categoría estructural si la carpeta Basura apareció tras el último sync."""
+    cursor.execute("SELECT id FROM categorias WHERE ruta = ?", (vault_writer.BASURA_CARPETA,))
+    row = cursor.fetchone()
+    if row:
+        return row[0]
+    cursor.execute(
+        "INSERT INTO categorias (nombre, padre_id, ruta, estructural) VALUES (?, NULL, ?, 1)",
+        ("Basura", vault_writer.BASURA_CARPETA),
+    )
+    return cursor.lastrowid
+
 # Cada hoja es un .md real en D:\Boveda. `hojas.id` (INTEGER, autoincrement)
 # sigue siendo el id que ya usan frontend/bot; `vault_id`/`ruta`/`mtime` son el
 # vínculo con el archivo -- nunca se exponen en la API. Regla dura: el archivo
@@ -475,11 +486,10 @@ def eliminar_hoja(hoja_id: int) -> Optional[str]:
     if ruta and (VAULT_ROOT / ruta).exists():
         ruta_nueva = vault_writer.mover_a_basura(VAULT_ROOT, ruta)
         nuevo_mtime = (VAULT_ROOT / ruta_nueva).stat().st_mtime
-        cursor.execute("SELECT id FROM categorias WHERE ruta = ?", (vault_writer.BASURA_CARPETA,))
-        basura_row = cursor.fetchone()
+        basura_id = _asegurar_categoria_basura(cursor)
         cursor.execute(
-            "UPDATE hojas SET ruta = ?, mtime = ?, categoria_id = COALESCE(?, categoria_id) WHERE id = ?",
-            (ruta_nueva, nuevo_mtime, basura_row[0] if basura_row else None, hoja_id),
+            "UPDATE hojas SET ruta = ?, mtime = ?, categoria_id = ? WHERE id = ?",
+            (ruta_nueva, nuevo_mtime, basura_id, hoja_id),
         )
     else:
         cursor.execute("DELETE FROM hojas WHERE id = ?", (hoja_id,))

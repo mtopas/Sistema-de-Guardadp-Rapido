@@ -96,8 +96,8 @@ routes/services" ya no aplican, ver arriba):
 5. Matching case-insensitive en POST movimiento — ver arriba.
 6. Emergencia client-side en dashboard (reemplazar el consumidor de `/fin/emergencia`) — ver
    arriba.
-7. Toggle de búsqueda semántica en `LeftPanel` de Bóveda — backend existe, cero UI (sin
-   mención de "semantic"/"semántica"/"embedding" en `LeftPanel.jsx` ni screens de Bóveda).
+7. ~~Toggle de búsqueda semántica en `LeftPanel` de Bóveda~~ — implementado; la UI usa
+   `top_k=20` y ofrece reindexación manual.
 8. `verify-sync.ps1` (script de humo que compara counts `/meta` antes/después de sync) — no
    existe.
 9. `POST /habitos/registros/batch` (`main.py:1912-1915`, ya existe en backend) sin consumidor
@@ -327,10 +327,8 @@ Telegram, `SGR_SYNC_TOKEN` obligatorio.
   índice `categorias/hojas` en `app.db`, y DOS colecciones semánticas separadas
   (`app/semantic.py` de SGR y `jarvis_memory` de Jarvis) — un buscador híbrido único
   (FTS5 + embedding + recencia) resolvería inconsistencias entre `/buscar`, `/pregunta` y `/jq`.
-  Versión chica de este problema (de `Testeos-Ollama.md`, 2026-06-07, verificado que sigue
-  igual el 2026-09-24): `/pregunta` del bot (RAG) y `/buscar` (keyword) son mecanismos
-  totalmente independientes — si el RAG no encuentra nada, `/pregunta` no cae a `/buscar` como
-  fallback, aunque el contenido sí exista por texto exacto.
+  `/pregunta` del bot ya prueba una búsqueda textual si el RAG no devuelve resultados
+  suficientemente relevantes; sigue pendiente un buscador híbrido compartido con `/buscar`.
 - Cada `GET` de Bóveda puede recorrer el vault completo (`rglob`) — mover la indexación a un
   watcher/poller fuera del request, con tabla de estado (`archivo, hash, mtime, último error`).
 - Historial de notas aprovechando que la Bóveda ya tiene Git propio (diff, restaurar versión) —

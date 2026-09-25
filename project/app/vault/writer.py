@@ -61,7 +61,7 @@ def crear_nota(vault_root: Path, categoria_ruta: str, titulo: str, frontmatter: 
     carpeta_abs = vault_root / categoria_ruta
     carpeta_abs.mkdir(parents=True, exist_ok=True)
     nombre = nombre_archivo_unico(carpeta_abs, titulo)
-    ruta_rel = str(Path(categoria_ruta) / nombre)
+    ruta_rel = (Path(categoria_ruta) / nombre).as_posix()
     _escribir_atomico(vault_root / ruta_rel, armar_texto_nota(frontmatter, titulo, body_md))
     return ruta_rel
 
@@ -87,7 +87,7 @@ def mover_a_categoria(vault_root: Path, ruta_rel_actual: str, categoria_ruta_nue
         nombre = nombre_archivo_unico(carpeta_destino, origen.stem)
         destino = carpeta_destino / nombre
     shutil.move(str(origen), str(destino))
-    return str(Path(categoria_ruta_nueva) / nombre)
+    return (Path(categoria_ruta_nueva) / nombre).as_posix()
 
 
 def mover_a_basura(vault_root: Path, ruta_rel_actual: str) -> str:

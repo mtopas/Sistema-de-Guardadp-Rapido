@@ -7,7 +7,6 @@ Cuando algo se complete, **mover la descripción actualizada a `Boveda.md`**.
 
 ## Frontend — Grafo
 
-- [ ] Zoom/pan real con SVG `viewBox` o `d3-zoom`
 - [ ] Modo "solo esta rama" al click en categoría
 - [ ] Segundo layout: grafo por tags (clusters) con toggle en TopBar
 - [ ] Grafo navegable con teclado (roving tabindex en árbol como alternativa)

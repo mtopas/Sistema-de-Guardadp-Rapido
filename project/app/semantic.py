@@ -6,7 +6,7 @@ Todas las operaciones son best-effort:
   - El índice vive en database/chroma/ (junto con app.db).
 
 Funciones públicas:
-  index_hoja(hoja_id, contenido, categoria_nombre, tipo) -> bool
+  index_hoja(hoja_id, contenido, categoria_nombre, tipo, apuntes) -> bool
   delete_hoja(hoja_id) -> bool
   search_hojas(query, top_k=5) -> list[dict]
   backfill_missing(hojas) -> int
@@ -174,7 +174,7 @@ def search_hojas(query: str, top_k: int = 5) -> list[dict]:
 
 def backfill_missing(hojas: list[dict], *, force: bool = False) -> int:
     """
-    Indexa las hojas que no estén en ChromaDB.
+    Reconcilia ChromaDB con las hojas visibles: elimina bajas y reindexa cambios.
     Devuelve la cantidad indexada (0 si Ollama no disponible).
     """
     try:

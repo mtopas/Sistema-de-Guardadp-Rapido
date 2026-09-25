@@ -121,12 +121,15 @@ export default function CaptureModal() {
       if (e.key === 'Escape') { e.preventDefault(); close() }
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault()
-        if (section === 'habitos') handleSaveHabito(); else handleSave()
+        if (section === 'habitos') handleSaveHabito()
+        else if (section === 'agenda') handleSaveAgenda()
+        else handleSave()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, contenido, categoriaId, tipo, fotoUrl, saving])
+  }, [open, section, contenido, categoriaId, tipo, fotoUrl, saving,
+      aTipo, aTitulo, aFecha, aHora, aListaId, hNombre, hColor, hFreq])
 
   const handleSave = async () => {
     if (saving) return

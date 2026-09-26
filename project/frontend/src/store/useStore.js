@@ -20,6 +20,62 @@ function currentMes() {
   return `${y}-${m}`
 }
 
+const HABITOS_OFFLINE_KEY = 'sgr-habitos-offline-v1'
+
+function isOfflineHabitoId(id) {
+  return typeof id === 'string' && id.startsWith('h_')
+}
+
+function isOfflineRegistroId(id) {
+  return typeof id === 'string' && id.startsWith('reg_')
+}
+
+function newClientId() {
+  return globalThis.crypto?.randomUUID?.() || `habito_${Date.now()}_${Math.random().toString(36).slice(2)}`
+}
+
+function readHabitosOffline() {
+  try {
+    const data = JSON.parse(localStorage.getItem(HABITOS_OFFLINE_KEY) || '{}')
+    return {
+      habitos: Array.isArray(data.habitos) ? data.habitos : [],
+      registros: Array.isArray(data.registros) ? data.registros : [],
+    }
+  } catch {
+    return { habitos: [], registros: [] }
+  }
+}
+
+function persistHabitosOffline(habitos, registros) {
+  try {
+    const pendingHabitos = habitos.filter(h => isOfflineHabitoId(h.id))
+    const pendingIds = new Set(pendingHabitos.map(h => h.id))
+    const pendingRegistros = registros.filter(r =>
+      isOfflineRegistroId(r.id) || pendingIds.has(r.habito_id) || r._pending_sync
+    )
+    if (!pendingHabitos.length && !pendingRegistros.length) {
+      localStorage.removeItem(HABITOS_OFFLINE_KEY)
+      return
+    }
+    localStorage.setItem(HABITOS_OFFLINE_KEY, JSON.stringify({ habitos: pendingHabitos, registros: pendingRegistros }))
+  } catch { /* local persistence is best effort */ }
+}
+
+const initialHabitosOffline = readHabitosOffline()
+
+function habitoCreatePayload(habito) {
+  return {
+    nombre: habito.nombre,
+    descripcion: habito.descripcion ?? null,
+    color: habito.color,
+    categoria: habito.categoria ?? null,
+    frecuencia_tipo: habito.frecuencia_tipo,
+    dias_semana: habito.dias_semana ?? null,
+    hora: habito.hora ?? null,
+    cliente_id: habito.cliente_id,
+  }
+}
+
 /** Evita re-render si el poll trae los mismos datos (parpadeo en Datos). */
 function finPayloadEqual(a, b) {
   if (a === b) return true
@@ -1199,17 +1255,81 @@ export const useStore = create((set, get) => ({
   // ---------------------------------------------------------------------------
   // Hábitos
   // ---------------------------------------------------------------------------
-  habitos:          [],
-  habitosRegistros: [],
+  habitos:          initialHabitosOffline.habitos,
+  habitosRegistros: initialHabitosOffline.registros,
 
   fetchHabitos: async () => {
     try {
       const res = await fetch(`${API_URL}/habitos`)
       if (!res.ok) throw new Error('not ok')
-      set({ habitos: await res.json() })
+      const data = await res.json()
+      const offlineHabitos = get().habitos.filter(h => isOfflineHabitoId(h.id))
+      const serverClientIds = new Set(data.map(h => h.cliente_id).filter(Boolean))
+      const reconciledIds = new Map(
+        offlineHabitos
+          .filter(h => serverClientIds.has(h.cliente_id))
+          .map(h => [h.id, data.find(server => server.cliente_id === h.cliente_id).id])
+      )
+      set(s => ({
+        habitos: [...data, ...offlineHabitos.filter(h => !serverClientIds.has(h.cliente_id))],
+        habitosRegistros: s.habitosRegistros.map(registro => (
+          reconciledIds.has(registro.habito_id)
+            ? { ...registro, habito_id: reconciledIds.get(registro.habito_id) }
+            : registro
+        )),
+      }))
+      persistHabitosOffline(get().habitos, get().habitosRegistros)
+      await get().reconcileHabitosOffline()
     } catch {
       if (DEBUG) console.log('fetchHabitos: API error, keeping current state')
     }
+  },
+
+  reconcileHabitosOffline: async () => {
+    const offlineHabitos = get().habitos.filter(h => isOfflineHabitoId(h.id))
+    for (const habito of offlineHabitos) {
+      try {
+        const res = await fetch(`${API_URL}/habitos`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(habitoCreatePayload(habito)),
+        })
+        if (!res.ok) throw new Error('not ok')
+        const saved = await res.json()
+        set(s => ({
+          habitos: s.habitos.map(h => h.id === habito.id ? saved : h),
+          habitosRegistros: s.habitosRegistros.map(r =>
+            r.habito_id === habito.id ? { ...r, habito_id: saved.id } : r
+          ),
+        }))
+      } catch {
+        persistHabitosOffline(get().habitos, get().habitosRegistros)
+        return
+      }
+    }
+
+    const pendingRegistros = get().habitosRegistros.filter(r => isOfflineRegistroId(r.id) || r._pending_sync)
+    for (const registro of pendingRegistros) {
+      if (isOfflineHabitoId(registro.habito_id)) continue
+      try {
+        const res = await fetch(`${API_URL}/habitos/${registro.habito_id}/registro`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fecha: registro.fecha,
+            valor: registro.valor,
+            ...(registro._actualizar_nota ? { nota: registro.nota ?? null } : {}),
+          }),
+        })
+        if (!res.ok) throw new Error('not ok')
+        const saved = await res.json()
+        set(s => ({ habitosRegistros: s.habitosRegistros.map(r =>
+          r.habito_id === registro.habito_id && r.fecha === registro.fecha ? saved : r
+        ) }))
+      } catch {
+        persistHabitosOffline(get().habitos, get().habitosRegistros)
+        return
+      }
+    }
+    persistHabitosOffline(get().habitos, get().habitosRegistros)
   },
 
   fetchHabitosRegistros: async (fechaDesde, fechaHasta) => {
@@ -1224,78 +1344,144 @@ export const useStore = create((set, get) => ({
         // merge: replace registros in the fetched range, keep the rest
         set(s => {
           const fuera = s.habitosRegistros.filter(r =>
-            (fechaDesde && r.fecha < fechaDesde) || (fechaHasta && r.fecha > fechaHasta)
+            r._pending_sync || (fechaDesde && r.fecha < fechaDesde) || (fechaHasta && r.fecha > fechaHasta)
           )
           return { habitosRegistros: [...fuera, ...data] }
         })
       } else {
-        set({ habitosRegistros: data })
+        set(s => {
+          const pending = s.habitosRegistros.filter(r => r._pending_sync)
+          const pendingKeys = new Set(pending.map(r => `${r.habito_id}-${r.fecha}`))
+          return { habitosRegistros: [...data.filter(r => !pendingKeys.has(`${r.habito_id}-${r.fecha}`)), ...pending] }
+        })
       }
     } catch { /* keep existing */ }
   },
 
   addHabito: async (payload) => {
+    const cliente_id = payload.cliente_id || newClientId()
+    const createPayload = { ...payload, cliente_id }
     try {
       const res = await fetch(`${API_URL}/habitos`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(createPayload),
       })
       if (!res.ok) throw new Error('not ok')
       const data = await res.json()
       set(s => ({ habitos: [...s.habitos, data] }))
       return data
     } catch {
-      const mock = { id: `h_${Date.now()}`, activo: true, creado_en: new Date().toISOString(), ...payload }
-      set(s => ({ habitos: [...s.habitos, mock] }))
+      const mock = { id: `h_${Date.now()}`, activo: true, creado_en: new Date().toISOString(), ...createPayload }
+      set(s => {
+        const habitos = [...s.habitos, mock]
+        persistHabitosOffline(habitos, s.habitosRegistros)
+        return { habitos }
+      })
       return mock
     }
   },
 
   updateHabito: async (id, patch) => {
+    const previous = get().habitos.find(h => h.id === id)
+    if (!previous) return
+    if (isOfflineHabitoId(id)) {
+      set(s => {
+        const habitos = s.habitos.map(h => h.id === id ? { ...h, ...patch } : h)
+        persistHabitosOffline(habitos, s.habitosRegistros)
+        return { habitos }
+      })
+      return get().habitos.find(h => h.id === id)
+    }
     set(s => ({ habitos: s.habitos.map(h => h.id === id ? { ...h, ...patch } : h) }))
     try {
-      await fetch(`${API_URL}/habitos/${id}`, {
+      const res = await fetch(`${API_URL}/habitos/${id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       })
-    } catch { /* offline ok */ }
+      if (!res.ok) throw new Error('not ok')
+      const data = await res.json()
+      set(s => ({ habitos: s.habitos.map(h => h.id === id ? data : h) }))
+      return data
+    } catch {
+      set(s => ({ habitos: s.habitos.map(h => h.id === id ? previous : h) }))
+      get().showToast('No se pudo actualizar el hábito -- revisá tu conexión', 'error')
+      return null
+    }
   },
 
   deleteHabito: async (id) => {
+    const previousHabito = get().habitos.find(h => h.id === id)
+    const previousRegistros = get().habitosRegistros.filter(r => r.habito_id === id)
+    if (!previousHabito) return false
+    if (isOfflineHabitoId(id)) {
+      set(s => {
+        const habitos = s.habitos.filter(h => h.id !== id)
+        const habitosRegistros = s.habitosRegistros.filter(r => r.habito_id !== id)
+        persistHabitosOffline(habitos, habitosRegistros)
+        return { habitos, habitosRegistros }
+      })
+      return true
+    }
     set(s => ({
       habitos:          s.habitos.filter(h => h.id !== id),
       habitosRegistros: s.habitosRegistros.filter(r => r.habito_id !== id),
     }))
-    try { await fetch(`${API_URL}/habitos/${id}`, { method: 'DELETE' }) } catch { /* noop */ }
+    try {
+      const res = await fetch(`${API_URL}/habitos/${id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('not ok')
+      return true
+    } catch {
+      set(s => ({
+        habitos: [...s.habitos, previousHabito].sort((a, b) => Number(a.id) - Number(b.id)),
+        habitosRegistros: [...s.habitosRegistros, ...previousRegistros],
+      }))
+      get().showToast('No se pudo eliminar el hábito -- revisá tu conexión', 'error')
+      return false
+    }
   },
 
   upsertHabitoRegistro: async (habitoId, fecha, valor, nota) => {
     const key = `${habitoId}-${fecha}`
+    const actualizarNota = nota !== undefined
+    const previousRegistros = get().habitosRegistros
     // optimistic: update or insert in local slice
     set(s => {
       const existing = s.habitosRegistros.find(r => r.habito_id === habitoId && r.fecha === fecha)
       if (existing) {
         return { habitosRegistros: s.habitosRegistros.map(r =>
-          r.habito_id === habitoId && r.fecha === fecha ? { ...r, valor, nota } : r
+          r.habito_id === habitoId && r.fecha === fecha
+            ? { ...r, valor, ...(actualizarNota ? { nota } : {}) }
+            : r
         )}
       }
-      const mock = { id: `reg_${Date.now()}`, habito_id: habitoId, fecha, valor, nota, creado_en: new Date().toISOString() }
+      const mock = { id: `reg_${Date.now()}`, habito_id: habitoId, fecha, valor, nota: nota ?? null, creado_en: new Date().toISOString() }
       return { habitosRegistros: [...s.habitosRegistros, mock] }
     })
     try {
       const res = await fetch(`${API_URL}/habitos/${habitoId}/registro`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fecha, valor, nota }),
+        body: JSON.stringify({ fecha, valor, ...(actualizarNota ? { nota } : {}) }),
       })
-      if (!res.ok) throw new Error('not ok')
+      if (!res.ok) throw new Error('server rejected')
       const data = await res.json()
       set(s => ({ habitosRegistros: s.habitosRegistros.map(r =>
         r.habito_id === habitoId && r.fecha === fecha ? data : r
       )}))
-    } catch {
-      // "Offline falso" (2026-09-21, ver Cerebro/PROXIMAMENTE.md) -- el
-      // optimistic update queda igual (mismo criterio de siempre), pero ahora
-      // se avisa que no se confirmó contra el servidor.
+    } catch (error) {
+      if (error.message === 'server rejected') {
+        set({ habitosRegistros: previousRegistros })
+        get().showToast('El servidor rechazó el registro', 'error')
+        return
+      }
+      set(s => {
+        const habitosRegistros = s.habitosRegistros.map(r =>
+          r.habito_id === habitoId && r.fecha === fecha
+            ? { ...r, _pending_sync: true, _actualizar_nota: actualizarNota }
+            : r
+        )
+        persistHabitosOffline(s.habitos, habitosRegistros)
+        return { habitosRegistros }
+      })
       get().showToast('No se pudo guardar el hábito -- revisá tu conexión', 'error')
     }
     if (DEBUG) console.log('upsertHabitoRegistro:', key, valor)
@@ -1307,14 +1493,18 @@ export const useStore = create((set, get) => ({
   // items: [{ habitoId, fecha, valor, nota? }]
   batchUpsertHabitoRegistros: async (items) => {
     if (!items.length) return
+    const previousRegistros = get().habitosRegistros
     // optimistic: upsert cada uno en el slice local, igual que upsertHabitoRegistro
     set(s => {
       let registros = s.habitosRegistros
       for (const { habitoId, fecha, valor, nota } of items) {
+        const actualizarNota = nota !== undefined
         const existing = registros.find(r => r.habito_id === habitoId && r.fecha === fecha)
         if (existing) {
           registros = registros.map(r =>
-            r.habito_id === habitoId && r.fecha === fecha ? { ...r, valor, nota: nota ?? r.nota } : r
+            r.habito_id === habitoId && r.fecha === fecha
+              ? { ...r, valor, ...(actualizarNota ? { nota } : {}) }
+              : r
           )
         } else {
           registros = [...registros, {
@@ -1329,10 +1519,12 @@ export const useStore = create((set, get) => ({
       const res = await fetch(`${API_URL}/habitos/registros/batch`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          registros: items.map(({ habitoId, fecha, valor, nota }) => ({ habito_id: habitoId, fecha, valor, nota })),
+          registros: items.map(({ habitoId, fecha, valor, nota }) => ({
+            habito_id: habitoId, fecha, valor, ...(nota !== undefined ? { nota } : {}),
+          })),
         }),
       })
-      if (!res.ok) throw new Error('not ok')
+      if (!res.ok) throw new Error('server rejected')
       const data = await res.json()
       set(s => {
         let registros = s.habitosRegistros
@@ -1343,7 +1535,21 @@ export const useStore = create((set, get) => ({
         }
         return { habitosRegistros: registros }
       })
-    } catch {
+    } catch (error) {
+      if (error.message === 'server rejected') {
+        set({ habitosRegistros: previousRegistros })
+        get().showToast('El servidor rechazó los hábitos seleccionados', 'error')
+        return
+      }
+      set(s => {
+        const pending = new Set(items.map(i => `${i.habitoId}-${i.fecha}`))
+        const habitosRegistros = s.habitosRegistros.map(r => pending.has(`${r.habito_id}-${r.fecha}`)
+          ? { ...r, _pending_sync: true, _actualizar_nota: items.find(i => i.habitoId === r.habito_id && i.fecha === r.fecha)?.nota !== undefined }
+          : r
+        )
+        persistHabitosOffline(s.habitos, habitosRegistros)
+        return { habitosRegistros }
+      })
       get().showToast('No se pudieron guardar los hábitos -- revisá tu conexión', 'error')
     }
   },

@@ -112,44 +112,18 @@ class TestHabitosIsScheduledParidad:
     @pytest.mark.parametrize("case", FIXTURES["schedule_cases"], ids=lambda c: c["name"])
     def test_matches_fixture(self, case):
         habito = case["habito"]
-        if "expected_backend" in case:
-            expected = case["expected_backend"]
-        else:
-            expected = case["expected"]
+        expected = case["expected"]
         for fecha, esperado in expected.items():
             assert crud._habito_is_scheduled(habito, fecha) == esperado, (
                 f"{case['name']}: _habito_is_scheduled(habito, {fecha!r}) "
                 f"esperaba {esperado}"
             )
 
-    def test_inactive_habit_diverges_from_expected_frontend_bot(self):
-        """Documenta la divergencia: el backend, a diferencia de frontend/bot, no mira 'activo'."""
-        case = next(c for c in FIXTURES["schedule_cases"] if c["name"] == "diario_inactivo")
-        habito = case["habito"]
-        assert habito["activo"] is False
-        for fecha, esperado_frontend_bot in case["expected_frontend_bot"].items():
-            backend_result = crud._habito_is_scheduled(habito, fecha)
-            assert esperado_frontend_bot is False
-            assert backend_result is True, (
-                "Si esto falla, _habito_is_scheduled empezó a respetar 'activo' -- "
-                "actualizar/eliminar este test junto con la nota de divergencia en "
-                "tests/fixtures/habitos_paridad.json ('diario_inactivo')."
-            )
-
-
 class TestHabitosStatsParidad:
     """habitos_stats() (racha_actual/racha_max/pct_mes) vs el fixture."""
 
     @pytest.mark.parametrize("case", FIXTURES["streak_cases"], ids=lambda c: c["name"])
     def test_racha_actual_matches_fixture(self, setup_db, frozen_today, case):
-        if case["name"] == "DIVERGENCE_today_pending":
-            pytest.skip(
-                "Divergencia real confirmada entre frontend/backend (racha=0) y bot "
-                "(racha=2) cuando hoy está programado y sin completar -- ver "
-                "'note' en el fixture ('DIVERGENCE_today_pending'). No se corrige "
-                "acá (decisión del usuario pendiente); test_bot_habitos_paridad.py "
-                "confirma el valor 2 del lado del bot para el mismo fixture."
-            )
         habito = _crear_habito(case["habito"])
         _cargar_registros(habito["id"], case["registros"])
 
@@ -158,22 +132,6 @@ class TestHabitosStatsParidad:
         assert stats["racha_actual"] == case["expected"]["racha_actual"], case["name"]
         if "racha_max" in case["expected"]:
             assert stats["racha_max"] == case["expected"]["racha_max"], case["name"]
-
-    def test_racha_actual_DIVERGENCE_today_pending_documents_backend_value(
-        self, setup_db, frozen_today
-    ):
-        """No-skip: confirma en vivo el valor 0 que el backend calcula hoy (2026-09-24 hallazgo).
-
-        Compañero de test_calc_racha_DIVERGENCE_today_pending en
-        test_bot_habitos_paridad.py, que confirma 2 para el bot con el mismo fixture.
-        """
-        case = next(c for c in FIXTURES["streak_cases"] if c["name"] == "DIVERGENCE_today_pending")
-        habito = _crear_habito(case["habito"])
-        _cargar_registros(habito["id"], case["registros"])
-
-        stats = crud.habitos_stats(habito["id"])
-
-        assert stats["racha_actual"] == case["expected_backend"] == 0
 
     @pytest.mark.parametrize("case", FIXTURES["month_pct_cases"], ids=lambda c: c["name"])
     def test_pct_mes_matches_fixture(self, setup_db, frozen_today, case):
@@ -188,19 +146,7 @@ class TestHabitosStatsParidad:
 
         assert stats["pct_mes"] == case["expected_pct_mes"], case["name"]
 
-    def test_inactive_habit_activo_ignored_by_backend(self, setup_db, frozen_today):
-        """DIVERGENCIA REAL: habitos_stats() ignora 'activo' por completo.
-
-        Frontend (calcStreak/calcMaxStreak/calcMonthPct, vía isScheduled) y bot
-        (_calc_racha, vía _is_scheduled) devuelven racha_actual=0, racha_max=0,
-        pct_mes=0 para un hábito inactivo -- para ellos un hábito inactivo nunca
-        está "programado". El backend no filtra por 'activo' en absoluto dentro de
-        is_scheduled/_habito_is_scheduled, así que calcula las stats como si el
-        hábito siguiera activo todos los días. Este test llama a la función real
-        (no hardcodea el resultado a mano) para que si algún día se corrige el
-        bug, el assert de abajo falle y avise -- en ese momento hay que actualizar
-        este test y la nota en el fixture, no antes.
-        """
+    def test_inactive_habit_has_zero_stats(self, setup_db, frozen_today):
         fixture = FIXTURES["inactive_habit_ignored_by_backend"]
         habito_fixture = fixture["habito"]
         assert habito_fixture["activo"] is False
@@ -210,15 +156,9 @@ class TestHabitosStatsParidad:
 
         stats = crud.habitos_stats(habito["id"])
 
-        expected_frontend_bot = fixture["expected_frontend_bot"]
-        assert stats["racha_actual"] != expected_frontend_bot["racha_actual"], (
-            "El backend dejó de ignorar 'activo' (o el fixture cambió) -- si esto "
-            "falla porque ahora COINCIDEN, la divergencia está resuelta: "
-            "actualizar el fixture y este test para dejar de esperar la divergencia."
-        )
-        assert stats["racha_actual"] == 4
-        assert stats["racha_max"] == 4
-        assert stats["pct_mes"] == 17
+        assert stats["racha_actual"] == fixture["expected"]["racha_actual"]
+        assert stats["racha_max"] == fixture["expected"]["racha_max"]
+        assert stats["pct_mes"] == fixture["expected"]["pct_mes"]
 
 
 if __name__ == "__main__":

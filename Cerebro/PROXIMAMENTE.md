@@ -104,8 +104,8 @@ routes/services" ya no aplican, ver arriba):
 - `seed_demo.py` desalineado → ya alineado al modelo de objetivos/FIRE
   (`seed_demo.py:243-246`); **`CLAUDE.md` quedó desactualizado en este punto puntual, corregir
   si se toca ese archivo**.
-- Bug P0 IDs offline de Hábitos → ya trackeado en `project/Habitos-Roadmap.md:10`, no duplicar
-  acá.
+- ~~Bug P0 IDs offline de Hábitos~~ → resuelto el 2026-09-26 con `cliente_id` idempotente y
+  reconciliación persistente de registros; ver `audit_habitos.txt`.
 - Notificaciones unificadas → ya tiene su propia entrada completa más abajo
   (`Diferido — Notificaciones unificadas`).
 

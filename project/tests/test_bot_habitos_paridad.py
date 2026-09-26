@@ -67,7 +67,7 @@ class TestIsScheduledParidad:
 class TestCalcRachaParidad:
     @pytest.mark.parametrize(
         "case",
-        [c for c in FIXTURES["streak_cases"] if c["name"] != "DIVERGENCE_today_pending"],
+        FIXTURES["streak_cases"],
         ids=lambda c: c["name"],
     )
     def test_matches_fixture(self, frozen_today, case):
@@ -78,40 +78,14 @@ class TestCalcRachaParidad:
 
         assert racha == case["expected"]["racha_actual"], case["name"]
 
-    def test_calc_racha_DIVERGENCE_today_pending(self, frozen_today):
-        """DIVERGENCIA REAL vs frontend/backend -- ver nota completa en el fixture.
-
-        calcStreak (frontend) y streak_cur (backend, habitos_stats) rompen la
-        racha en la primera iteración cuando HOY está programado y sin completar.
-        _calc_racha (bot) tiene un caso explícito para "hoy": si hoy está
-        programado pero sin completar, no rompe la racha, sigue contando hacia
-        atrás -- pese a que el comentario en agenda_handlers.py dice "Port de
-        calcStreak de habitosUtils.js". Con el mismo fixture exacto
-        (2 días completos + hoy pendiente), frontend/backend dan 0 y el bot da 2
-        (confirmado en test_habitos_paridad.py::TestHabitosStatsParidad::
-        test_racha_actual_DIVERGENCE_today_pending_documents_backend_value, y en
-        habitos.paridad.test.js del lado frontend).
-
-        No se corrige acá -- el alcance de esta tarea es solo detectar
-        divergencias, no decidir cuál de las tres implementaciones tiene razón.
-        """
-        case = next(c for c in FIXTURES["streak_cases"] if c["name"] == "DIVERGENCE_today_pending")
-        habito = {**case["habito"], "id": 1}
-        regmap = _build_registros_map(1, case["registros"])
-
-        racha = ah._calc_racha(habito, regmap)
-
-        assert racha == case["expected_bot"] == 2
-
-    def test_inactive_habit_matches_expected_frontend_bot(self, frozen_today):
-        """A diferencia del backend (ver test_habitos_paridad.py), el bot SÍ respeta 'activo'."""
+    def test_inactive_habit_matches_expected(self, frozen_today):
         fixture = FIXTURES["inactive_habit_ignored_by_backend"]
         habito = {**fixture["habito"], "id": 1}
         regmap = _build_registros_map(1, fixture["registros"])
 
         racha = ah._calc_racha(habito, regmap)
 
-        assert racha == fixture["expected_frontend_bot"]["racha_actual"] == 0
+        assert racha == fixture["expected"]["racha_actual"] == 0
 
 
 if __name__ == "__main__":

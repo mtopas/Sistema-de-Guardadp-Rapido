@@ -265,7 +265,8 @@ def init_db():
             dias_semana     TEXT,
             hora            TEXT,
             activo          INTEGER NOT NULL DEFAULT 1,
-            creado_en       TEXT NOT NULL
+            creado_en       TEXT NOT NULL,
+            cliente_id      TEXT UNIQUE
         )
     """)
 
@@ -869,7 +870,7 @@ def _apply_migrations(cursor):
             (clave, default),
         )
 
-    # --- habitos: archivado_en, notificar, minutos_antes ---
+    # --- habitos: archivado_en, notificar, minutos_antes, cliente_id ---
     hab_cols = _get_columns(cursor, "habitos")
     if "archivado_en" not in hab_cols:
         cursor.execute("ALTER TABLE habitos ADD COLUMN archivado_en TEXT")
@@ -883,6 +884,11 @@ def _apply_migrations(cursor):
         cursor.execute("ALTER TABLE habitos ADD COLUMN minutos_antes INTEGER NOT NULL DEFAULT 0")
         if DEBUG:
             print("migration: habitos.minutos_antes added")
+    if "cliente_id" not in hab_cols:
+        cursor.execute("ALTER TABLE habitos ADD COLUMN cliente_id TEXT")
+        if DEBUG:
+            print("migration: habitos.cliente_id added")
+    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_habitos_cliente_id ON habitos(cliente_id) WHERE cliente_id IS NOT NULL")
 
     _migrate_fin_categorias_objetivos(cursor)
 

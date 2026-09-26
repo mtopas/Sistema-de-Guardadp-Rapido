@@ -5,12 +5,6 @@ Cuando algo se complete, **mover la descripción actualizada a `Habitos.md`**.
 
 ---
 
-## Bugs P0
-
-- [ ] IDs mock offline `h_*`, `reg_*`: sin reconciliación al reconectar API; posibles duplicados si se crearon hábitos offline
-
----
-
 ## Bot — Pendiente menor
 
 - [ ] `/habitos` mostrar también hábitos no programados hoy con estado "no toca hoy" (contexto extra)
@@ -51,7 +45,6 @@ Cuando algo se complete, **mover la descripción actualizada a `Habitos.md`**.
 ## Backend
 
 - [ ] Campo `orden INTEGER` en tabla `habitos` para reordenamiento manual
-- [ ] Batch `PUT /habitos/registros` — store no lo consume aún; solo existe el endpoint
 
 ---
 

@@ -374,6 +374,9 @@ def parse_formato_guion(texto: str) -> dict:
 def _is_scheduled(habito: dict, d: date) -> bool:
     if not habito.get("activo", True):
         return False
+    creado_en = (habito.get("creado_en") or "")[:10]
+    if creado_en and d.isoformat() < creado_en:
+        return False
     if habito.get("frecuencia_tipo") == "diario":
         return True
     dias_json = habito.get("dias_semana")
@@ -397,7 +400,7 @@ def _calc_racha(habito: dict, registros_map: dict) -> int:
     d = today
     creado_en = (habito.get("creado_en") or "")[:10]
 
-    for _ in range(366):
+    for _ in range(400):
         iso = d.isoformat()
         if creado_en and iso < creado_en:
             break
@@ -1271,8 +1274,8 @@ async def cmd_racha(update: Update, context: ContextTypes.DEFAULT_TYPE):
     api = context.bot_data.get("api_base", DEFAULT_API_BASE)
     try:
         habitos   = _get_habitos_cached(context.bot_data, api)
-        desde90   = (date.today() - timedelta(days=90)).isoformat()
-        registros = _get_registros(api, desde90, _today_iso())
+        desde400  = (date.today() - timedelta(days=399)).isoformat()
+        registros = _get_registros(api, desde400, _today_iso())
     except Exception as e:
         await update.message.reply_text(f"No pude conectar con la API: {e}")
         return
@@ -1296,6 +1299,9 @@ async def cmd_hecho(update: Update, context: ContextTypes.DEFAULT_TYPE):
     h = _fuzzy_match_habito(nombre, [x for x in habitos if x.get("activo", True)])
     if not h:
         await update.message.reply_text(f"No encontré ningún hábito que coincida con \"{nombre}\".")
+        return
+    if not _is_scheduled(h, date.today()):
+        await update.message.reply_text(f"*{h['nombre']}* no está programado para hoy.", parse_mode="Markdown")
         return
 
     try:
@@ -1335,6 +1341,9 @@ async def cmd_ayer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     h = _fuzzy_match_habito(nombre, [x for x in habitos if x.get("activo", True)])
     if not h:
         await update.message.reply_text(f"No encontré ningún hábito que coincida con \"{nombre}\".")
+        return
+    if not _is_scheduled(h, date.today() - timedelta(days=1)):
+        await update.message.reply_text(f"*{h['nombre']}* no estaba programado para ayer.", parse_mode="Markdown")
         return
 
     tipo = "total" if valor == 1.0 else "parcial"

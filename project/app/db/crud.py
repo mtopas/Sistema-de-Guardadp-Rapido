@@ -2986,7 +2986,7 @@ def agenda_buscar(q: str) -> dict:
 
 _HABITO_SELECT = """SELECT id, nombre, descripcion, color, categoria, frecuencia_tipo,
                           dias_semana, hora, activo, creado_en, archivado_en,
-                          notificar, minutos_antes
+                          notificar, minutos_antes, cliente_id
                    FROM habitos"""
 
 
@@ -3005,6 +3005,7 @@ def _habito_dict(r) -> dict:
         "archivado_en":    r[10] if len(r) > 10 else None,
         "notificar":       bool(r[11]) if len(r) > 11 else False,
         "minutos_antes":   r[12] if len(r) > 12 else 0,
+        "cliente_id":      r[13] if len(r) > 13 else None,
     }
 
 
@@ -3025,15 +3026,22 @@ def habitos_crear(
     frecuencia_tipo: str = "diario",
     dias_semana: Optional[str] = None,
     hora: Optional[str] = None,
+    cliente_id: Optional[str] = None,
 ) -> dict:
     conn = get_connection()
     cursor = conn.cursor()
+    if cliente_id:
+        cursor.execute(_HABITO_SELECT + " WHERE cliente_id = ?", (cliente_id,))
+        existing = cursor.fetchone()
+        if existing:
+            conn.close()
+            return _habito_dict(existing)
     creado_en = datetime.now().isoformat()
     cursor.execute(
         """INSERT INTO habitos (nombre, descripcion, color, categoria, frecuencia_tipo,
-                                dias_semana, hora, activo, creado_en)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)""",
-        (nombre.strip(), descripcion, color, categoria, frecuencia_tipo, dias_semana, hora, creado_en),
+                                dias_semana, hora, activo, creado_en, cliente_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
+        (nombre.strip(), descripcion, color, categoria, frecuencia_tipo, dias_semana, hora, creado_en, cliente_id),
     )
     hid = cursor.lastrowid
     conn.commit()
@@ -3082,23 +3090,9 @@ def habitos_pendientes_hoy(fecha_hoy: str) -> list:
     reg_rows = {r[1]: _registro_dict(r) for r in cursor.fetchall()}
     conn.close()
     result = []
-    import json as _json
     for r in hab_rows:
         h = _habito_dict(r)
-        freq = h["frecuencia_tipo"]
-        if freq == "diario":
-            scheduled = True
-        else:
-            try:
-                dias = _json.loads(h["dias_semana"] or "[]")
-            except Exception:
-                dias = []
-            from datetime import date as _date
-            dow = _date.fromisoformat(fecha_hoy).weekday()
-            # weekday(): Mon=0..Sun=6 → convert to JS convention Sun=0..Sat=6
-            dow_js = (dow + 1) % 7
-            scheduled = dow_js in dias
-        if scheduled:
+        if _habito_is_scheduled(h, fecha_hoy):
             h["registro_hoy"] = reg_rows.get(h["id"])
             result.append(h)
     return result
@@ -3162,17 +3156,25 @@ def habitos_registros_upsert(
     fecha: str,
     valor: float,
     nota: Optional[str] = None,
+    actualizar_nota: bool = True,
 ) -> dict:
     if valor not in (0.5, 1.0):
         raise ValueError(f"valor debe ser 0.5 o 1.0, recibido: {valor}")
     conn = get_connection()
     cursor = conn.cursor()
+    try:
+        _validar_registro_habito(cursor, habito_id, fecha)
+    except Exception:
+        conn.close()
+        raise
     creado_en = datetime.now().isoformat()
     cursor.execute(
         """INSERT INTO habitos_registros (habito_id, fecha, valor, nota, creado_en)
            VALUES (?, ?, ?, ?, ?)
-           ON CONFLICT(habito_id, fecha) DO UPDATE SET valor = excluded.valor, nota = excluded.nota""",
-        (habito_id, fecha, valor, nota, creado_en),
+           ON CONFLICT(habito_id, fecha) DO UPDATE SET
+             valor = excluded.valor,
+             nota = CASE WHEN ? THEN excluded.nota ELSE habitos_registros.nota END""",
+        (habito_id, fecha, valor, nota, creado_en, int(actualizar_nota)),
     )
     rid = cursor.lastrowid
     conn.commit()
@@ -3185,6 +3187,22 @@ def habitos_registros_upsert(
     if DEBUG:
         print(f"habitos_registros_upsert: habito_id={habito_id} fecha={fecha} valor={valor}")
     return _registro_dict(row)
+
+
+def _validar_registro_habito(cursor, habito_id: int, fecha: str) -> None:
+    """Reject records that cannot belong to this active habit and date."""
+    try:
+        fecha_date = date.fromisoformat(fecha)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("fecha debe tener formato YYYY-MM-DD") from exc
+    cursor.execute(_HABITO_SELECT + " WHERE id = ?", (habito_id,))
+    row = cursor.fetchone()
+    if not row:
+        raise LookupError("Hábito no encontrado")
+    if fecha_date > date.today():
+        raise ValueError("No se pueden registrar hábitos en fechas futuras")
+    if not _habito_is_scheduled(_habito_dict(row), fecha):
+        raise ValueError("El hábito no está programado para esa fecha")
 
 
 def habitos_registros_eliminar(registro_id: int) -> bool:
@@ -3202,9 +3220,13 @@ def _habito_is_scheduled(h: dict, fecha_str: str) -> bool:
 
     Extracted from the closure formerly nested in habitos_stats() so it's importable
     for parity tests against isScheduled() (frontend) / _is_scheduled() (bot) -- same
-    behavior as before the extraction, including not checking `h["activo"]` (see
-    habitos_paridad fixture "inactive_habit_ignored_by_backend" for why that matters).
+    The date must be on or after creation and the habit must still be active.
     """
+    if not h.get("activo", False):
+        return False
+    creado_en = (h.get("creado_en") or "")[:10]
+    if creado_en and fecha_str < creado_en:
+        return False
     d = date.fromisoformat(fecha_str)
     if h["frecuencia_tipo"] == "diario":
         return True
@@ -3257,7 +3279,7 @@ def habitos_stats(habito_id: int) -> Optional[dict]:
             v = reg_map.get(ds, 0)
             if v and v > 0:
                 streak_cur += 1
-            elif d <= today:
+            elif d < today:
                 break
         from datetime import timedelta
         d = d - timedelta(days=1)
@@ -3323,18 +3345,29 @@ def habitos_registros_batch_upsert(items: list) -> list:
     cursor = conn.cursor()
     creado_en = datetime.now().isoformat()
     results = []
+    # Validate every item before writing so a batch never partially persists.
+    try:
+        for item in items:
+            v = item.get("valor")
+            if v not in (0.5, 1.0):
+                raise ValueError(f"valor debe ser 0.5 o 1.0, recibido: {v}")
+            _validar_registro_habito(cursor, item["habito_id"], item["fecha"])
+    except Exception:
+        conn.close()
+        raise
     for item in items:
         v = item.get("valor")
-        if v not in (0.5, 1.0):
-            continue  # skip invalid; caller should validate
         habito_id = item["habito_id"]
         fecha     = item["fecha"]
         nota      = item.get("nota")
+        actualizar_nota = item.get("actualizar_nota", True)
         cursor.execute(
             """INSERT INTO habitos_registros (habito_id, fecha, valor, nota, creado_en)
                VALUES (?, ?, ?, ?, ?)
-               ON CONFLICT(habito_id, fecha) DO UPDATE SET valor = excluded.valor, nota = excluded.nota""",
-            (habito_id, fecha, v, nota, creado_en),
+               ON CONFLICT(habito_id, fecha) DO UPDATE SET
+                 valor = excluded.valor,
+                 nota = CASE WHEN ? THEN excluded.nota ELSE habitos_registros.nota END""",
+            (habito_id, fecha, v, nota, creado_en, int(actualizar_nota)),
         )
         cursor.execute(
             "SELECT id, habito_id, fecha, valor, nota, creado_en FROM habitos_registros WHERE habito_id=? AND fecha=?",

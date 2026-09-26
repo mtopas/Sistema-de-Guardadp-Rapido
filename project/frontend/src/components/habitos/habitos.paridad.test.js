@@ -36,20 +36,14 @@ describe('habitos paridad (frontend vs backend vs bot)', () => {
       })
     })
 
-    it('diario_inactivo: el backend diverge (no mira "activo") -- documentado, no corregido acá', () => {
+    it('diario_inactivo: las tres implementaciones respetan "activo"', () => {
       const c = FIXTURES.schedule_cases.find(x => x.name === 'diario_inactivo')
-      // Frontend respeta 'activo': nunca programado. El backend (_habito_is_scheduled
-      // en crud.py) no filtra por 'activo' y lo trataría como programado siempre --
-      // ver test_inactive_habit_diverges_from_expected_frontend_bot en
-      // project/tests/test_habitos_paridad.py.
-      Object.values(c.expected_frontend_bot).forEach(v => expect(v).toBe(false))
-      Object.values(c.expected_backend).forEach(v => expect(v).toBe(true))
+      Object.values(c.expected).forEach(v => expect(v).toBe(false))
     })
   })
 
   describe('calcStreak (racha_actual)', () => {
     FIXTURES.streak_cases
-      .filter(c => c.name !== 'DIVERGENCE_today_pending')
       .forEach(c => {
         it(`${c.name}: coincide con backend y bot`, () => {
           const habito = { ...c.habito, id: 1 }
@@ -58,21 +52,6 @@ describe('habitos paridad (frontend vs backend vs bot)', () => {
         })
       })
 
-    it('DIVERGENCE_today_pending: frontend da 0, bot da 2 con el mismo fixture (divergencia real)', () => {
-      const c = FIXTURES.streak_cases.find(x => x.name === 'DIVERGENCE_today_pending')
-      const habito = { ...c.habito, id: 1 }
-      const registrosMap = buildRegistrosMap(1, c.registros)
-
-      // calcStreak rompe la racha ya en la primera iteración (d === today) si hoy
-      // está programado y sin completar -- la condición `else if (d <= today) break`
-      // es cierta también cuando d es exactamente hoy, pese a que el comentario del
-      // código ("scheduled day in the past") sugiere que solo debería aplicar a días
-      // pasados. _calc_racha del bot tiene un caso explícito para "hoy" que NO rompe
-      // la racha ahí. No se corrige acá -- ver nota completa en el fixture.
-      expect(calcStreak(habito, registrosMap)).toBe(c.expected_frontend)
-      expect(c.expected_frontend).toBe(0)
-      expect(c.expected_bot).toBe(2)
-    })
   })
 
   describe('calcMaxStreak (racha_max, solo frontend/backend -- el bot no la calcula)', () => {
@@ -97,16 +76,16 @@ describe('habitos paridad (frontend vs backend vs bot)', () => {
     })
   })
 
-  describe('hábito inactivo -- racha_actual/racha_max/pct_mes en 0 (a diferencia del backend)', () => {
+  describe('hábito inactivo -- racha_actual/racha_max/pct_mes en 0', () => {
     const fixture = FIXTURES.inactive_habit_ignored_by_backend
 
     it('calcStreak/calcMaxStreak/calcMonthPct dan 0 porque isScheduled respeta "activo"', () => {
       const habito = { ...fixture.habito, id: 1 }
       const registrosMap = buildRegistrosMap(1, fixture.registros)
 
-      expect(calcStreak(habito, registrosMap)).toBe(fixture.expected_frontend_bot.racha_actual)
-      expect(calcMaxStreak(habito, registrosMap)).toBe(fixture.expected_frontend_bot.racha_max)
-      expect(calcMonthPct(habito, registrosMap, 2026, 8)).toBe(fixture.expected_frontend_bot.pct_mes)
+      expect(calcStreak(habito, registrosMap)).toBe(fixture.expected.racha_actual)
+      expect(calcMaxStreak(habito, registrosMap)).toBe(fixture.expected.racha_max)
+      expect(calcMonthPct(habito, registrosMap, 2026, 8)).toBe(fixture.expected.pct_mes)
     })
   })
 })

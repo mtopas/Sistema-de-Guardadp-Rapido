@@ -1969,6 +1969,7 @@ class HabitoCreate(BaseModel):
     frecuencia_tipo: str = "diario"
     dias_semana: Optional[str] = None
     hora: Optional[str] = None
+    cliente_id: Optional[str] = None
 
 class HabitoPatch(BaseModel):
     nombre: Optional[str] = None
@@ -2033,15 +2034,19 @@ def crear_habito(body: HabitoCreate):
         frecuencia_tipo=body.frecuencia_tipo,
         dias_semana=body.dias_semana,
         hora=body.hora,
+        cliente_id=body.cliente_id,
     )
 
 @app.patch("/habitos/{habito_id}")
 def actualizar_habito(habito_id: int, body: HabitoPatch):
-    campos = {k: v for k, v in body.model_dump().items() if v is not None}
-    if body.activo is not None:
-        campos["activo"] = int(body.activo)
-    if body.notificar is not None:
-        campos["notificar"] = int(body.notificar)
+    campos = body.model_dump(exclude_unset=True)
+    for key in ("activo", "notificar", "minutos_antes"):
+        if campos.get(key) is None:
+            campos.pop(key, None)
+    if "activo" in campos:
+        campos["activo"] = int(campos["activo"])
+    if "notificar" in campos:
+        campos["notificar"] = int(campos["notificar"])
     result = habitos_actualizar(habito_id, campos)
     if result is None:
         raise HTTPException(status_code=404, detail="Hábito no encontrado")
@@ -2087,12 +2092,18 @@ def listar_habitos_registros(
 
 @app.put("/habitos/{habito_id}/registro")
 def upsert_habito_registro(habito_id: int, body: HabitoRegistroUpsert):
-    return habitos_registros_upsert(
-        habito_id=habito_id,
-        fecha=body.fecha,
-        valor=body.valor,
-        nota=body.nota,
-    )
+    try:
+        return habitos_registros_upsert(
+            habito_id=habito_id,
+            fecha=body.fecha,
+            valor=body.valor,
+            nota=body.nota,
+            actualizar_nota="nota" in body.model_fields_set,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 @app.delete("/habitos/registros/{registro_id}")
 def eliminar_habito_registro(registro_id: int):
@@ -2103,8 +2114,16 @@ def eliminar_habito_registro(registro_id: int):
 
 @app.post("/habitos/registros/batch")
 def batch_upsert_registros(body: HabitoRegistroBatch):
-    items = [r.model_dump() for r in body.registros]
-    return habitos_registros_batch_upsert(items)
+    items = [
+        {**r.model_dump(), "actualizar_nota": "nota" in r.model_fields_set}
+        for r in body.registros
+    ]
+    try:
+        return habitos_registros_batch_upsert(items)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 # --- Sync homelab ↔ Windows ---

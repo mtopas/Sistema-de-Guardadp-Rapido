@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect } from 'react'
 import { Flame, Pencil, Trash2, AlertTriangle } from 'lucide-react'
 import { useStore } from '../../store/useStore'
+import { API_URL } from '../../config'
 import { t } from '../../utils/i18n'
 import { buildRegistrosMap, calcStreak, calcMaxStreak, calcMonthPct, toISODate, isScheduled } from './habitosUtils'
 
@@ -12,9 +13,23 @@ export default function HabitosRightPanel({ selectedId, onEdit, forceVisible = f
   const showToast        = useStore(s => s.showToast)
 
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [serverStats, setServerStats] = useState(null)
   useEffect(() => { setConfirmDelete(false) }, [selectedId])
 
   const habito = habitos.find(h => h.id === selectedId)
+
+  useEffect(() => {
+    let cancelled = false
+    if (!habito || typeof habito.id !== 'number') {
+      setServerStats(null)
+      return undefined
+    }
+    fetch(`${API_URL}/habitos/${habito.id}/stats`)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => { if (!cancelled) setServerStats(data) })
+      .catch(() => { if (!cancelled) setServerStats(null) })
+    return () => { cancelled = true }
+  }, [habito?.id])
 
   const registrosMap = useMemo(() => buildRegistrosMap(habitosRegistros), [habitosRegistros])
   const today        = new Date()
@@ -49,9 +64,12 @@ export default function HabitosRightPanel({ selectedId, onEdit, forceVisible = f
     )
   }
 
-  const streak    = calcStreak(habito, registrosMap)
-  const maxStreak = calcMaxStreak(habito, registrosMap)
-  const pctMes    = calcMonthPct(habito, registrosMap, year, month)
+  const localStreak    = calcStreak(habito, registrosMap)
+  const localMaxStreak = calcMaxStreak(habito, registrosMap)
+  const localPctMes    = calcMonthPct(habito, registrosMap, year, month)
+  const streak    = serverStats?.habito_id === habito.id ? serverStats.racha_actual : localStreak
+  const maxStreak = serverStats?.habito_id === habito.id ? serverStats.racha_max : localMaxStreak
+  const pctMes    = serverStats?.habito_id === habito.id ? serverStats.pct_mes : localPctMes
   const pctColor  = pctMes >= 80 ? 'var(--success)' : pctMes >= 50 ? 'var(--warning)' : 'var(--danger)'
 
   // Recent registros (last 10)

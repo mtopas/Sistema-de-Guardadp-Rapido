@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { PanelRight } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
@@ -23,8 +23,12 @@ function TabFallback() {
 }
 
 export default function HabitosScreen() {
-  const { habitoModalOpen, closeHabitoModal } = useStore(
-    useShallow(s => ({ habitoModalOpen: s.habitoModalOpen, closeHabitoModal: s.closeHabitoModal }))
+  const { habitoModalOpen, closeHabitoModal, fetchHabitosRegistros } = useStore(
+    useShallow(s => ({
+      habitoModalOpen: s.habitoModalOpen,
+      closeHabitoModal: s.closeHabitoModal,
+      fetchHabitosRegistros: s.fetchHabitosRegistros,
+    }))
   )
 
   const [tab, setTab]               = useState('hoy')
@@ -35,6 +39,10 @@ export default function HabitosScreen() {
   const [drawerOpen, setDrawerOpen] = useState(false)
 
   const { openContextMenu, contextMenuLayer } = useHabitoContextMenu({ selectedId, setSelectedId })
+
+  useEffect(() => {
+    fetchHabitosRegistros()
+  }, [fetchHabitosRegistros])
 
   function handleHeatmapClick(year, month) {
     setHoyInitialDate(new Date(year, month, 1))

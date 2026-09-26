@@ -1,0 +1,43 @@
+REPORTE FINAL — CORRECCIONES DEL MÓDULO HÁBITOS
+Fecha: 2026-09-26. Alcance: hallazgos H01–H15, divergencias de paridad y P0 offline.
+
+RIESGO ACTIVO DE DATOS
+No queda un riesgo conocido de registros duplicados/fantasma por los IDs offline h_*/reg_*:
+las altas usan cliente_id idempotente y la reconciliación persistente remapea los registros al
+ID definitivo. Los rechazos HTTP de registros revierten el cambio optimista en vez de guardarlo
+como pendiente offline.
+
+H01 [store/CRUD] bug — updateHabito y deleteHabito verifican res.ok, revierten el estado optimista y muestran el error cuando el servidor rechaza la operación — evidencia: project/frontend/src/store/useStore.js:1390-1441 — impacto: alto — resuelto
+H02 [edición/API] bug — PATCH usa exclude_unset y conserva null para descripción, categoría, frecuencia y hora; campos booleanos/númericos nulos no se escriben — evidencia: project/app/main.py:2043-2052; project/tests/test_habitos_routes.py:91-102 — impacto: alto — resuelto
+H03 [HOY/CompletarModal] bug — los atajos globales de la grilla se desactivan mientras CompletarModal está abierto — evidencia: project/frontend/src/components/habitos/HoyTab.jsx:91-109 — impacto: alto — resuelto
+H04 [bot/registros] bug — el upsert conserva la nota cuando el cliente no la manda; el bot omite nota en /hecho y botones, por lo que no borra una nota existente — evidencia: project/mybot/agenda_handlers.py:560-566; project/app/main.py:2095-2107; project/app/db/crud.py:3153-3184 — impacto: alto — resuelto
+H05 [HOY/Progreso/Historial] inconsistencia — al abrir Hábitos se carga el historial completo y los fetch por rango preservan pendientes offline — evidencia: project/frontend/src/screens/HabitosScreen.jsx:39-47; project/frontend/src/store/useStore.js:1335-1357 — impacto: medio — resuelto
+H06 [archivo/UI] desconectado — el panel izquierdo ofrece Archivados y permite seleccionar un hábito para reactivarlo desde su edición — evidencia: project/frontend/src/components/habitos/HabitosLeftPanel.jsx:16-48,93-180 — impacto: medio — resuelto
+H07 [bot/programación] inconsistencia — /hecho y /ayer comprueban programación y fecha de creación; el backend también rechaza cualquier registro no programado — evidencia: project/mybot/agenda_handlers.py:1301-1304,1342-1345; project/app/db/crud.py:3192-3215 — impacto: medio — resuelto
+H08 [HOY/resumen] bug — contador y anillo solo cuentan hábitos programados para la fecha mostrada — evidencia: project/frontend/src/components/habitos/HabitosLeftPanel.jsx:23-36; project/frontend/src/components/habitos/HoyTab.jsx:72-85 — impacto: medio — resuelto
+H09 [estadísticas/historial] bug — isScheduled y backend descartan fechas anteriores a creado_en; pendientes, rachas, porcentajes e historial comparten ese límite — evidencia: project/frontend/src/components/habitos/habitosUtils.js:12-20; project/app/db/crud.py:3080-3098,3218-3237 — impacto: medio — resuelto
+H10 [Agenda HOY] inconsistencia — Agenda bloquea marcación individual y batch en fechas futuras; la API rechaza además registros futuros — evidencia: project/frontend/src/components/agenda/HoyTab.jsx:169,326-350,561-586; project/app/db/crud.py:3192-3215 — impacto: medio — resuelto
+H11 [Agenda/grilla horaria] bug — la grilla se amplía desde el bloque más temprano hasta el más tardío para hábitos, eventos, tareas bloqueadas y clases; el rango compacto queda como 06:00–24:00 por defecto — evidencia: project/frontend/src/components/agenda/HoyTab.jsx:254-323,701-892 — impacto: medio — resuelto
+H12 [Agenda/grilla horaria] desconectado — eventos, tareas y hábitos con hora comparten el mismo reparto de columnas y ya no se tapan entre sí — evidencia: project/frontend/src/components/agenda/HoyTab.jsx:15-38,254-283,757-879 — impacto: medio — resuelto
+H13 [bot/racha] inconsistencia — /racha consulta 400 días, igual que la ventana de cálculo; una racha de más de 90 días deja de truncarse — evidencia: project/mybot/agenda_handlers.py:396-419,1273-1282 — impacto: medio — resuelto
+H14 [campana Hábitos] desconectado — badge y lista derivan del store de hábitos/registros, por lo que se actualizan al completar o desmarcar sin cerrar el dropdown — evidencia: project/frontend/src/components/TopBar.jsx:57-89,385-462 — impacto: bajo — resuelto
+H15 [API/stats] backend-sin-frontend — HabitosRightPanel consume GET /habitos/{id}/stats y usa el cálculo local solo como fallback offline — evidencia: project/frontend/src/components/habitos/HabitosRightPanel.jsx:16-32,66-73 — impacto: bajo — resuelto
+
+PARIDAD Y OFFLINE
+- La racha actual conserva la racha previa si hoy está programado pero todavía pendiente, en frontend, backend y bot — evidencia: project/frontend/src/components/habitos/habitosUtils.js:44-69; project/app/db/crud.py:3265-3285; project/mybot/agenda_handlers.py:396-419.
+- Los hábitos archivados no participan de programación, rachas ni porcentajes en ninguno de los tres lados — evidencia: project/frontend/src/components/habitos/habitosUtils.js:12-20; project/app/db/crud.py:3218-3237; project/mybot/agenda_handlers.py:374-390.
+- El P0 de IDs offline se resolvió con cliente_id único en SQLite, creación idempotente y outbox persistente en localStorage para hábitos/registros — evidencia: project/app/db/database.py:269,873-891; project/app/db/crud.py:3021-3049; project/frontend/src/store/useStore.js:20-85,1261-1332.
+
+PRIORIDAD FINAL
+1. H01–H04 y P0 offline: corregidos; eliminan confirmaciones falsas, pérdida de notas y duplicados/fantasmas al reconectar.
+2. H05–H10: corregidos; historial, archivados, reglas de programación y fechas quedan consistentes.
+3. H11–H13: corregidos; Agenda muestra todos los bloques y el bot no trunca rachas largas.
+4. H14–H15: corregidos; campana sincronizada y endpoint de stats con consumidor.
+
+VERIFICACIÓN
+- Backend: 59 pruebas de Hábitos, rutas y paridad, todas en verde.
+- Frontend: 73 pruebas de Hábitos y Agenda en verde.
+- Frontend: npm run build completó correctamente.
+
+LÍMITES
+No quedan partes del alcance original sin revisar. No se hizo prueba manual en navegador ni Telegram; las rutas, store y componentes involucrados sí quedaron cubiertos por pruebas automatizadas y build.

@@ -74,6 +74,7 @@ El panel izquierdo (`HabitosLeftPanel`) y el derecho (`HabitosRightPanel`, solo 
 | `hora` | TEXT | `HH:MM` opcional; integra con Agenda HOY |
 | `activo` | INTEGER | `1` activo; PATCH `activo: false` → soft-archive; toggle en `NuevoHabitoModal` modo edición |
 | `creado_en` | TEXT ISO | Límite inferior para `calcStreak` |
+| `cliente_id` | TEXT UNIQUE | Identificador persistente del cliente para reconciliar un alta offline sin duplicarla |
 | `archivado_en` | TEXT ISO | Se setea automáticamente al desactivar; se limpia al reactivar |
 
 **Seed** (si tabla vacía): Meditar 10 min (diario, 08:00), Correr (lun/mié/vie, 07:00), Leer 30 min (diario, 22:00).
@@ -93,6 +94,7 @@ El panel izquierdo (`HabitosLeftPanel`) y el derecho (`HabitosRightPanel`, solo 
 **Reglas implícitas:**
 - **Racha actual** (`calcStreak`): días **programados** consecutivos hacia atrás con `valor > 0`. Días no programados se **saltan** (no rompen ni suman).
 - **% del mes** (`calcMonthPct`): `suma(valores) / días_programados_hasta_hoy × 100`.
+- Un registro solo se acepta para un hábito activo, programado, existente en esa fecha y que no sea futura.
 - **Desmarcar** en UI: `DELETE` del registro vía `deleteHabitoRegistro`. Desde Agenda HOY también usa DELETE (sin registros fantasma).
 
 ---
@@ -108,8 +110,10 @@ Prefijo `/habitos/*`.
 | PATCH | `/habitos/{id}` | Actualizar campos opcionales |
 | DELETE | `/habitos/{id}` | Borra hábito + registros (CASCADE) |
 | GET | `/habitos/pendientes-hoy?fecha=` | Hábitos programados para la fecha dada con `registro_hoy` incluido |
+| GET | `/habitos/{id}/stats` | Racha actual/máxima y porcentajes mensuales |
 | GET | `/habitos/registros` | Query: `habito_id`, `fecha_desde`, `fecha_hasta` |
 | PUT | `/habitos/{id}/registro` | Upsert `{ fecha, valor, nota }` — `valor` validado ∈ {0.5, 1.0} |
+| POST | `/habitos/registros/batch` | Upsert atómico de varios registros |
 | DELETE | `/habitos/registros/{id}` | Eliminar un registro |
 
 ---
@@ -123,7 +127,7 @@ Prefijo `/habitos/*`.
 
 ### 5.2 `HabitosLeftPanel.jsx`
 
-- Lista hábitos **activos** con estado de hoy: hecho · parcial · pendiente · no toca.
+- Lista hábitos **activos** con estado de hoy: hecho · parcial · pendiente · no toca; el selector Archivados permite reactivarlos desde la edición.
 - Racha ≥ 3 → icono 🔥 + número (`calcStreak`).
 - Barra "X de Y completados hoy".
 - Botón **Nuevo** → `onNew()` → `NuevoHabitoModal`.
@@ -164,7 +168,7 @@ Prefijo `/habitos/*`.
 ### 5.8 `HabitosRightPanel.jsx`
 
 - Visible solo `xl+`; detalle, stats, registros recientes, Editar / Eliminar.
-- `maxStreak` usa algoritmo calendar-day simple (no `isScheduled`) — distorsiona vs racha real (ver Roadmap).
+- Consulta `GET /habitos/{id}/stats` y conserva el cálculo local como fallback offline.
 
 ### 5.9 `habitosUtils.js` — fuente de verdad
 
@@ -186,15 +190,15 @@ El bot tiene su propio port Python de estas funciones en `agenda_handlers.py`.
 
 | Acción | Comportamiento |
 |--------|----------------|
-| `fetchHabitos` | GET `/habitos`; error → `[]` |
+| `fetchHabitos` | GET `/habitos`; reconcilia altas offline mediante `cliente_id` |
 | `fetchHabitosRegistros(desde?, hasta?)` | GET con merge por rango |
-| `addHabito` | POST + append; offline → id mock `h_*` |
+| `addHabito` | POST + append; offline → alta persistida y reconciliable |
 | `updateHabito` | Optimista + PATCH |
 | `deleteHabito` | Optimista + DELETE |
 | `upsertHabitoRegistro` | Optimista + PUT |
 | `deleteHabitoRegistro` | Optimista + DELETE por `registro_id` |
 
-**Carga inicial (`App.jsx`):** `fetchHabitos()` + `fetchHabitosRegistros()` **sin rango** → trae todos los registros históricos.
+**Carga:** App precarga una ventana reciente; al abrir Hábitos, `HabitosScreen` obtiene el historial completo para que HOY, Progreso e Historial calculen sobre los mismos registros.
 
 ---
 
@@ -204,10 +208,10 @@ Archivo: `components/agenda/HoyTab.jsx`.
 
 | Condición | UI Agenda |
 |-----------|-----------|
-| Activo + programado hoy + **sin** `hora` | Sección "Hábitos de hoy" en panel izq; checkbox inline |
-| Activo + programado hoy + **con** `hora` | Bloque en grilla horaria 6–23h (color del hábito) |
+| Activo + programado en fecha pasada/hoy + **sin** `hora` | Sección "Hábitos de hoy" en panel izq; checkbox inline |
+| Activo + programado en fecha pasada/hoy + **con** `hora` | Bloque en grilla horaria, que se extiende para abarcar hábitos, eventos y tareas bloqueadas fuera del horario habitual |
 
-- Checkbox: si hay registro con `valor > 0` → `deleteHabitoRegistro` (DELETE real); si no → upsert `1.0`.
+- Checkbox: si hay registro con `valor > 0` → `deleteHabitoRegistro` (DELETE real); si no → upsert `1.0`. Las fechas futuras se muestran sin acción de completación.
 - **Solo total y sin nota** desde Agenda (completación rica → solo desde `/habitos`).
 - Hábitos no aparecen en vista Mes.
 
@@ -243,13 +247,8 @@ Archivo: `components/agenda/HoyTab.jsx`.
 - **`HabitosScreen`:** `React.lazy` + `Suspense` para ProgresoTab y HistorialTab; `useShallow` en store selectors.
 - **Backend nuevo:** endpoint `GET /habitos/{id}/stats`; endpoint `POST /habitos/registros/batch`; columnas `notificar` + `minutos_antes` en `habitos` (migration automática).
 - **Backend previo:** validación `valor ∈ {0.5, 1.0}`; columna `archivado_en`; `GET /habitos/pendientes-hoy?fecha=`.
-- **Rendimiento:** `fetchHabitosRegistros` acotado a últimos 120 días al arrancar (App.jsx); `useMemo(buildRegistrosMap)` en todos los tabs y paneles.
-
-### Bugs conocidos
-
-| Bug | Dónde | Impacto |
-|-----|-------|---------|
-| IDs mock offline `h_*`, `reg_*` | Store | Posibles duplicados al reconectar API tras crear hábitos offline |
+- **Consistencia y recuperación (26/09/2026):** paridad de racha entre frontend/backend/bot; altas y registros offline reconciliables; registros fuera de programación/futuros rechazados; notas preservadas cuando una completación no manda nota; archivados accesibles desde el panel izquierdo.
+- **Rendimiento:** `useMemo(buildRegistrosMap)` en todos los tabs y paneles.
 
 ---
 

@@ -15,15 +15,10 @@
     {
       "name": "diario_inactivo",
       "habito": { "frecuencia_tipo": "diario", "dias_semana": null, "activo": false },
-      "expected_frontend_bot": {
+      "expected": {
         "2026-09-20": false, "2026-09-21": false, "2026-09-22": false, "2026-09-23": false,
         "2026-09-24": false, "2026-09-25": false, "2026-09-26": false
-      },
-      "expected_backend": {
-        "2026-09-20": true, "2026-09-21": true, "2026-09-22": true, "2026-09-23": true,
-        "2026-09-24": true, "2026-09-25": true, "2026-09-26": true
-      },
-      "note": "DIVERGENCIA: _habito_is_scheduled() en crud.py (extraída de la clausura de habitos_stats) nunca chequea habito['activo'] -- frontend (isScheduled) y bot (_is_scheduled) devuelven false siempre para un hábito inactivo, backend lo trata como si siempre estuviera programado. Ver TestHabitosParidadBackend.test_inactive_habit_activo_ignored_by_backend en test_habitos_paridad.py."
+      }
     },
     {
       "name": "semanal_mon_wed",
@@ -142,17 +137,14 @@
       "expected": { "racha_actual": 2, "racha_max": 2 }
     },
     {
-      "name": "DIVERGENCE_today_pending",
+      "name": "today_pending_keeps_prior_streak",
       "description": "Hábito diario con racha de 2 días (21 y 22), hoy (23) programado pero SIN completar todavía.",
       "habito": { "frecuencia_tipo": "diario", "dias_semana": null, "activo": true, "creado_en": "2026-09-01T00:00:00" },
       "registros": [
         { "fecha": "2026-09-21", "valor": 1.0 },
         { "fecha": "2026-09-22", "valor": 1.0 }
       ],
-      "expected_frontend": 0,
-      "expected_backend": 0,
-      "expected_bot": 2,
-      "note": "DIVERGENCIA REAL: calcStreak (frontend) y streak_cur (backend, habitos_stats) rompen la racha en la primera iteración si HOY está programado y no completado (su condición 'elif d <= today: break' es cierta también cuando d === today, pese a que el comentario en habitosUtils.js dice 'día... en el pasado'). _calc_racha (bot) tiene un caso explícito 'elif iso == today.isoformat(): pass' que día de hoy incompleto NO rompe la racha, sigue contando hacia atrás. Resultado: frontend/backend devuelven 0, el bot devuelve 2 con los mismos datos exactos."
+      "expected": { "racha_actual": 2, "racha_max": 2 }
     }
   ],
 
@@ -187,7 +179,7 @@
   ],
 
   "inactive_habit_ignored_by_backend": {
-    "description": "Hábito diario, activo = false, con 4 días consecutivos (incluido hoy) marcados como completos. Documenta la misma divergencia que 'diario_inactivo' en schedule_cases pero a través de habitos_stats() completo (racha_actual, racha_max, pct_mes), no solo is_scheduled.",
+    "description": "Hábito diario inactivo con registros históricos: las tres implementaciones devuelven cero.",
     "habito": { "frecuencia_tipo": "diario", "dias_semana": null, "activo": false, "creado_en": "2026-09-01T00:00:00" },
     "registros": [
       { "fecha": "2026-09-20", "valor": 1.0 },
@@ -195,7 +187,6 @@
       { "fecha": "2026-09-22", "valor": 1.0 },
       { "fecha": "2026-09-23", "valor": 1.0 }
     ],
-    "expected_frontend_bot": { "racha_actual": 0, "racha_max": 0, "pct_mes": 0 },
-    "note": "DIVERGENCIA REAL (misma causa raíz que 'diario_inactivo'): habitos_stats() en crud.py nunca filtra por habito['activo'], así que para este hábito inactivo con 4 días completos el backend calcula racha_actual=4, racha_max=4, pct_mes=17 (round(4/23*100)) -- ver test_inactive_habit_activo_ignored_by_backend, que llama a crud.habitos_stats() real y comprueba estos valores en vivo (no hardcodeados a mano) en vez de asumirlos, precisamente porque el punto del test es confirmar que el bug sigue ahí."
+    "expected": { "racha_actual": 0, "racha_max": 0, "pct_mes": 0 }
   }
 }

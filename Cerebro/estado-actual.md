@@ -54,8 +54,7 @@ cerrar aparte, no bloqueó el commit.
 `audit_finanzas.txt`/`audit_habitos.txt`/`audit_agenda.txt` en la raíz del repo, con
 aclaraciones del usuario en MAYÚSCULAS sobre los puntos ambiguos): Finanzas (6 hallazgos de
 impacto alto son números de plata reales — exigencia de tests con casos antes/después, no solo
-suite en verde), Hábitos (con 2 decisiones ya tomadas: no marcar hábitos futuros, extender la
-grilla horaria en vez de restringir hábitos), Agenda (con 1 decisión ya tomada: materializar
+suite en verde), Agenda (con 1 decisión ya tomada: materializar
 ocurrencias de eventos recurrentes como filas independientes, mismo patrón que Tareas).
 
 ## IMPLEMENTADO Y COMMITEADO: 24 hallazgos de la auditoría de Jarvis (2026-09-24/25) — pendiente deploy al homelab
@@ -145,7 +144,23 @@ rendirse — nueva función `embeddings.py::search_keyword()`. 3 tests nuevos
 (`test_bot_assistant.py`). Verificado por el orquestador: 307 backend + 1 skip, sin tocar
 frontend.
 
-## IMPLEMENTADO: tests de paridad de Hábitos (frontend/backend/bot) — 2 divergencias reales encontradas (2026-09-24)
+## IMPLEMENTADO: correcciones de auditoría de Hábitos (2026-09-26)
+
+Se resolvieron los 15 hallazgos de `audit_habitos.txt` y las dos divergencias que los tests de
+paridad habían documentado: frontend, backend y bot preservan la racha previa si hoy todavía
+está pendiente y excluyen hábitos archivados. Los tests de paridad ahora esperan un único
+resultado compartido.
+
+La corrección incluye reconciliación persistente de altas/registros offline mediante
+`cliente_id`, validación de registros futuros o fuera de programación, reversión ante rechazos
+HTTP, preservación de notas, carga completa del historial al abrir Hábitos, recuperación de
+archivados, actualización inmediata de la campana, consumo de stats del backend y una grilla
+Agenda que se amplía para hábitos, eventos, tareas bloqueadas y clases fuera de 06:00–24:00.
+
+Verificado: 59 pruebas backend, 73 pruebas frontend y build de producción en verde. El detalle
+por hallazgo quedó en `D:\SGR\audit_habitos.txt`.
+
+## HISTÓRICO: tests de paridad de Hábitos (frontend/backend/bot) — divergencias encontradas (2026-09-24)
 
 Commit `7ad651c` (rama `claude/sgr-project-setup-yyggmo`, sesión en la nube, mergeado a
 `master`). No se unificó la lógica (decisión ya tomada) — se agregó una red de seguridad:
@@ -154,8 +169,7 @@ tres lados (`habitos.paridad.test.js`, `test_habitos_paridad.py`, `test_bot_habi
 54 tests nuevos en total). `_habito_is_scheduled()` se extrajo de la clausura interna de
 `habitos_stats()` en `crud.py` para que sea testeable — mecánico, sin cambio de comportamiento.
 
-**Dos divergencias reales encontradas, documentadas en los tests (no corregidas, era el
-alcance):**
+**Dos divergencias reales encontradas, documentadas en los tests (resueltas el 2026-09-26):**
 1. **"Hoy pendiente" rompe la racha en frontend/backend pero no en el bot.** Con una racha
    previa y el día de hoy programado pero sin completar todavía: `calcStreak` (frontend,
    `habitosUtils.js`) y `streak_cur` (backend, `habitos_stats()` en `crud.py`) rompen la racha a
@@ -163,17 +177,17 @@ alcance):**
    contando hacia atrás. El comentario del bot dice "Port de `calcStreak`" pero en este caso
    puntual no lo es — puede ser que el bot tenga el comportamiento correcto (¿por qué romper la
    racha si todavía podés completar el hábito hoy?) y front/backend estén mal, o al revés — sin
-   decidir.
+   decidir. **Resuelto:** se adoptó el comportamiento del bot: hoy pendiente conserva la racha
+   previa hasta que termine el día.
 2. **El backend ignora `activo` — bug real en producción, no solo inconsistencia.**
    `habitos_stats()` nunca chequea si el hábito está activo/archivado: para uno inactivo con
    registros viejos, frontend y bot devuelven racha/pct en 0 (correcto, un hábito inactivo nunca
    está "programado" para ellos), pero el backend sigue calculando como si estuviera activo.
    `GET /habitos/{id}/stats` no filtra por `activo` — afecta cualquier vista que muestre stats de
-   un hábito archivado.
+   un hábito archivado. **Resuelto:** `_habito_is_scheduled()` ahora excluye inactivos, por lo
+   que `habitos_stats()` devuelve cero para un hábito archivado.
 
-**Pendiente:** decidir qué comportamiento es el correcto en cada divergencia y alinear los otros
-lados (o documentar como intencional si corresponde); decidir si `GET /habitos/{id}/stats`
-debería filtrar hábitos inactivos.
+No quedan divergencias conocidas entre las tres implementaciones para estos casos.
 
 ## IMPLEMENTADO: 7 quick wins del triage de julio + edición completa de hoja en DetailScreen (2026-09-24)
 

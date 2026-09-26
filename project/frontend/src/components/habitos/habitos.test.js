@@ -489,7 +489,7 @@ describe('habitosUtils', () => {
       expect(final[0]).toMatchObject({ id: 5, habito_id: 1, valor: 1.0 })
     })
 
-    it('keeps the optimistic update and shows a toast when the request fails', async () => {
+    it('reverts the optimistic update when the server rejects it', async () => {
       global.fetch = vi.fn(async () => ({ ok: false }))
 
       await useStore.getState().batchUpsertHabitoRegistros([
@@ -497,8 +497,20 @@ describe('habitosUtils', () => {
       ])
 
       const state = useStore.getState()
-      expect(state.habitosRegistros).toHaveLength(1)
+      expect(state.habitosRegistros).toHaveLength(0)
       expect(state.toast).toMatchObject({ type: 'error' })
+    })
+
+    it('keeps a network failure pending for reconciliation', async () => {
+      global.fetch = vi.fn(async () => { throw new Error('offline') })
+
+      await useStore.getState().batchUpsertHabitoRegistros([
+        { habitoId: 1, fecha: '2026-09-23', valor: 1.0 },
+      ])
+
+      expect(useStore.getState().habitosRegistros[0]).toMatchObject({
+        habito_id: 1, _pending_sync: true,
+      })
     })
   })
 })

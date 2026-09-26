@@ -73,13 +73,13 @@ export default function HoyTab({ selectedId, setSelectedId, onEdit, initialDate,
 
   // % today for ring
   const todayPct = useMemo(() => {
-    const s = activos.filter(h => isScheduled(h, today)).length
-    if (!s) return 0
-    const d = activos.filter(h => {
+    const scheduled = activos.filter(h => isScheduled(h, today))
+    if (!scheduled.length) return 0
+    const d = scheduled.filter(h => {
       const reg = registrosMap[`${h.id}-${todayStr}`]
       return reg && reg.valor > 0
     }).length
-    return d / s
+    return d / scheduled.length
   }, [activos, registrosMap, todayStr])
 
   // Scroll to today on mount / month change
@@ -97,6 +97,7 @@ export default function HoyTab({ selectedId, setSelectedId, onEdit, initialDate,
     if (!h) return
 
     const handler = async (e) => {
+      if (completar) return
       if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','1','2','Enter','Escape'].includes(e.key)) {
         e.preventDefault()
       }
@@ -130,7 +131,7 @@ export default function HoyTab({ selectedId, setSelectedId, onEdit, initialDate,
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [focusedCell, activos, daysInMonth, registrosMap, year, month, today])
+  }, [focusedCell, activos, daysInMonth, registrosMap, year, month, today, completar])
 
   // Focus cell element when focusedCell changes
   useEffect(() => {

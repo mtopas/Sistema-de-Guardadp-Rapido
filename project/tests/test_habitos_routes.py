@@ -1,5 +1,6 @@
 """Tests de rutas HTTP de /habitos* usando TestClient de FastAPI."""
 import pytest
+from datetime import date, timedelta
 from fastapi.testclient import TestClient
 from app.main import app
 
@@ -28,7 +29,7 @@ def test_put_registro_valor_valido_actualiza(client):
     habito = client.post("/habitos", json={"nombre": "Meditar"}).json()
     response = client.put(
         f"/habitos/{habito['id']}/registro",
-        json={"fecha": "2026-09-23", "valor": 1.0},
+        json={"fecha": date.today().isoformat(), "valor": 1.0},
     )
     assert response.status_code == 200
     assert response.json()["valor"] == 1.0
@@ -85,3 +86,62 @@ def test_get_pendientes_hoy_incluye_habito_diario_activo(client):
     assert response.status_code == 200
     nombres = [h["nombre"] for h in response.json()]
     assert "Tomar agua" in nombres
+
+
+@pytest.mark.integration
+def test_post_habito_con_cliente_id_es_idempotente(client):
+    first = client.post("/habitos", json={"nombre": "Leer", "cliente_id": "h-retry-1"})
+    second = client.post("/habitos", json={"nombre": "Duplicado", "cliente_id": "h-retry-1"})
+
+    assert first.status_code == second.status_code == 200
+    assert first.json()["id"] == second.json()["id"]
+    assert second.json()["nombre"] == "Leer"
+
+
+@pytest.mark.integration
+def test_patch_permite_limpiar_campos_opcionales(client):
+    habito = client.post("/habitos", json={
+        "nombre": "Leer", "descripcion": "antes de dormir", "hora": "22:00",
+    }).json()
+
+    response = client.patch(f"/habitos/{habito['id']}", json={"descripcion": None, "hora": None})
+
+    assert response.status_code == 200
+    assert response.json()["descripcion"] is None
+    assert response.json()["hora"] is None
+
+
+@pytest.mark.integration
+def test_upsert_sin_nota_conserva_la_nota_existente(client):
+    habito = client.post("/habitos", json={"nombre": "Meditar"}).json()
+    hoy = date.today().isoformat()
+    first = client.put(
+        f"/habitos/{habito['id']}/registro",
+        json={"fecha": hoy, "valor": 1.0, "nota": "respiración"},
+    )
+    second = client.put(
+        f"/habitos/{habito['id']}/registro",
+        json={"fecha": hoy, "valor": 0.5},
+    )
+
+    assert first.status_code == second.status_code == 200
+    assert second.json()["valor"] == 0.5
+    assert second.json()["nota"] == "respiración"
+
+
+@pytest.mark.integration
+def test_upsert_rechaza_fecha_futura_y_dia_no_programado(client):
+    habito = client.post(
+        "/habitos", json={"nombre": "Correr", "frecuencia_tipo": "semanal", "dias_semana": "[1]"}
+    ).json()
+    future = client.put(
+        f"/habitos/{habito['id']}/registro",
+        json={"fecha": (date.today() + timedelta(days=1)).isoformat(), "valor": 1.0},
+    )
+    unscheduled = client.put(
+        f"/habitos/{habito['id']}/registro",
+        json={"fecha": "2026-09-20", "valor": 1.0},
+    )
+
+    assert future.status_code == 422
+    assert unscheduled.status_code == 422

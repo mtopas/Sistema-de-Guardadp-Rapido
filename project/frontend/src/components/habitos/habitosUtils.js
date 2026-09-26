@@ -11,6 +11,8 @@ export const DIAS_SEMANA_FULL = ['Domingo','Lunes','Martes','Miércoles','Jueves
 /** Returns true if `date` (Date) is a scheduled day for `habito`. */
 export function isScheduled(habito, date) {
   if (!habito.activo) return false
+  const creadoEn = habito.creado_en?.slice(0, 10)
+  if (creadoEn && toISODate(date) < creadoEn) return false
   if (habito.frecuencia_tipo === 'diario') return true
   const dias = parseDias(habito.dias_semana)
   return dias.includes(date.getDay())
@@ -58,7 +60,7 @@ export function calcStreak(habito, registrosMap) {
       const reg = registrosMap[`${habito.id}-${dateStr}`]
       if (reg && reg.valor > 0) {
         streak++
-      } else if (d <= today) {
+      } else if (d < today) {
         break // scheduled day in the past with no completion — breaks streak
       }
     }

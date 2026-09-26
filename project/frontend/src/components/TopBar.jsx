@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from 'react'
+import { useMemo, useRef, useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Search, Bell, Plus, Settings, Target, CheckCircle2, Calendar, CheckSquare, Sparkles } from 'lucide-react'
 import { useStore } from '../store/useStore'
@@ -6,6 +6,7 @@ import { t } from '../utils/i18n'
 import { API_URL } from '../config'
 import { APP_MODULES, adjacentModule, moduleIndexForPath } from '../utils/themes'
 import { toLocalISODateTime } from './agenda/agendaUtils'
+import { buildRegistrosMap, isScheduled, toISODate } from './habitos/habitosUtils'
 
 const kbdStyle = {
   borderColor: 'var(--border)',
@@ -62,18 +63,29 @@ export default function TopBar({ searchQuery = '', onSearchChange, searchInputRe
   const openHabitoModal  = useStore(s => s.openHabitoModal)
   const openJarvisCapture = useStore(s => s.openJarvisCapture)
   const openFeedback     = useStore(s => s.openFeedback)
+  const habitos          = useStore(s => s.habitos)
+  const habitosRegistros = useStore(s => s.habitosRegistros)
   const initial      = userName ? userName.trim()[0].toUpperCase() : '?'
 
   const isHabitos  = location.pathname.startsWith('/habitos')
   const isAgenda   = location.pathname.startsWith('/agenda')
   const isFinanzas = location.pathname.startsWith('/finanzas')
   const [bellOpen, setBellOpen]             = useState(false)
-  const [pendingHabitos, setPendingHabitos]   = useState([])
   const [agendaNotifPending, setAgendaNotifPending] = useState([])
   const bellRef = useRef(null)
   const searchRef = useRef(null)
   const [agendaResults, setAgendaResults] = useState(null)
   const [finResults,    setFinResults]    = useState(null)
+
+  const pendingHabitos = useMemo(() => {
+    const today = new Date()
+    const todayStr = toISODate(today)
+    const registrosMap = buildRegistrosMap(habitosRegistros)
+    return habitos.filter(h => {
+      if (!isScheduled(h, today)) return false
+      return !(registrosMap[`${h.id}-${todayStr}`]?.valor > 0)
+    })
+  }, [habitos, habitosRegistros])
 
   // Finanzas data for local search
   const finMovAll    = useStore(s => s.finMovimientosAll)
@@ -148,18 +160,10 @@ export default function TopBar({ searchQuery = '', onSearchChange, searchInputRe
     return () => clearInterval(id)
   }, [isAgenda, agendaReminderMinutes])
 
-  async function handleBellClick() {
+  function handleBellClick() {
     if (isAgenda) { setBellOpen(v => !v); return }
     if (!isHabitos) return
-    if (bellOpen) { setBellOpen(false); return }
-    try {
-      const res = await fetch(`${API_URL}/habitos/pendientes-hoy`)
-      if (res.ok) {
-        const data = await res.json()
-        setPendingHabitos(data.filter(h => !h.registro_hoy || h.registro_hoy.valor === 0))
-      }
-    } catch { /* noop */ }
-    setBellOpen(true)
+    setBellOpen(v => !v)
   }
 
   const path        = location.pathname

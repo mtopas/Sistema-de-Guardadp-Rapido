@@ -10,16 +10,12 @@ import EventoModal from './EventoModal'
 import AgendaContextMenu from './AgendaContextMenu'
 import HorarioFacultadModal from './HorarioFacultadModal'
 import { buildRegistrosMap, isScheduled } from '../habitos/habitosUtils'
-import { toLocalISODate, HOURS, HOUR_HEIGHT, timeToMinutes, minutesToTop } from './agendaUtils'
+import { toLocalISODate, HOUR_HEIGHT, timeToMinutes, minutesToTop } from './agendaUtils'
 
-// Greedy column layout for timed events to avoid visual overlap
-function layoutTimedEvents(events) {
-  if (!events.length) return []
-  const evts = events.map(e => {
-    const startMin = timeToMinutes(e.fecha_inicio.slice(11, 16))
-    const endMin   = e.fecha_fin ? timeToMinutes(e.fecha_fin.slice(11, 16)) : startMin + 60
-    return { ...e, _startMin: startMin, _endMin: Math.max(endMin, startMin + 20) }
-  }).sort((a, b) => a._startMin - b._startMin)
+// Greedy column layout shared by events, task blocks, and timed habits.
+function layoutTimedBlocks(blocks) {
+  if (!blocks.length) return []
+  const evts = [...blocks].sort((a, b) => a._startMin - b._startMin)
 
   const colEnds = []
   evts.forEach(evt => {
@@ -154,7 +150,7 @@ export default function HoyTab() {
   const [newTareaOpen, setNewTareaOpen]       = useState(false)
   const [newEventoHora, setNewEventoHora]     = useState(null)
   const [quickEvento, setQuickEvento]         = useState(null) // { hora, titulo, top }
-  const [nowLine, setNowLine]                 = useState(0)
+  const [, setNowTick]                        = useState(Date.now())
   const [selectedItem, setSelectedItem]       = useState(null) // { type, item }
   const [editEvento, setEditEvento]           = useState(null)
   const [editTarea, setEditTarea]             = useState(null)
@@ -170,6 +166,7 @@ export default function HoyTab() {
   const viewISO     = toLocalISODate(viewDate)
   const todayISO    = toLocalISODate(todayActual)
   const isToday     = viewISO === todayISO
+  const canMarkHabitos = viewISO <= todayISO
   const todayDow    = (viewDate.getDay() + 6) % 7
 
   // Persist viewed date in store so the tab can remount without losing position
@@ -187,25 +184,6 @@ export default function HoyTab() {
       fetchAgendaEventos(desde, hasta)
     }
   }, [viewISO])
-
-  // Live "now" indicator
-  useEffect(() => {
-    const update = () => {
-      const now = new Date()
-      setNowLine(minutesToTop(now.getHours() * 60 + now.getMinutes()))
-    }
-    update()
-    const id = setInterval(update, 60000)
-    return () => clearInterval(id)
-  }, [])
-
-  // Scroll to current hour on mount
-  useEffect(() => {
-    if (!gridRef.current || !isToday) return
-    const now = new Date()
-    const top = minutesToTop(now.getHours() * 60 + now.getMinutes())
-    gridRef.current.scrollTop = Math.max(0, top - gridRef.current.clientHeight / 3)
-  }, [isToday])
 
   // Close QuickEventPopover on Escape
   useEffect(() => {
@@ -273,20 +251,86 @@ export default function HoyTab() {
     [todayEventos]
   )
 
-  // Task 1: layout with columns
-  const timedEventos = useMemo(() =>
-    layoutTimedEvents(todayEventos.filter(e => !e.todo_el_dia && e.fecha_inicio)),
-    [todayEventos]
-  )
+  const timedBlocks = useMemo(() => layoutTimedBlocks([
+    ...todayEventos
+      .filter(e => !e.todo_el_dia && e.fecha_inicio)
+      .map(e => {
+        const start = timeToMinutes(e.fecha_inicio.slice(11, 16))
+        let end = e.fecha_fin ? timeToMinutes(e.fecha_fin.slice(11, 16)) : start + 60
+        if (end <= start) end += 24 * 60
+        return { ...e, _kind: 'evento', _startMin: start, _endMin: Math.max(end, start + 20) }
+      }),
+    ...bloqueadas
+      .map(t => {
+        const start = timeToMinutes(t.hora_bloque)
+        return start === null ? null : {
+          ...t, _kind: 'tarea', _startMin: start,
+          _endMin: start + (t.duracion_estimada || 30),
+        }
+      })
+      .filter(Boolean),
+    ...habitosConHora
+      .map(h => {
+        const start = timeToMinutes(h.hora)
+        return start === null ? null : {
+          ...h, _kind: 'habito', _startMin: start, _endMin: start + 30,
+        }
+      })
+      .filter(Boolean),
+  ]), [todayEventos, bloqueadas, habitosConHora])
+  const timedEventos = timedBlocks.filter(item => item._kind === 'evento')
+  const timedTareas = timedBlocks.filter(item => item._kind === 'tarea')
+  const timedHabitos = timedBlocks.filter(item => item._kind === 'habito')
+
+  // La agenda conserva 06:00–24:00 como rango compacto por defecto, pero abre la
+  // grilla si cualquier bloque real del día queda fuera de él. Así un hábito a
+  // las 05:00, un evento nocturno o una tarea bloqueada no se dibujan fuera de vista.
+  const gridBounds = useMemo(() => {
+    const facultadBlocks = facultadHoy.map(hf => {
+      const start = timeToMinutes(hf.hora_inicio)
+      let end = timeToMinutes(hf.hora_fin)
+      if (start === null || end === null) return null
+      if (end <= start) end += 24 * 60
+      return { start, end }
+    }).filter(Boolean)
+    const blocks = [
+      ...timedBlocks.map(block => ({ start: block._startMin, end: block._endMin })),
+      ...facultadBlocks,
+    ]
+    const earliest = Math.min(6 * 60, ...blocks.map(block => block.start))
+    const latest = Math.max(24 * 60, ...blocks.map(block => block.end))
+    const startHour = Math.max(0, Math.floor(earliest / 60))
+    const endHour = Math.max(startHour + 1, Math.ceil(latest / 60))
+    return {
+      startHour,
+      endHour,
+      hours: Array.from({ length: endHour - startHour }, (_, index) => startHour + index),
+    }
+  }, [timedBlocks, facultadHoy])
+  const now = new Date()
+  const nowLine = minutesToTop(now.getHours() * 60 + now.getMinutes(), gridBounds.startHour)
+
+  // Keep the current-time line fresh even when no other state changes.
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 60000)
+    return () => clearInterval(id)
+  }, [])
+
+  // Scroll to the current hour after the dynamic grid has its final range.
+  useEffect(() => {
+    if (!gridRef.current || !isToday) return
+    gridRef.current.scrollTop = Math.max(0, nowLine - gridRef.current.clientHeight / 3)
+  }, [isToday, gridBounds.startHour])
 
   const handleHabitoCheck = useCallback((habito) => {
+    if (!canMarkHabitos) return
     const reg = registrosMap[`${habito.id}-${viewISO}`]
     if (reg && reg.valor > 0) {
       deleteHabitoRegistro(reg.id, habito.id, viewISO)
     } else {
       upsertHabitoRegistro(habito.id, viewISO, 1.0, null)
     }
-  }, [registrosMap, viewISO, deleteHabitoRegistro, upsertHabitoRegistro])
+  }, [canMarkHabitos, registrosMap, viewISO, deleteHabitoRegistro, upsertHabitoRegistro])
 
   // "Marcar todos" -- hábitos de hoy (sin hora) que faltan completar, en una
   // sola llamada batch en vez de un upsert por hábito (POST /habitos/registros/batch).
@@ -299,11 +343,11 @@ export default function HoyTab() {
   )
 
   const handleMarcarTodosHabitos = useCallback(() => {
-    if (!habitosHoyPendientes.length) return
+    if (!canMarkHabitos || !habitosHoyPendientes.length) return
     batchUpsertHabitoRegistros(
       habitosHoyPendientes.map(h => ({ habitoId: h.id, fecha: viewISO, valor: 1.0, nota: null }))
     )
-  }, [habitosHoyPendientes, viewISO, batchUpsertHabitoRegistros])
+  }, [canMarkHabitos, habitosHoyPendientes, viewISO, batchUpsertHabitoRegistros])
 
   const handleToggle = useCallback((tarea) => {
     updateAgendaTarea(tarea.id, { completada: !tarea.completada })
@@ -514,7 +558,7 @@ export default function HoyTab() {
           <div className="px-4 pb-4 border-t" style={{ borderColor: 'var(--border)' }}>
             <div className="flex items-center justify-between mt-3 mb-2">
               <div className="label">{t(lang, 'habitosDeHoy')}</div>
-              {habitosHoyPendientes.length > 1 && (
+              {canMarkHabitos && habitosHoyPendientes.length > 1 && (
                 <button
                   type="button"
                   onClick={handleMarcarTodosHabitos}
@@ -538,6 +582,8 @@ export default function HoyTab() {
                       className="shrink-0 w-4 h-4 rounded-md border grid place-items-center"
                       style={{ background: done ? h.color : 'transparent', borderColor: done ? h.color : 'var(--border)' }}
                       aria-checked={done}
+                      aria-disabled={!canMarkHabitos}
+                      disabled={!canMarkHabitos}
                       role="checkbox"
                       aria-label={h.nombre}
                     >
@@ -652,16 +698,16 @@ export default function HoyTab() {
 
           <div
             className="relative"
-            style={{ height: HOURS.length * HOUR_HEIGHT }}
+            style={{ height: gridBounds.hours.length * HOUR_HEIGHT }}
             aria-label={t(lang, 'agendaTuDia')}
             role="region"
           >
             {/* Hour lines + click targets */}
-            {HOURS.map(h => (
+            {gridBounds.hours.map(h => (
               <div
                 key={h}
                 className="absolute left-0 right-0 flex items-start gap-3"
-                style={{ top: (h - 6) * HOUR_HEIGHT, height: HOUR_HEIGHT }}
+                style={{ top: (h - gridBounds.startHour) * HOUR_HEIGHT, height: HOUR_HEIGHT }}
               >
                 <span
                   className="mono text-[10.5px] w-10 shrink-0 text-right pt-0.5"
@@ -670,15 +716,17 @@ export default function HoyTab() {
                 >
                   {String(h).padStart(2, '0')}:00
                 </span>
-                <div
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`Nuevo evento a las ${String(h).padStart(2, '0')}:00`}
-                  className="flex-1 border-t cursor-pointer hover:bg-[var(--surface)] rounded-sm transition-colors"
-                  style={{ borderColor: 'var(--border)', marginTop: 8, height: HOUR_HEIGHT - 8 }}
-                  onClick={() => setQuickEvento({ hora: `${String(h).padStart(2, '0')}:00`, titulo: '', top: (h - 6) * HOUR_HEIGHT })}
-                  onKeyDown={e => e.key === 'Enter' && setQuickEvento({ hora: `${String(h).padStart(2, '0')}:00`, titulo: '', top: (h - 6) * HOUR_HEIGHT })}
-                />
+                {h < 24 && (
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Nuevo evento a las ${String(h).padStart(2, '0')}:00`}
+                    className="flex-1 border-t cursor-pointer hover:bg-[var(--surface)] rounded-sm transition-colors"
+                    style={{ borderColor: 'var(--border)', marginTop: 8, height: HOUR_HEIGHT - 8 }}
+                    onClick={() => setQuickEvento({ hora: `${String(h).padStart(2, '0')}:00`, titulo: '', top: (h - gridBounds.startHour) * HOUR_HEIGHT })}
+                    onKeyDown={e => e.key === 'Enter' && setQuickEvento({ hora: `${String(h).padStart(2, '0')}:00`, titulo: '', top: (h - gridBounds.startHour) * HOUR_HEIGHT })}
+                  />
+                )}
               </div>
             ))}
 
@@ -687,8 +735,9 @@ export default function HoyTab() {
               const startMin = timeToMinutes(hf.hora_inicio)
               const endMin   = timeToMinutes(hf.hora_fin)
               if (startMin === null || endMin === null) return null
-              const top    = minutesToTop(startMin)
-              const height = ((endMin - startMin) / 60) * HOUR_HEIGHT
+              const adjustedEnd = endMin <= startMin ? endMin + 24 * 60 : endMin
+              const top    = minutesToTop(startMin, gridBounds.startHour)
+              const height = ((adjustedEnd - startMin) / 60) * HOUR_HEIGHT
               const color = hf.color || '#059669'
               return (
                 <div
@@ -707,7 +756,7 @@ export default function HoyTab() {
 
             {/* Task 1: Event blocks with column layout */}
             {timedEventos.map(evento => {
-              const top      = minutesToTop(evento._startMin)
+              const top      = minutesToTop(evento._startMin, gridBounds.startHour)
               const height   = Math.max(((evento._endMin - evento._startMin) / 60) * HOUR_HEIGHT, 20)
               const colFrac  = 1 / evento._totalCols
               const colLeft  = evento._col / evento._totalCols
@@ -743,20 +792,22 @@ export default function HoyTab() {
             })}
 
             {/* Task blocks */}
-            {bloqueadas.map(tarea => {
-              const startMin = timeToMinutes(tarea.hora_bloque)
-              if (startMin === null) return null
-              const dur        = tarea.duracion_estimada || 30
-              const top        = minutesToTop(startMin)
-              const height     = Math.max((dur / 60) * HOUR_HEIGHT, 24)
+            {timedTareas.map(tarea => {
+              const top        = minutesToTop(tarea._startMin, gridBounds.startHour)
+              const height     = Math.max(((tarea._endMin - tarea._startMin) / 60) * HOUR_HEIGHT, 24)
+              const colFrac    = 1 / tarea._totalCols
+              const colLeft    = tarea._col / tarea._totalCols
+              const leftVal    = `calc(${colLeft * 100}% + ${56 * (1 - colLeft)}px)`
+              const widthVal   = `calc(${colFrac * 100}% - ${56 * colFrac + 3}px)`
               const isSelected = selectedItem?.type === 'tarea' && selectedItem?.item?.id === tarea.id
               const isAnimating = completingIds.has(tarea.id)
               return (
                 <div
                   key={tarea.id}
-                  className="absolute left-14 right-8 rounded-md px-2 py-1 overflow-hidden flex items-center gap-1.5 block-new cursor-pointer"
+                  className="absolute rounded-md px-2 py-1 overflow-hidden flex items-center gap-1.5 block-new cursor-pointer"
                   style={{
                     top, height,
+                    left: leftVal, width: widthVal,
                     background: `color-mix(in oklch, ${tarea.lista_color} 15%, var(--surface))`,
                     border: `1.5px ${isSelected ? 'solid' : 'dashed'} ${tarea.lista_color}`,
                     transformOrigin: 'top',
@@ -799,21 +850,24 @@ export default function HoyTab() {
             })}
 
             {/* Hábitos con hora */}
-            {habitosConHora.map(h => {
-              const startMin = timeToMinutes(h.hora)
-              if (startMin === null) return null
-              const top    = minutesToTop(startMin)
-              const height = Math.max(HOUR_HEIGHT * 0.75, 28)
+            {timedHabitos.map(h => {
+              const top    = minutesToTop(h._startMin, gridBounds.startHour)
+              const height = Math.max(((h._endMin - h._startMin) / 60) * HOUR_HEIGHT, 28)
+              const colFrac  = 1 / h._totalCols
+              const colLeft  = h._col / h._totalCols
+              const leftVal  = `calc(${colLeft * 100}% + ${56 * (1 - colLeft)}px)`
+              const widthVal = `calc(${colFrac * 100}% - ${56 * colFrac + 3}px)`
               const reg    = registrosMap[`${h.id}-${viewISO}`]
               const done   = reg && reg.valor > 0
               return (
                 <div
                   key={h.id}
-                  className="absolute left-14 right-0 rounded-md px-2 py-1 flex items-center gap-1.5 cursor-pointer"
-                  style={{ top, height, background: `color-mix(in oklch, ${h.color} ${done ? 25 : 15}%, var(--surface))`, border: `1.5px solid color-mix(in oklch, ${h.color} 50%, transparent)`, opacity: done ? 0.7 : 1 }}
-                  onClick={() => handleHabitoCheck(h)}
+                  className="absolute rounded-md px-2 py-1 flex items-center gap-1.5 cursor-pointer"
+                  style={{ top, height, left: leftVal, width: widthVal, background: `color-mix(in oklch, ${h.color} ${done ? 25 : 15}%, var(--surface))`, border: `1.5px solid color-mix(in oklch, ${h.color} 50%, transparent)`, opacity: done ? 0.7 : 1, cursor: canMarkHabitos ? 'pointer' : 'default' }}
+                  onClick={canMarkHabitos ? () => handleHabitoCheck(h) : undefined}
                   role="button"
                   aria-label={h.nombre}
+                  aria-disabled={!canMarkHabitos}
                 >
                   <span className="w-2 h-2 rounded-full shrink-0" style={{ background: h.color }} />
                   <span className="text-[11px] font-medium truncate" style={{ color: 'var(--text)' }}>{h.nombre}</span>
@@ -827,7 +881,7 @@ export default function HoyTab() {
             })}
 
             {/* Now indicator */}
-            {isToday && nowLine > 0 && nowLine < HOURS.length * HOUR_HEIGHT && (
+            {isToday && nowLine > 0 && nowLine < gridBounds.hours.length * HOUR_HEIGHT && (
               <div
                 className="absolute left-12 right-0 flex items-center gap-1 pointer-events-none"
                 style={{ top: nowLine }}

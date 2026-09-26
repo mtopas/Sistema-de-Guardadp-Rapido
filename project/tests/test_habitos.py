@@ -12,6 +12,13 @@ def setup_db():
     yield
 
 
+def _set_habito_creado_en(habito_id, creado_en):
+    conn = get_connection()
+    conn.execute("UPDATE habitos SET creado_en = ? WHERE id = ?", (creado_en, habito_id))
+    conn.commit()
+    conn.close()
+
+
 class TestHabitosActualizar:
     """Tests for habitos_actualizar function."""
 
@@ -64,6 +71,8 @@ class TestHabitosPendientesHoy:
             nombre="Friday", frecuencia_tipo="semanal",
             dias_semana=json.dumps([5])
         )
+        _set_habito_creado_en(mon_wed["id"], "2026-01-01T00:00:00")
+        _set_habito_creado_en(friday["id"], "2026-01-01T00:00:00")
 
         # 2026-09-21 is Monday
         result = crud.habitos_pendientes_hoy("2026-09-21")
@@ -77,6 +86,7 @@ class TestHabitosPendientesHoy:
             nombre="Monday", frecuencia_tipo="semanal",
             dias_semana=json.dumps([1])
         )
+        _set_habito_creado_en(habito["id"], "2026-01-01T00:00:00")
         result = crud.habitos_pendientes_hoy("2026-09-21")  # Monday
         ids = [h["id"] for h in result]
         assert habito["id"] in ids
@@ -87,6 +97,7 @@ class TestHabitosPendientesHoy:
             nombre="Sunday", frecuencia_tipo="semanal",
             dias_semana=json.dumps([0])
         )
+        _set_habito_creado_en(habito["id"], "2026-01-01T00:00:00")
         result = crud.habitos_pendientes_hoy("2026-09-20")  # Sunday
         ids = [h["id"] for h in result]
         assert habito["id"] in ids
@@ -118,6 +129,12 @@ class TestHabitosPendientesHoy:
         ids = [h["id"] for h in result]
         assert habito["id"] not in ids
 
+    def test_habits_do_not_appear_before_creation(self, setup_db):
+        habito = crud.habitos_crear(nombre="New", frecuencia_tipo="diario")
+        result = crud.habitos_pendientes_hoy((date.today() - timedelta(days=1)).isoformat())
+
+        assert habito["id"] not in [h["id"] for h in result]
+
 
 class TestHabitosStats:
     """Tests for habitos_stats function."""
@@ -142,6 +159,7 @@ class TestHabitosStats:
         habito = crud.habitos_crear(nombre="Test", frecuencia_tipo="diario")
         hoy = date.today()
         first = date(hoy.year, hoy.month, 1)
+        _set_habito_creado_en(habito["id"], f"{first.isoformat()}T00:00:00")
 
         # Add one partial
         crud.habitos_registros_upsert(habito["id"], first.isoformat(), 0.5)
@@ -156,6 +174,7 @@ class TestHabitosStats:
         habito = crud.habitos_crear(nombre="Test", frecuencia_tipo="diario")
         hoy = date.today()
         first = date(hoy.year, hoy.month, 1)
+        _set_habito_creado_en(habito["id"], f"{first.isoformat()}T00:00:00")
 
         # Complete all days from 1st to today
         current = first
@@ -178,6 +197,7 @@ class TestHabitosStats:
 
         # Find and complete Mondays in current month
         first = date(y, m, 1)
+        _set_habito_creado_en(habito["id"], f"{first.isoformat()}T00:00:00")
         mondays = []
         d = first
         while d.month == m:
@@ -204,6 +224,7 @@ class TestHabitosStats:
         hoy = date.today()
         d1 = hoy - timedelta(days=5)
         d2 = hoy - timedelta(days=4)
+        _set_habito_creado_en(habito["id"], f"{d1.isoformat()}T00:00:00")
 
         crud.habitos_registros_upsert(habito["id"], d1.isoformat(), 1.0)
         crud.habitos_registros_upsert(habito["id"], d2.isoformat(), 1.0)

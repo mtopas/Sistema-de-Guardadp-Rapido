@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Flame, Plus, Target, Filter } from 'lucide-react'
+import { Archive, Flame, Plus, Target, Filter } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
 import {
@@ -13,14 +13,17 @@ export default function HabitosLeftPanel({ selectedId, setSelectedId, onNew, onH
   const upsertHabitoRegistro = useStore(s => s.upsertHabitoRegistro)
 
   const [soloHoy, setSoloHoy] = useState(false)
+  const [showArchived, setShowArchived] = useState(false)
 
   const registrosMap = useMemo(() => buildRegistrosMap(habitosRegistros), [habitosRegistros])
   const activos      = useMemo(() => habitos.filter(h => h.activo), [habitos])
+  const archivados   = useMemo(() => habitos.filter(h => !h.activo), [habitos])
   const today        = new Date()
   const todayStr     = toISODate(today)
 
   const doneCount = useMemo(() =>
     activos.filter(h => {
+      if (!isScheduled(h, today)) return false
       const reg = registrosMap[`${h.id}-${todayStr}`]
       return reg && reg.valor > 0
     }).length,
@@ -36,18 +39,19 @@ export default function HabitosLeftPanel({ selectedId, setSelectedId, onNew, onH
 
   // Filtered list
   const displayList = useMemo(() => {
+    if (showArchived) return archivados
     if (!soloHoy) return activos
     return activos.filter(h => {
       const status = todayStatus(h, registrosMap)
       return status === 'pending'  // only unfinished scheduled habits
     })
-  }, [activos, soloHoy, registrosMap])
+  }, [activos, archivados, soloHoy, showArchived, registrosMap])
 
   async function handleQuickCheck(e, h) {
     e.stopPropagation()
     const existing = registrosMap[`${h.id}-${todayStr}`]
     if (existing && existing.valor > 0) return // already done, let CompletarModal handle
-    await upsertHabitoRegistro(h.id, todayStr, 1.0, null)
+    await upsertHabitoRegistro(h.id, todayStr, 1.0)
   }
 
   return (
@@ -88,6 +92,20 @@ export default function HabitosLeftPanel({ selectedId, setSelectedId, onNew, onH
           </div>
         )}
 
+        {archivados.length > 0 && (
+          <button
+            onClick={() => { setShowArchived(v => !v); setSoloHoy(false) }}
+            className="flex items-center gap-1.5 text-[11px] px-2 py-1 mt-1 rounded-lg transition-colors w-full"
+            style={{
+              background: showArchived ? 'color-mix(in oklch, var(--accent) 12%, transparent)' : 'transparent',
+              color: showArchived ? 'var(--accent)' : 'var(--subtext)',
+            }}
+          >
+            <Archive size={11} />
+            {showArchived ? 'Ver activos' : `Archivados (${archivados.length})`}
+          </button>
+        )}
+
         {/* Filtro solo pendientes */}
         {scheduledToday > 0 && (
           <button
@@ -107,12 +125,12 @@ export default function HabitosLeftPanel({ selectedId, setSelectedId, onNew, onH
 
       {/* Habit list */}
       <div className="flex-1 overflow-y-auto px-2 pb-4">
-        {activos.length > 0 && onHabitoContextMenu && (
+        {displayList.length > 0 && onHabitoContextMenu && (
           <p className="px-2 pb-2 text-[10px] leading-snug" style={{ color: 'var(--mute)' }}>
             {t(lang, 'habitosContextHint')}
           </p>
         )}
-        {activos.length === 0 ? (
+        {activos.length === 0 && !showArchived ? (
           <div className="flex flex-col items-center gap-3 px-4 py-10 text-center">
             <div
               className="w-12 h-12 rounded-2xl grid place-items-center"
@@ -136,10 +154,10 @@ export default function HabitosLeftPanel({ selectedId, setSelectedId, onNew, onH
         ) : displayList.length === 0 ? (
           <div className="px-4 py-8 text-center">
             <div className="text-[13px] font-medium mb-1" style={{ color: 'var(--success)' }}>
-              ¡Todo listo por hoy!
+              {showArchived ? 'No hay hábitos archivados' : '¡Todo listo por hoy!'}
             </div>
             <div className="text-[11.5px]" style={{ color: 'var(--subtext)' }}>
-              No quedan hábitos pendientes
+              {showArchived ? 'Los hábitos archivados aparecen acá para poder reactivarlos' : 'No quedan hábitos pendientes'}
             </div>
           </div>
         ) : (
@@ -149,7 +167,7 @@ export default function HabitosLeftPanel({ selectedId, setSelectedId, onNew, onH
               const streak    = calcStreak(h, registrosMap)
               const isSelected = h.id === selectedId
               const scheduledNow = isScheduled(h, today)
-              const isPending = status === 'pending' && scheduledNow
+              const isPending = !showArchived && status === 'pending' && scheduledNow
 
               const statusDot = status === 'done'    ? 'var(--success)'
                 : status === 'partial'  ? 'var(--warning)'
@@ -158,7 +176,7 @@ export default function HabitosLeftPanel({ selectedId, setSelectedId, onNew, onH
               const statusLabel = status === 'done'   ? t(lang, 'habitosHecho')
                 : status === 'partial' ? `${t(lang, 'habitosParcial')} hoy`
                 : status === 'pending' ? t(lang, 'habitosPendiente')
-                : t(lang, 'habitosNoToca')
+                : showArchived ? 'Archivado — abrí el detalle para reactivarlo' : t(lang, 'habitosNoToca')
 
               return (
                 <div

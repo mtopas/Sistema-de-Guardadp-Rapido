@@ -63,6 +63,12 @@ export default function App() {
     const desde120 = new Date(); desde120.setDate(desde120.getDate() - 120)
     const desdeStr = desde120.toISOString().slice(0, 10)
     fetchHabitosRegistros(desdeStr)
+    const syncHabitos = () => {
+      fetchHabitos()
+      fetchHabitosRegistros(desdeStr)
+    }
+    window.addEventListener('online', syncHabitos)
+    return () => window.removeEventListener('online', syncHabitos)
   }, [])
 
   return (

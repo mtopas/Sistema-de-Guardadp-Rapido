@@ -1,0 +1,42 @@
+REPORTE FINAL — CORRECCIONES DE AGENDA (actualizado 2026-09-26)
+
+Se reemplazó por completo el informe de auditoría anterior. Los 19 hallazgos se trataron en el código; no se hizo commit ni se ejecutó una migración sobre la base de datos real.
+
+IMPLEMENTADO
+1. Eventos recurrentes: ahora se materializan como filas con ID propio y `serie_id` compartido, con el mismo límite inicial que las tareas (60 días diario, 12 semanas semanal, 12 ocurrencias mensual). Editar o borrar una ocurrencia —incluida la cabeza— afecta solo esa fila. El modal configura recurrencia solo al crear y explica la independencia al editar; PATCH rechaza cambios de regla en una ocurrencia.
+2. Migración de series antiguas: al iniciar la aplicación se convierten una sola vez las series virtuales existentes. Se generan ocurrencias históricas desde el comienzo y una ventana futura desde la fecha de migración. Una marca por serie evita duplicados en arranques siguientes; cada serie usa un savepoint para evitar inserciones parciales si su regla falla.
+3. Calendarios: “mover eventos” comprueba la respuesta antes de borrar. Si falla la reasignación, el calendario y sus eventos permanecen. El borrado también comprueba éxito y retira del store los eventos eliminados por cascada.
+4. Listas: borrar una lista con su contenido pide confirmación explícita e informa cuántas tareas desaparecerán.
+5. PATCH: los campos enviados como `null` ya llegan a la base de datos. Se pueden limpiar fecha fin, descripción, fecha/hora de tarea y `hora_bloque`; el botón de quitar bloque y el limpiado de bloques vencidos persisten.
+6. Recurrencia semanal sin días elegidos: repite el día de la fecha inicial, tanto en eventos como en tareas. Ambos tipos comparten el generador de fechas.
+7. Creación de evento recurrente: el store consulta y mezcla las nuevas ocurrencias después del POST, por lo que aparecen sin recargar la página.
+8. Notificaciones: las consultas usan la hora exacta; una ocurrencia recurrente ya no se avisa horas antes. El navegador envía su hora local al backend para que el aviso coincida con los horarios locales mostrados. La campana también muestra el intervalo configurado en vez del rótulo fijo de 15 minutos.
+9. Semana: las flechas actualizan el mes de referencia al cruzar su límite, corrigen la cabecera y activan la carga del nuevo rango de eventos.
+10. Revisión: el tab consume `GET /agenda/revision` para el tiempo por calendario. Las ocurrencias materializadas se cuentan por separado; la duración de eventos que terminan al día siguiente se calcula con timestamps completos. Los eventos de todo el día no reciben una hora ficticia. Si el resumen no carga, se muestra el estado en vez de un porcentaje de tiempo engañoso.
+11. Colores derivados: el store actualiza los eventos cargados al cambiar color/nombre de calendario y las tareas al cambiar color/nombre de lista. También recalcula color y nombre al mover un evento a otro calendario, desasignarlo o cambiar una tarea de lista.
+12. Carga offline: un GET fallido conserva los eventos, listas, tareas y horario de Facultad ya presentes en el store.
+13. Exportación: Revisión ofrece descarga ICS para la semana seleccionada mediante el endpoint existente.
+14. Facultad: el modal permite editar materias con el PATCH existente. El formulario y las filas se adaptaron a anchos estrechos.
+15. Mes: la grilla usa 4, 5 o 6 filas según el mes y permite navegar meses con la rueda del mouse.
+16. Mes en pantallas pequeñas: “Próximos eventos” usa el mismo filtro y orden cronológico que el panel amplio.
+17. Bot `/dia`: acepta `dd` para el mes actual y `dd-mm-aaaa` además del ISO existente; las fechas imposibles reciben un mensaje de error.
+18. Código sin uso: se retiraron `HourGrid`, `AgendaPanel`, `useAgendaDay` y `useAgendaKeyboard`, que no tenían consumidores.
+19. Documentación: `project/Agenda.md` y `project/README.md` reflejan la recurrencia materializada, las vistas y los controles actuales.
+
+CONTINUACIÓN — VENTANA DE RECURRENCIA (2026-09-26)
+20. Las series de eventos y tareas se extienden automáticamente al consultar períodos posteriores. Agenda guarda la regla, plantilla y última fecha generada en `agenda_series`, independiente de la primera ocurrencia. Se generan solo fechas posteriores al marcador: editar o borrar una ocurrencia, incluso la última de la ventana, no hace que reaparezca.
+21. El calendario pide las tareas hasta el período visible; `GET /agenda/tareas` acepta `hasta=YYYY-MM-DD`. Consultar tareas sin parámetro extiende las series hasta la fecha actual y una ventana adicional. Revisión y exportación de eventos también generan las fechas necesarias para sus rangos. La prueba de navegador encontró y permitió corregir una acción no extraída del store que dejaba la vista Mes en blanco al cargar.
+22. Los modales de evento y tarea permiten detener nuevas repeticiones con confirmación doble. Las ocurrencias ya creadas permanecen y se pueden editar o borrar por separado. Borrar la última ocurrencia también detiene automáticamente la serie, para que no reaparezca después. Borrar una lista o calendario desactiva sus series; mover los eventos a otro calendario conserva su recurrencia en el destino. El estado detenido sobrevive a un reinicio.
+23. `project/Agenda.md`, `project/README.md` y `Cerebro/PROXIMAMENTE.md` reflejan el nuevo comportamiento.
+
+VERIFICACIÓN
+- Suite backend completa, después de la continuación: 371 pruebas aprobadas, 1 omitida.
+- Pruebas específicas finales de Agenda y bot: 46 aprobadas, incluidas extensión diaria, semanal y mensual; borrados sin regeneración; continuidad tras borrar la primera ocurrencia; detención persistente y automática al borrar la última; reasignación o borrado de calendario/lista; PATCH con `null`; notificaciones por hora local y formatos de `/dia`.
+- Suite frontend completa: 182 pruebas aprobadas.
+- Compilación final de frontend: correcta.
+- Dos pruebas E2E de Agenda en Chromium aprobadas con base de datos temporal: crear/completar tarea en HOY y detener una serie desde el modal, verificando la respuesta de la API.
+- `git diff --check`: sin errores de whitespace. No se hizo una revisión visual exhaustiva en distintas resoluciones; la adaptación estrecha de Facultad fue verificada por código y compilación.
+- Los servidores temporales de prueba se detuvieron. La copia temporal `C:\Users\User\AppData\Local\Temp\sgr-agenda-qa-b3637964f7b74ae8865600889c39a879` quedó en disco porque la revisión automática de permisos rechazó los intentos de borrarla (acción bloqueada por política).
+
+LÍMITE CONOCIDO
+La extensión ocurre al consultar Agenda, no mediante un proceso en segundo plano mientras la aplicación está cerrada. Las fechas se ponen al día en la próxima lectura. El cambio no tocó las bases de datos reales durante esta sesión: las migraciones se aplicarán al próximo inicio de la aplicación sobre la copia de datos que se abra.

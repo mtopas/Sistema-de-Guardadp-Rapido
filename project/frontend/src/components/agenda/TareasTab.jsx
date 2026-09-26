@@ -292,10 +292,12 @@ export default function TareasTab() {
               lista={lista}
               isSelected={lista.id === selectedListaId}
               onClick={() => setSelectedListaId(lista.id)}
-              onDelete={id => {
-                if (selectedListaId === id) setSelectedListaId(INBOX_ID)
-                deleteAgendaLista(id)
-              }}
+               onDelete={id => {
+                 const count = agendaTareas.filter(t => t.lista_id === id).length
+                 if (!window.confirm(`¿Eliminar esta lista y sus ${count} tarea${count === 1 ? '' : 's'}? Esta acción no se puede deshacer.`)) return
+                 if (selectedListaId === id) setSelectedListaId(INBOX_ID)
+                 deleteAgendaLista(id)
+               }}
               onRename={(id, nombre) => updateAgendaLista(id, { nombre })}
               onTogglePin={(id, pinned) => updateAgendaLista(id, { pinned })}
             />

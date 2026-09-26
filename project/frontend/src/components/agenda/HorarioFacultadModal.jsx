@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { X, Trash2, Plus } from 'lucide-react'
+import { X, Trash2, Plus, Pencil } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
 import { AGENDA_COLORS } from '../../utils/agendaColors'
@@ -18,18 +18,20 @@ const inputStyle = {
   boxSizing: 'border-box',
 }
 
-function HorarioRow({ hf, onDelete }) {
+function HorarioRow({ hf, onDelete, onEdit }) {
   return (
-    <div className="flex items-center gap-3 px-3 py-2 rounded-lg panel-strong">
+    <div className="flex flex-wrap items-center gap-2 sm:gap-3 px-3 py-2 rounded-lg panel-strong min-w-0">
       <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: hf.color || '#059669' }} />
       <span className="text-[12px] w-16 shrink-0" style={{ color: 'var(--subtext)' }}>{DIAS_ES[hf.dia_semana]}</span>
       <span className="mono text-[11.5px] w-24 shrink-0" style={{ color: 'var(--text-2)' }}>
         {hf.hora_inicio} – {hf.hora_fin}
       </span>
-      <span className="flex-1 text-[12.5px] font-medium truncate" style={{ color: 'var(--text)' }}>{hf.materia}</span>
+      <span className="flex-1 min-w-[90px] text-[12.5px] font-medium truncate" style={{ color: 'var(--text)' }}>{hf.materia}</span>
       {hf.descripcion && (
         <span className="text-[11px] truncate max-w-[100px]" style={{ color: 'var(--mute)' }}>{hf.descripcion}</span>
       )}
+      <button className="icon-btn shrink-0" style={{ width: 22, height: 22, color: 'var(--mute)' }}
+        title="Editar materia" onClick={() => onEdit(hf)}><Pencil size={11} /></button>
       <button
         className="icon-btn shrink-0"
         style={{ width: 22, height: 22, color: 'var(--mute)' }}
@@ -45,13 +47,22 @@ export default function HorarioFacultadModal({ onClose }) {
   const lang                     = useStore(s => s.lang)
   const agendaHorarioFacultad    = useStore(s => s.agendaHorarioFacultad)
   const addAgendaHorarioFacultad = useStore(s => s.addAgendaHorarioFacultad)
+  const updateAgendaHorarioFacultad = useStore(s => s.updateAgendaHorarioFacultad)
   const deleteAgendaHorarioFacultad = useStore(s => s.deleteAgendaHorarioFacultad)
+  const showToast = useStore(s => s.showToast)
 
   const [form, setForm] = useState({
     dia_semana: 0, hora_inicio: '09:00', hora_fin: '11:00', materia: '', descripcion: '',
     color: AGENDA_COLORS[0],
   })
   const [saving, setSaving] = useState(false)
+  const [editingId, setEditingId] = useState(null)
+
+  const editHorario = hf => {
+    setEditingId(hf.id)
+    setForm({ dia_semana: hf.dia_semana, hora_inicio: hf.hora_inicio, hora_fin: hf.hora_fin,
+      materia: hf.materia, descripcion: hf.descripcion || '', color: hf.color || AGENDA_COLORS[0] })
+  }
 
   useEffect(() => {
     const h = (e) => { if (e.key === 'Escape') onClose() }
@@ -62,7 +73,14 @@ export default function HorarioFacultadModal({ onClose }) {
   const handleAdd = async () => {
     if (!form.materia.trim()) return
     setSaving(true)
-    await addAgendaHorarioFacultad({ ...form, materia: form.materia.trim(), descripcion: form.descripcion.trim() || null })
+    const payload = { ...form, materia: form.materia.trim(), descripcion: form.descripcion.trim() || null }
+    if (editingId !== null) {
+      const ok = await updateAgendaHorarioFacultad(editingId, payload)
+      if (!ok) { showToast('No se pudo actualizar la materia', 'error'); setSaving(false); return }
+      setEditingId(null)
+    } else {
+      await addAgendaHorarioFacultad(payload)
+    }
     setForm(f => ({ ...f, materia: '', descripcion: '' }))
     setSaving(false)
   }
@@ -72,7 +90,7 @@ export default function HorarioFacultadModal({ onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }}>
       <div
-        className="w-full max-w-2xl rounded-2xl border shadow-2xl p-6"
+        className="w-full max-w-2xl rounded-2xl border shadow-2xl p-4 sm:p-6"
         style={{ background: 'var(--panel-bg)', borderColor: 'var(--border)', maxHeight: '80vh', overflowY: 'auto' }}
       >
         <div className="flex items-center justify-between mb-5">
@@ -82,7 +100,7 @@ export default function HorarioFacultadModal({ onClose }) {
 
         {/* Add form */}
         <div className="panel-strong rounded-xl p-4 mb-5">
-          <div className="grid grid-cols-2 gap-3 mb-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
             <div style={{ minWidth: 0 }}>
               <div className="text-[11px] mb-1" style={{ color: 'var(--subtext)' }}>{t(lang, 'agendaDiaSemana')}</div>
               <select
@@ -103,7 +121,7 @@ export default function HorarioFacultadModal({ onClose }) {
               />
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-3 mb-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
             <div style={{ minWidth: 0 }}>
               <div className="text-[11px] mb-1" style={{ color: 'var(--subtext)' }}>{t(lang, 'agendaHoraInicio')}</div>
               <input type="time" style={inputStyle} value={form.hora_inicio} onChange={e => setForm(f => ({ ...f, hora_inicio: e.target.value }))} />
@@ -145,8 +163,11 @@ export default function HorarioFacultadModal({ onClose }) {
             disabled={!form.materia.trim() || saving}
             onClick={handleAdd}
           >
-            <Plus size={12} /> {t(lang, 'agendaNuevaMateria')}
+            <Plus size={12} /> {editingId === null ? t(lang, 'agendaNuevaMateria') : 'Guardar materia'}
           </button>
+          {editingId !== null && <button className="btn ml-2" onClick={() => {
+            setEditingId(null); setForm(f => ({ ...f, materia: '', descripcion: '' }))
+          }}>Cancelar edición</button>}
         </div>
 
         {/* List */}
@@ -157,7 +178,7 @@ export default function HorarioFacultadModal({ onClose }) {
             </div>
           ) : (
             sorted.map(hf => (
-              <HorarioRow key={hf.id} hf={hf} onDelete={deleteAgendaHorarioFacultad} />
+              <HorarioRow key={hf.id} hf={hf} onDelete={deleteAgendaHorarioFacultad} onEdit={editHorario} />
             ))
           )}
         </div>

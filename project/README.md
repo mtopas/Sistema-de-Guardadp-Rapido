@@ -210,6 +210,7 @@ API bajo `/fin/*` — cuentas (`POST /fin/recalcular-saldos`), categorías (CRUD
 | `agenda_eventos` | Eventos con fecha inicio/fin, todo_el_dia, se_repite, calendario_id, creado_en, actualizado_en |
 | `agenda_listas` | Listas de tareas con color |
 | `agenda_tareas` | Tareas con fecha/hora opcional, hora_bloque (time blocking), duracion_estimada, completada, lista_id, creado_en, actualizado_en |
+| `agenda_series` | Definición y horizonte de generación de eventos/tareas recurrentes; persiste aunque se borre la primera ocurrencia |
 | `agenda_horario_facultad` | Horario recurrente por día de semana; visible solo en vistas horarias |
 
 API bajo `/agenda/*` — calendarios, eventos, listas, tareas, horario-facultad. Sin seed — arranca vacío. Índice `idx_eventos_inicio` en `agenda_eventos(fecha_inicio)`.
@@ -349,12 +350,11 @@ Sin seed — arranca vacío.
 - **AgendaModalShell:** focus trap Tab/Shift-Tab + ARIA (`role="dialog"`, `aria-modal`, `aria-labelledby`, `aria-label` en close); grilla HOY tiene `role="grid"` / `role="row"` / `role="gridcell"`.
 - **TweaksPanel atajos contextuales:** `agendaActiveTab` en store; sección dinámica en Ctrl+M muestra atajos del tab activo.
 - **RevisionTab mejorado:** hábitos incluidos en % tiempo planificado; barra `role="progressbar"` + `aria-valuenow/min/max`; comparación N vs N-1 (delta badge); export PDF via `window.print()`; card "Finanzas · semana" con ingresos/gastos/neto.
-- **Motor recurrencia backend:** `_expand_recurring()` en `crud.py`; soporta `diario`, `semanal`, `mensual`; respeta `hasta`; se invoca en `agenda_obtener_eventos`.
+- **Motor recurrencia backend:** `agenda_recurrence.py` materializa eventos y tareas en filas independientes (`serie_id`); soporta `diario`, `semanal`, `mensual` y `hasta`. Las series antiguas de eventos se materializan una vez al iniciar. `agenda_series` guarda la definición y fecha generada para extender la ventana al consultar períodos nuevos, sin reponer ocurrencias borradas. Los modales permiten detener la generación conservando las ya creadas.
 - **`GET /agenda/export.ics`:** iCalendar RFC-compliant con `DTSTART`, `DTEND`, `SUMMARY`, `DESCRIPTION`, `UID`.
 - **`GET /agenda/notificaciones/pending`:** eventos próximos en ventana configurable (default 15 min); TopBar polling 60s + `Notification API` del browser.
 - **Cross-módulo Bóveda↔Agenda:** widget "Próximos eventos" en `RightPanel` con hasta 4 eventos de hoy; navega a `/agenda?tab=hoy`.
 - **Cross-módulo Finanzas↔Agenda:** `FinanzasLeftPanel` muestra tareas pendientes con keywords financieros (pagar, cuota, vencimiento…) con link a `/agenda?tab=tareas`; `HoyTab` muestra 💰 en tareas financieras con link a `/finanzas`.
-- **Deuda técnica:** `HourGrid.jsx` (grilla horaria reutilizable), `useAgendaDay.js` (hook datos de día), `useAgendaKeyboard.js` (ArrowLeft/Right + T/N), `AgendaPanel.jsx` (aside reutilizable).
 - **Bot — nota conversacional:** tras marcar ✓/½, el bot pregunta "¿Querés agregar una nota?" y gestiona la respuesta vía `STEP_HABITO_NOTA`.
 - **Bot — `/checkin [HH:MM]`:** ver o cambiar la hora del check-in nocturno; persiste en `checkin_config.json`; reprograma el job sin reiniciar el bot.
 

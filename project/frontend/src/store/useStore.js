@@ -899,41 +899,61 @@ export const useStore = create((set, get) => ({
   },
 
   updateAgendaCalendario: async (id, patch) => {
-    set(s => ({ agendaCalendarios: s.agendaCalendarios.map(c => c.id === id ? { ...c, ...patch } : c) }))
-    try {
-      await fetch(`${API_URL}/agenda/calendarios/${id}`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(patch),
-      })
-    } catch { /* offline ok */ }
-  },
-
-  deleteAgendaCalendario: async (id) => {
-    set(s => ({ agendaCalendarios: s.agendaCalendarios.filter(c => c.id !== id) }))
-    try { await fetch(`${API_URL}/agenda/calendarios/${id}`, { method: 'DELETE' }) } catch { /* noop */ }
-  },
-
-  reasignarEventosAgendaCalendario: async (origenId, destinoId) => {
-    const destino = get().agendaCalendarios.find(c => c.id === destinoId)
     set(s => ({
-      agendaEventos: s.agendaEventos.map(e => e.calendario_id === origenId
-        ? { ...e, calendario_id: destinoId, calendario_color: destino?.color ?? e.calendario_color, calendario_nombre: destino?.nombre ?? e.calendario_nombre }
+      agendaCalendarios: s.agendaCalendarios.map(c => c.id === id ? { ...c, ...patch } : c),
+      agendaEventos: s.agendaEventos.map(e => e.calendario_id === id
+        ? { ...e, ...(patch.color ? { calendario_color: patch.color } : {}), ...(patch.nombre ? { calendario_nombre: patch.nombre } : {}) }
         : e),
     }))
     try {
-      await fetch(`${API_URL}/agenda/calendarios/${origenId}/reasignar-eventos?destino_id=${destinoId}`, { method: 'PATCH' })
-    } catch { /* offline ok */ }
+      const res = await fetch(`${API_URL}/agenda/calendarios/${id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      })
+      if (!res.ok) throw new Error('not ok')
+      return true
+    } catch { return false }
   },
 
-  fetchAgendaEventos: async (desde, hasta) => {
+  deleteAgendaCalendario: async (id) => {
+    try {
+      const res = await fetch(`${API_URL}/agenda/calendarios/${id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('not ok')
+      set(s => ({
+        agendaCalendarios: s.agendaCalendarios.filter(c => c.id !== id),
+        agendaEventos: s.agendaEventos.filter(e => e.calendario_id !== id),
+      }))
+      return true
+    } catch { return false }
+  },
+
+  reasignarEventosAgendaCalendario: async (origenId, destinoId) => {
+    try {
+      const res = await fetch(`${API_URL}/agenda/calendarios/${origenId}/reasignar-eventos?destino_id=${destinoId}`, { method: 'PATCH' })
+      if (!res.ok) throw new Error('not ok')
+      const destino = get().agendaCalendarios.find(c => c.id === destinoId)
+      set(s => ({
+        agendaEventos: s.agendaEventos.map(e => e.calendario_id === origenId
+          ? { ...e, calendario_id: destinoId, calendario_color: destino?.color ?? e.calendario_color, calendario_nombre: destino?.nombre ?? e.calendario_nombre }
+          : e),
+      }))
+      return true
+    } catch { return false }
+  },
+
+  fetchAgendaEventos: async (desde, hasta, merge = false) => {
     try {
       const params = new URLSearchParams()
       if (desde) params.set('desde', desde)
       if (hasta) params.set('hasta', hasta)
       const res = await fetch(`${API_URL}/agenda/eventos?${params}`)
       if (!res.ok) throw new Error('not ok')
-      set({ agendaEventos: await res.json() })
-    } catch { set({ agendaEventos: [] }) }
+      const events = await res.json()
+      set(s => ({ agendaEventos: merge
+        ? [...s.agendaEventos.filter(old => !events.some(e => e.id === old.id)), ...events]
+        : events }))
+      return true
+    } catch { return false }
   },
 
   addAgendaEvento: async (payload) => {
@@ -945,33 +965,56 @@ export const useStore = create((set, get) => ({
       if (!res.ok) throw new Error('not ok')
       const data = await res.json()
       set(s => ({ agendaEventos: [...s.agendaEventos, data] }))
-      return data
+      if (payload.se_repite) {
+        const start = new Date(`${payload.fecha_inicio.slice(0, 10)}T12:00:00`)
+        const from = new Date(start.getFullYear(), start.getMonth() - 1, 1)
+        const through = new Date(start.getFullYear(), start.getMonth() + 14, 0)
+        const localDate = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        await get().fetchAgendaEventos(localDate(from), localDate(through), true)
+      }
+      return { ok: true, data }
     } catch {
       const mock = { id: `evt_${Date.now()}`, calendario_color: '#2563eb', calendario_nombre: '', ...payload }
       set(s => ({ agendaEventos: [...s.agendaEventos, mock] }))
-      return mock
+      return { ok: false, data: mock }
     }
   },
 
   updateAgendaEvento: async (id, patch) => {
     set(s => {
-      const cal = patch.calendario_id != null
-        ? s.agendaCalendarios.find(c => c.id === patch.calendario_id)
-        : null
-      const extra = cal ? { calendario_color: cal.color, calendario_nombre: cal.nombre } : {}
+      const changesCalendar = Object.prototype.hasOwnProperty.call(patch, 'calendario_id')
+      const cal = changesCalendar ? s.agendaCalendarios.find(c => c.id === patch.calendario_id) : null
+      const extra = changesCalendar
+        ? { calendario_color: cal?.color || '#2563eb', calendario_nombre: cal?.nombre || '' }
+        : {}
       return { agendaEventos: s.agendaEventos.map(e => e.id === id ? { ...e, ...patch, ...extra } : e) }
     })
     try {
-      await fetch(`${API_URL}/agenda/eventos/${id}`, {
+      const res = await fetch(`${API_URL}/agenda/eventos/${id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       })
-    } catch { /* offline ok */ }
+      if (!res.ok) throw new Error('not ok')
+      return true
+    } catch { return false }
   },
 
   deleteAgendaEvento: async (id) => {
     set(s => ({ agendaEventos: s.agendaEventos.filter(e => e.id !== id) }))
     try { await fetch(`${API_URL}/agenda/eventos/${id}`, { method: 'DELETE' }) } catch { /* noop */ }
+  },
+  stopAgendaSerie: async (tipo, serieId) => {
+    try {
+      const res = await fetch(`${API_URL}/agenda/series/${tipo}/${serieId}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('not ok')
+      set(s => ({
+        agendaEventos: s.agendaEventos.map(e => (tipo === 'evento' && (e.serie_id || e.id) === serieId)
+          ? { ...e, serie_activa: false } : e),
+        agendaTareas: s.agendaTareas.map(t => (tipo === 'tarea' && (t.serie_id || t.id) === serieId)
+          ? { ...t, serie_activa: false } : t),
+      }))
+      return true
+    } catch { return false }
   },
 
   fetchAgendaListas: async () => {
@@ -979,7 +1022,7 @@ export const useStore = create((set, get) => ({
       const res = await fetch(`${API_URL}/agenda/listas`)
       if (!res.ok) throw new Error('not ok')
       set({ agendaListas: await res.json() })
-    } catch { set({ agendaListas: [] }) }
+    } catch { /* Keep the last loaded lists while offline. */ }
   },
 
   addAgendaLista: async (payload) => {
@@ -1000,7 +1043,12 @@ export const useStore = create((set, get) => ({
   },
 
   updateAgendaLista: async (id, patch) => {
-    set(s => ({ agendaListas: s.agendaListas.map(l => l.id === id ? { ...l, ...patch } : l) }))
+    set(s => ({
+      agendaListas: s.agendaListas.map(l => l.id === id ? { ...l, ...patch } : l),
+      agendaTareas: s.agendaTareas.map(t => t.lista_id === id
+        ? { ...t, ...(patch.color ? { lista_color: patch.color } : {}), ...(patch.nombre ? { lista_nombre: patch.nombre } : {}) }
+        : t),
+    }))
     try {
       await fetch(`${API_URL}/agenda/listas/${id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
@@ -1017,12 +1065,12 @@ export const useStore = create((set, get) => ({
     try { await fetch(`${API_URL}/agenda/listas/${id}`, { method: 'DELETE' }) } catch { /* noop */ }
   },
 
-  fetchAgendaTareas: async () => {
+  fetchAgendaTareas: async (hasta) => {
     try {
-      const res = await fetch(`${API_URL}/agenda/tareas`)
+      const res = await fetch(`${API_URL}/agenda/tareas${hasta ? `?hasta=${encodeURIComponent(hasta)}` : ''}`)
       if (!res.ok) throw new Error('not ok')
       set({ agendaTareas: await res.json() })
-    } catch { set({ agendaTareas: [] }) }
+    } catch { /* Keep the last loaded tasks while offline. */ }
   },
 
   // addAgendaTarea/updateAgendaTarea devuelven ahora { ok, data } / ok booleano
@@ -1062,7 +1110,12 @@ export const useStore = create((set, get) => ({
   },
 
   updateAgendaTarea: async (id, patch) => {
-    set(s => ({ agendaTareas: s.agendaTareas.map(t => t.id === id ? { ...t, ...patch } : t) }))
+    set(s => {
+      const changesList = Object.prototype.hasOwnProperty.call(patch, 'lista_id')
+      const list = changesList ? s.agendaListas.find(l => l.id === patch.lista_id) : null
+      const extra = changesList ? { lista_color: list?.color || '#7c3aed', lista_nombre: list?.nombre || '' } : {}
+      return { agendaTareas: s.agendaTareas.map(t => t.id === id ? { ...t, ...patch, ...extra } : t) }
+    })
     try {
       const res = await fetch(`${API_URL}/agenda/tareas/${id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
@@ -1091,7 +1144,7 @@ export const useStore = create((set, get) => ({
       const res = await fetch(`${API_URL}/agenda/horario-facultad`)
       if (!res.ok) throw new Error('not ok')
       set({ agendaHorarioFacultad: await res.json() })
-    } catch { set({ agendaHorarioFacultad: [] }) }
+    } catch { /* Keep the last loaded timetable while offline. */ }
   },
 
   addAgendaHorarioFacultad: async (payload) => {
@@ -1114,11 +1167,13 @@ export const useStore = create((set, get) => ({
   updateAgendaHorarioFacultad: async (id, patch) => {
     set(s => ({ agendaHorarioFacultad: s.agendaHorarioFacultad.map(h => h.id === id ? { ...h, ...patch } : h) }))
     try {
-      await fetch(`${API_URL}/agenda/horario-facultad/${id}`, {
+      const res = await fetch(`${API_URL}/agenda/horario-facultad/${id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       })
-    } catch { /* offline ok */ }
+      if (!res.ok) throw new Error('not ok')
+      return true
+    } catch { return false }
   },
 
   deleteAgendaHorarioFacultad: async (id) => {

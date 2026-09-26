@@ -22,6 +22,7 @@ export default function TareaModal({ tarea, defaultListaId, defaultFecha, onClos
   const addAgendaTarea    = useStore(s => s.addAgendaTarea)
   const updateAgendaTarea = useStore(s => s.updateAgendaTarea)
   const deleteAgendaTarea = useStore(s => s.deleteAgendaTarea)
+  const stopAgendaSerie  = useStore(s => s.stopAgendaSerie)
   const showToast         = useStore(s => s.showToast)
 
   const [titulo, setTitulo]           = useState(tarea?.titulo || '')
@@ -32,6 +33,7 @@ export default function TareaModal({ tarea, defaultListaId, defaultFecha, onClos
   const [listaId, setListaId]         = useState(tarea?.lista_id || defaultListaId || agendaListas[0]?.id || null)
   const [saving, setSaving]           = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [confirmStop, setConfirmStop] = useState(false)
 
   // Recurrencia (2026-09-21) -- solo se ofrece al CREAR una tarea nueva, no al
   // editar una ya existente (no soportamos convertir una tarea en recurrente
@@ -79,6 +81,15 @@ export default function TareaModal({ tarea, defaultListaId, defaultFecha, onClos
     if (!confirmDelete) { setConfirmDelete(true); return }
     deleteAgendaTarea(tarea.id)
     onClose()
+  }
+
+  const handleStop = async () => {
+    if (!confirmStop) { setConfirmStop(true); return }
+    const ok = await stopAgendaSerie('tarea', tarea.serie_id || tarea.id)
+    showToast(ok
+      ? 'No se crearán más fechas; las tareas existentes permanecen.'
+      : 'No se pudo detener la repetición', ok ? 'success' : 'error')
+    if (ok) onClose()
   }
 
   const deleteBtn = tarea ? (
@@ -151,6 +162,18 @@ export default function TareaModal({ tarea, defaultListaId, defaultFecha, onClos
             onBlur={e => (e.target.style.borderColor = 'var(--border)')}
           />
         </div>
+        {tarea?.serie_activa && (
+          <div className="flex flex-col gap-2">
+            <p className="text-[11.5px]" style={{ color: 'var(--subtext)' }}>
+              Cada fecha es independiente. Detener la repetición conserva las tareas ya creadas.
+            </p>
+            <button type="button" onClick={handleStop}
+              className="self-start text-[12px] px-3 py-1.5 rounded-lg border transition-colors"
+              style={{ borderColor: confirmStop ? '#ef4444' : 'var(--border)', color: confirmStop ? '#ef4444' : 'var(--subtext)' }}>
+              {confirmStop ? 'Confirmar: las tareas existentes permanecen' : 'Detener nuevas repeticiones'}
+            </button>
+          </div>
+        )}
 
         {/* Recurrencia -- solo al crear una tarea nueva, y solo tiene sentido
             con fecha elegida (no hay desde dónde contar las ocurrencias). */}

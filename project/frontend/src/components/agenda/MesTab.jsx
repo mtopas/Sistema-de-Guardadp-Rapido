@@ -21,7 +21,7 @@ function buildMonthCells(year, month) {
   for (let i = offset - 1; i >= 0; i--) cells.push({ d: prevCount - i, prev: true })
   for (let d = 1; d <= daysCount; d++) cells.push({ d, cur: true })
   let nx = 1
-  while (cells.length % 7 !== 0 || cells.length < 42) cells.push({ d: nx++, next: true })
+  while (cells.length % 7 !== 0) cells.push({ d: nx++, next: true })
   return cells
 }
 
@@ -52,7 +52,7 @@ function AgendaMetric({ Icon, label, value, detail, color }) {
 }
 
 export default function MesTab() {
-  const { lang, agendaEventos, agendaTareas, agendaCalendarios, agendaHorarioFacultad, updateAgendaCalendario, fetchAgendaEventos, deleteAgendaEvento, deleteAgendaTarea, addAgendaEvento, setAgendaMesPosition } = useStore(
+  const { lang, agendaEventos, agendaTareas, agendaCalendarios, agendaHorarioFacultad, updateAgendaCalendario, fetchAgendaEventos, fetchAgendaTareas, deleteAgendaEvento, deleteAgendaTarea, addAgendaEvento, setAgendaMesPosition } = useStore(
     useShallow(s => ({
       lang:                  s.lang,
       agendaEventos:         s.agendaEventos,
@@ -63,6 +63,7 @@ export default function MesTab() {
       fetchAgendaEventos:    s.fetchAgendaEventos,
       deleteAgendaEvento:    s.deleteAgendaEvento,
       deleteAgendaTarea:     s.deleteAgendaTarea,
+      fetchAgendaTareas:    s.fetchAgendaTareas,
       addAgendaEvento:       s.addAgendaEvento,
       setAgendaMesPosition:  s.setAgendaMesPosition,
     }))
@@ -99,6 +100,7 @@ export default function MesTab() {
   const [editCalendario, setEditCalendario] = useState(null) // calendario | null
   const [newCalendario, setNewCalendario]   = useState(false)
   const lastFetchedMonth = useRef(null)
+  const lastWheelMonth = useRef(0)
 
   const openCalContextMenu = (e, cal) => {
     e.preventDefault()
@@ -145,7 +147,8 @@ export default function MesTab() {
     const desde = toLocalISODate(new Date(year, month - 1, 1))
     const hasta  = toLocalISODate(new Date(year, month + 2, 0))
     fetchAgendaEventos(desde, hasta)
-  }, [year, month, fetchAgendaEventos])
+    fetchAgendaTareas(hasta)
+  }, [year, month, fetchAgendaEventos, fetchAgendaTareas])
 
   const goMonth = (dir) => {
     let m = month + dir
@@ -153,6 +156,19 @@ export default function MesTab() {
     if (m > 11) { m = 0; y++ }
     if (m < 0)  { m = 11; y-- }
     setMonth(m); setYear(y); setAgendaMesPosition(y, m)
+  }
+
+  const goWeek = (dir) => {
+    const monday = buildWeekDays(year, month, weekOff)[0]
+    monday.setDate(monday.getDate() + dir * 7)
+    const thursday = new Date(monday)
+    thursday.setDate(thursday.getDate() + 3)
+    const y = thursday.getFullYear(), m = thursday.getMonth()
+    const firstMonday = buildWeekDays(y, m, 0)[0]
+    const utcDay = d => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())
+    setYear(y); setMonth(m)
+    setWeekOff(Math.round((utcDay(monday) - utcDay(firstMonday)) / (7 * 86400000)))
+    setAgendaMesPosition(y, m)
   }
 
   const goToday = () => {
@@ -254,11 +270,11 @@ export default function MesTab() {
         {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-2 px-4 lg:px-5 py-3 border-b shrink-0" style={{ borderColor: 'var(--border)' }}>
           <div className="flex items-center gap-3">
-            <button className="icon-btn" onClick={() => vista === 'mes' ? goMonth(-1) : setWeekOff(w => w - 1)}>
+             <button className="icon-btn" onClick={() => vista === 'mes' ? goMonth(-1) : goWeek(-1)}>
               <ChevronLeft size={15} />
             </button>
             <div className="text-[16px] font-semibold serif italic min-w-[160px] text-center capitalize">{monthName}</div>
-            <button className="icon-btn" onClick={() => vista === 'mes' ? goMonth(1) : setWeekOff(w => w + 1)}>
+             <button className="icon-btn" onClick={() => vista === 'mes' ? goMonth(1) : goWeek(1)}>
               <ChevronRight size={15} />
             </button>
             <button className="btn ml-1" onClick={goToday}>{t(lang, 'agendaHoy2')}</button>
@@ -298,7 +314,12 @@ export default function MesTab() {
             </div>
 
             {/* Month cells — key triggers remount (fade-in) on month change */}
-            <div key={`${year}-${month}`} className="flex-1 overflow-y-auto panel-scroll grid grid-cols-7 grid-rows-6" style={{ animation: 'sgr-fade-in 180ms ease' }}>
+            <div key={`${year}-${month}`} className="flex-1 overflow-y-auto panel-scroll grid grid-cols-7" style={{ animation: 'sgr-fade-in 180ms ease', gridTemplateRows: `repeat(${cells.length / 7}, minmax(0, 1fr))` }}
+              onWheel={e => {
+                if (Math.abs(e.deltaY) < 25 || Date.now() - lastWheelMonth.current < 350) return
+                lastWheelMonth.current = Date.now()
+                goMonth(e.deltaY > 0 ? 1 : -1)
+              }}>
               {cells.map((cell, i) => {
                 const row = Math.floor(i / 7), col = i % 7
                 const dim = cell.prev || cell.next
@@ -562,7 +583,7 @@ export default function MesTab() {
           <div className="flex items-center gap-3 px-4 py-2.5">
             <div className="label shrink-0">{t(lang, 'agendaProxEventos')}</div>
             <div className="flex gap-2 overflow-x-auto">
-              {agendaEventos.slice(0, 5).map((e, index) => (
+              {upcomingEvents.slice(0, 5).map((e, index) => (
                 <div key={`${e.id}-${e.fecha_inicio}-${index}`}
                   className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-[var(--surface)] cursor-pointer shrink-0 panel-strong"
                   onClick={() => setSelected({ type: 'evento', color: e.calendario_color, item: e })}>

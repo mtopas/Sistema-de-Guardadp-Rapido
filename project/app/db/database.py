@@ -1,7 +1,9 @@
 import sqlite3
-from datetime import datetime
+import json
+from datetime import date, datetime
 
 from app.config import DEBUG, DB_PATH
+from app.db.agenda_recurrence import recurring_dates, event_template, task_template
 
 
 def get_connection():
@@ -696,6 +698,48 @@ def _apply_migrations(cursor):
             if DEBUG:
                 print(f"migration: {tabla}.actualizado_en added")
 
+    # Legacy event series were virtual rows with one shared ID. Materialize them
+    # once so every occurrence has its own ID and can be edited/deleted alone.
+    eventos_cols = _get_columns(cursor, "agenda_eventos")
+    if "serie_id" not in eventos_cols:
+        cursor.execute("ALTER TABLE agenda_eventos ADD COLUMN serie_id INTEGER")
+    if "recurrencia_materializada" not in eventos_cols:
+        cursor.execute("ALTER TABLE agenda_eventos ADD COLUMN recurrencia_materializada INTEGER NOT NULL DEFAULT 0")
+    cursor.execute("""SELECT id, titulo, descripcion, fecha_inicio, fecha_fin,
+                            todo_el_dia, regla_repeticion, calendario_id
+                     FROM agenda_eventos
+                     WHERE se_repite = 1 AND recurrencia_materializada = 0""")
+    for event_id, title, description, start, end, all_day, rule_json, calendar_id in cursor.fetchall():
+        cursor.execute("SAVEPOINT agenda_event_series")
+        try:
+            rule = json.loads(rule_json) if rule_json else None
+            if not rule:
+                # The former virtual expander also treated an absent/empty rule
+                # as a single event, so do not invent a weekly series here.
+                cursor.execute("UPDATE agenda_eventos SET recurrencia_materializada = 1 WHERE id = ?", (event_id,))
+                cursor.execute("RELEASE SAVEPOINT agenda_event_series")
+                continue
+            duration = datetime.fromisoformat(end) - datetime.fromisoformat(start) if end else None
+            for day in recurring_dates(start, rule, extend_from=date.today()):
+                occurrence_start = day + start[10:]
+                occurrence_end = (datetime.fromisoformat(occurrence_start) + duration).isoformat() if duration else None
+                cursor.execute(
+                    """INSERT INTO agenda_eventos
+                       (titulo, descripcion, fecha_inicio, fecha_fin, todo_el_dia,
+                        se_repite, regla_repeticion, calendario_id, serie_id,
+                        recurrencia_materializada, creado_en, actualizado_en)
+                       VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?, 1, datetime('now'), datetime('now'))""",
+                    (title, description, occurrence_start, occurrence_end,
+                     all_day, calendar_id, event_id),
+                )
+            cursor.execute("UPDATE agenda_eventos SET recurrencia_materializada = 1 WHERE id = ?", (event_id,))
+            cursor.execute("RELEASE SAVEPOINT agenda_event_series")
+        except Exception as exc:
+            cursor.execute("ROLLBACK TO SAVEPOINT agenda_event_series")
+            cursor.execute("RELEASE SAVEPOINT agenda_event_series")
+            if DEBUG:
+                print(f"migration: serie de evento {event_id} no materializada: {exc}")
+
     # --- agenda_listas: pinned (vista canvas, listas "pineadas" primero) ---
     listas_cols = _get_columns(cursor, "agenda_listas")
     if "pinned" not in listas_cols:
@@ -720,6 +764,73 @@ def _apply_migrations(cursor):
         cursor.execute("ALTER TABLE agenda_tareas ADD COLUMN serie_id INTEGER")
         if DEBUG:
             print("migration: agenda_tareas.serie_id added")
+
+    # The series definition survives deletion or editing of its first occurrence.
+    # The date marker also prevents a deleted occurrence from being regenerated.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS agenda_series (
+            tipo               TEXT NOT NULL CHECK(tipo IN ('evento', 'tarea')),
+            serie_id           INTEGER NOT NULL,
+            fecha_inicio       TEXT NOT NULL,
+            regla_repeticion   TEXT NOT NULL,
+            plantilla         TEXT NOT NULL,
+            contenedor_id      INTEGER,
+            generada_hasta     TEXT NOT NULL,
+            activa             INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (tipo, serie_id)
+        )
+    """)
+    if "activa" not in _get_columns(cursor, "agenda_series"):
+        cursor.execute("ALTER TABLE agenda_series ADD COLUMN activa INTEGER NOT NULL DEFAULT 1")
+    cursor.execute("""SELECT id, titulo, descripcion, fecha_inicio, fecha_fin,
+                             todo_el_dia, regla_repeticion, calendario_id
+                      FROM agenda_eventos
+                      WHERE se_repite = 1 AND regla_repeticion IS NOT NULL
+                        AND NOT EXISTS (SELECT 1 FROM agenda_series s
+                                        WHERE s.tipo = 'evento' AND s.serie_id = agenda_eventos.id)""")
+    for eid, title, description, start, end, all_day, rule_json, calendar_id in cursor.fetchall():
+        if not rule_json:
+            continue
+        try:
+            rule = json.loads(rule_json)
+            if not rule:
+                continue
+            initial = recurring_dates(start, rule)
+            cursor.execute("SELECT MAX(substr(fecha_inicio, 1, 10)) FROM agenda_eventos WHERE serie_id = ?", (eid,))
+            last_child = cursor.fetchone()[0]
+            horizon = max(filter(None, [start[:10], initial[-1] if initial else None, last_child]))
+            template = event_template(title, description, start, end, all_day)
+            cursor.execute("""INSERT OR IGNORE INTO agenda_series
+                (tipo, serie_id, fecha_inicio, regla_repeticion, plantilla, contenedor_id, generada_hasta)
+                VALUES ('evento', ?, ?, ?, ?, ?, ?)""",
+                (eid, start, rule_json, json.dumps(template), calendar_id, horizon))
+        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+            if DEBUG:
+                print(f"migration: serie de evento {eid} sin extensión automática: {exc}")
+
+    cursor.execute("""SELECT id, titulo, descripcion, fecha_opcional, hora_opcional,
+                             hora_bloque, duracion_estimada, regla_repeticion, lista_id
+                      FROM agenda_tareas
+                      WHERE se_repite = 1 AND fecha_opcional IS NOT NULL AND regla_repeticion IS NOT NULL
+                        AND NOT EXISTS (SELECT 1 FROM agenda_series s
+                                        WHERE s.tipo = 'tarea' AND s.serie_id = agenda_tareas.id)""")
+    for tid, title, description, start, hour, block, duration, rule_json, list_id in cursor.fetchall():
+        if not rule_json:
+            continue
+        try:
+            rule = json.loads(rule_json)
+            initial = recurring_dates(start, rule or {})
+            cursor.execute("SELECT MAX(fecha_opcional) FROM agenda_tareas WHERE serie_id = ?", (tid,))
+            last_child = cursor.fetchone()[0]
+            horizon = max(filter(None, [start[:10], initial[-1] if initial else None, last_child]))
+            template = task_template(title, description, hour, block, duration)
+            cursor.execute("""INSERT OR IGNORE INTO agenda_series
+                (tipo, serie_id, fecha_inicio, regla_repeticion, plantilla, contenedor_id, generada_hasta)
+                VALUES ('tarea', ?, ?, ?, ?, ?, ?)""",
+                (tid, start[:10], rule_json, json.dumps(template), list_id, horizon))
+        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+            if DEBUG:
+                print(f"migration: serie de tarea {tid} sin extensión automática: {exc}")
 
     # --- Index para eventos por fecha ---
     cursor.execute(

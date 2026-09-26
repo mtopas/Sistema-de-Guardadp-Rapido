@@ -9,7 +9,7 @@ import tempfile
 import time
 import uuid
 import zipfile
-from datetime import datetime
+from datetime import date, datetime
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -1568,6 +1568,18 @@ class AgendaEventoCreate(BaseModel):
     def check_fechas(self):
         if self.fecha_fin and self.fecha_inicio and self.fecha_fin < self.fecha_inicio:
             raise ValueError("fecha_fin debe ser posterior a fecha_inicio")
+        if self.se_repite:
+            try:
+                rule = json.loads(self.regla_repeticion or "")
+                if not isinstance(rule, dict) or rule.get("frecuencia", "semanal") not in {"diario", "semanal", "mensual"}:
+                    raise ValueError("regla de repetición inválida")
+                days = rule.get("dias") or []
+                if not isinstance(days, list) or any(not isinstance(day, int) or day not in range(7) for day in days):
+                    raise ValueError("días de repetición inválidos")
+                if rule.get("hasta"):
+                    date.fromisoformat(rule["hasta"])
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise ValueError("regla_repeticion debe ser un JSON válido de Agenda") from exc
         return self
 
 class AgendaEventoPatch(BaseModel):
@@ -1579,6 +1591,12 @@ class AgendaEventoPatch(BaseModel):
     se_repite: Optional[bool] = None
     regla_repeticion: Optional[str] = None
     calendario_id: Optional[int] = None
+
+    @model_validator(mode='after')
+    def no_reprogramar_serie(self):
+        if {'se_repite', 'regla_repeticion'} & self.model_fields_set:
+            raise ValueError("La recurrencia se configura al crear; cada ocurrencia se edita por separado")
+        return self
 
 class AgendaListaCreate(BaseModel):
     nombre: str
@@ -1664,7 +1682,7 @@ def crear_agenda_calendario(body: AgendaCalendarioCreate):
 
 @app.patch("/agenda/calendarios/{cal_id}")
 def actualizar_agenda_calendario(cal_id: int, body: AgendaCalendarioPatch):
-    campos = {k: v for k, v in body.model_dump().items() if v is not None}
+    campos = body.model_dump(exclude_unset=True)
     result = agenda_actualizar_calendario(cal_id, campos)
     if result is None:
         raise HTTPException(status_code=404, detail="Calendario no encontrado")
@@ -1718,7 +1736,7 @@ def crear_agenda_evento(body: AgendaEventoCreate):
 
 @app.patch("/agenda/eventos/{evt_id}")
 def actualizar_agenda_evento(evt_id: int, body: AgendaEventoPatch):
-    campos = {k: v for k, v in body.model_dump().items() if v is not None}
+    campos = body.model_dump(exclude_unset=True)
     result = agenda_actualizar_evento(evt_id, campos)
     if result is None:
         raise HTTPException(status_code=404, detail="Evento no encontrado")
@@ -1729,6 +1747,16 @@ def eliminar_agenda_evento_endpoint(evt_id: int):
     if not agenda_eliminar_evento(evt_id):
         raise HTTPException(status_code=404, detail="Evento no encontrado")
     return {"mensaje": "Evento eliminado"}
+
+
+@app.delete("/agenda/series/{tipo}/{serie_id}")
+def detener_agenda_serie(tipo: str, serie_id: int):
+    """Stop future generation; already materialized occurrences remain independent."""
+    if tipo not in {"evento", "tarea"}:
+        raise HTTPException(status_code=422, detail="Tipo de serie inválido")
+    if not agenda_detener_serie(tipo, serie_id):
+        raise HTTPException(status_code=404, detail="Serie activa no encontrada")
+    return {"mensaje": "No se generarán más ocurrencias; las existentes permanecen"}
 
 
 @app.get("/agenda/export.ics")
@@ -1783,14 +1811,19 @@ def exportar_agenda_ics(
 
 
 @app.get("/agenda/notificaciones/pending")
-def agenda_notificaciones_pending(ventana_min: int = Query(15)):
+def agenda_notificaciones_pending(ventana_min: int = Query(15, ge=1, le=120), ahora: Optional[str] = Query(None)):
     """Events starting within the next `ventana_min` minutes."""
     from datetime import datetime, timedelta
-    now   = datetime.now()
+    try:
+        now = datetime.fromisoformat(ahora) if ahora else datetime.now()
+        if now.tzinfo is not None:
+            raise ValueError("Se requiere fecha y hora local sin zona")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     hasta = now + timedelta(minutes=ventana_min)
     eventos = agenda_obtener_eventos(
-        fecha_desde=now.strftime('%Y-%m-%dT%H:%M'),
-        fecha_hasta=hasta.strftime('%Y-%m-%dT%H:%M'),
+        fecha_desde=now.isoformat(timespec='seconds'),
+        fecha_hasta=hasta.isoformat(timespec='seconds'),
     )
     return [e for e in eventos if not e.get("todo_el_dia")]
 
@@ -1809,7 +1842,7 @@ def crear_agenda_lista(body: AgendaListaCreate):
 
 @app.patch("/agenda/listas/{lista_id}")
 def actualizar_agenda_lista(lista_id: int, body: AgendaListaPatch):
-    campos = {k: v for k, v in body.model_dump().items() if v is not None}
+    campos = body.model_dump(exclude_unset=True)
     result = agenda_actualizar_lista(lista_id, campos)
     if result is None:
         raise HTTPException(status_code=404, detail="Lista no encontrada")
@@ -1830,8 +1863,14 @@ def eliminar_agenda_lista_endpoint(lista_id: int):
 def listar_agenda_tareas(
     lista_id: Optional[int] = Query(None),
     pendientes: bool = Query(False),
+    hasta: Optional[str] = Query(None),
 ):
-    return agenda_obtener_tareas(lista_id=lista_id, solo_pendientes=pendientes)
+    if hasta:
+        try:
+            date.fromisoformat(hasta)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="hasta debe ser YYYY-MM-DD") from exc
+    return agenda_obtener_tareas(lista_id=lista_id, solo_pendientes=pendientes, fecha_hasta=hasta)
 
 @app.post("/agenda/tareas")
 def crear_agenda_tarea(body: AgendaTareaCreate):
@@ -1849,7 +1888,7 @@ def crear_agenda_tarea(body: AgendaTareaCreate):
 
 @app.patch("/agenda/tareas/{tarea_id}")
 def actualizar_agenda_tarea(tarea_id: int, body: AgendaTareaPatch):
-    campos = {k: v for k, v in body.model_dump().items() if v is not None}
+    campos = body.model_dump(exclude_unset=True)
     if body.completada is not None:
         campos["completada"] = int(body.completada)
     result = agenda_actualizar_tarea(tarea_id, campos)
@@ -1885,7 +1924,7 @@ def crear_agenda_horario(body: AgendaHorarioCreate):
 
 @app.patch("/agenda/horario-facultad/{hf_id}")
 def actualizar_agenda_horario(hf_id: int, body: AgendaHorarioPatch):
-    campos = {k: v for k, v in body.model_dump().items() if v is not None}
+    campos = body.model_dump(exclude_unset=True)
     result = agenda_actualizar_horario_facultad(hf_id, campos)
     if result is None:
         raise HTTPException(status_code=404, detail="Horario no encontrado")

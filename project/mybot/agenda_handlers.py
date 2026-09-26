@@ -278,8 +278,13 @@ def _parse_fecha_simple(text: str) -> str:
         return today.isoformat()
     if re.match(r"ma[ñn]ana", text):
         return (today + timedelta(days=1)).isoformat()
-    if re.match(r"\d{4}-\d{2}-\d{2}", text):
-        return text
+    if re.fullmatch(r"\d{1,2}", text):
+        return date(today.year, today.month, int(text)).isoformat()
+    if re.fullmatch(r"\d{1,2}-\d{1,2}-\d{4}", text):
+        day, month, year = map(int, text.split("-"))
+        return date(year, month, day).isoformat()
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        return date.fromisoformat(text).isoformat()
     for day_name, py_wd in _DIAS_ES.items():
         if day_name in text:
             days_ahead = py_wd - today.weekday()
@@ -990,7 +995,11 @@ async def cmd_hoy(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_dia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     api = context.bot_data.get("api_base", DEFAULT_API_BASE)
     raw = " ".join(context.args).strip() if context.args else ""
-    fecha = _parse_fecha_simple(raw)
+    try:
+        fecha = _parse_fecha_simple(raw)
+    except ValueError:
+        await update.message.reply_text("Fecha inválida. Usá /dia dd, /dia dd-mm-aaaa o /dia aaaa-mm-dd.")
+        return
 
     try:
         tareas  = _get_tareas_pendientes(api)

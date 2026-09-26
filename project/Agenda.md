@@ -11,8 +11,8 @@ Agenda es el módulo de **gestión de tiempo y tareas**: calendarios, eventos, l
 
 | Tab | Default | Rol |
 |-----|---------|-----|
-| **HOY** | ✅ al entrar | Día actual: pendientes, grilla 6–23h, bloques, hábitos |
-| **Mes** | | Calendario mensual + vista semana; toggles de calendarios |
+| **HOY** | | Día actual: pendientes, grilla 6–23h, bloques, hábitos |
+| **Mes** | ✅ al entrar | Calendario mensual + vista semana; toggles de calendarios |
 | **Tareas** | | Listas y checklists sin calendario de fondo |
 | **Revisión** | | Retrospectiva semanal |
 
@@ -39,13 +39,12 @@ app/main.py → app/db/crud.py → SQLite
 |------|----------|
 | Pantalla | `frontend/src/screens/AgendaScreen.jsx` |
 | Tabs | `components/agenda/HoyTab.jsx`, `MesTab.jsx`, `TareasTab.jsx`, `RevisionTab.jsx` |
-| UI compartida | `AgendaTabs.jsx`, `MiniCalendar.jsx`, `AgendaModalShell.jsx`, `AgendaContextMenu.jsx`, `AgendaPanel.jsx` |
+| UI compartida | `AgendaTabs.jsx`, `MiniCalendar.jsx`, `AgendaModalShell.jsx`, `AgendaContextMenu.jsx` |
 | Modales | `EventoModal.jsx`, `TareaModal.jsx`, `HorarioFacultadModal.jsx` |
-| Hooks reutilizables | `useAgendaDay.js`, `useAgendaKeyboard.js` |
-| Grilla horaria | `HourGrid.jsx` (parametrizable: hours, hourHeight, nowMinutes, blocks, events) |
+| Grilla horaria | Implementada en `HoyTab.jsx`; constantes en `agendaUtils.js` |
 | Estado | `store/useStore.js` (slice `agenda*` + `agendaActiveTab`) |
 | API | `app/main.py` (`/agenda/*`) |
-| SQL | `app/db/crud.py` (`agenda_*`, `_expand_recurring`) |
+| SQL | `app/db/crud.py` (`agenda_*`) + `app/db/agenda_recurrence.py` (fechas compartidas de eventos/tareas) |
 | Schema + seed | `app/db/database.py` (`_seed_agenda`) |
 | i18n | `utils/i18n.js` (claves `agenda*`) |
 | Carga inicial | `App.jsx` — 5 `fetchAgenda*` al montar |
@@ -67,8 +66,10 @@ Toda mutación hace **update optimista** en Zustand y luego `fetch` en `try/catc
 ```sql
 agenda_calendarios      (id, nombre, color, activo)
 agenda_eventos          (id, titulo, descripcion, fecha_inicio, fecha_fin,
-                         todo_el_dia, se_repite, regla_repeticion, calendario_id,
+                         todo_el_dia, se_repite, regla_repeticion, calendario_id, serie_id,
                          creado_en, actualizado_en)
+agenda_series           (tipo, serie_id, fecha_inicio, regla_repeticion,
+                         plantilla, contenedor_id, generada_hasta, activa)
 agenda_listas           (id, nombre, color)
 agenda_tareas           (id, titulo, descripcion, fecha_opcional, hora_opcional,
                          hora_bloque, duracion_estimada, completada, lista_id,
@@ -96,7 +97,7 @@ agenda_horario_facultad (id, dia_semana, hora_inicio, hora_fin, materia, descrip
 | `hora_bloque` | Time blocking HOY: tarea en grilla; si pasa sin completar → se limpia al montar `HoyTab` |
 | `hora_opcional` | Metadata en listas / chips |
 | `duracion_estimada` | Altura del bloque en grilla (default 30 min) |
-| `se_repite` / `regla_repeticion` | JSON `{frecuencia, dias, hasta}`; **motor backend** `_expand_recurring()` en `crud.py` expande ocurrencias al servir eventos |
+| `se_repite` / `regla_repeticion` | JSON `{frecuencia, dias, hasta}`; al crear se materializan filas independientes de eventos o tareas, vinculadas por `serie_id`. Semanal sin días elegidos repite el día inicial. Ventana inicial: diario 60 días, semanal 12 semanas, mensual 12 ocurrencias; las lecturas extienden la serie al consultar fechas posteriores. `agenda_series` conserva la regla y la última fecha generada incluso si se borra la primera ocurrencia. |
 | `activo` (calendario) | Mes filtra eventos de calendarios inactivos |
 
 ### API REST
@@ -109,14 +110,15 @@ agenda_horario_facultad (id, dia_semana, hora_inicio, hora_fin, materia, descrip
 | POST/PATCH/DELETE | `/agenda/eventos/{id}` | PATCH actualiza `actualizado_en` |
 | GET/POST | `/agenda/listas` | |
 | PATCH/DELETE | `/agenda/listas/{id}` | DELETE borra tareas de esa lista |
-| GET | `/agenda/tareas?lista_id=&pendientes=` | Front casi siempre pide todas |
+| GET | `/agenda/tareas?lista_id=&pendientes=&hasta=` | Front casi siempre pide todas; `hasta` extiende las recurrencias hasta el período consultado y una ventana adicional. |
 | POST | `/agenda/tareas` | Acepta `hora_bloque` en create |
 | PATCH/DELETE | `/agenda/tareas/{id}` | PATCH actualiza `actualizado_en` |
+| DELETE | `/agenda/series/{tipo}/{serie_id}` | Detiene la generación futura de eventos o tareas; conserva las ocurrencias ya materializadas. Borrar la última ocurrencia también detiene automáticamente la serie. |
 | GET/POST/PATCH/DELETE | `/agenda/horario-facultad` | `dia_semana`: Lun=0 … Dom=6 |
 | GET | `/agenda/buscar?q=` | Full-text en título/descripción de eventos y tareas; retorna `{eventos, tareas}` (20 c/u) |
 | GET | `/agenda/revision?desde=&hasta=` | JSON con completadas, incompletas, vencidas, por_calendario |
 | GET | `/agenda/export.ics?desde=&hasta=` | iCalendar RFC-compliant; `DTSTART`, `DTEND`, `SUMMARY`, `DESCRIPTION`, `UID` |
-| GET | `/agenda/notificaciones/pending?ventana_min=` | Eventos que empiezan dentro de `ventana_min` (default 15); usado por TopBar polling |
+| GET | `/agenda/notificaciones/pending?ventana_min=&ahora=` | Eventos que empiezan dentro de `ventana_min`; `ahora` es la hora local enviada por el navegador para evitar diferencias de zona con el servidor. |
 
 Formato fechas eventos: ISO local `YYYY-MM-DDTHH:MM:00` (string en SQLite).
 
@@ -166,7 +168,7 @@ Formato fechas eventos: ISO local `YYYY-MM-DDTHH:MM:00` (string en SQLite).
 **Refetch automático:** `useRef(lastFetchedMonth)` — refetch al cambiar `year/month` fuera del rango cargado.
 
 **Izquierda:** `MiniCalendar` + lista calendarios (toggle `activo` al click).
-**Centro:** vista Mes (6×7) o Semana (columnas 7–22h). Click en día → `EventoModal` con `defaultFecha`. Click en chip → `selected` en panel derecho.
+**Centro:** vista Mes (4–6 filas según el mes; rueda para cambiar) o Semana (columnas 7–22h). Click en día → `EventoModal` con `defaultFecha`. Click en chip → `selected` en panel derecho.
 **Derecha (xl):** detalle evento/tarea (lectura + botón **Editar** que abre `EventoModal`/`TareaModal`) o próximos 5 eventos.
 
 **Vista Semana (mejoras mayo 2026):**
@@ -187,7 +189,7 @@ Formato fechas eventos: ISO local `YYYY-MM-DDTHH:MM:00` (string en SQLite).
 - **Sparkline SVG** de tareas completadas por día (L–D) con puntos `var(--accent)`.
 - **% tiempo planificado:** denominador = 16h despierto × 7 días = 6720 min. Numerador incluye **eventos** + **bloques de tareas** (`hora_bloque + duracion_estimada`). Muestra desglose "(Xh eventos + Yh bloques)" cuando hay bloques.
 - **Botón Exportar Markdown:** genera `.md` con resumen de completadas, incompletas, vencidas y tiempo por calendario vía `URL.createObjectURL`.
-- Panel derecho: minutos por calendario + estimado facultad (suma de slots semanales, no por día real).
+- Panel derecho: minutos por calendario desde `GET /agenda/revision` + estimado facultad (suma de slots semanales, no por día real). Exportación Markdown e ICS.
 
 ### 4.5 Modales
 
@@ -200,9 +202,9 @@ Formato fechas eventos: ISO local `YYYY-MM-DDTHH:MM:00` (string en SQLite).
 
 | Modal | Abre desde | Notas |
 |-------|------------|-------|
-| `EventoModal` | TopBar CTA, clic en día Mes, mini-cal, click slot HOY, panel derecho | Usa `AgendaModalShell`. Acepta `defaultHora`. `showToast` i18n al guardar. **Confirmación doble** antes de eliminar (primer click = confirmar; segundo = DELETE). **UI de recurrencia:** toggle `seRepite` → selector frecuencia (Diario/Semanal/Mensual) + días de semana (solo Semanal) + fecha límite; serializa a `regla_repeticion` JSON. |
-| `TareaModal` | HOY +, Tareas, panel derecho | Usa `AgendaModalShell`. `showToast` i18n al guardar. **Confirmación doble** antes de eliminar. |
-| `HorarioFacultadModal` | Botón "Facultad" | Lista + form inline; CRUD recurrente por día de semana. `Escape` cierra, backdrop blur. |
+| `EventoModal` | TopBar CTA, clic en día Mes, mini-cal, click slot HOY, panel derecho | Usa `AgendaModalShell`. Acepta `defaultHora`. **Confirmación doble** antes de eliminar. La recurrencia se configura al crear; después cada ocurrencia se edita o borra de forma independiente. Permite detener nuevas repeticiones sin borrar las fechas existentes. |
+| `TareaModal` | HOY +, Tareas, panel derecho | Usa `AgendaModalShell`. `showToast` i18n al guardar. **Confirmación doble** antes de eliminar. Permite detener nuevas repeticiones sin borrar tareas existentes. |
+| `HorarioFacultadModal` | Botón "Facultad" | Lista + form inline; crear, editar y borrar por día de semana. `Escape` cierra, backdrop blur. |
 
 ---
 
@@ -215,7 +217,7 @@ Formato fechas eventos: ISO local `YYYY-MM-DDTHH:MM:00` (string en SQLite).
 | **Finanzas** | Soft-link por keywords (`FIN_KEYWORDS` regex): `HoyTab` muestra 💰 en tareas con palabras financieras (pagar, cuota, factura…) → click navega a `/finanzas`; `FinanzasLeftPanel` muestra hasta 6 tareas pendientes con keyword financiero y enlace "Ver todas →" en `/agenda?tab=tareas` |
 | **TopBar búsqueda** | En `/agenda`: debounce 300ms → `GET /agenda/buscar?q=` → dropdown con eventos (📅) y tareas (☑) |
 | **CaptureModal** | Tab "Agenda" habilitado: toggle Evento/Tarea, título, fecha, hora; tareas asocian lista |
-| **TopBar campana** | Badge visual; sin handler (decorativo) |
+| **TopBar campana** | En Agenda muestra eventos próximos; el navegador envía avisos globales según Ajustes mientras SGR está abierto. |
 | **TweaksPanel Ctrl+M** | Global: temas/tonos/fuentes; igual en todos los módulos |
 
 ---
@@ -389,12 +391,10 @@ project/
 │   ├── store/useStore.js    # Slice agenda*
 │   ├── screens/AgendaScreen.jsx  # Tab en URL (?tab=)
 │   └── components/agenda/
-│       ├── agendaUtils.js        # toLocalISODate, HOURS, HOUR_HEIGHT, timeToMinutes, minutesToTop, layoutTimedEvents
+│       ├── agendaUtils.js        # Fechas locales y dimensiones de la grilla
 │       ├── AgendaModalShell.jsx  # Shell reutilizable: Escape, Ctrl+Enter, backdrop blur
 │       ├── AgendaTabs.jsx
-│       ├── AgendaPanel.jsx       # Panel derecho reutilizable (detalle evento/tarea)
 │       ├── AgendaContextMenu.jsx # Menú contextual (integrado en chips Mes: Editar/Duplicar/Eliminar)
-│       ├── HourGrid.jsx          # Grilla horaria parametrizable (hours, hourHeight, nowMinutes, blocks, events)
 │       ├── MiniCalendar.jsx
 │       ├── HoyTab.jsx            # Grilla 6–23h + navegación día + integración hábitos + 💰 FIN_KEYWORDS
 │       ├── MesTab.jsx
@@ -403,8 +403,7 @@ project/
 │       ├── EventoModal.jsx       # Usa AgendaModalShell; recurrencia UI
 │       ├── TareaModal.jsx        # Usa AgendaModalShell
 │       ├── HorarioFacultadModal.jsx
-│       ├── useAgendaDay.js       # Hook: lógica de navegación de día (viewDate, viewISO, isToday)
-│       └── useAgendaKeyboard.js  # Hook: atajos de teclado globales en AgendaScreen
+│       └── CalendarioModal.jsx   # CRUD de calendarios
 └── mybot/
     ├── bot.py               # Entry point + Bóveda + backoff healthcheck + /checkin handler
     ├── agenda_handlers.py   # Agenda + Hábitos; nota conversacional; /checkin configurable

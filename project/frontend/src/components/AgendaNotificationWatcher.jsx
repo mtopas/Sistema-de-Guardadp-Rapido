@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useStore } from '../store/useStore'
 import { API_URL } from '../config'
+import { toLocalISODateTime } from './agenda/agendaUtils'
 
 export default function AgendaNotificationWatcher() {
   const enabled = useStore(s => s.agendaNotificationsEnabled)
@@ -13,7 +14,7 @@ export default function AgendaNotificationWatcher() {
     let active = true
     const check = async () => {
       try {
-        const response = await fetch(`${API_URL}/agenda/notificaciones/pending?ventana_min=${minutes}`)
+        const response = await fetch(`${API_URL}/agenda/notificaciones/pending?ventana_min=${minutes}&ahora=${encodeURIComponent(toLocalISODateTime())}`)
         if (!response.ok || !active) return
         const events = await response.json()
         if (!active) return

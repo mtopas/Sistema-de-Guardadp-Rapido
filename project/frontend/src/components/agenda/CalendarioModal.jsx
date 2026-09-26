@@ -37,7 +37,8 @@ export default function CalendarioModal({ calendario, onClose }) {
     if (!nombre.trim()) return
     setSaving(true)
     if (calendario) {
-      await updateAgendaCalendario(calendario.id, { nombre: nombre.trim(), color })
+      const ok = await updateAgendaCalendario(calendario.id, { nombre: nombre.trim(), color })
+      if (!ok) { showToast('No se pudo actualizar el calendario', 'error'); setSaving(false); return }
       showToast(t(lang, 'agendaCalendarioActualizado'))
     } else {
       await addAgendaCalendario({ nombre: nombre.trim(), color })
@@ -49,10 +50,14 @@ export default function CalendarioModal({ calendario, onClose }) {
 
   const handleDelete = async () => {
     if (!confirmDelete) { setConfirmDelete(true); return }
-    if (deleteMode === 'mover' && destinoId) {
-      await reasignarEventosAgendaCalendario(calendario.id, destinoId)
+    setSaving(true)
+    if (deleteMode === 'mover') {
+      if (!destinoId) { showToast('Elegí un calendario de destino', 'error'); setSaving(false); return }
+      const moved = await reasignarEventosAgendaCalendario(calendario.id, destinoId)
+      if (!moved) { showToast('No se pudieron mover los eventos; el calendario sigue intacto', 'error'); setSaving(false); return }
     }
-    await deleteAgendaCalendario(calendario.id)
+    const deleted = await deleteAgendaCalendario(calendario.id)
+    if (!deleted) { showToast('No se pudo eliminar el calendario', 'error'); setSaving(false); return }
     showToast(t(lang, 'agendaCalendarioEliminado'))
     onClose()
   }
@@ -81,6 +86,7 @@ export default function CalendarioModal({ calendario, onClose }) {
         </div>
       )}
       <button
+        disabled={saving}
         className="text-[12px] px-3 py-1.5 rounded-lg border transition-colors"
         style={{
           borderColor: confirmDelete ? '#ef4444' : 'var(--border)',

@@ -5,6 +5,7 @@ import { useStore } from '../store/useStore'
 import { t } from '../utils/i18n'
 import { API_URL } from '../config'
 import { APP_MODULES, adjacentModule, moduleIndexForPath } from '../utils/themes'
+import { toLocalISODateTime } from './agenda/agendaUtils'
 
 const kbdStyle = {
   borderColor: 'var(--border)',
@@ -136,7 +137,7 @@ export default function TopBar({ searchQuery = '', onSearchChange, searchInputRe
     if (!isAgenda) return
     const checkNotifs = async () => {
       try {
-        const res = await fetch(`${API_URL}/agenda/notificaciones/pending?ventana_min=${agendaReminderMinutes}`)
+        const res = await fetch(`${API_URL}/agenda/notificaciones/pending?ventana_min=${agendaReminderMinutes}&ahora=${encodeURIComponent(toLocalISODateTime())}`)
         if (!res.ok) return
         const data = await res.json()
         setAgendaNotifPending(data)
@@ -403,7 +404,7 @@ export default function TopBar({ searchQuery = '', onSearchChange, searchInputRe
               <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor: 'var(--border)' }}>
                 <Bell size={13} style={{ color: 'var(--accent)' }} />
                 <span className="text-[12px] font-semibold" style={{ color: 'var(--text)' }}>
-                  Próximos 15 min
+                  Próximos {agendaReminderMinutes} min
                 </span>
               </div>
               {agendaNotifPending.length === 0 ? (

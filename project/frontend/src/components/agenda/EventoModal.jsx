@@ -23,6 +23,7 @@ export default function EventoModal({ defaultFecha, defaultHora, evento, onClose
   const addAgendaEvento    = useStore(s => s.addAgendaEvento)
   const updateAgendaEvento = useStore(s => s.updateAgendaEvento)
   const deleteAgendaEvento = useStore(s => s.deleteAgendaEvento)
+  const stopAgendaSerie   = useStore(s => s.stopAgendaSerie)
   const showToast          = useStore(s => s.showToast)
 
   const [titulo, setTitulo]           = useState(evento?.titulo || '')
@@ -32,16 +33,16 @@ export default function EventoModal({ defaultFecha, defaultHora, evento, onClose
   const [fechaFin, setFechaFin]       = useState(evento?.fecha_fin?.slice(0, 10) || '')
   const [horaFin, setHoraFin]         = useState(evento?.fecha_fin?.slice(11, 16) || '')
   const [todoElDia, setTodoElDia]     = useState(evento?.todo_el_dia ?? false)
-  const [seRepite, setSeRepite]       = useState(evento?.se_repite ?? false)
+  const [seRepite, setSeRepite]       = useState(false)
   const [calId, setCalId]             = useState(evento?.calendario_id || agendaCalendarios[0]?.id || null)
   const [saving, setSaving]           = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [confirmStop, setConfirmStop] = useState(false)
 
-  // Recurrence state (parsed from regla_repeticion JSON)
-  const initRec = evento?.regla_repeticion ? (typeof evento.regla_repeticion === 'string' ? JSON.parse(evento.regla_repeticion) : evento.regla_repeticion) : {}
-  const [recFrecuencia, setRecFrecuencia] = useState(initRec.frecuencia || 'semanal')
-  const [recDias, setRecDias]             = useState(initRec.dias || [])
-  const [recHasta, setRecHasta]           = useState(initRec.hasta || '')
+  // Recurrence is configured when creating; existing occurrences are independent.
+  const [recFrecuencia, setRecFrecuencia] = useState('semanal')
+  const [recDias, setRecDias]             = useState([])
+  const [recHasta, setRecHasta]           = useState('')
 
   const toggleDia = (i) => setRecDias(prev => prev.includes(i) ? prev.filter(d => d !== i) : [...prev, i])
 
@@ -58,16 +59,16 @@ export default function EventoModal({ defaultFecha, defaultHora, evento, onClose
     const payload = {
       titulo: titulo.trim(), descripcion: descripcion.trim() || null,
       fecha_inicio: fechaInicioFull, fecha_fin: fechaFinFull,
-      todo_el_dia: todoElDia, se_repite: seRepite,
-      regla_repeticion: reglaRep,
+      todo_el_dia: todoElDia,
       calendario_id: calId,
     }
+    if (!evento) { payload.se_repite = seRepite; payload.regla_repeticion = reglaRep }
     if (evento) {
-      await updateAgendaEvento(evento.id, payload)
-      showToast(t(lang, 'agendaEventoActualizado'))
+      const ok = await updateAgendaEvento(evento.id, payload)
+      showToast(ok ? t(lang, 'agendaEventoActualizado') : 'No se pudo actualizar el evento', ok ? 'success' : 'error')
     } else {
-      await addAgendaEvento(payload)
-      showToast(t(lang, 'agendaEventoCreado'))
+      const { ok } = await addAgendaEvento(payload)
+      showToast(ok ? t(lang, 'agendaEventoCreado') : 'No se pudo guardar el evento', ok ? 'success' : 'error')
     }
     setSaving(false)
     onClose()
@@ -77,6 +78,15 @@ export default function EventoModal({ defaultFecha, defaultHora, evento, onClose
     if (!confirmDelete) { setConfirmDelete(true); return }
     deleteAgendaEvento(evento.id)
     onClose()
+  }
+
+  const handleStop = async () => {
+    if (!confirmStop) { setConfirmStop(true); return }
+    const ok = await stopAgendaSerie('evento', evento.serie_id || evento.id)
+    showToast(ok
+      ? 'No se crearán más fechas; las existentes permanecen.'
+      : 'No se pudo detener la repetición', ok ? 'success' : 'error')
+    if (ok) onClose()
   }
 
   const handleDuplicate = useCallback(async () => {
@@ -189,7 +199,20 @@ export default function EventoModal({ defaultFecha, defaultHora, evento, onClose
           )}
         </div>
 
-        {/* Recurrence */}
+        {evento && (evento.se_repite || evento.serie_id) && (
+          <p className="text-[11.5px]" style={{ color: 'var(--subtext)' }}>
+            Esta fecha es independiente: editarla o borrarla no afecta las demás ocurrencias.
+          </p>
+        )}
+        {evento?.serie_activa && (
+          <button type="button" onClick={handleStop}
+            className="self-start text-[12px] px-3 py-1.5 rounded-lg border transition-colors"
+            style={{ borderColor: confirmStop ? '#ef4444' : 'var(--border)', color: confirmStop ? '#ef4444' : 'var(--subtext)' }}>
+            {confirmStop ? 'Confirmar: las fechas existentes permanecen' : 'Detener nuevas repeticiones'}
+          </button>
+        )}
+        {/* Recurrence applies only when creating the series. */}
+        {!evento && <>
         <label className="flex items-center gap-2.5 cursor-pointer">
           <div
             className="w-9 h-5 rounded-full relative transition-colors"
@@ -260,6 +283,7 @@ export default function EventoModal({ defaultFecha, defaultHora, evento, onClose
             </div>
           </div>
         )}
+        </>}
 
         {agendaCalendarios.length > 0 && (
           <div>

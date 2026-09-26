@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, Clock, Download, Printer } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import { t } from '../../utils/i18n'
 import { toLocalISODate } from './agendaUtils'
 import { isScheduled } from '../habitos/habitosUtils'
+import { API_URL } from '../../config'
 
 function getWeekBounds(offset) {
   const today = new Date()
@@ -62,12 +63,10 @@ function exportMarkdown(weekLabel, completadas, incompletas, vencidas, porCalend
 }
 
 export default function RevisionTab() {
-  const { lang, agendaTareas, agendaEventos, agendaCalendarios, agendaHorarioFacultad, habitos, finMovimientosAll } = useStore(
+  const { lang, agendaTareas, agendaHorarioFacultad, habitos, finMovimientosAll } = useStore(
     useShallow(s => ({
       lang:                s.lang,
       agendaTareas:        s.agendaTareas,
-      agendaEventos:       s.agendaEventos,
-      agendaCalendarios:   s.agendaCalendarios,
       agendaHorarioFacultad: s.agendaHorarioFacultad,
       habitos:             s.habitos,
       finMovimientosAll:   s.finMovimientosAll,
@@ -75,6 +74,7 @@ export default function RevisionTab() {
   )
 
   const [weekOff, setWeekOff] = useState(-1)
+  const [weekSummary, setWeekSummary] = useState(null)
 
   const { monday, sunday }             = getWeekBounds(weekOff)
   const { monday: prevMonday, sunday: prevSunday } = getWeekBounds(weekOff - 1)
@@ -82,6 +82,17 @@ export default function RevisionTab() {
   const sundayISO    = toLocalISODate(sunday)
   const prevMondayISO = toLocalISODate(prevMonday)
   const prevSundayISO = toLocalISODate(prevSunday)
+  const rangeKey = `${mondayISO}:${sundayISO}`
+  useEffect(() => {
+    let active = true
+    fetch(`${API_URL}/agenda/revision?desde=${mondayISO}&hasta=${sundayISO}`)
+      .then(response => { if (!response.ok) throw new Error('No se pudo cargar la revisión'); return response.json() })
+      .then(data => { if (active) setWeekSummary({ rangeKey, data }) })
+      .catch(() => { if (active) setWeekSummary({ rangeKey, error: true }) })
+    return () => { active = false }
+  }, [rangeKey])
+  const summary = weekSummary?.rangeKey === rangeKey ? weekSummary.data : null
+  const summaryError = weekSummary?.rangeKey === rangeKey && weekSummary.error
 
   const weekLabel = `${monday.toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })} – ${sunday.toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' })}`
 
@@ -100,11 +111,6 @@ export default function RevisionTab() {
     !t.completada && t.fecha_opcional && t.fecha_opcional < toLocalISODate(sevenAgo)
   )
 
-  const eventosWeek = agendaEventos.filter(e => {
-    const d = e.fecha_inicio?.slice(0, 10)
-    return d && d >= mondayISO && d <= sundayISO
-  })
-
   // Bloques de tareas en la semana
   const bloquesWeek = agendaTareas.filter(t =>
     t.hora_bloque && t.fecha_opcional && t.fecha_opcional >= mondayISO && t.fecha_opcional <= sundayISO
@@ -113,12 +119,7 @@ export default function RevisionTab() {
   // % tiempo planificado — denominador: 16h despierto × 7 días = 6720 min
   const AWAKE_MINUTES_WEEK = 16 * 60 * 7
 
-  const plannedMinutosEventos = eventosWeek.reduce((acc, e) => {
-    if (e.todo_el_dia) return acc + 60
-    const start = e.fecha_inicio ? (parseInt(e.fecha_inicio.slice(11, 13)) * 60 + parseInt(e.fecha_inicio.slice(14, 16) || 0)) : 0
-    const end   = e.fecha_fin   ? (parseInt(e.fecha_fin.slice(11, 13))   * 60 + parseInt(e.fecha_fin.slice(14, 16)   || 0)) : start + 60
-    return acc + Math.max(0, end - start)
-  }, 0)
+  const plannedMinutosEventos = summary?.por_calendario.reduce((acc, cal) => acc + cal.minutos, 0) || 0
 
   const plannedMinutosBloques = bloquesWeek.reduce((acc, t) => {
     return acc + (t.duracion_estimada || 30)
@@ -131,18 +132,12 @@ export default function RevisionTab() {
   }).reduce((acc, n) => acc + n * 30, 0)
 
   const plannedMinutes = plannedMinutosEventos + plannedMinutosBloques + plannedMinutosHabitos
-  const pctPlanned     = Math.min(100, Math.round((plannedMinutes / AWAKE_MINUTES_WEEK) * 100))
+  const pctPlanned     = summary ? Math.min(100, Math.round((plannedMinutes / AWAKE_MINUTES_WEEK) * 100)) : null
 
   // Tiempo por calendario
   const calStats = {}
-  eventosWeek.forEach(e => {
-    const cal    = agendaCalendarios.find(c => c.id === e.calendario_id)
-    const nombre = cal?.nombre || 'Sin calendario'
-    const color  = cal?.color  || 'var(--accent)'
-    if (!calStats[nombre]) calStats[nombre] = { nombre, color, minutes: 0 }
-    const start = e.fecha_inicio ? (parseInt(e.fecha_inicio.slice(11, 13)) * 60 + parseInt(e.fecha_inicio.slice(14, 16) || 0)) : 0
-    const end   = e.fecha_fin   ? (parseInt(e.fecha_fin.slice(11, 13))   * 60 + parseInt(e.fecha_fin.slice(14, 16)   || 0)) : start + 60
-    calStats[nombre].minutes += Math.max(0, end - start)
+  summary?.por_calendario.forEach(cal => {
+    calStats[cal.nombre] = { nombre: cal.nombre, color: cal.color, minutes: cal.minutos }
   })
 
   const facultadMinutes = agendaHorarioFacultad.reduce((acc, h) => {
@@ -196,6 +191,14 @@ export default function RevisionTab() {
         <div className="flex items-center justify-between mb-4">
           <div className="label capitalize">{weekLabel}</div>
           <div className="flex items-center gap-2">
+            <a
+              className="flex items-center gap-1.5 text-[11.5px] px-2.5 py-1.5 rounded-lg border transition-colors"
+              style={{ borderColor: 'var(--border)', color: 'var(--subtext)' }}
+              href={`${API_URL}/agenda/export.ics?desde=${mondayISO}&hasta=${sundayISO}`}
+              download
+            >
+              <Download size={12} /> ICS
+            </a>
             <button
               className="flex items-center gap-1.5 text-[11.5px] px-2.5 py-1.5 rounded-lg border transition-colors"
               style={{ borderColor: 'var(--border)', color: 'var(--subtext)' }}
@@ -218,6 +221,9 @@ export default function RevisionTab() {
             </button>
           </div>
         </div>
+        {!summary && <p className="text-xs mb-4" style={{ color: 'var(--subtext)' }}>
+          {summaryError ? 'No se pudo cargar el tiempo por calendario de esta semana.' : 'Cargando tiempo por calendario…'}
+        </p>}
 
         <div className="grid grid-cols-2 gap-4 mb-6">
           {/* Completadas */}
@@ -314,10 +320,10 @@ export default function RevisionTab() {
         <div className="panel-strong p-4 rounded-xl mb-6">
           <div className="label mb-1">{t(lang, 'agendaTiempoPlan')}</div>
           <div className="text-[11px] mb-3" style={{ color: 'var(--mute)' }}>
-            {Math.round(plannedMinutes / 60)}h planificadas de {AWAKE_MINUTES_WEEK / 60}h despierto
+            {summary ? `${Math.round(plannedMinutes / 60)}h planificadas de ${AWAKE_MINUTES_WEEK / 60}h despierto` : 'Esperando el resumen de eventos'}
           </div>
           <div className="flex items-end gap-3 mb-2">
-            <div className="text-[32px] font-bold tnum" style={{ color: 'var(--accent)' }}>{pctPlanned}%</div>
+            <div className="text-[32px] font-bold tnum" style={{ color: 'var(--accent)' }}>{pctPlanned === null ? '—' : `${pctPlanned}%`}</div>
             <div className="text-[11px] mb-2 flex flex-col gap-0.5" style={{ color: 'var(--subtext)' }}>
               {plannedMinutosEventos > 0 && <span>{Math.round(plannedMinutosEventos/60)}h eventos</span>}
               {plannedMinutosBloques > 0 && <span>{Math.round(plannedMinutosBloques/60)}h bloques</span>}
@@ -327,13 +333,14 @@ export default function RevisionTab() {
           <div
             className="h-2 rounded-full overflow-hidden"
             role="progressbar"
-            aria-valuenow={pctPlanned}
+            aria-valuenow={pctPlanned ?? 0}
+            aria-valuetext={pctPlanned === null ? 'Resumen de eventos no disponible' : undefined}
             aria-valuemin={0}
             aria-valuemax={100}
-            aria-label={`${pctPlanned}% tiempo planificado`}
+            aria-label={pctPlanned === null ? 'Tiempo planificado pendiente' : `${pctPlanned}% tiempo planificado`}
             style={{ background: 'var(--surface)' }}
           >
-            <div className="h-full rounded-full transition-all" style={{ width: `${pctPlanned}%`, background: 'var(--accent)' }} />
+            <div className="h-full rounded-full transition-all" style={{ width: `${pctPlanned ?? 0}%`, background: 'var(--accent)' }} />
           </div>
         </div>
 

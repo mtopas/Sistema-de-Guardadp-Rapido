@@ -4,13 +4,14 @@ from datetime import datetime, date, timedelta
 import pytest
 from app.db.crud import (
     _generar_fechas_recurrencia_tarea,
-    _expand_recurring,
+    agenda_crear_evento, agenda_obtener_eventos, agenda_actualizar_evento, agenda_eliminar_evento,
     agenda_crear_tarea,
     agenda_crear_horario_facultad_excepcion,
     agenda_resumen_semana,
     agenda_obtener_listas,
     agenda_crear_lista,
 )
+from app.db.agenda_recurrence import recurring_dates
 
 
 class TestGenerarFechasRecurrenciaTarea:
@@ -23,20 +24,12 @@ class TestGenerarFechasRecurrenciaTarea:
         assert "2026-09-23" not in resultado
         assert len(resultado) > 0  # Pero sí incluye ocurrencias posteriores
 
-    def test_semanal_default_todos_dias_vacio(self):
-        """Semanal sin dias especificados → todos los días en ventana (12 semanas)."""
+    def test_semanal_default_repite_dia_original(self):
         regla = {"frecuencia": "semanal", "dias": []}
         resultado = _generar_fechas_recurrencia_tarea("2026-09-23", regla)
-        # Ventana: 12 semanas = 84 días
-        # Empezando 24/09 (día después de 23/09) hasta ~84 días después
-        assert len(resultado) == 84
-        assert resultado[0] == "2026-09-24"  # Día después de inicio
-        # Último día debe ser alrededor de 12 semanas después
-        ultimo = date.fromisoformat(resultado[-1])
-        inicio = date(2026, 9, 23)
-        dias_transcurridos = (ultimo - inicio).days
-        assert 83 <= dias_transcurridos <= 84
-
+        assert len(resultado) == 12
+        assert resultado[0] == "2026-09-30"
+        assert resultado[-1] == "2026-12-16"
     def test_semanal_con_dias_especificos(self):
         """Semanal con dias=[0,2,4] → lunes, miércoles, viernes."""
         # 23/09/2026 es miércoles (weekday=2)
@@ -98,131 +91,41 @@ class TestGenerarFechasRecurrenciaTarea:
         assert resultado[-1] == "2026-10-05"
 
     def test_regla_vacia_default_semanal(self):
-        """Regla vacía o sin 'frecuencia' → default semanal."""
-        resultado1 = _generar_fechas_recurrencia_tarea("2026-09-23", {})
-        resultado2 = _generar_fechas_recurrencia_tarea("2026-09-23", {"dias": []})
-        # Ambas deben dar semanal con todos los días (84 ocurrencias)
-        assert len(resultado1) == 84
-        assert len(resultado2) == 84
+        resultado = _generar_fechas_recurrencia_tarea("2026-09-23", {})
+        assert len(resultado) == 12
+        assert resultado[0] == "2026-09-30"
 
+    def test_extension_mensual_preserva_dia_original_y_salta_ventana_generada(self):
+        initial = recurring_dates("2026-01-31", {"frecuencia": "mensual"})
+        extended = recurring_dates(
+            "2026-01-31", {"frecuencia": "mensual"},
+            extend_from=date(2027, 4, 1), after=date.fromisoformat(initial[-1]),
+        )
+        assert initial[-1] == "2027-01-31"
+        assert extended[:3] == ["2027-02-28", "2027-03-31", "2027-04-30"]
 
-class TestExpandRecurring:
-    """Pruebas para _expand_recurring (función pura, expande eventos)."""
-
-    def test_sin_regla_devuelve_evento_sin_cambios(self):
-        """Evento sin regla_repeticion → devuelve [evento] intacto."""
-        evento = {
-            "id": 1,
-            "titulo": "Test",
-            "fecha_inicio": "2026-09-23T10:00:00",
-            "fecha_fin": "2026-09-23T11:00:00",
+class TestEventosMaterializados:
+    def test_cada_ocurrencia_es_independiente(self, tmp_app_db):
+        head = agenda_crear_evento(
+            titulo="Clase", fecha_inicio="2026-09-23T10:00:00",
+            fecha_fin="2026-09-23T11:00:00", se_repite=True,
+            regla_repeticion='{"frecuencia":"semanal","dias":[]}',
+        )
+        events = agenda_obtener_eventos("2026-09-23", "2026-10-14")
+        assert [e["fecha_inicio"][:10] for e in events] == [
+            "2026-09-23", "2026-09-30", "2026-10-07", "2026-10-14"
+        ]
+        assert len({e["id"] for e in events}) == 4
+        assert all(e["serie_id"] == head["id"] for e in events[1:])
+        child_id = events[1]["id"]
+        agenda_actualizar_evento(child_id, {"titulo": "Clase movida"})
+        assert agenda_obtener_eventos("2026-09-23", "2026-10-14")[0]["titulo"] == "Clase"
+        agenda_eliminar_evento(child_id)
+        remaining = agenda_obtener_eventos("2026-09-23", "2026-10-14")
+        assert len(remaining) == 3
+        assert {e["fecha_inicio"][:10] for e in remaining} == {
+            "2026-09-23", "2026-10-07", "2026-10-14"
         }
-        resultado = _expand_recurring(evento, "2026-09-20", "2026-09-30")
-        assert resultado == [evento]
-
-    def test_regla_json_invalida_devuelve_evento_intacto(self):
-        """Si regla_repeticion es JSON inválido → devuelve evento sin expandir."""
-        evento = {
-            "id": 1,
-            "titulo": "Test",
-            "fecha_inicio": "2026-09-23T10:00:00",
-            "regla_repeticion": "{ invalid json",
-        }
-        resultado = _expand_recurring(evento, "2026-09-20", "2026-09-30")
-        assert resultado == [evento]
-
-    def test_semanal_todos_dias_en_rango(self):
-        """Semanal sin dias → todos los días dentro de [desde, hasta]."""
-        evento = {
-            "id": 1,
-            "titulo": "Evento semanal",
-            "fecha_inicio": "2026-09-23T10:00:00",
-            "regla_repeticion": '{"frecuencia": "semanal", "dias": []}',
-        }
-        resultado = _expand_recurring(evento, "2026-09-24", "2026-09-30")
-        # Del 24 al 30 = 7 días
-        assert len(resultado) == 7
-        fechas = [o["fecha_inicio"][:10] for o in resultado]
-        assert fechas == ["2026-09-24", "2026-09-25", "2026-09-26", "2026-09-27",
-                         "2026-09-28", "2026-09-29", "2026-09-30"]
-
-    def test_semanal_con_dias_filtra_weekday(self):
-        """Semanal con dias=[1,3] → martes, jueves."""
-        evento = {
-            "id": 1,
-            "titulo": "Evento",
-            "fecha_inicio": "2026-09-23T10:00:00",  # 23/09/2026 es miércoles
-            "regla_repeticion": '{"frecuencia": "semanal", "dias": [1, 3]}',
-        }
-        resultado = _expand_recurring(evento, "2026-09-24", "2026-09-30")
-        # 2026-09: L=21/28, M=22/29, X=23/30, J=24, V=25, S=26, D=27
-        # Rango 24-30: J(3)=24, M(1)=29
-        fechas = [o["fecha_inicio"][:10] for o in resultado]
-        assert fechas == ["2026-09-24", "2026-09-29"]
-
-    def test_mensual_clampeo_usa_dia_original(self):
-        """Mensual clampea siempre contra base.day (el día original del evento),
-        nunca contra cur.day -- fix del 2026-09-23 (ver Cerebro/estado-actual.md):
-        antes, un evento del día 31 quedaba pegado en 28 para siempre después de
-        pasar por febrero, porque el avance de mes a mes arrastraba el día ya
-        clampeado del mes anterior en vez de recalcular desde el día original.
-        Ahora se comporta igual que _generar_fechas_recurrencia_tarea: clampea
-        para el mes que no llega al día 31, y vuelve a 31 en el que sí llega.
-        """
-        evento = {
-            "id": 1,
-            "titulo": "Evento mensual",
-            "fecha_inicio": "2026-01-31T10:00:00",
-            "regla_repeticion": '{"frecuencia": "mensual"}',
-        }
-        resultado = _expand_recurring(evento, "2026-01-31", "2026-05-31")
-        fechas = [o["fecha_inicio"][:10] for o in resultado]
-
-        # Enero 31 (día original) -> Febrero clampeado a 28 (no tiene 31) ->
-        # Marzo vuelve a 31 (sí tiene 31, ya no arrastra el clampeo de febrero) ->
-        # Abril clampeado a 30 -> Mayo vuelve a 31.
-        assert fechas == ["2026-01-31", "2026-02-28", "2026-03-31", "2026-04-30", "2026-05-31"]
-
-    def test_rango_excluye_fuera_de_limite(self):
-        """Occurrences fuera de [desde, hasta] no aparecen."""
-        evento = {
-            "id": 1,
-            "titulo": "Evento",
-            "fecha_inicio": "2026-09-23T10:00:00",
-            "regla_repeticion": '{"frecuencia": "semanal", "dias": []}',
-        }
-        resultado = _expand_recurring(evento, "2026-09-25", "2026-09-28")
-        # El rango es 25-28, así que evento en 23 (antes del rango) no aparece
-        fechas = [o["fecha_inicio"][:10] for o in resultado]
-        assert fechas == ["2026-09-25", "2026-09-26", "2026-09-27", "2026-09-28"]
-        assert "2026-09-23" not in fechas
-        assert "2026-09-24" not in fechas
-
-    def test_preserva_hora_en_expansión(self):
-        """La hora se preserva en cada ocurrencia expandida."""
-        evento = {
-            "id": 1,
-            "titulo": "Evento",
-            "fecha_inicio": "2026-09-23T14:30:00",
-            "regla_repeticion": '{"frecuencia": "semanal", "dias": []}',
-        }
-        resultado = _expand_recurring(evento, "2026-09-24", "2026-09-26")
-        # Todas las ocurrencias deben mantener la hora 14:30:00
-        assert all(o["fecha_inicio"].endswith("T14:30:00") for o in resultado)
-
-    def test_hasta_en_regla_limita_rango(self):
-        """Regla 'hasta' intersecta con [desde, hasta] de expansión."""
-        evento = {
-            "id": 1,
-            "titulo": "Evento",
-            "fecha_inicio": "2026-09-23T10:00:00",
-            "regla_repeticion": '{"frecuencia": "semanal", "dias": [], "hasta": "2026-09-26"}',
-        }
-        resultado = _expand_recurring(evento, "2026-09-24", "2026-10-01")
-        # Rango pedido es 24-01/10, pero 'hasta'=26/09 corta antes
-        fechas = [o["fecha_inicio"][:10] for o in resultado]
-        assert fechas == ["2026-09-24", "2026-09-25", "2026-09-26"]
-
 
 class TestAgendaCrearTarea:
     """Pruebas para agenda_crear_tarea (requiere DB fixture)."""

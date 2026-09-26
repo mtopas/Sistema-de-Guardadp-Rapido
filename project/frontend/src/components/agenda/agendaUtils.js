@@ -6,6 +6,11 @@ export const toLocalISODate = (d = new Date()) => {
   return new Date(d.getTime() - offset).toISOString().slice(0, 10)
 }
 
+export const toLocalISODateTime = (d = new Date()) => {
+  const offset = d.getTimezoneOffset() * 60000
+  return new Date(d.getTime() - offset).toISOString().slice(0, 19)
+}
+
 export const HOURS = Array.from({ length: 18 }, (_, i) => i + 6) // 6–23
 export const HOUR_HEIGHT = 56 // px per hour
 

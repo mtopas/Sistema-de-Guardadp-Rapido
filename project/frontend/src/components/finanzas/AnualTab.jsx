@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useStore } from '../../store/useStore'
-import { fmtARS, fmtARSShort, isTransferencia, movimientoAnio } from '../../data/finanzas'
+import { fmtARS, fmtARSShort, isTransferencia, movimientoAnio, montoEnMoneda } from '../../data/finanzas'
 import { buildFinCategoriaColorByName, getFinCategoriaColor } from '../../data/finCategoriaColors'
 import CardHeader from './CardHeader'
 
@@ -15,7 +15,7 @@ function fmtPct(n, decimals = 1) {
   return `${n >= 0 ? '' : '-'}${Math.abs(n).toFixed(decimals)}%`
 }
 
-export function buildMonthly(movimientos, year) {
+export function buildMonthly(movimientos, year, dolar = 1245) {
   const months = Array.from({ length: 12 }, (_, i) => ({
     mes: `${year}-${String(i + 1).padStart(2, '0')}`,
     idx: i,
@@ -30,7 +30,7 @@ export function buildMonthly(movimientos, year) {
     const raw   = m.fecha ?? ''
     const idx   = parseInt(String(raw).slice(5, 7), 10) - 1
     if (idx < 0 || idx > 11) return
-    const monto = Math.abs(m.monto ?? 0)
+    const monto = montoEnMoneda(m, 'ARS', dolar)
     if (tipo === 'income') months[idx].ingresos += monto
     else                   months[idx].gastos   += monto
   })
@@ -341,7 +341,7 @@ function MonthTable({ monthlyData, inflMap, lang }) {
 
 // ── Category breakdown ────────────────────────────────────────────────────────
 
-function CategoryTable({ movimientos, year, lang, finCategorias }) {
+function CategoryTable({ movimientos, year, lang, finCategorias, dolar }) {
   const colorByName = useMemo(
     () => buildFinCategoriaColorByName(finCategorias),
     [finCategorias],
@@ -354,7 +354,7 @@ function CategoryTable({ movimientos, year, lang, finCategorias }) {
       if (m.tipo !== 'expense') return
       if (movimientoAnio(m) !== String(year)) return
       const cat   = m.categoria_nombre ?? (lang === 'en' ? 'Other' : 'Otro')
-      const monto = Math.abs(m.monto ?? 0)
+      const monto = montoEnMoneda(m, 'ARS', dolar)
       map[cat] = (map[cat] ?? 0) + monto
     })
     const total = Object.values(map).reduce((a, b) => a + b, 0)
@@ -366,7 +366,7 @@ function CategoryTable({ movimientos, year, lang, finCategorias }) {
         color: getFinCategoriaColor(colorByName, nombre, i),
       }))
       .sort((a, b) => b.monto - a.monto)
-  }, [movimientos, year, lang, colorByName])
+  }, [movimientos, year, lang, colorByName, dolar])
 
   if (cats.length === 0) return null
 
@@ -448,6 +448,7 @@ export default function AnualTab() {
   const selectedMes      = useStore(s => s.selectedMes)
   const finMovimientosAll = useStore(s => s.finMovimientosAll)
   const finCategorias     = useStore(s => s.finCategorias)
+  const finConfig         = useStore(s => s.finConfig)
   const finInflacion     = useStore(s => s.finInflacion)
   const fetchAll         = useStore(s => s.fetchFinMovimientosAll)
   const fetchInflacion   = useStore(s => s.fetchFinInflacion)
@@ -457,10 +458,11 @@ export default function AnualTab() {
   useEffect(() => { fetchAll(); fetchInflacion() }, [])
 
   const year = selectedMes.split('-')[0]
+  const dolar = finConfig?.dolar_mep ?? finConfig?.dolar_oficial ?? finConfig?.dolar_default ?? 1245
 
   const monthlyData = useMemo(
-    () => buildMonthly(finMovimientosAll, year),
-    [finMovimientosAll, year],
+    () => buildMonthly(finMovimientosAll, year, dolar),
+    [finMovimientosAll, year, dolar],
   )
 
   const deflators = useMemo(
@@ -561,7 +563,7 @@ export default function AnualTab() {
       <MonthTable monthlyData={monthlyData} inflMap={finInflacion} lang={lang} />
 
       {/* Category breakdown */}
-      <CategoryTable movimientos={finMovimientosAll} year={year} lang={lang} finCategorias={finCategorias} />
+      <CategoryTable movimientos={finMovimientosAll} year={year} lang={lang} finCategorias={finCategorias} dolar={dolar} />
     </div>
   )
 }

@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
-import { fmtUSD, fmtARSShort, contribucionFireUSD, mesMovimiento } from '../../data/finanzas'
+import { fmtUSD, fmtARSShort, contribucionFireUSD, mesMovimiento, ahorroFireRealOOverride } from '../../data/finanzas'
 import { mergeFireCfg } from './fireConfigUtils'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -297,13 +297,8 @@ export default function FireTab() {
       let ahorrado
       if (isFuture) {
         ahorrado = null
-      } else if (computed > 0) {
-        // Movimientos reales ganan sobre override 0 (p. ej. seed en fin_fire_filas)
-        ahorrado = computed
-      } else if (override !== undefined) {
-        ahorrado = override
       } else {
-        ahorrado = 0
+        ahorrado = ahorroFireRealOOverride(computed, override)
       }
 
       const efectivo   = isFuture ? aporte : (ahorrado ?? aporte)

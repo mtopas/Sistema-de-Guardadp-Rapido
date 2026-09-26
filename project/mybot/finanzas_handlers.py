@@ -182,6 +182,7 @@ def _normalize_mov(mov: dict) -> dict:
         "id":               mov.get("id"),
         "tipo":             mov.get("tipo") or mov.get("type", "expense"),
         "monto":            float(mov.get("monto") or mov.get("amount") or 0),
+        "moneda":           (mov.get("moneda") or mov.get("currency") or "ARS").upper(),
         "descripcion":      mov.get("descripcion") or mov.get("desc", ""),
         "categoria_nombre": mov.get("categoria_nombre") or mov.get("cat", ""),
         "cuenta_nombre":    mov.get("cuenta_nombre") or mov.get("method", ""),
@@ -196,6 +197,21 @@ def _is_transfer(mv: dict) -> bool:
 def _monto_abs(mv: dict) -> float:
     """Monto siempre positivo para totales (la DB puede tener gastos con signo −)."""
     return abs(float(mv.get("monto") or 0))
+
+
+def _cotizacion(config: dict | None) -> float:
+    config = config or {}
+    return float(config.get("dolar_mep") or config.get("dolar_oficial") or config.get("dolar_default") or 0)
+
+
+def _monto_en_moneda(mv: dict, moneda: str, dolar: float) -> float:
+    monto = _monto_abs(mv)
+    origen = (mv.get("moneda") or "ARS").upper()
+    if origen == moneda:
+        return monto
+    if dolar <= 0:
+        raise ValueError("Falta configurar una cotización ARS/USD para calcular el total")
+    return monto * dolar if origen == "USD" else monto / dolar
 
 
 # ──────────────────────────────────────────────────────────────
@@ -522,21 +538,25 @@ def _build_saldo(cuentas: list, config: dict) -> str:
     return "\n".join(lines)
 
 
-def _build_mes(movimientos: list, mes: str) -> str:
+def _build_mes(movimientos: list, mes: str, config: dict | None = None) -> str:
     año, mn = int(mes[:4]), int(mes[5:7])
     meses_es = ["enero","febrero","marzo","abril","mayo","junio",
                 "julio","agosto","septiembre","octubre","noviembre","diciembre"]
     mes_label = f"{meses_es[mn - 1]} {año}"
 
     ingresos = gastos = 0.0
-    for m in movimientos:
-        mv = _normalize_mov(m)
-        if _is_transfer(mv):
-            continue
-        if mv["tipo"] == "income":
-            ingresos += _monto_abs(mv)
-        else:
-            gastos += _monto_abs(mv)
+    try:
+        for m in movimientos:
+            mv = _normalize_mov(m)
+            if _is_transfer(mv):
+                continue
+            monto = _monto_en_moneda(mv, "ARS", _cotizacion(config))
+            if mv["tipo"] == "income":
+                ingresos += monto
+            else:
+                gastos += monto
+    except ValueError as exc:
+        return f"📊 *Resumen — {mes_label}*\n\n⚠️ {exc}."
 
     balance = ingresos - gastos
     tasa    = balance / ingresos * 100 if ingresos else 0.0
@@ -561,34 +581,37 @@ def _movimiento_asignado_a_cajon(mv: dict, nombre_cat: str) -> bool:
     return cat == key or desc == key
 
 
-def _contribucion_categoria(mv: dict, nombre_cat: str) -> float:
+def _contribucion_categoria(mv: dict, nombre_cat: str, moneda: str | None = None, dolar: float = 0) -> float:
     if not _movimiento_asignado_a_cajon(mv, nombre_cat):
         return 0.0
-    if mv["tipo"] == "expense":
-        return mv["monto"]
-    return -mv["monto"]
+    monto = _monto_en_moneda(mv, moneda, dolar) if moneda else abs(mv["monto"])
+    return monto if mv["tipo"] == "expense" else -monto
 
 
-def _contribucion_mes(movimientos: list, mes: str, nombre_cat: str) -> float:
+def _contribucion_mes(movimientos: list, mes: str, nombre_cat: str, moneda: str | None = None, dolar: float = 0) -> float:
     total = 0.0
     for m in movimientos:
         mv = _normalize_mov(m)
         if not (mv.get("fecha") or "").startswith(mes):
             continue
-        total += _contribucion_categoria(mv, nombre_cat)
+        total += _contribucion_categoria(mv, nombre_cat, moneda, dolar)
     return total
 
 
-def _build_ahorro(movimientos: list, objetivos: list, mes: str, movs_all: list | None = None) -> str:
+def _build_ahorro(movimientos: list, objetivos: list, mes: str, movs_all: list | None = None, config: dict | None = None) -> str:
     mn = int(mes[5:7])
     meses_es = ["enero","febrero","marzo","abril","mayo","junio",
                 "julio","agosto","septiembre","octubre","noviembre","diciembre"]
     mes_label = f"{meses_es[mn - 1]} {mes[:4]}"
 
-    fire_mes = _contribucion_mes(movimientos, mes, "FIRE")
+    dolar = _cotizacion(config)
+    try:
+        fire_mes = _contribucion_mes(movimientos, mes, "FIRE", "USD", dolar)
+    except ValueError as exc:
+        return f"💚 *Ahorro — {mes_label}*\n\n⚠️ {exc}."
     lines = [
         f"💚 *Ahorro — {mes_label}*\n",
-        f"🔥 *FIRE* este mes: *{_fmt_ars(fire_mes)}*",
+        f"🔥 *FIRE* este mes: *USD {fire_mes:,.2f}*",
     ]
 
     if objetivos:
@@ -596,17 +619,24 @@ def _build_ahorro(movimientos: list, objetivos: list, mes: str, movs_all: list |
         lines.append("*Objetivos (este mes / meta):*")
         for obj in objetivos[:8]:
             nombre = obj["nombre"]
-            mes_obj = _contribucion_mes(movimientos, mes, nombre)
             meta   = float(obj.get("meta") or 0)
-            moneda = obj.get("moneda", "ARS")
+            moneda = (obj.get("moneda") or "ARS").upper()
+            try:
+                mes_obj = _contribucion_mes(movimientos, mes, nombre, moneda, dolar)
+            except ValueError as exc:
+                return f"💚 *Ahorro — {mes_label}*\n\n⚠️ {exc}."
             ahorrado = 0.0
             if movs_all:
                 for m in movs_all:
-                    ahorrado += _contribucion_categoria(_normalize_mov(m), nombre)
+                    try:
+                        ahorrado += _contribucion_categoria(_normalize_mov(m), nombre, moneda, dolar)
+                    except ValueError as exc:
+                        return f"💚 *Ahorro — {mes_label}*\n\n⚠️ {exc}."
             cuota  = _cuota_mensual_objetivo(obj, ahorrado)
             fmt_m  = _fmt_ars(meta) if moneda == "ARS" else f"USD {meta:,.0f}"
-            cuota_str = f" — cuota {_fmt_ars(cuota)}/mes" if cuota else ""
-            lines.append(f"  • *{nombre}*: {_fmt_ars(mes_obj)} (meta {fmt_m}){cuota_str}")
+            fmt_obj = (lambda v: _fmt_ars(v)) if moneda == "ARS" else (lambda v: f"USD {v:,.2f}")
+            cuota_str = f" — cuota {fmt_obj(cuota)}/mes" if cuota else ""
+            lines.append(f"  • *{nombre}*: {fmt_obj(mes_obj)} (meta {fmt_m}){cuota_str}")
     else:
         lines.append("\n_Sin objetivos — creá uno desde la app._")
 
@@ -635,7 +665,8 @@ def _build_ultimo(movimientos: list) -> tuple:
         cat   = mv["categoria_nombre"] or "—"
         cta   = mv["cuenta_nombre"] or "—"
         fecha = (mv["fecha"] or "")[:10]
-        lines.append(f"{i}. {_tipo_icon(mv['tipo'])} *{_fmt_ars(mv['monto'])}* — {desc}")
+        monto_texto = f"USD {_monto_abs(mv):,.2f}" if mv["moneda"] == "USD" else _fmt_ars(_monto_abs(mv))
+        lines.append(f"{i}. {_tipo_icon(mv['tipo'])} *{monto_texto}* — {desc}")
         lines.append(f"   {cat} | {cta} | {fecha}")
         desc_short = desc[:22] + ("…" if len(desc) > 22 else "")
         botones.append([InlineKeyboardButton(f"🗑 #{i} {desc_short}", callback_data=f"fdel:{mv['id']}")])
@@ -643,16 +674,19 @@ def _build_ultimo(movimientos: list) -> tuple:
     return "\n".join(lines), InlineKeyboardMarkup(botones)
 
 
-def _build_objetivo(obj: dict, movs_all: list) -> str:
+def _build_objetivo(obj: dict, movs_all: list, config: dict | None = None) -> str:
     meta   = float(obj.get("meta") or 0)
-    moneda = obj.get("moneda", "ARS")
+    moneda = (obj.get("moneda") or "ARS").upper()
     vence  = obj.get("fecha_limite") or ""
     nombre = obj["nombre"]
 
     ahorrado = 0.0
-    for m in movs_all:
-        mv = _normalize_mov(m)
-        ahorrado += _contribucion_categoria(mv, nombre)
+    try:
+        for m in movs_all:
+            mv = _normalize_mov(m)
+            ahorrado += _contribucion_categoria(mv, nombre, moneda, _cotizacion(config))
+    except ValueError as exc:
+        return f"🎯 *{nombre}*\n\n⚠️ {exc}."
 
     cuota  = _cuota_mensual_objetivo(obj, ahorrado)
 
@@ -725,10 +759,11 @@ async def cmd_mes(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     try:
         movs = _get_movimientos(api, mes)
+        config = _get_config(api)
     except Exception as e:
         await update.message.reply_text(f"No pude conectar con la API: {e}")
         return
-    await update.message.reply_text(_build_mes(movs, mes), parse_mode="Markdown")
+    await update.message.reply_text(_build_mes(movs, mes, config), parse_mode="Markdown")
 
 
 async def cmd_ahorro(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -740,10 +775,11 @@ async def cmd_ahorro(update: Update, context: ContextTypes.DEFAULT_TYPE):
         movs      = _get_movimientos(api, mes)
         movs_all  = _get_movimientos(api)
         objetivos = _get_objetivos(api)
+        config    = _get_config(api)
     except Exception as e:
         await update.message.reply_text(f"No pude conectar con la API: {e}")
         return
-    await update.message.reply_text(_build_ahorro(movs, objetivos, mes, movs_all), parse_mode="Markdown")
+    await update.message.reply_text(_build_ahorro(movs, objetivos, mes, movs_all, config), parse_mode="Markdown")
 
 
 async def cmd_ultimo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -835,11 +871,12 @@ async def cmd_objetivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         movs_all = _get_movimientos(api)
+        config = _get_config(api)
     except Exception as e:
         await update.message.reply_text(f"No pude cargar movimientos: {e}")
         return
 
-    await update.message.reply_text(_build_objetivo(obj, movs_all), parse_mode="Markdown")
+    await update.message.reply_text(_build_objetivo(obj, movs_all, config), parse_mode="Markdown")
 
 
 # ──────────────────────────────────────────────────────────────
@@ -1196,7 +1233,8 @@ async def resumen_semanal_finanzas(context):
     try:
         mes = date.today().strftime("%Y-%m")
         movs = _get_movimientos(api, mes)
-        texto = _build_mes(movs, mes)
+        config = _get_config(api)
+        texto = _build_mes(movs, mes, config)
         await context.bot.send_message(
             chat_id=chat_id,
             text=f"📊 *Resumen semanal de finanzas*\n\n{texto}",

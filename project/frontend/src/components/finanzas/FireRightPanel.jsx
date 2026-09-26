@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
-import { fmtUSD, contribucionFireUSD, mesMovimiento } from '../../data/finanzas'
+import { fmtUSD, contribucionFireUSD, mesMovimiento, ahorroFireRealOOverride } from '../../data/finanzas'
 import {
   fireFormFromConfig,
   fireFormDirty,
@@ -278,7 +278,7 @@ export default function FireRightPanel() {
       const aporte = mes === inicioMes ? aporteInicial : prevAportePlan * (1 + aumentoMensual)
       const computed = ahorroPorMes[mes] ?? 0
       const override = finFireFilas[mes]
-      const ahorrado = computed > 0 ? computed : (override !== undefined ? override : 0)
+      const ahorrado = ahorroFireRealOOverride(computed, override)
       const interes  = (saldo + ahorrado) * rentabilidadMensual
       saldo = saldo + ahorrado + interes
       prevAportePlan = aporte

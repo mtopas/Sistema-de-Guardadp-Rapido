@@ -974,7 +974,11 @@ def editar_fin_cuenta(cuenta_id: int, body: FinCuentaUpdate):
 
 @app.delete("/fin/cuentas/{cuenta_id}")
 def eliminar_fin_cuenta(cuenta_id: int):
-    if not fin_eliminar_cuenta(cuenta_id):
+    try:
+        deleted = fin_eliminar_cuenta(cuenta_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    if not deleted:
         raise HTTPException(status_code=404, detail="Cuenta no encontrada")
     return {"mensaje": "Cuenta eliminada"}
 
@@ -1016,7 +1020,7 @@ def eliminar_fin_categoria(cat_id: int):
             status_code=403,
             detail="Categoría vinculada a un objetivo de ahorro. Eliminá el objetivo desde la pestaña Ahorro.",
         )
-    if cat["name"] in FIN_CATEGORIAS_RESERVADAS:
+    if cat["name"].strip().casefold() in {n.casefold() for n in FIN_CATEGORIAS_RESERVADAS}:
         raise HTTPException(status_code=403, detail="Esta categoría del sistema no se puede eliminar")
     if fin_contar_movimientos_categoria(cat_id) > 0:
         raise HTTPException(
@@ -1053,27 +1057,35 @@ def resumen_fin_movimientos(mes: Optional[str] = Query(None)):
     conn.close()
 
     ingresos = gastos = 0.0
+    config = fin_obtener_config()
+    dolar = float(config.get("dolar_mep") or config.get("dolar_oficial") or config.get("dolar_default") or 0)
+
     por_categoria: dict = {}
     for r in rows:
         cat_nombre = cat_map.get(r[8], "")
         if cat_nombre.lower() == "transferencia":
             continue
-        monto = r[2] or 0.0
+        monto = abs(r[2] or 0.0)
+        if (r[9] or "ARS").upper() == "USD":
+            if dolar <= 0:
+                raise HTTPException(status_code=422, detail="Configurá una cotización ARS/USD para calcular el resumen")
+            monto *= dolar
         tipo  = r[3]
         if tipo == "income":
             ingresos += monto
         else:
-            gastos += abs(monto)
+            gastos += monto
         cat_key = cat_nombre or "Sin categoría"
         por_categoria.setdefault(cat_key, {"categoria": cat_key, "ingresos": 0.0, "gastos": 0.0})
         if tipo == "income":
             por_categoria[cat_key]["ingresos"] += monto
         else:
-            por_categoria[cat_key]["gastos"] += abs(monto)
+            por_categoria[cat_key]["gastos"] += monto
 
     return {
         "mes":            m,
         "ingresos":       round(ingresos, 2),
+        "moneda":         "ARS",
         "gastos":         round(gastos, 2),
         "balance":        round(ingresos - gastos, 2),
         "tasa_ahorro":    round((ingresos - gastos) / ingresos * 100, 1) if ingresos > 0 else 0,
@@ -1112,7 +1124,10 @@ def exportar_fin_csv():
 @app.post("/fin/import/csv")
 def importar_fin_csv(body: FinImportCSV):
     filas = [row.model_dump() for row in body.filas]
-    created = fin_import_movimientos(filas)
+    try:
+        created = fin_import_movimientos(filas)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return {"importados": len(created), "movimientos": created}
 
 
@@ -1425,7 +1440,10 @@ def actualizar_transaccion_instrumento(trans_id: int, body: FinTransaccionPatch)
         raise HTTPException(status_code=400, detail="Sin campos a actualizar")
     if "tipo" in campos and campos["tipo"] not in ("compra", "venta"):
         raise HTTPException(status_code=400, detail="tipo debe ser 'compra' o 'venta'")
-    result = fin_actualizar_transaccion_instrumento(trans_id, campos)
+    try:
+        result = fin_actualizar_transaccion_instrumento(trans_id, campos)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     if result is None:
         raise HTTPException(status_code=404, detail="Transacción no encontrada")
     return result
@@ -1433,7 +1451,11 @@ def actualizar_transaccion_instrumento(trans_id: int, body: FinTransaccionPatch)
 
 @app.delete("/fin/transacciones/{trans_id}")
 def eliminar_transaccion_instrumento(trans_id: int):
-    if not fin_eliminar_transaccion_instrumento(trans_id):
+    try:
+        deleted = fin_eliminar_transaccion_instrumento(trans_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if not deleted:
         raise HTTPException(status_code=404, detail="Transacción no encontrada")
     return {"mensaje": "Transacción eliminada"}
 

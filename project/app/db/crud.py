@@ -1,5 +1,4 @@
 from datetime import datetime, date, timedelta
-import calendar as _calendar
 import json
 import os
 import re
@@ -10,6 +9,7 @@ from typing import Optional
 
 from app.config import DEBUG, VAULT_ROOT
 from app.db.database import get_connection
+from app.db.agenda_recurrence import recurring_dates, event_template, task_template
 from app.vault import parser as vault_parser
 from app.vault import sync as vault_sync
 from app.vault import writer as vault_writer
@@ -789,24 +789,26 @@ def fin_crear_saldos_iniciales(
 
     cat_id = fin_obtener_o_crear_categoria_ajuste(cursor)
     fecha = date.today().isoformat()
-    if saldo_ars and float(saldo_ars) > 0:
-        monto = float(saldo_ars)
+    if saldo_ars and float(saldo_ars) != 0:
+        monto = abs(float(saldo_ars))
+        tipo = 'income' if float(saldo_ars) > 0 else 'expense'
         cursor.execute(
             """INSERT INTO fin_movimientos
                (fecha, monto, tipo, descripcion, icono, cuenta_id, cuotas, categoria_id, moneda, nota, audit)
-               VALUES (?, ?, 'income', 'Saldo inicial', NULL, ?, NULL, ?, 'ARS', NULL, 0)""",
-            (fecha, monto, cuenta_id, cat_id),
+               VALUES (?, ?, ?, 'Saldo inicial', NULL, ?, NULL, ?, 'ARS', NULL, 0)""",
+            (fecha, monto, tipo, cuenta_id, cat_id),
         )
-        _fin_ajustar_saldo_cuenta(cursor, cuenta_id, monto, 0.0)
-    if saldo_usd and float(saldo_usd) > 0:
-        monto = float(saldo_usd)
+        _fin_ajustar_saldo_cuenta(cursor, cuenta_id, float(saldo_ars), 0.0)
+    if saldo_usd and float(saldo_usd) != 0:
+        monto = abs(float(saldo_usd))
+        tipo = 'income' if float(saldo_usd) > 0 else 'expense'
         cursor.execute(
             """INSERT INTO fin_movimientos
                (fecha, monto, tipo, descripcion, icono, cuenta_id, cuotas, categoria_id, moneda, nota, audit)
-               VALUES (?, ?, 'income', 'Saldo inicial (USD)', NULL, ?, NULL, ?, 'USD', NULL, 0)""",
-            (fecha, monto, cuenta_id, cat_id),
+               VALUES (?, ?, ?, 'Saldo inicial (USD)', NULL, ?, NULL, ?, 'USD', NULL, 0)""",
+            (fecha, monto, tipo, cuenta_id, cat_id),
         )
-        _fin_ajustar_saldo_cuenta(cursor, cuenta_id, 0.0, monto)
+        _fin_ajustar_saldo_cuenta(cursor, cuenta_id, 0.0, float(saldo_usd))
 
 
 def fin_crear_cuenta(nombre: str, tipo: str = "wallet", color: Optional[str] = None,
@@ -818,7 +820,7 @@ def fin_crear_cuenta(nombre: str, tipo: str = "wallet", color: Optional[str] = N
         (nombre.strip(), tipo, color, initials),
     )
     cid = cursor.lastrowid
-    if float(saldo_ars or 0) > 0 or float(saldo_usd or 0) > 0:
+    if float(saldo_ars or 0) != 0 or float(saldo_usd or 0) != 0:
         fin_crear_saldos_iniciales(cursor, cid, saldo_ars, saldo_usd)
     conn.commit()
     conn.close()
@@ -830,11 +832,16 @@ def fin_crear_cuenta(nombre: str, tipo: str = "wallet", color: Optional[str] = N
 def fin_eliminar_cuenta(cuenta_id: int) -> bool:
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM fin_cuentas WHERE id = ?", (cuenta_id,))
-    deleted = cursor.rowcount > 0
-    conn.commit()
-    conn.close()
-    return deleted
+    try:
+        cursor.execute("DELETE FROM fin_cuentas WHERE id = ?", (cuenta_id,))
+        deleted = cursor.rowcount > 0
+        conn.commit()
+        return deleted
+    except sqlite3.IntegrityError as exc:
+        conn.rollback()
+        raise ValueError("La cuenta tiene movimientos asociados") from exc
+    finally:
+        conn.close()
 
 
 def fin_editar_cuenta(cuenta_id: int, nombre: str, tipo: str, color: Optional[str], initials: Optional[str]) -> Optional[dict]:
@@ -915,10 +922,15 @@ def fin_obtener_categorias(include_ocultas: bool = False):
 def fin_crear_categoria(nombre: str, color: Optional[str] = None, tipo: str = "expense") -> Optional[int]:
     conn = get_connection()
     cursor = conn.cursor()
+    nombre = nombre.strip()
+    cursor.execute("SELECT id FROM fin_categorias WHERE LOWER(TRIM(nombre)) = LOWER(?) LIMIT 1", (nombre,))
+    if not nombre or cursor.fetchone() or nombre.casefold() in {n.casefold() for n in FIN_CATEGORIAS_SISTEMA}:
+        conn.close()
+        return None
     try:
         cursor.execute(
             "INSERT INTO fin_categorias (nombre, color, tipo) VALUES (?, ?, ?)",
-            (nombre.strip(), color, tipo),
+            (nombre, color, tipo),
         )
         cid = cursor.lastrowid
         conn.commit()
@@ -947,7 +959,7 @@ def _fin_vincular_categoria_objetivo(cursor, objetivo_id: int, nombre: str) -> i
             (nombre, row[0]),
         )
         return row[0]
-    cursor.execute("SELECT id FROM fin_categorias WHERE nombre = ?", (nombre,))
+    cursor.execute("SELECT id FROM fin_categorias WHERE LOWER(TRIM(nombre)) = LOWER(?)", (nombre,))
     by_name = cursor.fetchone()
     if by_name:
         cursor.execute(
@@ -976,7 +988,7 @@ def fin_categoria_es_protegida(cat_id: int) -> bool:
         return True
     if row[1] is not None:
         return True
-    return row[0] in FIN_CATEGORIAS_SISTEMA
+    return row[0].strip().casefold() in {n.casefold() for n in FIN_CATEGORIAS_SISTEMA}
 
 
 def fin_contar_movimientos_categoria(cat_id: int) -> int:
@@ -1001,7 +1013,7 @@ def fin_eliminar_categoria(cat_id: int) -> bool:
     if obj_row and obj_row[0] is not None:
         conn.close()
         return False
-    if row[0] in FIN_CATEGORIAS_SISTEMA:
+    if row[0].strip().casefold() in {n.casefold() for n in FIN_CATEGORIAS_SISTEMA}:
         conn.close()
         return False
     if fin_contar_movimientos_categoria(cat_id) > 0:
@@ -1524,15 +1536,20 @@ def fin_crear_objetivo(
 ) -> Optional[dict]:
     conn = get_connection()
     cursor = conn.cursor()
+    nombre = nombre.strip()
+    cursor.execute("SELECT id FROM fin_objetivos WHERE LOWER(TRIM(nombre)) = LOWER(?) LIMIT 1", (nombre,))
+    if not nombre or nombre.casefold() in {n.casefold() for n in FIN_CATEGORIAS_SISTEMA} or cursor.fetchone():
+        conn.close()
+        return None
     fecha_creacion = datetime.now().isoformat()
     try:
         cursor.execute(
             """INSERT INTO fin_objetivos (nombre, meta, moneda, fecha_limite, cuota_mensual, fecha_creacion)
                VALUES (?, ?, ?, ?, ?, ?)""",
-            (nombre.strip(), meta, moneda, fecha_limite, cuota_mensual, fecha_creacion),
+            (nombre, meta, moneda, fecha_limite, cuota_mensual, fecha_creacion),
         )
         oid = cursor.lastrowid
-        _fin_vincular_categoria_objetivo(cursor, oid, nombre.strip())
+        _fin_vincular_categoria_objetivo(cursor, oid, nombre)
         conn.commit()
         cursor.execute(
             "SELECT id, nombre, meta, moneda, fecha_limite, cuota_mensual, fecha_creacion FROM fin_objetivos WHERE id = ?",
@@ -1645,8 +1662,15 @@ def fin_actualizar_categoria(cat_id: int, campos: dict) -> Optional[dict]:
     if not existing:
         conn.close()
         return None
-    if existing[1] is not None or existing[0] in FIN_CATEGORIAS_SISTEMA:
+    if existing[1] is not None or existing[0].strip().casefold() in {n.casefold() for n in FIN_CATEGORIAS_SISTEMA}:
         safe.pop("nombre", None)
+    if "nombre" in safe:
+        nuevo = safe["nombre"].strip()
+        cursor.execute("SELECT id FROM fin_categorias WHERE LOWER(TRIM(nombre)) = LOWER(?) AND id != ? LIMIT 1", (nuevo, cat_id))
+        if not nuevo or cursor.fetchone() or nuevo.casefold() in {n.casefold() for n in FIN_CATEGORIAS_SISTEMA}:
+            conn.close()
+            return None
+        safe["nombre"] = nuevo
     if not safe:
         conn.close()
         return None
@@ -1716,38 +1740,75 @@ def fin_export_csv_data() -> list:
 
 
 def fin_import_movimientos(filas: list) -> list:
-    """Importa lista de dicts con campos de movimiento. Devuelve los creados."""
+    """Importa movimientos y saldos como una sola transacción; no deja lotes parciales."""
+    conn = get_connection()
+    cursor = conn.cursor()
     created = []
-    for f in filas:
-        tipo   = f.get("tipo") or f.get("type", "expense")
-        monto  = float(f.get("monto") or f.get("amount") or 0)
-        fecha  = f.get("fecha") or f.get("date", "")
-        desc   = f.get("descripcion") or f.get("desc", "")
-        cat    = f.get("categoria_nombre") or f.get("cat", "")
-        cta    = f.get("cuenta_nombre") or f.get("method", "")
-        moneda = f.get("moneda", "ARS")
-        nota   = f.get("nota", "")
-        cuotas = f.get("cuotas")
-        if not fecha or monto == 0 or tipo not in ("income", "expense"):
-            continue
-        cuenta_id = fin_buscar_cuenta_por_nombre(cta) if cta else None
-        categoria_id = fin_buscar_categoria_por_nombre(cat) if cat else None
-        if cat and categoria_id is None:
-            tipo_cat = "income" if tipo == "income" else "expense"
-            categoria_id = fin_crear_categoria(cat, tipo=tipo_cat)
-        mov = fin_crear_movimiento(
-            fecha=fecha[:10],
-            monto=monto,
-            tipo=tipo,
-            descripcion=desc,
-            cuenta_id=cuenta_id,
-            cuotas=int(cuotas) if cuotas else None,
-            categoria_id=categoria_id,
-            moneda=moneda,
-            nota=nota or None,
-        )
-        created.append(mov)
-    return created
+    try:
+        for numero, f in enumerate(filas, 1):
+            tipo = f.get("tipo") or f.get("type", "expense")
+            monto = float(f.get("monto") or f.get("amount") or 0)
+            fecha = (f.get("fecha") or f.get("date") or "")[:10]
+            desc = f.get("descripcion") or f.get("desc", "")
+            cat = (f.get("categoria_nombre") or f.get("cat") or "").strip()
+            cta = (f.get("cuenta_nombre") or f.get("method") or "").strip()
+            moneda = (f.get("moneda") or "ARS").upper()
+            cuotas = f.get("cuotas")
+            try:
+                date.fromisoformat(fecha)
+            except ValueError as exc:
+                raise ValueError(f"Fila {numero}: fecha inválida") from exc
+            if monto == 0 or tipo not in ("income", "expense") or moneda not in ("ARS", "USD"):
+                raise ValueError(f"Fila {numero}: tipo, monto o moneda inválidos")
+            cuenta_id = None
+            if cta:
+                cursor.execute("SELECT id FROM fin_cuentas WHERE nombre = ? LIMIT 1", (cta,))
+                row = cursor.fetchone()
+                if not row:
+                    raise ValueError(f"Fila {numero}: cuenta inexistente: {cta}")
+                cuenta_id = row[0]
+            categoria_id = None
+            if cat:
+                cursor.execute("SELECT id FROM fin_categorias WHERE LOWER(TRIM(nombre)) = LOWER(?) LIMIT 1", (cat,))
+                row = cursor.fetchone()
+                if row:
+                    categoria_id = row[0]
+                else:
+                    if cat.casefold() in {n.casefold() for n in FIN_CATEGORIAS_SISTEMA}:
+                        raise ValueError(f"Fila {numero}: falta la categoría del sistema {cat}")
+                    cursor.execute(
+                        "INSERT INTO fin_categorias (nombre, color, tipo) VALUES (?, NULL, ?)",
+                        (cat, tipo),
+                    )
+                    categoria_id = cursor.lastrowid
+            cursor.execute(
+                """INSERT INTO fin_movimientos
+                   (fecha, monto, tipo, descripcion, icono, cuenta_id, cuotas, categoria_id, moneda, nota, audit)
+                   VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, 0)""",
+                (fecha, monto, tipo, desc, cuenta_id, int(cuotas) if cuotas else None,
+                 categoria_id, moneda, f.get("nota") or None),
+            )
+            mid = cursor.lastrowid
+            d_ars, d_usd = _fin_delta_saldo(monto, moneda, tipo, cat)
+            _fin_ajustar_saldo_cuenta(cursor, cuenta_id, d_ars, d_usd)
+            cursor.execute(
+                """SELECT m.id, m.fecha, m.monto, m.tipo, m.descripcion, m.icono,
+                          m.cuenta_id, c.nombre, m.cuotas, m.categoria_id, cat.nombre,
+                          m.moneda, m.nota, m.audit
+                   FROM fin_movimientos m
+                   LEFT JOIN fin_cuentas c ON c.id = m.cuenta_id
+                   LEFT JOIN fin_categorias cat ON cat.id = m.categoria_id
+                   WHERE m.id = ?""",
+                (mid,),
+            )
+            created.append(_mov_dict(cursor.fetchone()))
+        conn.commit()
+        return created
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -1804,11 +1865,29 @@ _TRANS_SELECT = """
 """
 
 
+def _tipo_cambio_para_compra(cursor, moneda: str, tipo_cambio: Optional[float]) -> Optional[float]:
+    if moneda != "ARS":
+        return None
+    if tipo_cambio is not None:
+        if tipo_cambio <= 0:
+            raise ValueError("El tipo de cambio ARS/USD debe ser positivo")
+        return tipo_cambio
+    cursor.execute("""SELECT valor FROM fin_config
+                      WHERE clave IN ('dolar_mep', 'dolar_oficial', 'dolar_default')
+                        AND CAST(valor AS REAL) > 0
+                      ORDER BY CASE clave WHEN 'dolar_mep' THEN 0 WHEN 'dolar_oficial' THEN 1 ELSE 2 END
+                      LIMIT 1""")
+    row = cursor.fetchone()
+    if not row:
+        raise ValueError("Falta tipo de cambio ARS/USD para registrar la compra")
+    return float(row[0])
+
+
 def _recalcular_posicion(cursor, instrumento_id: int) -> None:
     """Recalculate cantidad+costo_usd for an instrument from its full tx history.
     Must be called inside an open transaction; does NOT commit."""
     cursor.execute(
-        """SELECT tipo, cantidad, precio, moneda, tipo_cambio
+        """SELECT id, tipo, cantidad, precio, moneda, tipo_cambio
            FROM fin_transacciones_instrumento
            WHERE instrumento_id = ?
            ORDER BY fecha ASC, id ASC""",
@@ -1819,26 +1898,27 @@ def _recalcular_posicion(cursor, instrumento_id: int) -> None:
     cantidad = 0.0
     costo_usd = 0.0
 
-    for tipo, cant, precio, moneda, tc in rows:
+    for tx_id, tipo, cant, precio, moneda, tc in rows:
+        if cant <= 0 or precio <= 0:
+            raise ValueError(f"Transacción {tx_id}: cantidad y precio deben ser positivos")
         if tipo == "compra":
             if moneda == "ARS":
-                if tc and tc > 0:
-                    costo_tx = (cant * precio) / tc
-                else:
-                    cursor.execute("SELECT valor FROM fin_config WHERE clave = 'dolar_mep'")
-                    r = cursor.fetchone()
-                    tc_fallback = float(r[0]) if (r and r[0]) else 1.0
-                    costo_tx = (cant * precio) / tc_fallback
+                if not tc or tc <= 0:
+                    # Transacciones legacy: congelar la cotización una sola vez.
+                    tc = _tipo_cambio_para_compra(cursor, "ARS", None)
+                    cursor.execute("UPDATE fin_transacciones_instrumento SET tipo_cambio = ? WHERE id = ?", (tc, tx_id))
+                costo_tx = (cant * precio) / tc
             else:
                 costo_tx = cant * precio
             cantidad += cant
             costo_usd += costo_tx
         elif tipo == "venta":
+            if cant > cantidad + 1e-8:
+                raise ValueError(f"Venta del {tx_id} ({cant}) supera la posición disponible en esa fecha ({cantidad})")
             ppc = costo_usd / cantidad if cantidad > 0 else 0.0
-            vendido = min(cant, cantidad)
-            costo_usd -= vendido * ppc
-            cantidad -= vendido
-            if cantidad <= 0:
+            costo_usd -= cant * ppc
+            cantidad -= cant
+            if cantidad <= 1e-8:
                 cantidad = 0.0
                 costo_usd = 0.0
 
@@ -1920,39 +2000,35 @@ def fin_crear_transaccion_instrumento(
     moneda: str = "ARS",
     tipo_cambio: Optional[float] = None,
 ) -> dict:
-    # Validate venta doesn't exceed current position
-    if tipo == "venta":
-        conn_check = get_connection()
-        cur_check = conn_check.cursor()
-        cur_check.execute("SELECT cantidad FROM fin_instrumentos WHERE id = ?", (instrumento_id,))
-        r = cur_check.fetchone()
-        conn_check.close()
-        if r is None:
-            raise ValueError("Instrumento no encontrado")
-        if cantidad > (r[0] or 0):
-            raise ValueError(f"Venta ({cantidad}) supera la posición actual ({r[0] or 0})")
-
+    if tipo not in ("compra", "venta") or moneda not in ("ARS", "USD"):
+        raise ValueError("Tipo de transacción o moneda inválida")
+    if cantidad <= 0 or precio <= 0:
+        raise ValueError("Cantidad y precio deben ser positivos")
     monto_total = round(cantidad * precio, 6)
     creado_en   = datetime.now().isoformat()
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute(
-        """INSERT INTO fin_transacciones_instrumento
-           (instrumento_id, tipo, fecha, cantidad, precio, monto_total, nota, creado_en,
-            moneda, tipo_cambio)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (instrumento_id, tipo, fecha, cantidad, precio, monto_total, nota, creado_en,
-         moneda, tipo_cambio),
-    )
-    tid = cursor.lastrowid
-    _recalcular_posicion(cursor, instrumento_id)
-    conn.commit()
-    cursor.execute(
-        _TRANS_SELECT + "WHERE id = ?",
-        (tid,),
-    )
-    row = cursor.fetchone()
-    conn.close()
+    try:
+        if tipo == "compra":
+            tipo_cambio = _tipo_cambio_para_compra(cursor, moneda, tipo_cambio)
+        cursor.execute(
+            """INSERT INTO fin_transacciones_instrumento
+               (instrumento_id, tipo, fecha, cantidad, precio, monto_total, nota, creado_en,
+                moneda, tipo_cambio)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (instrumento_id, tipo, fecha, cantidad, precio, monto_total, nota, creado_en,
+             moneda, tipo_cambio),
+        )
+        tid = cursor.lastrowid
+        _recalcular_posicion(cursor, instrumento_id)
+        conn.commit()
+        cursor.execute(_TRANS_SELECT + "WHERE id = ?", (tid,))
+        row = cursor.fetchone()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
     if DEBUG:
         print(f"fin_crear_transaccion_instrumento: id={tid} inst={instrumento_id} tipo={tipo}")
     return _trans_dict(row)
@@ -1987,12 +2063,17 @@ def fin_actualizar_transaccion_instrumento(
         safe["monto_total"] = round(cant * prec, 6)
     sets = ", ".join(f"{k} = ?" for k in safe)
     vals = list(safe.values()) + [trans_id]
-    cursor.execute(f"UPDATE fin_transacciones_instrumento SET {sets} WHERE id = ?", vals)
-    _recalcular_posicion(cursor, instrumento_id)
-    conn.commit()
-    cursor.execute(_TRANS_SELECT + "WHERE id = ?", (trans_id,))
-    row = cursor.fetchone()
-    conn.close()
+    try:
+        cursor.execute(f"UPDATE fin_transacciones_instrumento SET {sets} WHERE id = ?", vals)
+        _recalcular_posicion(cursor, instrumento_id)
+        conn.commit()
+        cursor.execute(_TRANS_SELECT + "WHERE id = ?", (trans_id,))
+        row = cursor.fetchone()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
     return _trans_dict(row) if row else None
 
 
@@ -2021,6 +2102,9 @@ def fin_crear_transaccion_unificada(
     if row:
         instrumento_id = row[0]
     else:
+        if tipo == "venta":
+            conn.close()
+            raise ValueError("No se puede vender un instrumento sin compras previas")
         now_iso = datetime.now().isoformat()
         cursor.execute(
             """INSERT INTO fin_instrumentos
@@ -2031,16 +2115,24 @@ def fin_crear_transaccion_unificada(
         instrumento_id = cursor.lastrowid
     conn.commit()
     conn.close()
-    return fin_crear_transaccion_instrumento(
-        instrumento_id=instrumento_id,
-        tipo=tipo,
-        fecha=fecha,
-        cantidad=cantidad,
-        precio=precio,
-        nota=nota,
-        moneda=moneda,
-        tipo_cambio=tipo_cambio,
-    )
+    try:
+        return fin_crear_transaccion_instrumento(
+            instrumento_id=instrumento_id,
+            tipo=tipo,
+            fecha=fecha,
+            cantidad=cantidad,
+            precio=precio,
+            nota=nota,
+            moneda=moneda,
+            tipo_cambio=tipo_cambio,
+        )
+    except Exception:
+        if not row:
+            cleanup = get_connection()
+            cleanup.execute("DELETE FROM fin_instrumentos WHERE id = ?", (instrumento_id,))
+            cleanup.commit()
+            cleanup.close()
+        raise
 
 
 def fin_eliminar_transaccion_instrumento(trans_id: int) -> bool:
@@ -2054,10 +2146,15 @@ def fin_eliminar_transaccion_instrumento(trans_id: int) -> bool:
         conn.close()
         return False
     instrumento_id = r[0]
-    cursor.execute("DELETE FROM fin_transacciones_instrumento WHERE id = ?", (trans_id,))
-    _recalcular_posicion(cursor, instrumento_id)
-    conn.commit()
-    conn.close()
+    try:
+        cursor.execute("DELETE FROM fin_transacciones_instrumento WHERE id = ?", (trans_id,))
+        _recalcular_posicion(cursor, instrumento_id)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
     return True
 
 
@@ -2140,6 +2237,8 @@ def agenda_actualizar_calendario(cal_id: int, campos: dict) -> Optional[dict]:
 def agenda_eliminar_calendario(cal_id: int) -> bool:
     conn = get_connection()
     cursor = conn.cursor()
+    cursor.execute("""UPDATE agenda_series SET activa = 0
+                      WHERE tipo = 'evento' AND contenedor_id = ?""", (cal_id,))
     cursor.execute("DELETE FROM agenda_calendarios WHERE id = ?", (cal_id,))
     deleted = cursor.rowcount > 0
     conn.commit()
@@ -2155,6 +2254,8 @@ def agenda_reasignar_eventos_calendario(origen_id: int, destino_id: int) -> int:
         (destino_id, origen_id),
     )
     afectados = cursor.rowcount
+    cursor.execute("""UPDATE agenda_series SET contenedor_id = ?
+                      WHERE tipo = 'evento' AND contenedor_id = ?""", (destino_id, origen_id))
     conn.commit()
     conn.close()
     return afectados
@@ -2163,6 +2264,63 @@ def agenda_reasignar_eventos_calendario(origen_id: int, destino_id: int) -> int:
 # ---------------------------------------------------------------------------
 # Agenda — Eventos
 # ---------------------------------------------------------------------------
+
+def _extender_series(conn, tipo: str, hasta: str) -> None:
+    """Materialize only dates beyond each series' persisted generation marker."""
+    target = date.fromisoformat(hasta[:10])
+    cursor = conn.cursor()
+    cursor.execute("BEGIN IMMEDIATE")
+    try:
+        cursor.execute("""SELECT serie_id, fecha_inicio, regla_repeticion, plantilla,
+                                 contenedor_id, generada_hasta
+                          FROM agenda_series WHERE tipo = ? AND activa = 1 AND generada_hasta < ?""",
+                       (tipo, target.isoformat()))
+        for series_id, start, rule_json, template_json, container_id, generated in cursor.fetchall():
+            rule = json.loads(rule_json)
+            template = json.loads(template_json)
+            dates = recurring_dates(start, rule, extend_from=target, after=date.fromisoformat(generated))
+            for day in dates:
+                if tipo == "evento":
+                    occurrence_start = day + template["hora_inicio"]
+                    duration = template["duracion_segundos"]
+                    occurrence_end = (
+                        (datetime.fromisoformat(occurrence_start) + timedelta(seconds=duration)).isoformat()
+                        if duration is not None else None
+                    )
+                    cursor.execute("""INSERT INTO agenda_eventos
+                        (titulo, descripcion, fecha_inicio, fecha_fin, todo_el_dia,
+                         se_repite, regla_repeticion, calendario_id, serie_id, recurrencia_materializada)
+                        VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?, 1)""",
+                        (template["titulo"], template["descripcion"], occurrence_start,
+                         occurrence_end, int(template["todo_el_dia"]), container_id, series_id))
+                else:
+                    cursor.execute("""INSERT INTO agenda_tareas
+                        (titulo, descripcion, fecha_opcional, hora_opcional, hora_bloque,
+                         duracion_estimada, completada, lista_id, se_repite, regla_repeticion, serie_id)
+                        VALUES (?, ?, ?, ?, ?, ?, 0, ?, 0, NULL, ?)""",
+                        (template["titulo"], template["descripcion"], day,
+                         template["hora_opcional"], template["hora_bloque"],
+                         template["duracion_estimada"], container_id, series_id))
+            cursor.execute("""UPDATE agenda_series SET generada_hasta = ?
+                              WHERE tipo = ? AND serie_id = ?""",
+                           (dates[-1] if dates else target.isoformat(), tipo, series_id))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def agenda_detener_serie(tipo: str, serie_id: int) -> bool:
+    if tipo not in {"evento", "tarea"}:
+        return False
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""UPDATE agenda_series SET activa = 0
+                      WHERE tipo = ? AND serie_id = ? AND activa = 1""", (tipo, serie_id))
+    stopped = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return stopped
 
 def _evento_dict(r) -> dict:
     return {
@@ -2177,76 +2335,9 @@ def _evento_dict(r) -> dict:
         "calendario_id":     r[8],
         "calendario_color":  r[9] or "#2563eb",
         "calendario_nombre": r[10] or "",
+        "serie_id":          r[11],
+        "serie_activa":      bool(r[12]) if len(r) > 12 else False,
     }
-
-
-def _expand_recurring(evento: dict, desde: str, hasta: str) -> list:
-    """Expands a recurring event into individual occurrences within [desde, hasta]."""
-    try:
-        regla = evento.get("regla_repeticion")
-        if isinstance(regla, str):
-            regla = json.loads(regla)
-        if not regla:
-            return [evento]
-    except Exception:
-        return [evento]
-
-    frecuencia = regla.get("frecuencia", "semanal")
-    dias       = regla.get("dias") or []          # [0=Mon..6=Sun] for weekly
-    hasta_rule = regla.get("hasta")
-
-    base_str  = evento["fecha_inicio"][:10]
-    base_day  = date.fromisoformat(base_str).day
-    time_part = evento["fecha_inicio"][10:]       # e.g. "T08:00:00" or ""
-    duration  = None
-    if evento.get("fecha_fin"):
-        try:
-            duration = datetime.fromisoformat(evento["fecha_fin"]) - datetime.fromisoformat(evento["fecha_inicio"])
-        except Exception:
-            pass
-
-    range_start = max(date.fromisoformat(desde[:10]), date.fromisoformat(base_str))
-    range_end   = date.fromisoformat(hasta[:10])
-    if hasta_rule:
-        try:
-            range_end = min(range_end, date.fromisoformat(hasta_rule))
-        except Exception:
-            pass
-
-    occurrences = []
-    cur = date.fromisoformat(base_str)
-
-    while cur <= range_end:
-        scheduled = False
-        if frecuencia == "diario":
-            scheduled = True
-        elif frecuencia == "semanal":
-            scheduled = (not dias) or (cur.weekday() in dias)
-        elif frecuencia == "mensual":
-            scheduled = cur.day == min(base_day, _calendar.monthrange(cur.year, cur.month)[1])
-
-        if scheduled and cur >= range_start:
-            occ = dict(evento)
-            occ["fecha_inicio"] = cur.isoformat() + time_part
-            if duration is not None:
-                occ["fecha_fin"] = (datetime.fromisoformat(occ["fecha_inicio"]) + duration).isoformat()
-            occurrences.append(occ)
-
-        if frecuencia == "mensual":
-            m, y = cur.month + 1, cur.year
-            if m > 12:
-                m, y = 1, y + 1
-            # Clampear siempre contra el día ORIGINAL del evento (base_day), nunca
-            # contra cur.day -- si no, un evento del día 31 que clampea a 28 en
-            # febrero se queda pegado en 28 para siempre (marzo, mayo, etc. nunca
-            # vuelven a dar 31), porque cur.day ya venía arrastrando el clampeo del
-            # mes anterior. Mismo criterio que ya usa _generar_fechas_recurrencia_tarea.
-            day = min(base_day, _calendar.monthrange(y, m)[1])
-            cur = date(y, m, day)
-        else:
-            cur += timedelta(days=1)
-
-    return occurrences
 
 
 def agenda_obtener_eventos(
@@ -2254,6 +2345,7 @@ def agenda_obtener_eventos(
     fecha_hasta: Optional[str] = None,
 ) -> list:
     conn = get_connection()
+    _extender_series(conn, "evento", fecha_hasta or date.today().isoformat())
     cursor = conn.cursor()
     # fecha_inicio se compara como texto (formato "YYYY-MM-DDTHH:MM:SS") -- un
     # fecha_hasta "pelado" (solo fecha, sin hora, ej. "2026-09-16") queda
@@ -2264,34 +2356,31 @@ def agenda_obtener_eventos(
     # normaliza acá con el mismo criterio.
     if fecha_hasta and "T" not in fecha_hasta:
         fecha_hasta = f"{fecha_hasta}T23:59:59.999999"
-    # Fetch all recurring events regardless of start date so expansion can cover the range
     query = """
         SELECT e.id, e.titulo, e.descripcion, e.fecha_inicio, e.fecha_fin,
                e.todo_el_dia, e.se_repite, e.regla_repeticion, e.calendario_id,
-               COALESCE(c.color, '#2563eb'), COALESCE(c.nombre, '')
+                COALESCE(c.color, '#2563eb'), COALESCE(c.nombre, ''), e.serie_id,
+                EXISTS(SELECT 1 FROM agenda_series s WHERE s.tipo = 'evento'
+                       AND s.serie_id = COALESCE(e.serie_id, e.id) AND s.activa = 1)
         FROM agenda_eventos e
         LEFT JOIN agenda_calendarios c ON c.id = e.calendario_id
     """
     params: list = []
     if fecha_desde and fecha_hasta:
-        query += " WHERE (e.fecha_inicio >= ? AND e.fecha_inicio <= ?) OR e.se_repite = 1"
+        query += " WHERE e.fecha_inicio >= ? AND e.fecha_inicio <= ?"
         params = [fecha_desde, fecha_hasta]
     elif fecha_desde:
-        query += " WHERE e.fecha_inicio >= ? OR e.se_repite = 1"
+        query += " WHERE e.fecha_inicio >= ?"
         params = [fecha_desde]
+    elif fecha_hasta:
+        query += " WHERE e.fecha_inicio <= ?"
+        params = [fecha_hasta]
     query += " ORDER BY e.fecha_inicio"
     cursor.execute(query, params)
     rows = cursor.fetchall()
     conn.close()
 
-    results = []
-    for r in rows:
-        ev = _evento_dict(r)
-        if ev["se_repite"] and fecha_desde and fecha_hasta:
-            results.extend(_expand_recurring(ev, fecha_desde, fecha_hasta))
-        else:
-            results.append(ev)
-    return results
+    return [_evento_dict(r) for r in rows]
 
 
 def agenda_crear_evento(
@@ -2309,17 +2398,45 @@ def agenda_crear_evento(
     cursor.execute(
         """INSERT INTO agenda_eventos
            (titulo, descripcion, fecha_inicio, fecha_fin, todo_el_dia,
-            se_repite, regla_repeticion, calendario_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            se_repite, regla_repeticion, calendario_id, recurrencia_materializada)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)""",
         (titulo.strip(), descripcion, fecha_inicio, fecha_fin,
          int(todo_el_dia), int(se_repite), regla_repeticion, calendario_id),
     )
     eid = cursor.lastrowid
+    if se_repite and regla_repeticion:
+        try:
+            rule = json.loads(regla_repeticion) if isinstance(regla_repeticion, str) else regla_repeticion
+            duration = datetime.fromisoformat(fecha_fin) - datetime.fromisoformat(fecha_inicio) if fecha_fin else None
+            dates = recurring_dates(fecha_inicio, rule)
+            for day in dates:
+                occurrence_start = day + fecha_inicio[10:]
+                occurrence_end = (datetime.fromisoformat(occurrence_start) + duration).isoformat() if duration else None
+                cursor.execute(
+                    """INSERT INTO agenda_eventos
+                       (titulo, descripcion, fecha_inicio, fecha_fin, todo_el_dia,
+                        se_repite, regla_repeticion, calendario_id, serie_id, recurrencia_materializada)
+                       VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?, 1)""",
+                    (titulo.strip(), descripcion, occurrence_start, occurrence_end,
+                      int(todo_el_dia), calendario_id, eid),
+                )
+            template = event_template(titulo.strip(), descripcion, fecha_inicio, fecha_fin, todo_el_dia)
+            cursor.execute("""INSERT INTO agenda_series
+                (tipo, serie_id, fecha_inicio, regla_repeticion, plantilla, contenedor_id, generada_hasta)
+                VALUES ('evento', ?, ?, ?, ?, ?, ?)""",
+                (eid, fecha_inicio, regla_repeticion, json.dumps(template), calendario_id,
+                 dates[-1] if dates else fecha_inicio[:10]))
+        except Exception:
+            conn.rollback()
+            conn.close()
+            raise
     conn.commit()
     cursor.execute(
         """SELECT e.id, e.titulo, e.descripcion, e.fecha_inicio, e.fecha_fin,
                   e.todo_el_dia, e.se_repite, e.regla_repeticion, e.calendario_id,
-                  COALESCE(c.color, '#2563eb'), COALESCE(c.nombre, '')
+                   COALESCE(c.color, '#2563eb'), COALESCE(c.nombre, ''), e.serie_id,
+                   EXISTS(SELECT 1 FROM agenda_series s WHERE s.tipo = 'evento'
+                          AND s.serie_id = COALESCE(e.serie_id, e.id) AND s.activa = 1)
            FROM agenda_eventos e
            LEFT JOIN agenda_calendarios c ON c.id = e.calendario_id
            WHERE e.id = ?""",
@@ -2352,7 +2469,9 @@ def agenda_actualizar_evento(evt_id: int, campos: dict) -> Optional[dict]:
     cursor.execute(
         """SELECT e.id, e.titulo, e.descripcion, e.fecha_inicio, e.fecha_fin,
                   e.todo_el_dia, e.se_repite, e.regla_repeticion, e.calendario_id,
-                  COALESCE(c.color, '#2563eb'), COALESCE(c.nombre, '')
+                   COALESCE(c.color, '#2563eb'), COALESCE(c.nombre, ''), e.serie_id,
+                   EXISTS(SELECT 1 FROM agenda_series s WHERE s.tipo = 'evento'
+                          AND s.serie_id = COALESCE(e.serie_id, e.id) AND s.activa = 1)
            FROM agenda_eventos e
            LEFT JOIN agenda_calendarios c ON c.id = e.calendario_id
            WHERE e.id = ?""",
@@ -2366,8 +2485,16 @@ def agenda_actualizar_evento(evt_id: int, campos: dict) -> Optional[dict]:
 def agenda_eliminar_evento(evt_id: int) -> bool:
     conn = get_connection()
     cursor = conn.cursor()
+    cursor.execute("SELECT COALESCE(serie_id, id) FROM agenda_eventos WHERE id = ?", (evt_id,))
+    row = cursor.fetchone()
     cursor.execute("DELETE FROM agenda_eventos WHERE id = ?", (evt_id,))
     deleted = cursor.rowcount > 0
+    if deleted and row:
+        series_id = row[0]
+        cursor.execute("SELECT 1 FROM agenda_eventos WHERE id = ? OR serie_id = ? LIMIT 1", (series_id, series_id))
+        if not cursor.fetchone():
+            cursor.execute("""UPDATE agenda_series SET activa = 0
+                              WHERE tipo = 'evento' AND serie_id = ?""", (series_id,))
     conn.commit()
     conn.close()
     return deleted
@@ -2425,6 +2552,8 @@ def agenda_actualizar_lista(lista_id: int, campos: dict) -> Optional[dict]:
 def agenda_eliminar_lista(lista_id: int) -> bool:
     conn = get_connection()
     cursor = conn.cursor()
+    cursor.execute("""UPDATE agenda_series SET activa = 0
+                      WHERE tipo = 'tarea' AND contenedor_id = ?""", (lista_id,))
     cursor.execute("DELETE FROM agenda_tareas WHERE lista_id = ?", (lista_id,))
     cursor.execute("DELETE FROM agenda_listas WHERE id = ?", (lista_id,))
     deleted = cursor.rowcount > 0
@@ -2453,20 +2582,26 @@ def _tarea_dict(r) -> dict:
         "se_repite":         bool(r[11]),
         "regla_repeticion":  r[12],
         "serie_id":          r[13],
+        "serie_activa":      bool(r[14]) if len(r) > 14 else False,
     }
 
 
 def agenda_obtener_tareas(
     lista_id: Optional[int] = None,
     solo_pendientes: bool = False,
+    fecha_hasta: Optional[str] = None,
 ) -> list:
     conn = get_connection()
+    target = max(date.today(), date.fromisoformat(fecha_hasta[:10])) if fecha_hasta else date.today()
+    _extender_series(conn, "tarea", target.isoformat())
     cursor = conn.cursor()
     query = """
         SELECT t.id, t.titulo, t.descripcion, t.fecha_opcional, t.hora_opcional,
                t.hora_bloque, t.duracion_estimada, t.completada, t.lista_id,
                COALESCE(l.color, '#7c3aed'), COALESCE(l.nombre, ''),
-               t.se_repite, t.regla_repeticion, t.serie_id
+                t.se_repite, t.regla_repeticion, t.serie_id,
+                EXISTS(SELECT 1 FROM agenda_series s WHERE s.tipo = 'tarea'
+                       AND s.serie_id = COALESCE(t.serie_id, t.id) AND s.activa = 1)
         FROM agenda_tareas t
         LEFT JOIN agenda_listas l ON l.id = t.lista_id
         WHERE 1=1
@@ -2484,61 +2619,12 @@ def agenda_obtener_tareas(
     return [_tarea_dict(r) for r in rows]
 
 
-# Recurrencia de tareas (2026-09-21): a diferencia de agenda_eventos (que
-# expande virtualmente en _expand_recurring(), nunca persiste), las tareas sí
-# tienen estado por ocurrencia (completada) -- una ocurrencia completada no
-# puede afectar a sus hermanas, así que acá se materializan filas reales.
-# Ventana acotada a propósito, sin job que la extienda: es una limitación
-# conocida, no un bug -- ver Cerebro/PROXIMAMENTE.md.
-_REC_TAREA_DIAS_DIARIO   = 60   # "diario": hasta 60 días hacia adelante
-_REC_TAREA_SEMANAS       = 12   # "semanal": hasta 12 semanas hacia adelante
-_REC_TAREA_MESES         = 12   # "mensual": hasta 12 ocurrencias
-
-
+# Las tareas y los eventos materializan cada ocurrencia como fila independiente.
+# Una edición o eliminación por ID afecta solo a esa ocurrencia.
+# La ventana inicial se extiende al consultar, sin regenerar días anteriores.
 def _generar_fechas_recurrencia_tarea(fecha_inicio: str, regla: dict) -> list:
-    """Fechas (ISO, sin incluir fecha_inicio) de las próximas ocurrencias de
-    una tarea recurrente, dentro de la ventana acotada de arriba. Mismo shape
-    de regla que agenda_eventos.regla_repeticion (frecuencia/dias/hasta) y
-    mismo criterio de "scheduled" que _expand_recurring(), pero generando
-    fechas concretas en vez de expandir un evento virtual."""
-    frecuencia = regla.get("frecuencia", "semanal")
-    dias       = regla.get("dias") or []  # [0=lunes..6=domingo], igual que eventos
-    hasta_rule = regla.get("hasta")
-
-    base = date.fromisoformat(fecha_inicio[:10])
-    limite = None
-    if hasta_rule:
-        try:
-            limite = date.fromisoformat(hasta_rule)
-        except Exception:
-            limite = None
-
-    fechas = []
-    if frecuencia == "mensual":
-        cur = base
-        for _ in range(_REC_TAREA_MESES):
-            m, y = cur.month + 1, cur.year
-            if m > 12:
-                m, y = 1, y + 1
-            day = min(base.day, _calendar.monthrange(y, m)[1])
-            cur = date(y, m, day)
-            if limite is not None and cur > limite:
-                break
-            fechas.append(cur.isoformat())
-    else:
-        if frecuencia == "diario":
-            fin = base + timedelta(days=_REC_TAREA_DIAS_DIARIO)
-        else:  # "semanal" (default)
-            fin = base + timedelta(weeks=_REC_TAREA_SEMANAS)
-        if limite is not None:
-            fin = min(fin, limite)
-        cur = base + timedelta(days=1)
-        while cur <= fin:
-            scheduled = frecuencia == "diario" or (not dias) or (cur.weekday() in dias)
-            if scheduled:
-                fechas.append(cur.isoformat())
-            cur += timedelta(days=1)
-    return fechas
+    """Compatibility name for the shared materialized recurrence generator."""
+    return recurring_dates(fecha_inicio, regla)
 
 
 def agenda_crear_tarea(
@@ -2563,12 +2649,9 @@ def agenda_crear_tarea(
          lista_id, int(bool(se_repite)), regla_repeticion),
     )
     tid = cursor.lastrowid
-    conn.commit()
-
     # Generar ocurrencias reales de la serie -- solo si hay fecha inicial (sin
     # fecha_opcional no hay desde dónde contar la recurrencia) y una regla
-    # parseable. Cualquier error acá se loguea y se ignora -- la tarea cabeza
-    # ya quedó creada, no tiene sentido tumbar la request por esto.
+    # parseable. Se confirma cabeza e hijas en una sola transacción.
     if se_repite and regla_repeticion and fecha_opcional:
         try:
             regla = json.loads(regla_repeticion) if isinstance(regla_repeticion, str) else regla_repeticion
@@ -2580,20 +2663,29 @@ def agenda_crear_tarea(
                         duracion_estimada, completada, lista_id, se_repite, regla_repeticion, serie_id)
                        VALUES (?, ?, ?, ?, ?, ?, 0, ?, 0, NULL, ?)""",
                     (titulo.strip(), descripcion, f, hora_opcional, hora_bloque,
-                     duracion_estimada, lista_id, tid),
+                      duracion_estimada, lista_id, tid),
                 )
-            conn.commit()
+            template = task_template(titulo.strip(), descripcion, hora_opcional, hora_bloque, duracion_estimada)
+            cursor.execute("""INSERT INTO agenda_series
+                (tipo, serie_id, fecha_inicio, regla_repeticion, plantilla, contenedor_id, generada_hasta)
+                VALUES ('tarea', ?, ?, ?, ?, ?, ?)""",
+                (tid, fecha_opcional[:10], regla_repeticion, json.dumps(template), lista_id,
+                 fechas[-1] if fechas else fecha_opcional[:10]))
             if DEBUG:
                 print(f"agenda_crear_tarea: {len(fechas)} ocurrencias generadas para serie_id={tid}")
-        except Exception as exc:
-            if DEBUG:
-                print(f"agenda_crear_tarea: fallo generando ocurrencias de recurrencia (serie_id={tid}): {exc}")
+        except Exception:
+            conn.rollback()
+            conn.close()
+            raise
+    conn.commit()
 
     cursor.execute(
         """SELECT t.id, t.titulo, t.descripcion, t.fecha_opcional, t.hora_opcional,
                   t.hora_bloque, t.duracion_estimada, t.completada, t.lista_id,
                   COALESCE(l.color, '#7c3aed'), COALESCE(l.nombre, ''),
-                  t.se_repite, t.regla_repeticion, t.serie_id
+                   t.se_repite, t.regla_repeticion, t.serie_id,
+                   EXISTS(SELECT 1 FROM agenda_series s WHERE s.tipo = 'tarea'
+                          AND s.serie_id = COALESCE(t.serie_id, t.id) AND s.activa = 1)
            FROM agenda_tareas t
            LEFT JOIN agenda_listas l ON l.id = t.lista_id
            WHERE t.id = ?""",
@@ -2627,7 +2719,9 @@ def agenda_actualizar_tarea(tarea_id: int, campos: dict) -> Optional[dict]:
         """SELECT t.id, t.titulo, t.descripcion, t.fecha_opcional, t.hora_opcional,
                   t.hora_bloque, t.duracion_estimada, t.completada, t.lista_id,
                   COALESCE(l.color, '#7c3aed'), COALESCE(l.nombre, ''),
-                  t.se_repite, t.regla_repeticion, t.serie_id
+                   t.se_repite, t.regla_repeticion, t.serie_id,
+                   EXISTS(SELECT 1 FROM agenda_series s WHERE s.tipo = 'tarea'
+                          AND s.serie_id = COALESCE(t.serie_id, t.id) AND s.activa = 1)
            FROM agenda_tareas t
            LEFT JOIN agenda_listas l ON l.id = t.lista_id
            WHERE t.id = ?""",
@@ -2641,8 +2735,16 @@ def agenda_actualizar_tarea(tarea_id: int, campos: dict) -> Optional[dict]:
 def agenda_eliminar_tarea(tarea_id: int) -> bool:
     conn = get_connection()
     cursor = conn.cursor()
+    cursor.execute("SELECT COALESCE(serie_id, id) FROM agenda_tareas WHERE id = ?", (tarea_id,))
+    row = cursor.fetchone()
     cursor.execute("DELETE FROM agenda_tareas WHERE id = ?", (tarea_id,))
     deleted = cursor.rowcount > 0
+    if deleted and row:
+        series_id = row[0]
+        cursor.execute("SELECT 1 FROM agenda_tareas WHERE id = ? OR serie_id = ? LIMIT 1", (series_id, series_id))
+        if not cursor.fetchone():
+            cursor.execute("""UPDATE agenda_series SET activa = 0
+                              WHERE tipo = 'tarea' AND serie_id = ?""", (series_id,))
     conn.commit()
     conn.close()
     return deleted
@@ -2771,6 +2873,8 @@ def agenda_resumen_semana(desde: str, hasta: str) -> dict:
     if hasta and "T" not in hasta:
         hasta = f"{hasta}T23:59:59.999999"
     conn = get_connection()
+    _extender_series(conn, "evento", hasta)
+    _extender_series(conn, "tarea", hasta)
     cursor = conn.cursor()
 
     # Tareas completadas en el rango (con fecha en el rango)
@@ -2844,7 +2948,9 @@ def agenda_buscar(q: str) -> dict:
     cursor.execute(
         """SELECT e.id, e.titulo, e.descripcion, e.fecha_inicio, e.fecha_fin,
                   e.todo_el_dia, e.se_repite, e.regla_repeticion, e.calendario_id,
-                  COALESCE(c.color, '#2563eb'), COALESCE(c.nombre, '')
+                   COALESCE(c.color, '#2563eb'), COALESCE(c.nombre, ''), e.serie_id,
+                   EXISTS(SELECT 1 FROM agenda_series s WHERE s.tipo = 'evento'
+                          AND s.serie_id = COALESCE(e.serie_id, e.id) AND s.activa = 1)
            FROM agenda_eventos e
            LEFT JOIN agenda_calendarios c ON c.id = e.calendario_id
            WHERE e.titulo LIKE ? OR e.descripcion LIKE ?
@@ -2858,7 +2964,9 @@ def agenda_buscar(q: str) -> dict:
         """SELECT t.id, t.titulo, t.descripcion, t.fecha_opcional, t.hora_opcional,
                   t.hora_bloque, t.duracion_estimada, t.completada, t.lista_id,
                   COALESCE(l.color, '#7c3aed'), COALESCE(l.nombre, ''),
-                  t.se_repite, t.regla_repeticion, t.serie_id
+                   t.se_repite, t.regla_repeticion, t.serie_id,
+                   EXISTS(SELECT 1 FROM agenda_series s WHERE s.tipo = 'tarea'
+                          AND s.serie_id = COALESCE(t.serie_id, t.id) AND s.activa = 1)
            FROM agenda_tareas t
            LEFT JOIN agenda_listas l ON l.id = t.lista_id
            WHERE t.titulo LIKE ? OR t.descripcion LIKE ?

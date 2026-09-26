@@ -64,21 +64,17 @@ siendo real y no estaba capturada en ningún otro lugar de `Cerebro/` — se vue
   1462) — ~30-35% de crecimiento en 2 meses. El corte plano por `APIRouter`/slices que sugiere
   el informe choca con la decisión de `CLAUDE.md` (arriba) — si se retoma, sería con otro
   criterio de partición, no el propuesto.
-- **Cajones por typo (Finanzas)**: `fin_buscar_categoria_por_nombre` (`crud.py:960-966`) hace
-  `WHERE nombre = ?` exacto, sin `lower()`/`trim()`. La auto-creación de categoría en
-  `POST /fin/movimientos` (`main.py:1028-1033`) sigue sin normalizar — "Comida"/"comida" crean
-  cajones distintos.
+- **Cajones por typo (Finanzas)**: resuelto en la auditoría de Finanzas de septiembre de 2026.
+  La búsqueda y el alta comparan nombres sin distinguir mayúsculas ni espacios; se rechazan
+  duplicados y variantes de las categorías del sistema.
 - **Migraciones sin red**: `_apply_migrations` (`database.py:482`) sigue siendo checks de
   columna ad-hoc (`ALTER TABLE ... ADD COLUMN` condicional). Sin `schema_version`, sin backup
   automático pre-migración, sin log de qué se aplicó.
-- **Dual schema de movimientos, parcialmente mitigado**: `normalizeMovimiento()`
-  (`data/finanzas.js:249`) sigue existiendo con tests dedicados; el fallback offline en
-  `addFinMovimiento` (`useStore.js:208-245`) sigue construyendo un shape mixto. Lo que sí
-  cambió (por la auditoría de septiembre, no por este informe): el fallback ya no falla en
-  silencio — hace rollback visual + toast (`useStore.js:232-243`).
-- **Legacy visible**: banner de `Ahorro` legacy sigue en `AhorroTab.jsx:1469-1478`;
-  `GET /fin/emergencia` sigue `deprecated=True` (`main.py:1164`) y sigue consumido por el store
-  (`useStore.js:186`).
+- **Dual schema de movimientos**: resuelto el 2026-09-24; los consumidores frontend y el
+  fallback local usan el shape de la API. El bot conserva un normalizador de compatibilidad.
+  El fallback temporal aún requiere una cola durable si se busca soporte offline completo.
+- **Legacy visible**: banner de `Ahorro` legacy sigue en Ahorro; `GET /fin/emergencia` permanece
+  deprecated, pero el store calcula el saldo desde `finMovimientosAll` sin llamarlo.
 - **Sync sin guard de divergencia**: `POST /sync/import` (`main.py:1967-2012`) no tiene
   precondición de versión (`expected_hash`/`If-Match`/409) — mismo hallazgo P0 que ya está en
   `Diferido — riesgo de pérdida de datos en el sync` arriba, **con una decisión explícita ya
@@ -90,12 +86,10 @@ routes/services" ya no aplican, ver arriba):
 1. Botón "Crear backup ahora" en Settings — no existe.
 2. Banner de frescura de sync en TopBar — no existe.
 3. `SGR_VERSION` visible + `CHANGELOG.md` — no existen.
-4. `GET /fin/movimientos/duplicados` (`main.py:953-955`, ya existe en backend) sin ningún
-   consumidor en el frontend — **distinto** del cuadro de filtros agregado el 24/09 a
-   `DatosTab.jsx`, que no lo cubre.
-5. Matching case-insensitive en POST movimiento — ver arriba.
-6. Emergencia client-side en dashboard (reemplazar el consumidor de `/fin/emergencia`) — ver
-   arriba.
+4. ~~`GET /fin/movimientos/duplicados` sin consumidor frontend~~ — Datos ya ofrece el botón
+   de duplicados y permite revisar los resultados.
+5. ~~Matching case-insensitive en POST movimiento~~ — implementado.
+6. ~~Emergencia client-side en dashboard~~ — implementado.
 7. ~~Toggle de búsqueda semántica en `LeftPanel` de Bóveda~~ — implementado; la UI usa
    `top_k=20` y ofrece reindexación manual.
 8. `verify-sync.ps1` (script de humo que compara counts `/meta` antes/después de sync) — no
@@ -183,6 +177,8 @@ ejecutado. No había ningún puntero desde `Cerebro/` hacia la carpeta salvo est
 ---
 
 ## Extender automáticamente la ventana de recurrencia de tareas
+
+**Implementado, 2026-09-26:** Agenda extiende las series de eventos y tareas al consultar períodos posteriores. La definición se conserva en `agenda_series`, incluso si se borra la primera ocurrencia; el marcador de última fecha generada impide recrear ocurrencias borradas. Los modales ofrecen detener nuevas repeticiones sin borrar las ya creadas; borrar la última ocurrencia también detiene la serie. Las notas siguientes describen la decisión pendiente original y quedan como antecedente.
 
 **Fecha:** 2026-09-21
 

@@ -1,5 +1,5 @@
 import { BRANCH_COLORS } from '../utils/themes'
-import { isTransferencia } from './finanzas'
+import { isTransferencia, montoEnMoneda } from './finanzas'
 
 /** Paleta de respaldo cuando la categoría no tiene color en DB. */
 export const FIN_CAT_PALETTE = [
@@ -49,7 +49,7 @@ export function getFinCategoriaColor(colorByName, catName, fallbackIndex = 0) {
  * Agrega gastos/ingresos por categoría con colores de fin_categorias.
  * Usado en donuts, listas de movimientos y filtros del dashboard.
  */
-export function buildCategories(movimientos, type, finCategorias = null) {
+export function buildCategories(movimientos, type, finCategorias = null, dolar = 1245) {
   const colorByName = buildFinCategoriaColorByName(finCategorias ?? [])
 
   const filtered = movimientos.filter(m => m.tipo === type && !isTransferencia(m))
@@ -61,7 +61,7 @@ export function buildCategories(movimientos, type, finCategorias = null) {
   const map = {}
   filtered.forEach(m => {
     const cat = m.categoria_nombre ?? 'Otros'
-    const amt = Math.abs(m.monto ?? 0)
+    const amt = montoEnMoneda(m, 'ARS', dolar)
     if (!map[cat]) map[cat] = { name: cat, amount: 0 }
     map[cat].amount += amt
   })

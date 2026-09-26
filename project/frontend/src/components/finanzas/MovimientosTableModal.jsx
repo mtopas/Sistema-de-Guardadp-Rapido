@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { X, ArrowUp, ArrowDown, ArrowUpDown, Download, Pencil, Trash2, Check } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
-import { fmtARS, fmtUSD } from '../../data/finanzas'
+import { fmtARS, fmtUSD, isTransferencia } from '../../data/finanzas'
 import { buildCategories } from './CategoryDonutCard'
 
 function exportCSV(rows, type) {
@@ -66,12 +66,14 @@ export default function MovimientosTableModal({ open, onClose, type = 'expense' 
   const lang = useStore(s => s.lang)
   const finMovimientos = useStore(s => s.finMovimientos)
   const finCategorias  = useStore(s => s.finCategorias)
+  const finConfig = useStore(s => s.finConfig)
+  const dolar = finConfig?.dolar_mep ?? finConfig?.dolar_oficial ?? finConfig?.dolar_default ?? 1245
   const deleteMov = useStore(s => s.deleteFinMovimiento)
   const updateMov = useStore(s => s.updateFinMovimiento)
   const catColors = useMemo(() => {
-    const { cats } = buildCategories(finMovimientos, type, finCategorias)
+    const { cats } = buildCategories(finMovimientos, type, finCategorias, dolar)
     return Object.fromEntries(cats.map(c => [c.name, c.color]))
-  }, [finMovimientos, type, finCategorias])
+  }, [finMovimientos, type, finCategorias, dolar])
 
   const { sortCol, sortDir, handleSort } = useColumnSort()
   const [filterCat, setFilterCat] = useState('__all__')
@@ -110,7 +112,7 @@ export default function MovimientosTableModal({ open, onClose, type = 'expense' 
   }, [open])
 
   const filtered = useMemo(() => {
-    return finMovimientos.filter(m => m.tipo === type)
+    return finMovimientos.filter(m => m.tipo === type && !isTransferencia(m))
   }, [finMovimientos, type])
 
   const categories = useMemo(() => {
@@ -422,7 +424,7 @@ export default function MovimientosTableModal({ open, onClose, type = 'expense' 
                         className="tnum"
                         style={{ color: isIncome ? 'var(--income)' : 'var(--expense)' }}
                       >
-                        {isIncome ? '+' : '−'}{m.currency === 'USD' ? fmtUSD(Math.abs(monto)) : fmtARS(Math.abs(monto))}
+                        {isIncome ? '+' : '−'}{m.moneda === 'USD' ? fmtUSD(Math.abs(monto)) : fmtARS(Math.abs(monto))}
                       </span>
                     </td>
                     <td style={{ ...tdStyle, textAlign: 'right', padding: '4px 6px' }}>

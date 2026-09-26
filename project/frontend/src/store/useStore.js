@@ -316,8 +316,6 @@ export const useStore = create((set, get) => ({
   },
 
   createFinCuenta: async (nombre, tipo, color, initials, saldo_ars = 0, saldo_usd = 0) => {
-    const optimistic = { id: Date.now(), name: nombre, tipo, color, initials, ars: saldo_ars, usd: saldo_usd }
-    set(state => ({ finCuentas: [...state.finCuentas, optimistic] }))
     try {
       const res = await fetch(`${API_URL}/fin/cuentas`, {
         method: 'POST',
@@ -326,21 +324,20 @@ export const useStore = create((set, get) => ({
       })
       if (!res.ok) throw new Error('not ok')
       const created = await res.json()
-      set(state => ({ finCuentas: state.finCuentas.map(c => c.id === optimistic.id ? created : c) }))
-      if (saldo_ars > 0 || saldo_usd > 0) {
+      set(state => ({ finCuentas: [...state.finCuentas, created] }))
+      if (saldo_ars !== 0 || saldo_usd !== 0) {
         await get().fetchFinMovimientos(get().selectedMes)
         await get().fetchFinMovimientosAll()
       }
+      return created
     } catch {
-      // keep optimistic
+      get().showToast('No se pudo crear la cuenta', 'error')
+      return null
     }
     if (DEBUG) console.log('createFinCuenta:', nombre, tipo)
   },
 
   editFinCuentaMeta: async (id, nombre, tipo, color, initials) => {
-    set(state => ({
-      finCuentas: state.finCuentas.map(c => c.id === id ? { ...c, name: nombre, tipo, color, initials } : c),
-    }))
     try {
       const res = await fetch(`${API_URL}/fin/cuentas/${id}`, {
         method: 'PATCH',
@@ -350,18 +347,23 @@ export const useStore = create((set, get) => ({
       if (!res.ok) throw new Error('not ok')
       const updated = await res.json()
       set(state => ({ finCuentas: state.finCuentas.map(c => c.id === id ? { ...c, ...updated } : c) }))
+      return true
     } catch {
-      // keep optimistic
+      get().showToast('No se pudo editar la cuenta', 'error')
+      return false
     }
     if (DEBUG) console.log('editFinCuentaMeta:', id, nombre)
   },
 
   deleteFinCuenta: async (id) => {
-    set(state => ({ finCuentas: state.finCuentas.filter(c => c.id !== id) }))
     try {
-      await fetch(`${API_URL}/fin/cuentas/${id}`, { method: 'DELETE' })
+      const res = await fetch(`${API_URL}/fin/cuentas/${id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('not ok')
+      set(state => ({ finCuentas: state.finCuentas.filter(c => c.id !== id) }))
+      return true
     } catch {
-      // offline: optimistic delete stands
+      get().showToast('No se pudo eliminar la cuenta; puede tener movimientos asociados', 'error')
+      return false
     }
     if (DEBUG) console.log('deleteFinCuenta:', id)
   },
@@ -502,7 +504,7 @@ export const useStore = create((set, get) => ({
       const data = await res.json()
       set({ finConfig: data, finFirePreview: null })
     } catch {
-      set(state => ({ finConfig: { ...state.finConfig, ...updates }, finFirePreview: null }))
+      throw new Error('No se pudo guardar la configuración FIRE')
     }
     if (DEBUG) console.log('saveFinConfigBulk:', Object.keys(updates))
   },
@@ -585,30 +587,38 @@ export const useStore = create((set, get) => ({
       set(state => ({ finInstrumentos: [...state.finInstrumentos, data] }))
       return data
     } catch {
-      const mock = { id: `i_${Date.now()}`, ...payload }
-      set(state => ({ finInstrumentos: [...state.finInstrumentos, mock] }))
-      return mock
+      get().showToast('No se pudo crear el instrumento', 'error')
+      return null
     }
   },
 
   updateFinInstrumento: async (id, patch) => {
-    set(state => ({
-      finInstrumentos: state.finInstrumentos.map(i => i.id === id ? { ...i, ...patch } : i),
-    }))
     try {
-      await fetch(`${API_URL}/fin/instrumentos/${id}`, {
+      const res = await fetch(`${API_URL}/fin/instrumentos/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       })
-    } catch { /* offline ok */ }
+      if (!res.ok) throw new Error('not ok')
+      const updated = await res.json()
+      set(state => ({ finInstrumentos: state.finInstrumentos.map(i => i.id === id ? { ...i, ...updated } : i) }))
+      return true
+    } catch {
+      get().showToast('No se pudo editar el instrumento', 'error')
+      return false
+    }
   },
 
   deleteFinInstrumento: async (id) => {
-    set(state => ({ finInstrumentos: state.finInstrumentos.filter(i => i.id !== id) }))
     try {
-      await fetch(`${API_URL}/fin/instrumentos/${id}`, { method: 'DELETE' })
-    } catch { /* noop */ }
+      const res = await fetch(`${API_URL}/fin/instrumentos/${id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('not ok')
+      set(state => ({ finInstrumentos: state.finInstrumentos.filter(i => i.id !== id) }))
+      return true
+    } catch {
+      get().showToast('No se pudo eliminar el instrumento', 'error')
+      return false
+    }
   },
 
   // ---------------------------------------------------------------------------
@@ -625,9 +635,25 @@ export const useStore = create((set, get) => ({
       if (!res.ok) throw new Error('not ok')
       const data = await res.json()
       set({ finTransacciones: data })
+      return true
     } catch {
       if (DEBUG) console.log('fetchFinTransacciones: API error')
+      return false
     }
+  },
+
+  addFinTransaccionUnificada: async (payload) => {
+    const res = await fetch(`${API_URL}/fin/transacciones`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.detail || 'No se pudo guardar la transacción')
+    }
+    const created = await res.json()
+    await Promise.all([get().fetchFinTransacciones({ limit: 2000 }), get().fetchFinInstrumentos()])
+    return created
   },
 
   addFinTransaccion: async (instrumento_id, payload) => {
@@ -648,6 +674,7 @@ export const useStore = create((set, get) => ({
         finTransacciones: state.finTransacciones.map(t => t.id === mock.id ? data : t),
       }))
       await get().fetchFinInstrumentos()
+      await get().fetchFinTransacciones({ limit: 2000 })
       return data
     } catch (err) {
       set(state => ({ finTransacciones: state.finTransacciones.filter(t => t.id !== mock.id) }))
@@ -669,12 +696,15 @@ export const useStore = create((set, get) => ({
       if (!res.ok) throw new Error('not ok')
       const data = await res.json()
       set(state => ({
-        finTransacciones: state.finTransacciones.map(t => t.id === id ? data : t),
+        finTransacciones: state.finTransacciones.map(t => t.id === id ? { ...t, ...data } : t),
       }))
       await get().fetchFinInstrumentos()
+      await get().fetchFinTransacciones({ limit: 2000 })
       return data
     } catch {
       set({ finTransacciones: prev })
+      get().showToast('No se pudo editar la transacción', 'error')
+      return null
     }
   },
 
@@ -685,8 +715,12 @@ export const useStore = create((set, get) => ({
       const res = await fetch(`${API_URL}/fin/transacciones/${id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error('not ok')
       await get().fetchFinInstrumentos()
+      await get().fetchFinTransacciones({ limit: 2000 })
+      return true
     } catch {
       set({ finTransacciones: prev })
+      get().showToast('No se pudo eliminar la transacción', 'error')
+      return false
     }
   },
 
@@ -719,23 +753,26 @@ export const useStore = create((set, get) => ({
       await get().fetchFinCategorias()
       return data
     } catch {
-      const mock = { id: `o_${Date.now()}`, fecha_creacion: new Date().toISOString(), ...payload }
-      set(state => ({ finObjetivos: [...state.finObjetivos, mock] }))
-      return mock
+      get().showToast('No se pudo crear el objetivo', 'error')
+      return null
     }
   },
 
   updateFinObjetivo: async (id, patch) => {
-    set(state => ({
-      finObjetivos: state.finObjetivos.map(o => o.id === id ? { ...o, ...patch } : o),
-    }))
     try {
-      await fetch(`${API_URL}/fin/objetivos/${id}`, {
+      const res = await fetch(`${API_URL}/fin/objetivos/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       })
-    } catch { /* offline ok */ }
+      if (!res.ok) throw new Error('not ok')
+      const updated = await res.json()
+      set(state => ({ finObjetivos: state.finObjetivos.map(o => o.id === id ? updated : o) }))
+      return true
+    } catch {
+      get().showToast('No se pudo actualizar el objetivo', 'error')
+      return false
+    }
   },
 
   deleteFinObjetivo: async (id) => {

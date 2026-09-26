@@ -86,6 +86,23 @@ export function contribucionCategoria(mov) {
   return tipo === 'income' ? -monto : monto
 }
 
+/** Todos los importes de un agregado deben estar en la misma moneda. */
+export function montoEnMoneda(mov, moneda, dolar) {
+  const monto = Math.abs(Number(mov?.monto ?? 0))
+  const origen = (mov?.moneda ?? 'ARS').toUpperCase()
+  const destino = (moneda ?? 'ARS').toUpperCase()
+  if (origen === destino) return monto
+  const cotizacion = Number(dolar)
+  if (!Number.isFinite(cotizacion) || cotizacion <= 0) return null
+  return origen === 'USD' ? monto * cotizacion : monto / cotizacion
+}
+
+export function contribucionCategoriaEnMoneda(mov, moneda, dolar) {
+  const monto = montoEnMoneda(mov, moneda, dolar)
+  if (monto == null) return null
+  return mov?.tipo === 'income' ? -monto : monto
+}
+
 /** Alias histórico — misma lógica que contribucionCategoria. */
 export const contribucionAhorro = contribucionCategoria
 
@@ -95,13 +112,7 @@ export function contribucionFire(mov) {
 
 export function contribucionFireUSD(mov, dolar) {
   if (!isCategoriaFire(mov)) return 0
-  const monto = Math.abs(Number(mov?.monto ?? 0))
-  const tipo  = mov?.tipo
-  const signo = tipo === 'income' ? -1 : 1
-  const enUSD = (mov?.moneda ?? 'ARS').toUpperCase() === 'USD'
-    ? monto
-    : monto / (Number(dolar) || 1)
-  return signo * enUSD
+  return contribucionCategoriaEnMoneda(mov, 'USD', dolar)
 }
 
 export function acumuladoPorCategoriaNombre(movs, nombreCategoria) {
@@ -111,6 +122,19 @@ export function acumuladoPorCategoriaNombre(movs, nombreCategoria) {
     if (!movimientoAsignadoACajon(m, key)) return sum
     return sum + contribucionCategoria(m)
   }, 0)
+}
+
+export function acumuladoPorCategoriaNombreEnMoneda(movs, nombreCategoria, moneda, dolar) {
+  const key = (nombreCategoria || '').trim().toLowerCase()
+  if (!key) return 0
+  let total = 0
+  for (const mov of movs || []) {
+    if (!movimientoAsignadoACajon(mov, key)) continue
+    const aporte = contribucionCategoriaEnMoneda(mov, moneda, dolar)
+    if (aporte == null) return null
+    total += aporte
+  }
+  return total
 }
 
 /** Nombre del objetivo/categoría seed del fondo de emergencia (ver app/db/database.py). */
@@ -179,6 +203,22 @@ export function ahorradoFireEnMes(finMovimientosAll, finFireFilas, mes) {
   return 0
 }
 
+/** Los overrides de fin_fire_filas y la meta FIRE están expresados en USD. */
+export function ahorradoFireUSDEnMes(finMovimientosAll, finFireFilas, mes, dolar) {
+  let computed = 0
+  for (const mov of finMovimientosAll ?? []) {
+    if (mesMovimiento(mov) !== mes || !isCategoriaFire(mov)) continue
+    const aporte = contribucionFireUSD(mov, dolar)
+    if (aporte == null) return null
+    computed += aporte
+  }
+  return ahorroFireRealOOverride(computed, finFireFilas?.[mes])
+}
+
+export function ahorroFireRealOOverride(computed, override) {
+  return computed !== 0 ? computed : (override ?? 0)
+}
+
 /** @deprecated Usar isCategoriaFire */
 export function isCategoriaAhorro(mov) {
   return isCategoriaFire(mov)
@@ -197,6 +237,17 @@ export function mesMovimiento(mov) {
   const d = new Date(raw)
   if (isNaN(d.getTime())) return ''
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+/** Fecha de última cuota, sin desborde del día 31 ni corrimiento por zona horaria. */
+export function sumarMesesFecha(isoStr, meses) {
+  const match = String(isoStr ?? '').match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!match) return null
+  const [, y, m, d] = match.map(Number)
+  const target = new Date(y, m - 1 + meses, 1)
+  const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate()
+  target.setDate(Math.min(d, lastDay))
+  return target
 }
 
 /** Año calendario del movimiento (ISO o corto). */

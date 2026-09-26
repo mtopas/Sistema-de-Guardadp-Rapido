@@ -161,13 +161,10 @@ describe('Contribuciones y fechas', () => {
       expect(contribucionFireUSD({ categoria_nombre: 'FIRE', tipo: 'expense', monto: 500, moneda: 'ARS' }, 1000)).toBe(0.5);
     });
 
-    it('should use 1 as divisor when dolar is 0, null, or undefined', () => {
-      // dolar = 0 → divide por 1
-      expect(contribucionFireUSD({ categoria_nombre: 'FIRE', tipo: 'expense', monto: 1000 }, 0)).toBe(1000);
-      // dolar = null → divide por 1
-      expect(contribucionFireUSD({ categoria_nombre: 'FIRE', tipo: 'expense', monto: 1000 }, null)).toBe(1000);
-      // dolar = undefined → divide por 1
-      expect(contribucionFireUSD({ categoria_nombre: 'FIRE', tipo: 'expense', monto: 1000 }, undefined)).toBe(1000);
+    it('does not present ARS as USD when the exchange rate is missing', () => {
+      expect(contribucionFireUSD({ categoria_nombre: 'FIRE', tipo: 'expense', monto: 1000 }, 0)).toBeNull();
+      expect(contribucionFireUSD({ categoria_nombre: 'FIRE', tipo: 'expense', monto: 1000 }, null)).toBeNull();
+      expect(contribucionFireUSD({ categoria_nombre: 'FIRE', tipo: 'expense', monto: 1000 }, undefined)).toBeNull();
     });
 
     it('should use abs(monto) internally, respecting sign from tipo', () => {

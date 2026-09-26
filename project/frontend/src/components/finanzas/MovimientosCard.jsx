@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
-import { fmtARS, fmtUSD } from '../../data/finanzas'
+import { fmtARS, fmtUSD, isTransferencia } from '../../data/finanzas'
 import { buildCategories } from './CategoryDonutCard'
 import CardHeader from './CardHeader'
 import MovimientosTableModal from './MovimientosTableModal'
@@ -10,15 +10,17 @@ export default function MovimientosListCard({ type = 'expense', filterCat = null
   const lang = useStore(s => s.lang)
   const finMovimientos = useStore(s => s.finMovimientos)
   const finCategorias  = useStore(s => s.finCategorias)
+  const finConfig = useStore(s => s.finConfig)
+  const dolar = finConfig?.dolar_mep ?? finConfig?.dolar_oficial ?? finConfig?.dolar_default ?? 1245
   const [modalOpen, setModalOpen] = useState(false)
 
   const catColors = useMemo(() => {
-    const { cats } = buildCategories(finMovimientos, type, finCategorias)
+    const { cats } = buildCategories(finMovimientos, type, finCategorias, dolar)
     return Object.fromEntries(cats.map(c => [c.name, c.color]))
-  }, [finMovimientos, type, finCategorias])
+  }, [finMovimientos, type, finCategorias, dolar])
 
   const items = useMemo(() => {
-    let base = finMovimientos.filter(m => m.tipo === type)
+    let base = finMovimientos.filter(m => m.tipo === type && !isTransferencia(m))
     if (filterCat) base = base.filter(m => (m.categoria_nombre ?? '') === filterCat)
     return base.slice(0, filterCat ? 8 : 4)
   }, [finMovimientos, type, filterCat])
@@ -97,7 +99,7 @@ export default function MovimientosListCard({ type = 'expense', filterCat = null
                     className="text-[13px] font-semibold tnum"
                     style={{ color: isIncome ? 'var(--income)' : 'var(--expense)' }}
                   >
-                    {isIncome ? '+' : '−'}{m.currency === 'USD' ? fmtUSD(Math.abs(monto)) : fmtARS(Math.abs(monto))}
+                    {isIncome ? '+' : '−'}{m.moneda === 'USD' ? fmtUSD(Math.abs(monto)) : fmtARS(Math.abs(monto))}
                   </div>
                   <div className="text-[10px] mono mt-0.5" style={{ color: 'var(--subtext)' }}>
                     {date}

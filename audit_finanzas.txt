@@ -1,0 +1,37 @@
+REPORTE FINAL — CORRECCIÓN DE LA AUDITORÍA DE FINANZAS (SGR)
+Fecha: 2026-09-26
+
+RESULTADO
+Se implementaron los 15 hallazgos del informe previo. Los cambios abarcan backend, frontend, bot y documentación. No se modificó la base de datos real ni se hizo commit. Se preservaron las modificaciones preexistentes de otros módulos en el mismo árbol de trabajo.
+
+RIESGOS FINANCIEROS CORREGIDOS — CASOS ANTES / DESPUÉS
+
+1. Bot /ahorro y /objetivo: un gasto de $1.000 creado desde la UI llegaba con monto -1000 y el bot lo mostraba como aporte -$1.000. Ahora usa el tipo de movimiento para el signo y muestra +$1.000. Evidencia: project/mybot/finanzas_handlers.py:584; prueba: project/tests/test_fin_audit_dinero.py.
+2. FIRE en USD: con un aporte USD 100 y otro ARS 120.000 a ARS/USD 1.200, el widget anterior calculaba USD 100,08; ahora calcula USD 200. Un override de USD 200 antes aparecía como USD 0,17; ahora queda en USD 200. Evidencia: project/frontend/src/data/finanzas.js:207 y paneles FIRE; prueba: project/frontend/src/data/finanzas.dinero.test.js.
+3. Agregados de monedas: un cajón con USD 100 y ARS 10.000 antes indicaba ARS 10.100; ahora indica ARS 130.000 a ARS/USD 1.200. Dashboard, donuts, Anual, objetivos y reparto convierten antes de sumar. El resumen API y los comandos /mes, /ahorro y /objetivo del bot aplican la misma regla; el bot y la API rechazan un total mixto cuando falta cotización. Evidencia: project/frontend/src/data/finanzas.js:90, project/frontend/src/components/finanzas/AnualTab.jsx:18, project/app/main.py:1041 y project/mybot/finanzas_handlers.py:541; pruebas: project/frontend/src/data/finanzas.dinero.test.js y project/tests/test_fin_audit_dinero.py.
+4. Ventas retroactivas del ledger: con compras de 10 unidades en enero y 10 en marzo, una venta de 15 fechada en febrero antes se guardaba, recortaba la venta a 10 en el cálculo y dejaba una posición ficticia de 10. Ahora se rechaza toda la transacción y la posición queda en 20. Alta, edición y baja recalculan dentro de una transacción que revierte el cambio si el historial queda inválido. Evidencia: project/app/db/crud.py:1849; prueba: project/tests/test_fin_audit_dinero.py.
+5. PPC de compras ARS: compra de 10 unidades por ARS 120.000 cada una con MEP 1.200, seguida por una compra de 1 unidad por USD 100 tras subir el MEP a 1.500: antes el costo pasaba a USD 900 y el PPC a USD 81,82; ahora el costo es USD 1.100 y el PPC USD 100. La compra ARS guarda la cotización usada. Evidencia: project/app/db/crud.py:1831; prueba: project/tests/test_fin_audit_dinero.py.
+6. Retiros FIRE: ante movimientos netos de -USD 100 y un override previo de +USD 50, la tabla y la proyección antes mostraban +USD 50; ahora muestran -USD 100, igual que el widget. Evidencia: project/frontend/src/data/finanzas.js:218 y FireTab/FireRightPanel; prueba: project/frontend/src/data/finanzas.dinero.test.js.
+
+OTROS HALLAZGOS RESUELTOS
+
+7. Guardado FIRE: un fallo de PUT ya no se transforma en éxito local. El formulario permanece en edición y muestra error. Evidencia: project/frontend/src/store/useStore.js:496.
+8. Instrumentos y objetivos: crear o editar comprueba la respuesta del servidor; ya no se generan objetos ficticios ni se cierra un alta fallida. Evidencia: project/frontend/src/store/useStore.js:578 y :761; AhorroTab y AhorroRightPanel.
+9. Cuentas: borrar una cuenta con movimientos devuelve HTTP 409; el store conserva la cuenta y avisa del rechazo. Evidencia: project/app/db/crud.py:832, project/app/main.py:976 y project/frontend/src/store/useStore.js:358. Hay prueba de ruta y persistencia.
+10. Saldos iniciales negativos: se registran como Ajuste de gasto en ARS o USD y sobreviven al recálculo de saldos. Evidencia: project/app/db/crud.py:781; hay prueba con -ARS 5.000 y -USD 20.
+11. Cuotas: el panel lee todo el historial y suma meses calendario sin desbordar el día 31; conserva la moneda de cada cuota. El 31/01/2026 + un mes antes podía caer en marzo; ahora termina el 28/02/2026. Evidencia: project/frontend/src/components/finanzas/CuotasCard.jsx:7 y project/frontend/src/data/finanzas.js:243; hay prueba.
+12. Dashboard: las listas de movimientos y su modal excluyen Transferencia, como los KPIs y donuts. Evidencia: project/frontend/src/components/finanzas/MovimientosCard.jsx:23 y MovimientosTableModal.jsx:115.
+13. Categorías: altas, búsqueda y cambios de nombre rechazan duplicados sin distinguir mayúsculas y espacios. FIRE, Ajuste y Transferencia quedan protegidas también con variantes de caja; los objetivos no pueden usar esos nombres. Evidencia: project/app/db/crud.py:922 y :1530, project/frontend/src/data/finCategorias.js:17; hay prueba.
+14. API antes sin UI: Datos ofrece exportación CSV histórica, importación CSV y cambio de categoría o eliminación masiva de filas seleccionadas. Ahorro ofrece tabla global de transacciones con alta, edición, baja y filtro por ticker. Evidencia: project/frontend/src/components/finanzas/FinDataTools.jsx:7, DatosTab.jsx:490, GlobalLedgerPanel.jsx:9 y AhorroTab.jsx:1544. El CSV exportado se lee con comillas y comas; el servidor confirma el lote completo o lo revierte si alguna fila falla. Hay pruebas de lectura y reversión.
+15. Documentación: Finanzas.md, Finanzas-Roadmap.md y Cerebro/PROXIMAMENTE.md reflejan el cálculo de emergencia desde el historial, el ledger implementado y la resolución del dual schema del frontend. Las mejoras que siguen pendientes se describen por separado.
+
+VERIFICACIÓN
+- Backend Finanzas: 27 pruebas aprobadas (test_fin_audit_dinero.py, test_fin_routes.py, test_fin_saldos_objetivos.py).
+- Frontend Finanzas: 84 pruebas aprobadas en seis archivos; se actualizó una prueba antigua que esperaba usar cotización 1 cuando faltaba el dólar.
+- Compilación de producción del frontend: aprobada.
+- Revisión de espacios y parches: git diff --check sin errores.
+
+LÍMITES Y DATOS EXISTENTES
+- No se inspeccionó la base de datos real ni se probó la interfaz en navegador. Las compras ARS antiguas que no guardaron tipo de cambio no permiten reconstruir su cotización histórica exacta: al primer recálculo se fija la cotización configurada y luego permanece estable. Conviene revisar manualmente el PPC de esas operaciones históricas.
+- La conversión de movimientos ARS/USD para reportes usa la cotización configurada al consultar; los movimientos antiguos no guardan una cotización propia. Si se interrumpe la conexión después de confirmar una importación CSV, la respuesta puede perderse: conviene revisar el historial antes de reintentar.
+- No se revisaron el despliegue/homelab, datos de producción ni la presentación visual interactiva. No se hizo commit.

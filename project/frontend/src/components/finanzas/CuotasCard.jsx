@@ -1,36 +1,29 @@
 import { useMemo } from 'react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
-import { fmtARS } from '../../data/finanzas'
+import { fmtARS, fmtUSD, sumarMesesFecha } from '../../data/finanzas'
 import CardHeader from './CardHeader'
-
-function addMonths(isoStr, n) {
-  const d = new Date(isoStr)
-  if (isNaN(d.getTime())) return null
-  d.setMonth(d.getMonth() + n)
-  return d
-}
 
 export default function CuotasCard() {
   const lang           = useStore(s => s.lang)
-  const finMovimientos = useStore(s => s.finMovimientos)
+  const finMovimientosAll = useStore(s => s.finMovimientosAll)
 
   const now = new Date()
 
   const cuotasActivas = useMemo(() => {
-    return finMovimientos
+    return finMovimientosAll
       .filter(m => {
         const cuotas = m.cuotas ?? 0
         if (cuotas <= 1) return false
         const startRaw = m.fecha ?? new Date().toISOString()
-        const endDate  = addMonths(startRaw, cuotas - 1)
-        return !endDate || endDate >= now
+        const endDate  = sumarMesesFecha(startRaw, cuotas - 1)
+        return endDate && endDate >= new Date(now.getFullYear(), now.getMonth(), now.getDate())
       })
       .map(m => {
         const cuotas    = m.cuotas
         const startRaw  = m.fecha ?? new Date().toISOString()
-        const startDate = new Date(startRaw)
-        const endDate   = addMonths(startRaw, cuotas - 1)
+        const startDate = sumarMesesFecha(startRaw, 0)
+        const endDate   = sumarMesesFecha(startRaw, cuotas - 1)
         const montoTotal = Math.abs(m.monto ?? 0)
         const montoCuota = cuotas > 0 ? montoTotal / cuotas : montoTotal
 
@@ -44,10 +37,11 @@ export default function CuotasCard() {
           start: fmt(startDate),
           end: fmt(endDate),
           montoCuota,
+          moneda: m.moneda ?? 'ARS',
           cuotas,
         }
       })
-  }, [finMovimientos])
+  }, [finMovimientosAll])
 
   if (cuotasActivas.length === 0) return null
 
@@ -110,7 +104,7 @@ export default function CuotasCard() {
                 </td>
                 <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>
                   <span className="tnum" style={{ color: 'var(--expense)' }}>
-                    {fmtARS(c.montoCuota)}
+                    {c.moneda === 'USD' ? fmtUSD(c.montoCuota) : fmtARS(c.montoCuota)}
                   </span>
                 </td>
                 <td style={{ ...tdStyle, textAlign: 'center' }}>

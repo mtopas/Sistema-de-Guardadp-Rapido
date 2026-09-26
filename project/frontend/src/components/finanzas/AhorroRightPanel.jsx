@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useCallback } from 'react'
 import { Plus, X, Check } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
-import { fmtARS, fmtUSD, contribucionFire, acumuladoPorCategoriaNombre, mesMovimiento, cuotaMensualObjetivo } from '../../data/finanzas'
+import { fmtARS, fmtUSD, acumuladoPorCategoriaNombreEnMoneda, ahorradoFireUSDEnMes, cuotaMensualObjetivo } from '../../data/finanzas'
 import AgendaContextMenu from '../agenda/AgendaContextMenu'
 
 function ProgressBar({ pct, color }) {
@@ -371,36 +371,29 @@ export default function AhorroRightPanel() {
   }
 
   const ahorradoFireMes = useMemo(() => {
-    const computed = finMovimientosAll
-      .filter(m => mesMovimiento(m) === currentMes)
-      .reduce((sum, m) => sum + contribucionFire(m), 0)
-    const override = finFireFilas[currentMes]
-    if (computed !== 0) return computed
-    if (override !== undefined) return override
-    return 0
-  }, [finMovimientosAll, finFireFilas, currentMes])
+    const dolar = finConfig?.dolar_mep ?? finConfig?.dolar_oficial ?? finConfig?.dolar_default ?? 1245
+    return ahorradoFireUSDEnMes(finMovimientosAll, finFireFilas, currentMes, dolar)
+  }, [finMovimientosAll, finFireFilas, currentMes, finConfig])
 
   const acumPorObj = useMemo(() => {
     const map = {}
     finObjetivos.forEach(o => {
-      map[o.nombre] = acumuladoPorCategoriaNombre(finMovimientosAll, o.nombre)
+      const dolar = finConfig?.dolar_mep ?? finConfig?.dolar_oficial ?? finConfig?.dolar_default ?? 1245
+      map[o.nombre] = acumuladoPorCategoriaNombreEnMoneda(finMovimientosAll, o.nombre, o.moneda ?? 'ARS', dolar)
     })
     return map
-  }, [finMovimientosAll, finObjetivos])
+  }, [finMovimientosAll, finObjetivos, finConfig])
 
-  const dolar = finConfig?.dolar_mep ?? finConfig?.dolar_oficial ?? finConfig?.dolar_default ?? 1245
-  const ahorradoFireUSD = ahorradoFireMes / (dolar || 1)
+  const ahorradoFireUSD = ahorradoFireMes
   const pctFire = fireAporteActual > 0 ? Math.min(100, (ahorradoFireUSD / fireAporteActual) * 100) : 0
 
   const handleSaveObj = async (payload) => {
-    await addObj(payload)
-    setAddingObj(false)
+    if (await addObj(payload)) setAddingObj(false)
   }
 
   const handleUpdateObj = async (patch) => {
     if (!editingObj) return
-    await updateObj(editingObj.id, patch)
-    setEditingObj(null)
+    if (await updateObj(editingObj.id, patch)) setEditingObj(null)
   }
 
   return (

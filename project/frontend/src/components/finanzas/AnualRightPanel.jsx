@@ -73,13 +73,15 @@ export default function AnualRightPanel() {
   const lang              = useStore(s => s.lang)
   const selectedMes       = useStore(s => s.selectedMes)
   const finMovimientosAll = useStore(s => s.finMovimientosAll)
+  const finConfig         = useStore(s => s.finConfig)
   const finInflacion      = useStore(s => s.finInflacion)
 
   const year     = selectedMes.split('-')[0]
   const prevYear = String(parseInt(year) - 1)
 
-  const monthlyData     = useMemo(() => buildMonthly(finMovimientosAll, year),     [finMovimientosAll, year])
-  const prevMonthlyData = useMemo(() => buildMonthly(finMovimientosAll, prevYear), [finMovimientosAll, prevYear])
+  const dolar = finConfig?.dolar_mep ?? finConfig?.dolar_oficial ?? finConfig?.dolar_default ?? 1245
+  const monthlyData     = useMemo(() => buildMonthly(finMovimientosAll, year, dolar),     [finMovimientosAll, year, dolar])
+  const prevMonthlyData = useMemo(() => buildMonthly(finMovimientosAll, prevYear, dolar), [finMovimientosAll, prevYear, dolar])
 
   const now           = new Date()
   const isCurrentYear = String(now.getFullYear()) === year

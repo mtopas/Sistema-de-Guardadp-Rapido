@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { ArrowDown, ArrowUp, Settings, ChevronDown, ChevronUp, CalendarClock, Plus, Trash2, Pencil, X, Check } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
-import { fmtARS, fmtUSD, fmtDolarQuote, isTransferencia } from '../../data/finanzas'
+import { fmtARS, fmtUSD, fmtDolarQuote, isTransferencia, montoEnMoneda } from '../../data/finanzas'
 import { BRANCH_COLORS } from '../../utils/themes'
 
 const FIN_KEYWORDS = /pagar|cuota|vencimiento|cobro|débito|debito|transferir|tarjeta|impuesto|factura|alquiler|servicio|préstamo|prestamo/i
@@ -77,16 +77,18 @@ export default function FinanzasLeftPanel() {
 
   // Derive ingresos and gastos from real movements (exclude internal transfers)
   const ingresosMes = useMemo(() => {
+    const dolar = finConfig?.dolar_mep ?? finConfig?.dolar_oficial ?? finConfig?.dolar_default ?? 1245
     return finMovimientos
       .filter(m => m.tipo === 'income' && !isTransferencia(m))
-      .reduce((a, m) => a + Math.abs(m.monto ?? 0), 0)
-  }, [finMovimientos])
+      .reduce((a, m) => a + montoEnMoneda(m, 'ARS', dolar), 0)
+  }, [finMovimientos, finConfig])
 
   const gastosMes = useMemo(() => {
+    const dolar = finConfig?.dolar_mep ?? finConfig?.dolar_oficial ?? finConfig?.dolar_default ?? 1245
     return finMovimientos
       .filter(m => m.tipo === 'expense' && !isTransferencia(m))
-      .reduce((a, m) => a + Math.abs(m.monto ?? 0), 0)
-  }, [finMovimientos])
+      .reduce((a, m) => a + montoEnMoneda(m, 'ARS', dolar), 0)
+  }, [finMovimientos, finConfig])
 
   const tasaAhorro = ingresosMes > 0
     ? Math.round(((ingresosMes - gastosMes) / ingresosMes) * 100)
@@ -352,10 +354,9 @@ export default function FinanzasLeftPanel() {
                     setDeleteConfirm(null)
                   }
 
-                  const handleMetaSave = () => {
+                  const handleMetaSave = async () => {
                     if (!editForm.nombre.trim()) return
-                    editFinCuentaMeta(cuenta.id, editForm.nombre.trim(), editForm.tipo, editForm.color, editForm.initials.slice(0, 3).toUpperCase())
-                    setEditId(null)
+                    if (await editFinCuentaMeta(cuenta.id, editForm.nombre.trim(), editForm.tipo, editForm.color, editForm.initials.slice(0, 3).toUpperCase())) setEditId(null)
                   }
 
                   return (
@@ -386,7 +387,7 @@ export default function FinanzasLeftPanel() {
                               <Trash2 size={11} />
                             </button>
                           : <span className="flex items-center gap-1 text-[10px]" style={{ color: '#ef4444' }}>
-                              <button type="button" onClick={() => { deleteFinCuenta(cuenta.id); setDeleteConfirm(null) }}
+                              <button type="button" onClick={async () => { if (await deleteFinCuenta(cuenta.id)) setDeleteConfirm(null) }}
                                 className="font-semibold">¿Sí?</button>
                               <button type="button" onClick={() => setDeleteConfirm(null)}>
                                 <X size={10} />
@@ -539,11 +540,11 @@ export default function FinanzasLeftPanel() {
                   <div className="flex gap-1.5">
                     <button type="button"
                       disabled={!newForm.nombre.trim()}
-                      onClick={() => {
+                      onClick={async () => {
                         if (!newForm.nombre.trim()) return
                         const ars = parseFloat(String(newForm.saldo_ars).replace(',', '.'))
                         const usd = parseFloat(String(newForm.saldo_usd).replace(',', '.'))
-                        createFinCuenta(
+                        const created = await createFinCuenta(
                           newForm.nombre.trim(),
                           newForm.tipo,
                           newForm.color,
@@ -551,8 +552,10 @@ export default function FinanzasLeftPanel() {
                           isNaN(ars) ? 0 : ars,
                           isNaN(usd) ? 0 : usd,
                         )
-                        setNewOpen(false)
-                        setNewForm(EMPTY_CUENTA)
+                        if (created) {
+                          setNewOpen(false)
+                          setNewForm(EMPTY_CUENTA)
+                        }
                       }}
                       className="flex-1 py-1 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1"
                       style={{ background: 'var(--cta-bg)', color: 'var(--cta-text)', border: 'none', opacity: newForm.nombre.trim() ? 1 : 0.4 }}>

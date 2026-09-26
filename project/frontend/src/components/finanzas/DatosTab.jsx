@@ -6,6 +6,7 @@ import { t } from '../../utils/i18n'
 import { fmtARS, isTransferencia, filtrarMovimientos } from '../../data/finanzas'
 import { buildFinCategoriaColorByName, getFinCategoriaColor } from '../../data/finCategoriaColors'
 import { API_URL } from '../../config'
+import FinDataTools from './FinDataTools'
 
 export function getVal(mov, field) {
   switch (field) {
@@ -67,7 +68,7 @@ const TH = {
 }
 
 // Porcentajes → ocupan todo el ancho del panel (antes: px fijos ~820px pegados a la izquierda)
-const COL_WIDTHS = ['10%', '9%', '11%', '6%', '12%', '12%', '32%', '6%', '2%']
+const COL_WIDTHS = ['4%', '9%', '8%', '10%', '6%', '11%', '11%', '33%', '6%', '2%']
 
 function ColGroup() {
   return (
@@ -102,6 +103,8 @@ export default function DatosTab() {
   )
 
   const [filtros, setFiltros] = useState({ categoria: '', cuenta: '', tipo: '', desde: '', hasta: '' })
+  const [selectedIds, setSelectedIds] = useState([])
+  const toggleSelected = id => setSelectedIds(current => current.includes(id) ? current.filter(x => x !== id) : [...current, id])
   const setFiltro = (campo, valor) => setFiltros(f => ({ ...f, [campo]: valor }))
   const limpiarFiltros = () => setFiltros({ categoria: '', cuenta: '', tipo: '', desde: '', hasta: '' })
   const hayFiltrosActivos = Object.values(filtros).some(Boolean)
@@ -484,6 +487,7 @@ export default function DatosTab() {
         </div>
       )}
 
+      <FinDataTools selectedIds={selectedIds} clearSelection={() => setSelectedIds([])} />
       <div className="panel-strong" style={{ width: '100%', overflow: 'hidden' }}>
       <div
         ref={parentRef}
@@ -500,6 +504,7 @@ export default function DatosTab() {
           <caption className="sr-only">Historial de movimientos</caption>
           <thead>
             <tr>
+              <th scope="col" style={TH}><input type="checkbox" aria-label="Seleccionar movimientos filtrados" checked={rows.length > 0 && rows.every(m => selectedIds.includes(m.id))} onChange={e => setSelectedIds(e.target.checked ? rows.map(m => m.id) : [])} /></th>
               <th scope="col" style={TH}>{t(lang, 'colFecha')}</th>
               <th scope="col" style={TH}>{t(lang, 'colTipo')}</th>
               <th scope="col" style={{ ...TH, textAlign: 'right' }}>{t(lang, 'colMonto')}</th>
@@ -514,13 +519,13 @@ export default function DatosTab() {
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={9} style={{ padding: 32, textAlign: 'center', color: 'var(--subtext)' }}>
+                <td colSpan={10} style={{ padding: 32, textAlign: 'center', color: 'var(--subtext)' }}>
                   {t(lang, 'sinMovimientos')}
                 </td>
               </tr>
             )}
             {!renderPlain && paddingTop > 0 && (
-              <tr><td colSpan={9} style={{ height: paddingTop, padding: 0 }} /></tr>
+              <tr><td colSpan={10} style={{ height: paddingTop, padding: 0 }} /></tr>
             )}
             {(renderPlain ? rows.map((mov, index) => ({ mov, index, size: 34 })) : virtualItems.map(vr => ({
               mov: rows[vr.index],
@@ -544,6 +549,7 @@ export default function DatosTab() {
                     opacity: xfer ? 0.85 : 1,
                   }}
                 >
+                  <td style={TD}><input type="checkbox" aria-label={`Seleccionar movimiento ${mov.id}`} checked={selectedIds.includes(mov.id)} onChange={() => toggleSelected(mov.id)} /></td>
                   <FechaCell  mov={mov} />
                   <SelectCell mov={mov} field="tipo"   options={tipoOptions}   tabIdx={isEditingRow ? 0 : -1} />
                   <NumberCell mov={mov} />
@@ -557,7 +563,7 @@ export default function DatosTab() {
               )
             })}
             {!renderPlain && paddingBottom > 0 && (
-              <tr><td colSpan={9} style={{ height: paddingBottom, padding: 0 }} /></tr>
+              <tr><td colSpan={10} style={{ height: paddingBottom, padding: 0 }} /></tr>
             )}
           </tbody>
         </table>

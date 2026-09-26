@@ -2,9 +2,10 @@ import { useState, useMemo, useEffect, useCallback } from 'react'
 import { ChevronDown, ChevronRight, Plus, Trash2, Check, X, BookOpen } from 'lucide-react'
 import { API_URL } from '../../config'
 import { useStore } from '../../store/useStore'
+import GlobalLedgerPanel from './GlobalLedgerPanel'
 import { t } from '../../utils/i18n'
 import {
-  fmtARS, fmtUSD, fmtCantidad, acumuladoPorCategoriaNombre, CATEGORIA_FIRE,
+  fmtARS, fmtUSD, fmtCantidad, acumuladoPorCategoriaNombreEnMoneda, CATEGORIA_FIRE,
 } from '../../data/finanzas'
 
 const TIPOS = [
@@ -832,8 +833,7 @@ function TipoSection({ tipo, items, lang, addInstrumento }) {
   const uvaHoy              = parseFloat(finConfig?.uva_valor) || null
 
   const handleSave = async (payload) => {
-    await addInstrumento(payload)
-    setAdding(false)
+    if (await addInstrumento(payload)) setAdding(false)
   }
 
   const isPF     = tipo === 'plazo_fijo'
@@ -1153,6 +1153,7 @@ function LedgerSection({ instrumentos, lang }) {
 
   const addFinTransaccion    = useStore(s => s.addFinTransaccion)
   const deleteFinTransaccion = useStore(s => s.deleteFinTransaccion)
+  const finTransacciones = useStore(s => s.finTransacciones)
 
   const { entityGroups, individualChips } = useMemo(() => {
     const groups = new Map()
@@ -1212,14 +1213,17 @@ function LedgerSection({ instrumentos, lang }) {
     setLoading(false)
   }, [])
 
+  useEffect(() => {
+    if (selId && instrumentos.some(inst => inst.id === selId && isLedgerTradable(inst))) fetchTrans(selId)
+  }, [finTransacciones, selId, instrumentos, fetchTrans])
+
   const selectInstrument = useCallback((inst, entityKey) => {
     if (!inst) return
     setSelId(inst.id)
     setSelEntity(entityKey ?? null)
     setShowForm(false)
-    if (isLedgerTradable(inst)) fetchTrans(inst.id)
-    else setTrans([])
-  }, [fetchTrans])
+    if (!isLedgerTradable(inst)) setTrans([])
+  }, [])
 
   const handleSelectEntity = (key) => {
     const items = entityGroups.find(([k]) => k === key)?.[1] ?? []
@@ -1254,8 +1258,9 @@ function LedgerSection({ instrumentos, lang }) {
   }
 
   const handleDelete = async (transId) => {
-    await deleteFinTransaccion(transId)
-    setTrans(prev => prev.filter(x => x.id !== transId))
+    if (await deleteFinTransaccion(transId)) {
+      setTrans(prev => prev.filter(x => x.id !== transId))
+    }
   }
 
   const entityChipActive = (key) => selEntity === key
@@ -1434,11 +1439,11 @@ export default function AhorroTab() {
   }, [finInstrumentos, dolar])
 
   const reparto = useMemo(() => {
-    const fire = acumuladoPorCategoriaNombre(finMovimientosAll, CATEGORIA_FIRE)
+    const fire = acumuladoPorCategoriaNombreEnMoneda(finMovimientosAll, CATEGORIA_FIRE, 'ARS', dolar)
     const objetivos = (finObjetivos || []).map(o => ({
       key: `obj-${o.id}`,
       label: o.nombre,
-      val: acumuladoPorCategoriaNombre(finMovimientosAll, o.nombre),
+      val: acumuladoPorCategoriaNombreEnMoneda(finMovimientosAll, o.nombre, 'ARS', dolar),
     }))
     const segments = [
       { key: 'fire', label: CATEGORIA_FIRE, val: fire },
@@ -1447,7 +1452,7 @@ export default function AhorroTab() {
     const cajones = fire + objetivos.reduce((s, o) => s + o.val, 0)
     const liquido = cajones - costoTotalInstrumentos
     return { segments, liquido, cajones }
-  }, [finMovimientosAll, finObjetivos, costoTotalInstrumentos, lang])
+  }, [finMovimientosAll, finObjetivos, costoTotalInstrumentos, lang, dolar])
 
   const legacyAhorroCount = useMemo(() => (
     finMovimientosAll.filter(m =>
@@ -1536,6 +1541,7 @@ export default function AhorroTab() {
       {finInstrumentos.length > 0 && (
         <LedgerSection instrumentos={finInstrumentos} lang={lang} />
       )}
+      <GlobalLedgerPanel />
     </div>
   )
 }

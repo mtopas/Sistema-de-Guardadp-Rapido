@@ -20,9 +20,9 @@ Cuando algo se complete, **mover la descripción actualizada a `Finanzas.md`** (
 
 ---
 
-## En especificación
+## Ledger — mejoras pendientes
 
-- [ ] **Ahorro — ledger unificado y posiciones derivadas** — ver [`Finanzas-Ahorro-Ledger.md`](Finanzas-Ahorro-Ledger.md) (merge por ticker, PPC automático, tabla global de transacciones, fecha/hora editable).
+- [ ] Edición de hora de transacción y paginación de la tabla global cuando el historial exceda 2000 operaciones. El merge por ticker, PPC y tabla global ya están implementados.
 
 ---
 
@@ -41,11 +41,10 @@ Implementado en `mybot/finanzas_handlers.py`. Ver `Finanzas.md` §6.
 - [ ] Atajos Dashboard: `Vi`/`Ve` ver todos ingresos/gastos con teclado (requiere levantar estado modal a store)
 - [ ] Atajos Datos: `Ctrl+S` guardar fila, `Supr` borrar fila seleccionada (requiere fila seleccionada en store)
 - [ ] Atajos Ahorro: `I` nuevo instrumento; FIRE: `E` modo edición (requiere refs o store)
-- [ ] Dashboard fondo emergencia: calcular saldo en cliente desde `finMovimientosAll` + objetivo (eliminar dependencia de `GET /fin/emergencia`)
 
 ## Frontend — Rendimiento
 
-- [ ] Normalizar dual schema movimientos: eliminar fallbacks `type/amount/cat` en todos los consumidores; alinear optimistic add a shape API
+- [ ] Eliminar el fallback local temporal de `addFinMovimiento` si se implementa una cola offline durable; actualmente avisa el error y conserva el shape API.
 
 ## Migración de datos (usuario)
 
@@ -55,7 +54,6 @@ Implementado en `mybot/finanzas_handlers.py`. Ver `Finanzas.md` §6.
 
 ## Backend
 
-- [ ] Normalizar respuestas movimientos: mismo shape siempre; eliminar dual schema en clientes
 - [ ] `PATCH /fin/categorias/{id}` — **fusionar** dos categorías en una (renombrar ya está; merge pendiente)
 - [ ] Endpoint o job one-shot: migrar movimientos `Ahorro` → `FIRE` (opcional; hoy es manual)
 

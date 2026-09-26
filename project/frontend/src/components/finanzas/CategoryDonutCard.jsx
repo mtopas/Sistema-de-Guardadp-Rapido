@@ -17,10 +17,12 @@ export default function DonutCard({ type = 'expense', activeCat = null, onFilter
   const selectedMes  = useStore(s => s.selectedMes)
   const finMovimientos = useStore(s => s.finMovimientos)
   const finCategorias  = useStore(s => s.finCategorias)
+  const finConfig = useStore(s => s.finConfig)
+  const dolar = finConfig?.dolar_mep ?? finConfig?.dolar_oficial ?? finConfig?.dolar_default ?? 1245
 
   const { cats, total } = useMemo(
-    () => buildCategories(finMovimientos, type, finCategorias),
-    [finMovimientos, type, finCategorias]
+    () => buildCategories(finMovimientos, type, finCategorias, dolar),
+    [finMovimientos, type, finCategorias, dolar]
   )
 
   const title = type === 'income' ? t(lang, 'incomesByCategory') : t(lang, 'expensesByCategory')

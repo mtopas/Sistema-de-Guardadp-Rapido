@@ -5,9 +5,10 @@ import {
   fmtARS,
   fmtUSD,
   isTransferencia,
-  acumuladoPorCategoriaNombre,
   fireAportePlanMes,
-  ahorradoFireEnMes,
+  ahorradoFireUSDEnMes,
+  acumuladoPorCategoriaNombreEnMoneda,
+  montoEnMoneda,
 } from '../../data/finanzas'
 import { buildFinCategoriaColorByName, getFinCategoriaColor } from '../../data/finCategoriaColors'
 
@@ -116,8 +117,9 @@ export default function FinanzasRightPanel() {
     const expenses = finMovimientos.filter(m => m.tipo === 'expense' && !isTransferencia(m))
     const incomes  = finMovimientos.filter(m => m.tipo === 'income'  && !isTransferencia(m))
 
-    const totalGastos   = expenses.reduce((a, m) => a + Math.abs(m.monto ?? 0), 0)
-    const totalIngresos = incomes.reduce((a, m)  => a + Math.abs(m.monto ?? 0), 0)
+    const dolar = finConfig?.dolar_mep ?? finConfig?.dolar_oficial ?? finConfig?.dolar_default ?? 1245
+    const totalGastos   = expenses.reduce((a, m) => a + montoEnMoneda(m, 'ARS', dolar), 0)
+    const totalIngresos = incomes.reduce((a, m)  => a + montoEnMoneda(m, 'ARS', dolar), 0)
 
     const [year, month] = selectedMes.split('-').map(Number)
     const daysInMonth   = new Date(year, month, 0).getDate()
@@ -130,7 +132,7 @@ export default function FinanzasRightPanel() {
     const catMap = {}
     expenses.forEach(m => {
       const cat = m.categoria_nombre ?? 'Otros'
-      catMap[cat] = (catMap[cat] ?? 0) + Math.abs(m.monto ?? 0)
+      catMap[cat] = (catMap[cat] ?? 0) + montoEnMoneda(m, 'ARS', dolar)
     })
     const colorByName = buildFinCategoriaColorByName(finCategorias)
     const topEntry  = Object.entries(catMap).sort((a, b) => b[1] - a[1])[0]
@@ -148,15 +150,14 @@ export default function FinanzasRightPanel() {
     const diasSinGastar = Math.max(0, daysElapsed - spendDays.size)
 
     return { avgDaily, topCat, topCatColor, topCatPct, tasaAhorro, diasSinGastar, totalGastos, totalIngresos }
-  }, [finMovimientos, finCategorias, selectedMes])
+  }, [finMovimientos, finCategorias, finConfig, selectedMes])
 
   const savingsColor = kpis.tasaAhorro >= tasaObjetivo ? 'var(--income)' : 'var(--expense)'
 
   const fireMeta = useMemo(() => {
     const dolar       = finConfig?.dolar_mep ?? finConfig?.dolar_oficial ?? finConfig?.dolar_default ?? 1245
     const aporteUSD   = fireAportePlanMes(finConfig, selectedMes)
-    const ahorradoARS = ahorradoFireEnMes(finMovimientosAll, finFireFilas, selectedMes)
-    const ahorradoUSD = ahorradoARS / (dolar || 1)
+    const ahorradoUSD = ahorradoFireUSDEnMes(finMovimientosAll, finFireFilas, selectedMes, dolar)
     const ok          = aporteUSD > 0 && ahorradoUSD >= aporteUSD
     const color       = ok ? '#22c55e' : 'var(--cta-bg)'
     return { aporteUSD, ahorradoUSD, ok, color }
@@ -164,7 +165,8 @@ export default function FinanzasRightPanel() {
 
   const objetivosMetas = useMemo(() => {
     return finObjetivos.map(obj => {
-      const acumulado = acumuladoPorCategoriaNombre(finMovimientosAll, obj.nombre)
+      const dolar = finConfig?.dolar_mep ?? finConfig?.dolar_oficial ?? finConfig?.dolar_default ?? 1245
+      const acumulado = acumuladoPorCategoriaNombreEnMoneda(finMovimientosAll, obj.nombre, obj.moneda ?? 'ARS', dolar)
       const meta = Number(obj.meta) || 0
       const pct = meta > 0 ? Math.min(100, (acumulado / meta) * 100) : 0
       const ok = pct >= 100
@@ -179,7 +181,7 @@ export default function FinanzasRightPanel() {
         color: ok ? '#22c55e' : 'var(--accent)',
       }
     })
-  }, [finObjetivos, finMovimientosAll])
+  }, [finObjetivos, finMovimientosAll, finConfig])
 
   return (
     <aside

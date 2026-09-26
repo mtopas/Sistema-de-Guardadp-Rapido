@@ -2,9 +2,9 @@ import { isTransferencia } from './finanzas'
 
 /** Categorías del sistema — no editar nombre ni eliminar desde la UI. */
 export const FIN_CATEGORIAS_SISTEMA = new Set([
-  'Transferencia',
-  'Ajuste',
-  'FIRE',
+  'transferencia',
+  'ajuste',
+  'fire',
 ])
 
 /** @deprecated Usar FIN_CATEGORIAS_SISTEMA */
@@ -17,9 +17,9 @@ export function isFinCategoriaObjetivo(cat) {
 export function isFinCategoriaReservada(catOrName) {
   if (catOrName && typeof catOrName === 'object') {
     if (isFinCategoriaObjetivo(catOrName)) return true
-    return FIN_CATEGORIAS_SISTEMA.has((catOrName.name || '').trim())
+    return FIN_CATEGORIAS_SISTEMA.has((catOrName.name || '').trim().toLowerCase())
   }
-  return FIN_CATEGORIAS_SISTEMA.has((catOrName || '').trim())
+  return FIN_CATEGORIAS_SISTEMA.has((catOrName || '').trim().toLowerCase())
 }
 
 export function categoriaAplicaATipo(cat, tipoMov) {

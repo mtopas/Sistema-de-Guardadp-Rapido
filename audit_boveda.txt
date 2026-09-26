@@ -1,0 +1,40 @@
+BÓVEDA — REPORTE FINAL DE CORRECCIONES
+Fecha: 2026-09-25
+Repositorio: D:\SGR
+
+ESTADO
+Se implementaron las correcciones de los hallazgos de la auditoría de Bóveda. El vault Markdown sigue siendo la fuente de verdad y app.db continúa como índice reconstruible. Este trabajo no modifica los datos reales de D:\Boveda.
+
+RIESGOS DE DATOS CORREGIDOS
+1. PATCH de hojas: los cambios de metadatos conservan el cuerpo Markdown, los tags manuales y las claves de frontmatter ajenas a SGR. El título se modifica sobre el H1 existente; un prefacio anterior al H1 permanece en el archivo. La conversión HTML→Markdown se reserva para una edición explícita de apuntes.
+2. Sync: una nota existente con frontmatter temporalmente inválido, error de lectura o conflicto de upsert conserva su fila mientras el archivo siga en disco. Al corregirse, se recupera con el mismo ID público si corresponde a la misma ruta.
+3. Eliminación: mover una hoja o una categoría forzada a 05 - Basura crea primero la categoría estructural en el índice si faltaba. Las consultas públicas, recientes, detalle, búsqueda textual y búsqueda semántica excluyen las notas de Basura. Se corrigió además la normalización de rutas nuevas y movidas a separadores "/" en Windows, necesaria para el emparejamiento posterior del sync.
+4. Reconstrucción: icono y color de categoría se guardan en .sgr-categoria.yaml; color y vista previa de link de cada hoja se guardan en su frontmatter. Se recuperan al reconstruir app.db.
+5. ChromaDB: el texto indexado incluye apuntes; la reconciliación detecta cambios con una firma del contenido, purga IDs obsoletos y reindexa IDs reutilizados después de reconstruir SQLite. La búsqueda semántica reconcilia antes de consultar; el reindexado manual usa la misma lógica.
+
+BÚSQUEDA, BOT Y ENLACES
+6. LeftPanel usa top_k=20, dentro del límite de la API, y ofrece una acción de reindexación semántica.
+7. /pregunta prueba la búsqueda textual cuando los resultados semánticos no superan el umbral de relevancia; un resultado débil ya no bloquea ese recurso.
+8. La captura de Telegram separa la URL del texto acompañante. La URL se guarda como link válido y el comentario como apunte; EditHojaModal inicializa la edición desde la URL real.
+9. La API expone link_url en la hoja y RightPanel lo usa para mostrar el enlace contextual.
+
+FRONTEND
+10. Las fotos se muestran como imagen en DetailScreen, separadas del editor TipTap. Las referencias a adjuntos son relativas al servidor de la aplicación, por lo que funcionan al acceder desde otro dispositivo.
+11. El store comprueba la respuesta HTTP al cargar hojas/categorías y al borrar una hoja. Un error no sustituye los arrays por un objeto ni confirma visualmente un borrado que falló.
+12. Grafo y lista comparten el conjunto filtrado por la búsqueda de la pantalla.
+13. Ctrl/Cmd+Enter en CaptureModal llama al guardado de la sección activa, incluida Agenda; el listener incorpora sus dependencias.
+14. RightPanel consume GET /hojas/recientes y LeftPanel consume POST /hojas/reindexar. Esas rutas ya no quedan sin uso en la UI.
+
+DOCUMENTACIÓN
+15. README, Boveda.md, Boveda-Roadmap.md y Cerebro/PROXIMAMENTE.md reflejan el grafo SVG de posiciones fijas, el zoom/pan funcional, la búsqueda semántica existente, el fallback textual del bot y la persistencia del vault. Boveda.md sigue marcando expresamente como históricas sus secciones del antiguo modelo SQLite.
+
+VERIFICACIÓN
+- Suite completa: 354 pruebas aprobadas, 1 omitida.
+- Regresiones nuevas en project/tests/test_boveda_audit_fixes.py: preservación de Markdown/frontmatter, identidad SQLite ante frontmatter inválido, borrado de hoja y categoría, rutas anidadas de Windows, reconstrucción de metadatos y reconciliación semántica.
+- Frontend: npm run build completó correctamente.
+- git diff --check no detectó errores de espacios.
+
+LÍMITES
+Las pruebas usaron bases y vault temporales. No se inspeccionó ni alteró D:\Boveda real, app.db real o ChromaDB real, ni se comprobó la UI manualmente en navegador, el bot conectado a Telegram o el acceso remoto por Tailscale. La generación efectiva de embeddings continúa dependiendo de que Ollama esté disponible; si no lo está, la operación semántica queda en modo best-effort y se reconciliará cuando vuelva a estarlo.
+
+Los archivos de auditoría de otros módulos no se tocaron.

@@ -1,5 +1,98 @@
 # Estado Actual de Jarvis
-Última actualización: 2026-09-25
+Última actualización: 2026-09-27
+
+## CORREGIDO: `NameError` al detener una serie de Agenda + `master` estaba en rojo (2026-09-27)
+
+Commit `4b2b728`. `DELETE /agenda/series/{tipo}/{serie_id}` (`project/app/main.py:1757`) llamaba
+a `agenda_detener_serie` **sin importarlo** desde `app.db.crud` — cualquier request válida
+reventaba con `NameError`. El import vivía sin commitear en el working tree desde el 26/09, lo
+que hacía pasar la suite localmente y la dejaba **roja en `origin/master`** (373 passed / 2
+failed: `test_agenda_routes.py:227` y `:251`, tests preexistentes del propio commit de auditoría
+de Agenda `daedd4e`). O sea: el handoff del 26/09 declaró "375 backend + 184 frontend en verde"
+verificando contra el working tree y no contra `HEAD`.
+
+Se agregó un test de regresión (`test_detener_serie_valida_tipo_y_existencia`,
+`project/tests/test_agenda_routes.py:258`) que cubre las ramas 422 (tipo inválido) / 404 (serie
+inexistente) / 404 al detener dos veces. **Barrido estático con `pyflakes` sobre los 58 `.py` de
+`project/`: cero nombres indefinidos además de este**, más un chequeo `ast` inverso de los 180
+nombres top-level de `crud.py` contra todos sus importadores en `app/` y `mybot/` — cero
+faltantes. Esta clase de bug queda cerrada.
+
+Verificado por el orquestador: **376 backend (0 skip) + 184 frontend en verde**, build limpio.
+
+**Deuda chica detectada y no corregida** (no justifica retrasar el deploy): `extra_str` se arma
+y nunca se muestra en `project/mybot/finanzas_handlers.py:940` (gap de UX del bot); 3 imports
+huérfanos en `main.py:29-31`, con `actualizar_apuntes`/`actualizar_icono` ya sin consumidores en
+`crud.py` (código muerto); varios locales muertos (`crud.py:3179`, `:3269`,
+`mybot/agenda_handlers.py:756`, `:794-795`). Hoy no hay ningún linter en el venv: agregar
+`pyflakes`/`ruff` a `project/requirements` queda propuesto, sin decidir.
+
+## IMPLEMENTADO Y COMMITEADO: correcciones de la auditoría de Agenda (2026-09-26) — pendiente deploy
+
+Commit `daedd4e`. Los 19 hallazgos de `audit_agenda.txt` más una continuación de alcance propio
+(ventana de recurrencia, puntos 20-23 del reporte) que **no** era parte del pedido original.
+
+Lo estructural: **los eventos recurrentes pasan de expandirse virtualmente en tiempo de lectura
+a materializarse como filas reales con ID propio y `serie_id` compartido** — mismo patrón que ya
+usaban las Tareas. Editar o borrar una ocurrencia (incluida la cabeza) afecta solo esa fila. La
+definición de la serie vive en una tabla nueva `agenda_series` (regla + plantilla + última fecha
+generada + `activa`), independiente de la primera ocurrencia, así que sobrevive a que se borre o
+edite. Las series se **auto-extienden al consultar** períodos posteriores (no hay proceso de
+fondo: las fechas se ponen al día en la próxima lectura), y generan solo fechas posteriores al
+marcador, de modo que borrar una ocurrencia no la hace reaparecer. Los modales permiten detener
+nuevas repeticiones con confirmación doble; borrar la última ocurrencia detiene la serie sola.
+
+Además: PATCH con `null` ahora limpia campos de verdad (fecha fin, descripción, `hora_bloque`);
+notificaciones por hora local exacta en vez de avisar horas antes; `GET /agenda/revision`
+alimenta el tab Revisión; exportación ICS de la semana; edición de materias en el modal de
+Facultad; grilla del mes de 4/5/6 filas con navegación por rueda; `/dia` del bot acepta `dd` y
+`dd-mm-aaaa`; carga offline que conserva lo que ya está en el store; y se borró código sin
+consumidores (`HourGrid`, `AgendaPanel`, `useAgendaDay`, `useAgendaKeyboard`).
+
+**Migración a datos reales — analizada por el orquestador el 2026-09-27, ver el handoff de esa
+fecha:** es idempotente (guarda por `recurrencia_materializada = 0`, inserta con el flag ya en
+1, `SAVEPOINT` por serie) y no duplica la fila padre (`recurring_dates()` arranca en
+`base + 1 día`). **Y sobre el homelab real es un no-op**: 0 eventos y 0 tareas con
+`se_repite=1`. No hay nada que materializar.
+
+## IMPLEMENTADO Y COMMITEADO: correcciones de la auditoría de Finanzas (2026-09-26) — pendiente deploy
+
+Commit `9b13ab1` (30 archivos; `crud.py` con 648 líneas cambiadas). Los 15 hallazgos de
+`audit_finanzas.txt`, 6 de ellos sobre **números de plata reales**, con casos antes/después
+documentados en ese archivo:
+
+- **Multi-moneda, el hilo central**: agregar USD y ARS sin convertir daba totales sin sentido
+  (un cajón con USD 100 + ARS 10.000 informaba "ARS 10.100"; ahora ARS 130.000 a 1.200).
+  Dashboard, donuts, Anual, objetivos, reparto, el resumen de la API y los comandos `/mes`,
+  `/ahorro` y `/objetivo` del bot convierten antes de sumar; bot y API **rechazan** un total
+  mixto si falta cotización en vez de inventar una.
+- **FIRE en USD** calculaba USD 100,08 donde iban USD 200; un override de USD 200 aparecía como
+  USD 0,17. **Retiros FIRE**: con movimientos netos de -USD 100 y un override previo de +USD 50,
+  la tabla mostraba +USD 50.
+- **Ventas retroactivas del ledger**: compras de 10 en enero y 10 en marzo, venta de 15 fechada
+  en febrero → se guardaba, se recortaba a 10 en el cálculo y quedaba una posición ficticia.
+  Ahora se rechaza la transacción entera y el recálculo corre dentro de una transacción que
+  revierte si el historial queda inválido.
+- **PPC de compras ARS**: el costo se recalculaba con la cotización del día en vez de la de la
+  compra (USD 900 / PPC 81,82 donde iban USD 1.100 / PPC 100). Las compras ARS ahora guardan su
+  `tipo_cambio`.
+- El bot mostraba los gastos con el signo del monto crudo (un gasto de $1.000 aparecía como
+  aporte de -$1.000); ahora usa el tipo de movimiento.
+- Resto: fallos de PUT/POST que se convertían en éxito local en el store (FIRE, instrumentos,
+  objetivos); borrar una cuenta con movimientos ahora da 409; saldos iniciales negativos como
+  Ajuste que sobreviven al recálculo; cuotas que sumaban meses desbordando el día 31; listas del
+  dashboard que no excluían Transferencia como sí hacían los KPIs; duplicados de categoría
+  case/espacio-insensitive con FIRE/Ajuste/Transferencia protegidas. Y UI nueva para API que no
+  la tenía: `FinDataTools.jsx` (export/import CSV, cambio masivo de categoría) y
+  `GlobalLedgerPanel.jsx` (tabla global de transacciones).
+
+**Límite conocido, del propio reporte**: las compras ARS históricas sin `tipo_cambio` no
+permiten reconstruir su cotización real — al primer recálculo se les fija la configurada y queda
+estable. Conviene revisar a mano el PPC de esas operaciones después del deploy.
+
+**Revisión de riesgo del orquestador: incompleta.** Repasados y correctos los helpers de
+conversión de `frontend/src/data/finanzas.js` y `_recalcular_posicion` en `crud.py`. Falta el
+resto del diff de `crud.py` (~2.048 líneas).
 
 ## IMPLEMENTADO Y COMMITEADO: cierre completo de la auditoría de Bóveda (2026-09-25)
 

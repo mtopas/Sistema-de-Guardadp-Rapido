@@ -256,6 +256,29 @@ def test_serie_tareas_extiende_y_detenerla_persiste(client):
 
 
 @pytest.mark.integration
+def test_detener_serie_valida_tipo_y_existencia(client):
+    """Cubre las ramas de error de DELETE /agenda/series/{tipo}/{serie_id}.
+
+    Regresion: el endpoint llamaba a agenda_detener_serie sin importarlo desde
+    app.db.crud, asi que cualquier request valida reventaba con NameError.
+    """
+    # Tipo de serie invalido -> 422, sin tocar la DB
+    assert client.delete("/agenda/series/habito/1").status_code == 422
+
+    # Serie inexistente -> 404 (la rama llega a crud, no a un NameError)
+    assert client.delete("/agenda/series/evento/999999").status_code == 404
+    assert client.delete("/agenda/series/tarea/999999").status_code == 404
+
+    # Serie real: se detiene una sola vez; el segundo intento ya no la encuentra activa
+    head = client.post("/agenda/eventos", json={
+        "titulo": "Semanal", "fecha_inicio": "2026-09-23T10:00:00",
+        "se_repite": True, "regla_repeticion": '{"frecuencia":"semanal"}',
+    }).json()
+    assert client.delete(f"/agenda/series/evento/{head['id']}").status_code == 200
+    assert client.delete(f"/agenda/series/evento/{head['id']}").status_code == 404
+
+
+@pytest.mark.integration
 def test_reasignar_calendario_conserva_extension_y_eliminarlo_la_detiene(client):
     origin = client.post("/agenda/calendarios", json={"nombre": "Origen"}).json()
     destination = client.post("/agenda/calendarios", json={"nombre": "Destino"}).json()

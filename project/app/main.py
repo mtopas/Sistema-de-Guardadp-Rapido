@@ -119,6 +119,7 @@ from app.db.crud import (
     agenda_crear_tarea,
     agenda_actualizar_tarea,
     agenda_eliminar_tarea,
+    agenda_detener_serie,
     agenda_obtener_horario_facultad,
     agenda_crear_horario_facultad,
     agenda_actualizar_horario_facultad,
@@ -1056,10 +1057,10 @@ def resumen_fin_movimientos(mes: Optional[str] = Query(None)):
     cat_map = {r[0]: r[1] for r in cursor.fetchall()}
     conn.close()
 
-    ingresos = gastos = 0.0
     config = fin_obtener_config()
     dolar = float(config.get("dolar_mep") or config.get("dolar_oficial") or config.get("dolar_default") or 0)
 
+    ingresos = gastos = 0.0
     por_categoria: dict = {}
     for r in rows:
         cat_nombre = cat_map.get(r[8], "")
@@ -1084,8 +1085,8 @@ def resumen_fin_movimientos(mes: Optional[str] = Query(None)):
 
     return {
         "mes":            m,
-        "ingresos":       round(ingresos, 2),
         "moneda":         "ARS",
+        "ingresos":       round(ingresos, 2),
         "gastos":         round(gastos, 2),
         "balance":        round(ingresos - gastos, 2),
         "tasa_ahorro":    round((ingresos - gastos) / ingresos * 100, 1) if ingresos > 0 else 0,

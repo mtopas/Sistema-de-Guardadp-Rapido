@@ -3,20 +3,24 @@
 
 ## DEPLOYADO EN HOMELAB: lote Jarvis + Finanzas + Agenda + Hábitos (2026-09-28)
 
-`master` y `origin/master` quedaron en `02277b5` y el lote completo está corriendo en el
+`master` y `origin/master` quedaron en `b29993e` y el lote completo está corriendo en el
 homelab (`192.168.137.10`). Antes del reinicio se dejó el backup
-`/home/mtopas/project/database/app.db.bak.20260928-133817`. Se reconstruyó `sgr-app:latest`
+`/home/mtopas/project/database/app.db.bak.20260928-161832`. Se reconstruyó `sgr-app:latest`
 con red de host y se levantó con `docker-compose up -d --no-build` (backend, bot y worker
 están `Up`); `/` respondió el `index.html` de producción después del arranque.
 
 Verificación real post-deploy: Finanzas devolvió 5 cuentas, 88 movimientos, 8 transacciones y
 15 instrumentos; Agenda, 26 eventos y 9 tareas; Jarvis, `/jarvis/health` 200 con el worker
-activo. Las rutas de Hábitos (`/habitos` y `/habitos/registros`) responden 200, pero la base
+activo. Las cinco rutas que habían fallado (`/agenda/eventos`, `/agenda/tareas`, `/hojas`,
+`/hojas/recientes` y `/categorias`) devolvieron 200 simultáneamente y también desde la IP
+Tailscale `100.117.86.117`. Las rutas de Hábitos (`/habitos` y `/habitos/registros`) responden 200, pero la base
 real del homelab tiene 0 hábitos y 0 registros hoy, así que no había filas que mostrar. La
 revisión manual del límite de Finanzas no encontró compras ARS históricas sin `tipo_cambio`
 pendientes (0 casos).
 
-La suite contra HEAD limpio queda en **376 backend (0 skip) + 188 frontend**, y el build local
+El fix de concurrencia de SQLite (lock compartido para sync de Bóveda/materialización de Agenda,
+rollback/cierre y `busy_timeout`) quedó en `b29993e`. La suite contra HEAD limpio queda en
+**381 backend (0 skip) + 188 frontend**, y el build local
 de producción terminó limpio (solo el warning preexistente de tamaño de chunk). El backup y
 los logs quedan como referencia para el próximo deploy.
 

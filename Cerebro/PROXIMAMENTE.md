@@ -10,7 +10,10 @@ homelab. Por eso no hay que volver a tratar como pendientes los bugs cerrados en
 Finanzas, y reconciliación offline de Hábitos (incluido el outbox persistente por `cliente_id`,
 notas que sobreviven reintentos y tombstones de borrado). El endpoint batch de registros ya
 tiene consumidor en Agenda HOY. Sigue diferido únicamente el rediseño genérico de offline con
-IndexedDB/idempotencia server-side y el resto de ítems de este archivo.
+IndexedDB/idempotencia server-side y el resto de ítems de este archivo. El bloqueo de SQLite que
+apareció en la primera carga quedó corregido y desplegado en `b29993e`: un lock compartido
+serializa el sync de Bóveda y la materialización de Agenda, con `busy_timeout` y cleanup de
+errores; la ráfaga concurrente de las cinco rutas afectadas volvió a dar 200 en producción.
 
 ---
 

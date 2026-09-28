@@ -1,5 +1,24 @@
 # Estado Actual de Jarvis
-Última actualización: 2026-09-27
+Última actualización: 2026-09-28
+
+## DEPLOYADO EN HOMELAB: lote Jarvis + Finanzas + Agenda + Hábitos (2026-09-28)
+
+`master` y `origin/master` quedaron en `02277b5` y el lote completo está corriendo en el
+homelab (`192.168.137.10`). Antes del reinicio se dejó el backup
+`/home/mtopas/project/database/app.db.bak.20260928-133817`. Se reconstruyó `sgr-app:latest`
+con red de host y se levantó con `docker-compose up -d --no-build` (backend, bot y worker
+están `Up`); `/` respondió el `index.html` de producción después del arranque.
+
+Verificación real post-deploy: Finanzas devolvió 5 cuentas, 88 movimientos, 8 transacciones y
+15 instrumentos; Agenda, 26 eventos y 9 tareas; Jarvis, `/jarvis/health` 200 con el worker
+activo. Las rutas de Hábitos (`/habitos` y `/habitos/registros`) responden 200, pero la base
+real del homelab tiene 0 hábitos y 0 registros hoy, así que no había filas que mostrar. La
+revisión manual del límite de Finanzas no encontró compras ARS históricas sin `tipo_cambio`
+pendientes (0 casos).
+
+La suite contra HEAD limpio queda en **376 backend (0 skip) + 188 frontend**, y el build local
+de producción terminó limpio (solo el warning preexistente de tamaño de chunk). El backup y
+los logs quedan como referencia para el próximo deploy.
 
 ## CORREGIDO: `NameError` al detener una serie de Agenda + `master` estaba en rojo (2026-09-27)
 
@@ -27,7 +46,7 @@ huérfanos en `main.py:29-31`, con `actualizar_apuntes`/`actualizar_icono` ya si
 `mybot/agenda_handlers.py:756`, `:794-795`). Hoy no hay ningún linter en el venv: agregar
 `pyflakes`/`ruff` a `project/requirements` queda propuesto, sin decidir.
 
-## IMPLEMENTADO Y COMMITEADO: correcciones de la auditoría de Agenda (2026-09-26) — pendiente deploy
+## IMPLEMENTADO, COMMITEADO Y DEPLOYADO: correcciones de la auditoría de Agenda (2026-09-26)
 
 Commit `daedd4e`. Los 19 hallazgos de `audit_agenda.txt` más una continuación de alcance propio
 (ventana de recurrencia, puntos 20-23 del reporte) que **no** era parte del pedido original.
@@ -55,7 +74,9 @@ fecha:** es idempotente (guarda por `recurrencia_materializada = 0`, inserta con
 `base + 1 día`). **Y sobre el homelab real es un no-op**: 0 eventos y 0 tareas con
 `se_repite=1`. No hay nada que materializar.
 
-## IMPLEMENTADO Y COMMITEADO: correcciones de la auditoría de Finanzas (2026-09-26) — pendiente deploy
+Deploy verificado el 2026-09-28 con 26 eventos y 9 tareas reales vía API.
+
+## IMPLEMENTADO, COMMITEADO Y DEPLOYADO: correcciones de la auditoría de Finanzas (2026-09-26)
 
 Commit `9b13ab1` (30 archivos; `crud.py` con 648 líneas cambiadas). Los 15 hallazgos de
 `audit_finanzas.txt`, 6 de ellos sobre **números de plata reales**, con casos antes/después
@@ -88,11 +109,12 @@ documentados en ese archivo:
 
 **Límite conocido, del propio reporte**: las compras ARS históricas sin `tipo_cambio` no
 permiten reconstruir su cotización real — al primer recálculo se les fija la configurada y queda
-estable. Conviene revisar a mano el PPC de esas operaciones después del deploy.
+estable. La revisión manual post-deploy del 2026-09-28 no encontró casos pendientes en los datos
+reales del homelab (0 compras ARS sin `tipo_cambio`).
 
-**Revisión de riesgo del orquestador: incompleta.** Repasados y correctos los helpers de
-conversión de `frontend/src/data/finanzas.js` y `_recalcular_posicion` en `crud.py`. Falta el
-resto del diff de `crud.py` (~2.048 líneas).
+La revisión de riesgo quedó cerrada: además de los helpers de conversión y `_recalcular_posicion`,
+se repasó el resto del diff de `crud.py` (~2.048 líneas) sin encontrar un bloqueo adicional.
+Deploy verificado con 88 movimientos, 8 transacciones y 15 instrumentos reales vía API.
 
 ## IMPLEMENTADO Y COMMITEADO: cierre completo de la auditoría de Bóveda (2026-09-25)
 
@@ -150,7 +172,7 @@ impacto alto son números de plata reales — exigencia de tests con casos antes
 suite en verde), Agenda (con 1 decisión ya tomada: materializar
 ocurrencias de eventos recurrentes como filas independientes, mismo patrón que Tareas).
 
-## IMPLEMENTADO Y COMMITEADO: 24 hallazgos de la auditoría de Jarvis (2026-09-24/25) — pendiente deploy al homelab
+## IMPLEMENTADO, COMMITEADO Y DEPLOYADO: 24 hallazgos de la auditoría de Jarvis (2026-09-24/25)
 
 La lista que sigue describe el estado observado durante la auditoría de solo lectura. Los 24
 hallazgos se corrigieron (commit `e0f02d8`, ya commiteado y pusheado a `origin/master`); el
@@ -175,9 +197,8 @@ comportamiento correcto (`project/tests/test_jarvis_audit_fixes.py`). Nota: el r
 inicializar en vez de un 503 limpio; no se implementó un guard por-request para eso, quedó
 fuera de esta corrección puntual.
 
-**Pendiente real:** deploy al homelab (build + `docker-compose up -d --no-build`, mismo proceso
-que deploys anteriores) — el código está en `master` pero no está corriendo en producción
-todavía.
+Deploy verificado el 2026-09-28: `/jarvis/health` respondió 200, el worker quedó activo y el
+bot completó su arranque (incluido el warmup local de Ollama).
 
 Sesión externa (no el orquestador), solo lectura, sin ejecutar código ni tocar el homelab.
 Cobertura: prácticamente todo `jarvis/` + integraciones en `project/mybot/`/`project/frontend/
@@ -251,7 +272,14 @@ archivados, actualización inmediata de la campana, consumo de stats del backend
 Agenda que se amplía para hábitos, eventos, tareas bloqueadas y clases fuera de 06:00–24:00.
 
 Verificado: 59 pruebas backend, 73 pruebas frontend y build de producción en verde. El detalle
-por hallazgo quedó en `D:\SGR\audit_habitos.txt`.
+por hallazgo quedó en `D:\SGR\audit_habitos.txt`. Después se cerraron dos caminos de la
+reconciliación offline (nota pendiente que no se pierda en reintentos y borrado durable mediante
+tombstones) con cuatro regresiones nuevas en `habitos.test.js`; commit `02277b5`. La suite
+frontend completa quedó en 188 pruebas.
+
+Deploy verificado el 2026-09-28: `/habitos` y `/habitos/registros` responden 200. La base real
+del homelab tiene 0 hábitos y 0 registros, por lo que la comprobación de datos de este módulo
+queda limitada a la respuesta vacía válida, sin crear datos artificiales en producción.
 
 ## HISTÓRICO: tests de paridad de Hábitos (frontend/backend/bot) — divergencias encontradas (2026-09-24)
 

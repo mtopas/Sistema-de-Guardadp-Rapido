@@ -2,6 +2,16 @@
 
 Ideas anotadas para evaluar/diseñar más adelante — no aprobadas, no implementadas. Formato libre, se promueven a una propuesta formal en `decisiones-implementacion.md` cuando se retoman.
 
+## Actualización 2026-09-28 — auditorías ya desplegadas
+
+El lote de auditorías de Jarvis, Finanzas, Agenda y Hábitos ya está en producción en el
+homelab. Por eso no hay que volver a tratar como pendientes los bugs cerrados en
+`Cerebro/estado-actual.md`: recurrencia materializada/idempotente, conversiones y ledger de
+Finanzas, y reconciliación offline de Hábitos (incluido el outbox persistente por `cliente_id`,
+notas que sobreviven reintentos y tombstones de borrado). El endpoint batch de registros ya
+tiene consumidor en Agenda HOY. Sigue diferido únicamente el rediseño genérico de offline con
+IndexedDB/idempotencia server-side y el resto de ítems de este archivo.
+
 ---
 
 ## ADR-005 del laboratorio Jarvis-Research: separar Agent Router / Model Router / Policy Engine
@@ -72,7 +82,8 @@ siendo real y no estaba capturada en ningún otro lugar de `Cerebro/` — se vue
   automático pre-migración, sin log de qué se aplicó.
 - **Dual schema de movimientos**: resuelto el 2026-09-24; los consumidores frontend y el
   fallback local usan el shape de la API. El bot conserva un normalizador de compatibilidad.
-  El fallback temporal aún requiere una cola durable si se busca soporte offline completo.
+  Hábitos además tiene ahora reconciliación durable propia; el fallback genérico aún requiere
+  una cola IndexedDB si se busca soporte offline completo para todos los módulos.
 - **Legacy visible**: banner de `Ahorro` legacy sigue en Ahorro; `GET /fin/emergencia` permanece
   deprecated, pero el store calcula el saldo desde `finMovimientosAll` sin llamarlo.
 - **Sync sin guard de divergencia**: `POST /sync/import` (`main.py:1967-2012`) no tiene
@@ -94,8 +105,9 @@ routes/services" ya no aplican, ver arriba):
    `top_k=20` y ofrece reindexación manual.
 8. `verify-sync.ps1` (script de humo que compara counts `/meta` antes/después de sync) — no
    existe.
-9. `POST /habitos/registros/batch` (`main.py:1912-1915`, ya existe en backend) sin consumidor
-   — candidato natural para marcar varios hábitos de una vez en Agenda HOY.
+9. ~~`POST /habitos/registros/batch` sin consumidor~~ **Implementado, 2026-09-26** — Agenda
+   HOY lo usa para marcar varios hábitos en una sola llamada; la reconciliación offline quedó
+   cerrada en `02277b5`.
 
 **Ya no vigente / ya cubierto en otro lado (no repetir si se retoma esto):**
 - "Cero tests" → superado (ver `Diferido — sin red de seguridad automatizada`).
@@ -105,7 +117,8 @@ routes/services" ya no aplican, ver arriba):
   (`seed_demo.py:243-246`); **`CLAUDE.md` quedó desactualizado en este punto puntual, corregir
   si se toca ese archivo**.
 - ~~Bug P0 IDs offline de Hábitos~~ → resuelto el 2026-09-26 con `cliente_id` idempotente y
-  reconciliación persistente de registros; ver `audit_habitos.txt`.
+  reconciliación persistente de registros; el 2026-09-28 se sumaron preservación de notas y
+  tombstones de borrado (`02277b5`); ver `audit_habitos.txt`.
 - Notificaciones unificadas → ya tiene su propia entrada completa más abajo
   (`Diferido — Notificaciones unificadas`).
 

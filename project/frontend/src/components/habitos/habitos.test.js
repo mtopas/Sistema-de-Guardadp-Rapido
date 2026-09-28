@@ -513,4 +513,91 @@ describe('habitosUtils', () => {
       })
     })
   })
+
+  describe('useStore offline habits reconciliation', () => {
+    const originalFetch = global.fetch
+    const offlineKey = 'sgr-habitos-offline-v1'
+
+    beforeEach(() => {
+      localStorage.removeItem(offlineKey)
+      useStore.setState({
+        habitos: [{ id: 1, nombre: 'Leer', activo: true }],
+        habitosRegistros: [{ id: 7, habito_id: 1, fecha: '2026-09-23', valor: 0.5, nota: 'vieja' }],
+        habitosRegistrosEliminaciones: [],
+        showToast: vi.fn(),
+      })
+    })
+
+    afterEach(() => {
+      global.fetch = originalFetch
+      localStorage.removeItem(offlineKey)
+    })
+
+    it('preserves a pending note update when a later offline edit omits nota', async () => {
+      global.fetch = vi.fn(async () => { throw new Error('offline') })
+
+      await useStore.getState().upsertHabitoRegistro(1, '2026-09-23', 1.0, 'nueva')
+      await useStore.getState().upsertHabitoRegistro(1, '2026-09-23', 0.5)
+
+      const registro = useStore.getState().habitosRegistros[0]
+      const persisted = JSON.parse(localStorage.getItem(offlineKey))
+      expect(registro).toMatchObject({ nota: 'nueva', _pending_sync: true, _actualizar_nota: true })
+      expect(persisted.registros[0]).toMatchObject({ nota: 'nueva', _actualizar_nota: true })
+    })
+
+    it('preserves a pending note update through batch retries too', async () => {
+      global.fetch = vi.fn(async () => { throw new Error('offline') })
+
+      await useStore.getState().batchUpsertHabitoRegistros([
+        { habitoId: 1, fecha: '2026-09-23', valor: 1.0, nota: 'nueva' },
+      ])
+      await useStore.getState().batchUpsertHabitoRegistros([
+        { habitoId: 1, fecha: '2026-09-23', valor: 0.5 },
+      ])
+
+      expect(useStore.getState().habitosRegistros[0]).toMatchObject({
+        nota: 'nueva', _pending_sync: true, _actualizar_nota: true,
+      })
+    })
+
+    it('persists an offline delete and hides the server row until it is reconciled', async () => {
+      global.fetch = vi.fn(async () => { throw new Error('offline') })
+
+      await useStore.getState().deleteHabitoRegistro(7, 1, '2026-09-23')
+
+      expect(useStore.getState().habitosRegistros).toHaveLength(0)
+      expect(JSON.parse(localStorage.getItem(offlineKey)).eliminaciones).toEqual([
+        { registro_id: 7, habito_id: 1, fecha: '2026-09-23' },
+      ])
+
+      global.fetch = vi.fn(async () => ({
+        ok: true,
+        json: async () => [{ id: 7, habito_id: 1, fecha: '2026-09-23', valor: 1.0, nota: null }],
+      }))
+      await useStore.getState().fetchHabitosRegistros()
+
+      expect(useStore.getState().habitosRegistros).toHaveLength(0)
+    })
+
+    it('retries an offline delete and clears its tombstone after success', async () => {
+      useStore.setState({
+        habitosRegistros: [],
+        habitosRegistrosEliminaciones: [{ registro_id: 7, habito_id: 1, fecha: '2026-09-23' }],
+      })
+      localStorage.setItem(offlineKey, JSON.stringify({
+        habitos: [], registros: [],
+        eliminaciones: [{ registro_id: 7, habito_id: 1, fecha: '2026-09-23' }],
+      }))
+      global.fetch = vi.fn(async (url, options) => {
+        expect(url).toContain('/habitos/registros/7')
+        expect(options.method).toBe('DELETE')
+        return { ok: true, status: 200 }
+      })
+
+      await useStore.getState().reconcileHabitosOffline()
+
+      expect(useStore.getState().habitosRegistrosEliminaciones).toHaveLength(0)
+      expect(localStorage.getItem(offlineKey)).toBeNull()
+    })
+  })
 })

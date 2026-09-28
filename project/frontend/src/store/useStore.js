@@ -40,24 +40,33 @@ function readHabitosOffline() {
     return {
       habitos: Array.isArray(data.habitos) ? data.habitos : [],
       registros: Array.isArray(data.registros) ? data.registros : [],
+      eliminaciones: Array.isArray(data.eliminaciones) ? data.eliminaciones : [],
     }
   } catch {
-    return { habitos: [], registros: [] }
+    return { habitos: [], registros: [], eliminaciones: [] }
   }
 }
 
-function persistHabitosOffline(habitos, registros) {
+function registroCoincideEliminacion(registro, eliminacion) {
+  return String(registro.id) === String(eliminacion.registro_id)
+}
+
+function persistHabitosOffline(habitos, registros, eliminaciones = []) {
   try {
     const pendingHabitos = habitos.filter(h => isOfflineHabitoId(h.id))
     const pendingIds = new Set(pendingHabitos.map(h => h.id))
     const pendingRegistros = registros.filter(r =>
       isOfflineRegistroId(r.id) || pendingIds.has(r.habito_id) || r._pending_sync
     )
-    if (!pendingHabitos.length && !pendingRegistros.length) {
+    if (!pendingHabitos.length && !pendingRegistros.length && !eliminaciones.length) {
       localStorage.removeItem(HABITOS_OFFLINE_KEY)
       return
     }
-    localStorage.setItem(HABITOS_OFFLINE_KEY, JSON.stringify({ habitos: pendingHabitos, registros: pendingRegistros }))
+    localStorage.setItem(HABITOS_OFFLINE_KEY, JSON.stringify({
+      habitos: pendingHabitos,
+      registros: pendingRegistros,
+      eliminaciones,
+    }))
   } catch { /* local persistence is best effort */ }
 }
 
@@ -1257,6 +1266,7 @@ export const useStore = create((set, get) => ({
   // ---------------------------------------------------------------------------
   habitos:          initialHabitosOffline.habitos,
   habitosRegistros: initialHabitosOffline.registros,
+  habitosRegistrosEliminaciones: initialHabitosOffline.eliminaciones,
 
   fetchHabitos: async () => {
     try {
@@ -1278,7 +1288,7 @@ export const useStore = create((set, get) => ({
             : registro
         )),
       }))
-      persistHabitosOffline(get().habitos, get().habitosRegistros)
+      persistHabitosOffline(get().habitos, get().habitosRegistros, get().habitosRegistrosEliminaciones)
       await get().reconcileHabitosOffline()
     } catch {
       if (DEBUG) console.log('fetchHabitos: API error, keeping current state')
@@ -1302,12 +1312,38 @@ export const useStore = create((set, get) => ({
           ),
         }))
       } catch {
-        persistHabitosOffline(get().habitos, get().habitosRegistros)
+        persistHabitosOffline(get().habitos, get().habitosRegistros, get().habitosRegistrosEliminaciones)
         return
       }
     }
 
-    const pendingRegistros = get().habitosRegistros.filter(r => isOfflineRegistroId(r.id) || r._pending_sync)
+    // Borrados primero: una edición offline pendiente del mismo registro no
+    // debe volver a crearlo antes de aplicar la eliminación.
+    for (const eliminacion of get().habitosRegistrosEliminaciones) {
+      if (isOfflineRegistroId(eliminacion.registro_id)) {
+        set(s => ({
+          habitosRegistrosEliminaciones: s.habitosRegistrosEliminaciones.filter(e => e !== eliminacion),
+        }))
+        continue
+      }
+      try {
+        const res = await fetch(`${API_URL}/habitos/registros/${eliminacion.registro_id}`, { method: 'DELETE' })
+        if (!res.ok && res.status !== 404) throw new Error('not ok')
+        set(s => ({
+          habitosRegistros: s.habitosRegistros.filter(r => !registroCoincideEliminacion(r, eliminacion)),
+          habitosRegistrosEliminaciones: s.habitosRegistrosEliminaciones.filter(e => e !== eliminacion),
+        }))
+      } catch {
+        persistHabitosOffline(get().habitos, get().habitosRegistros, get().habitosRegistrosEliminaciones)
+        return
+      }
+    }
+
+    const eliminacionesPendientes = get().habitosRegistrosEliminaciones
+    const eliminacionIds = new Set(eliminacionesPendientes.map(e => String(e.registro_id)))
+    const pendingRegistros = get().habitosRegistros.filter(r =>
+      (isOfflineRegistroId(r.id) || r._pending_sync) && !eliminacionIds.has(String(r.id))
+    )
     for (const registro of pendingRegistros) {
       if (isOfflineHabitoId(registro.habito_id)) continue
       try {
@@ -1325,11 +1361,11 @@ export const useStore = create((set, get) => ({
           r.habito_id === registro.habito_id && r.fecha === registro.fecha ? saved : r
         ) }))
       } catch {
-        persistHabitosOffline(get().habitos, get().habitosRegistros)
+        persistHabitosOffline(get().habitos, get().habitosRegistros, get().habitosRegistrosEliminaciones)
         return
       }
     }
-    persistHabitosOffline(get().habitos, get().habitosRegistros)
+    persistHabitosOffline(get().habitos, get().habitosRegistros, get().habitosRegistrosEliminaciones)
   },
 
   fetchHabitosRegistros: async (fechaDesde, fechaHasta) => {
@@ -1344,15 +1380,28 @@ export const useStore = create((set, get) => ({
         // merge: replace registros in the fetched range, keep the rest
         set(s => {
           const fuera = s.habitosRegistros.filter(r =>
-            r._pending_sync || (fechaDesde && r.fecha < fechaDesde) || (fechaHasta && r.fecha > fechaHasta)
+            !s.habitosRegistrosEliminaciones.some(e => registroCoincideEliminacion(r, e)) &&
+            (r._pending_sync || isOfflineRegistroId(r.id) || (fechaDesde && r.fecha < fechaDesde) || (fechaHasta && r.fecha > fechaHasta))
           )
-          return { habitosRegistros: [...fuera, ...data] }
+          const pendingKeys = new Set(fuera.map(r => `${r.habito_id}-${r.fecha}`))
+          const visibles = data.filter(r =>
+            !s.habitosRegistrosEliminaciones.some(e => registroCoincideEliminacion(r, e)) &&
+            !pendingKeys.has(`${r.habito_id}-${r.fecha}`)
+          )
+          return { habitosRegistros: [...fuera, ...visibles] }
         })
       } else {
         set(s => {
-          const pending = s.habitosRegistros.filter(r => r._pending_sync)
+          const pending = s.habitosRegistros.filter(r =>
+            (r._pending_sync || isOfflineRegistroId(r.id)) &&
+            !s.habitosRegistrosEliminaciones.some(e => registroCoincideEliminacion(r, e))
+          )
           const pendingKeys = new Set(pending.map(r => `${r.habito_id}-${r.fecha}`))
-          return { habitosRegistros: [...data.filter(r => !pendingKeys.has(`${r.habito_id}-${r.fecha}`)), ...pending] }
+          const visibles = data.filter(r =>
+            !s.habitosRegistrosEliminaciones.some(e => registroCoincideEliminacion(r, e)) &&
+            !pendingKeys.has(`${r.habito_id}-${r.fecha}`)
+          )
+          return { habitosRegistros: [...visibles, ...pending] }
         })
       }
     } catch { /* keep existing */ }
@@ -1374,7 +1423,7 @@ export const useStore = create((set, get) => ({
       const mock = { id: `h_${Date.now()}`, activo: true, creado_en: new Date().toISOString(), ...createPayload }
       set(s => {
         const habitos = [...s.habitos, mock]
-        persistHabitosOffline(habitos, s.habitosRegistros)
+        persistHabitosOffline(habitos, s.habitosRegistros, s.habitosRegistrosEliminaciones)
         return { habitos }
       })
       return mock
@@ -1387,7 +1436,7 @@ export const useStore = create((set, get) => ({
     if (isOfflineHabitoId(id)) {
       set(s => {
         const habitos = s.habitos.map(h => h.id === id ? { ...h, ...patch } : h)
-        persistHabitosOffline(habitos, s.habitosRegistros)
+        persistHabitosOffline(habitos, s.habitosRegistros, s.habitosRegistrosEliminaciones)
         return { habitos }
       })
       return get().habitos.find(h => h.id === id)
@@ -1412,19 +1461,22 @@ export const useStore = create((set, get) => ({
   deleteHabito: async (id) => {
     const previousHabito = get().habitos.find(h => h.id === id)
     const previousRegistros = get().habitosRegistros.filter(r => r.habito_id === id)
+    const previousEliminaciones = get().habitosRegistrosEliminaciones
     if (!previousHabito) return false
     if (isOfflineHabitoId(id)) {
       set(s => {
         const habitos = s.habitos.filter(h => h.id !== id)
         const habitosRegistros = s.habitosRegistros.filter(r => r.habito_id !== id)
-        persistHabitosOffline(habitos, habitosRegistros)
-        return { habitos, habitosRegistros }
+        const habitosRegistrosEliminaciones = s.habitosRegistrosEliminaciones.filter(e => e.habito_id !== id)
+        persistHabitosOffline(habitos, habitosRegistros, habitosRegistrosEliminaciones)
+        return { habitos, habitosRegistros, habitosRegistrosEliminaciones }
       })
       return true
     }
     set(s => ({
       habitos:          s.habitos.filter(h => h.id !== id),
       habitosRegistros: s.habitosRegistros.filter(r => r.habito_id !== id),
+      habitosRegistrosEliminaciones: s.habitosRegistrosEliminaciones.filter(e => e.habito_id !== id),
     }))
     try {
       const res = await fetch(`${API_URL}/habitos/${id}`, { method: 'DELETE' })
@@ -1434,6 +1486,7 @@ export const useStore = create((set, get) => ({
       set(s => ({
         habitos: [...s.habitos, previousHabito].sort((a, b) => Number(a.id) - Number(b.id)),
         habitosRegistros: [...s.habitosRegistros, ...previousRegistros],
+        habitosRegistrosEliminaciones: previousEliminaciones,
       }))
       get().showToast('No se pudo eliminar el hábito -- revisá tu conexión', 'error')
       return false
@@ -1476,10 +1529,10 @@ export const useStore = create((set, get) => ({
       set(s => {
         const habitosRegistros = s.habitosRegistros.map(r =>
           r.habito_id === habitoId && r.fecha === fecha
-            ? { ...r, _pending_sync: true, _actualizar_nota: actualizarNota }
+            ? { ...r, _pending_sync: true, _actualizar_nota: Boolean(r._actualizar_nota || actualizarNota) }
             : r
         )
-        persistHabitosOffline(s.habitos, habitosRegistros)
+        persistHabitosOffline(s.habitos, habitosRegistros, s.habitosRegistrosEliminaciones)
         return { habitosRegistros }
       })
       get().showToast('No se pudo guardar el hábito -- revisá tu conexión', 'error')
@@ -1544,10 +1597,10 @@ export const useStore = create((set, get) => ({
       set(s => {
         const pending = new Set(items.map(i => `${i.habitoId}-${i.fecha}`))
         const habitosRegistros = s.habitosRegistros.map(r => pending.has(`${r.habito_id}-${r.fecha}`)
-          ? { ...r, _pending_sync: true, _actualizar_nota: items.find(i => i.habitoId === r.habito_id && i.fecha === r.fecha)?.nota !== undefined }
+          ? { ...r, _pending_sync: true, _actualizar_nota: Boolean(r._actualizar_nota || items.find(i => i.habitoId === r.habito_id && i.fecha === r.fecha)?.nota !== undefined) }
           : r
         )
-        persistHabitosOffline(s.habitos, habitosRegistros)
+        persistHabitosOffline(s.habitos, habitosRegistros, s.habitosRegistrosEliminaciones)
         return { habitosRegistros }
       })
       get().showToast('No se pudieron guardar los hábitos -- revisá tu conexión', 'error')
@@ -1556,10 +1609,26 @@ export const useStore = create((set, get) => ({
 
   deleteHabitoRegistro: async (registroId, habitoId, fecha) => {
     set(s => ({ habitosRegistros: s.habitosRegistros.filter(r => !(r.habito_id === habitoId && r.fecha === fecha)) }))
+    // Un registro creado offline nunca llegó al servidor: quitarlo del estado
+    // y persistir basta, no hay DELETE que reintentar.
+    if (isOfflineRegistroId(registroId) || isOfflineHabitoId(habitoId)) {
+      persistHabitosOffline(get().habitos, get().habitosRegistros, get().habitosRegistrosEliminaciones)
+      return
+    }
     try {
       const res = await fetch(`${API_URL}/habitos/registros/${registroId}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error('not ok')
+      if (!res.ok && res.status !== 404) throw new Error('not ok')
+      persistHabitosOffline(get().habitos, get().habitosRegistros, get().habitosRegistrosEliminaciones)
     } catch {
+      set(s => {
+        const eliminacion = { registro_id: registroId, habito_id: habitoId, fecha }
+        const habitosRegistrosEliminaciones = [
+          ...s.habitosRegistrosEliminaciones.filter(e => String(e.registro_id) !== String(registroId)),
+          eliminacion,
+        ]
+        persistHabitosOffline(s.habitos, s.habitosRegistros, habitosRegistrosEliminaciones)
+        return { habitosRegistrosEliminaciones }
+      })
       get().showToast('No se pudo eliminar el registro en el servidor -- revisá tu conexión', 'error')
     }
   },

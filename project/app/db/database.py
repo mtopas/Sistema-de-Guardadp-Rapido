@@ -1,13 +1,32 @@
 import sqlite3
 import json
+from contextlib import contextmanager
 from datetime import date, datetime
+from threading import RLock
 
 from app.config import DEBUG, DB_PATH
 from app.db.agenda_recurrence import recurring_dates, event_template, task_template
 
 
+# Un único coordinador por proceso para los caminos que convierten un GET en
+# una escritura (sync de Bóveda y extensión de series de Agenda). SQLite sólo
+# admite un escritor; serializarlos antes de abrir la transacción evita que dos
+# requests paralelos compitan hasta agotar el busy timeout.
+_APP_DB_WRITE_LOCK = RLock()
+
+
+@contextmanager
+def serialized_app_db_write():
+    with _APP_DB_WRITE_LOCK:
+        yield
+
+
 def get_connection():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    # El lock de arriba resuelve la contención conocida dentro del backend. El
+    # timeout cubre escritores ajenos al proceso y carreras breves con otros
+    # caminos de escritura sin transformar un pico transitorio en un 500.
+    conn = sqlite3.connect(DB_PATH, timeout=15.0, check_same_thread=False)
+    conn.execute("PRAGMA busy_timeout = 15000")
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 

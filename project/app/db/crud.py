@@ -3,12 +3,13 @@ import json
 import os
 import re
 import sqlite3
+import time
 import uuid
 from pathlib import Path
 from typing import Optional
 
 from app.config import DEBUG, VAULT_ROOT
-from app.db.database import get_connection
+from app.db.database import get_connection, serialized_app_db_write
 from app.db.agenda_recurrence import recurring_dates, event_template, task_template
 from app.vault import parser as vault_parser
 from app.vault import sync as vault_sync
@@ -52,12 +53,32 @@ def _extraer_upload_filename(contenido: Optional[str], apuntes_html: Optional[st
     return None
 
 
+_ultima_sincronizacion_vault = 0.0
+
+
 def sincronizar_vault_si_hace_falta() -> None:
-    conn = get_connection()
-    try:
-        vault_sync.sincronizar_vault(VAULT_ROOT, conn)
-    finally:
-        conn.close()
+    """Sincroniza una vez para cada ráfaga de requests concurrentes.
+
+    La UI consulta hojas, recientes y categorías en paralelo. Cada llamada
+    conserva la semántica de pedir un sync, pero las que llegaron antes de que
+    terminara el primero reutilizan ese resultado en vez de recorrer CIFS y
+    escribir la misma DB otra vez.
+    """
+    global _ultima_sincronizacion_vault
+    solicitada_en = time.monotonic()
+    with serialized_app_db_write():
+        if _ultima_sincronizacion_vault >= solicitada_en:
+            return
+        conn = get_connection()
+        try:
+            vault_sync.sincronizar_vault(VAULT_ROOT, conn)
+        except Exception:
+            conn.rollback()
+            raise
+        else:
+            _ultima_sincronizacion_vault = time.monotonic()
+        finally:
+            conn.close()
 
 
 def _parse_preview(raw):
@@ -2268,46 +2289,47 @@ def agenda_reasignar_eventos_calendario(origen_id: int, destino_id: int) -> int:
 def _extender_series(conn, tipo: str, hasta: str) -> None:
     """Materialize only dates beyond each series' persisted generation marker."""
     target = date.fromisoformat(hasta[:10])
-    cursor = conn.cursor()
-    cursor.execute("BEGIN IMMEDIATE")
-    try:
-        cursor.execute("""SELECT serie_id, fecha_inicio, regla_repeticion, plantilla,
-                                 contenedor_id, generada_hasta
-                          FROM agenda_series WHERE tipo = ? AND activa = 1 AND generada_hasta < ?""",
-                       (tipo, target.isoformat()))
-        for series_id, start, rule_json, template_json, container_id, generated in cursor.fetchall():
-            rule = json.loads(rule_json)
-            template = json.loads(template_json)
-            dates = recurring_dates(start, rule, extend_from=target, after=date.fromisoformat(generated))
-            for day in dates:
-                if tipo == "evento":
-                    occurrence_start = day + template["hora_inicio"]
-                    duration = template["duracion_segundos"]
-                    occurrence_end = (
-                        (datetime.fromisoformat(occurrence_start) + timedelta(seconds=duration)).isoformat()
-                        if duration is not None else None
-                    )
-                    cursor.execute("""INSERT INTO agenda_eventos
-                        (titulo, descripcion, fecha_inicio, fecha_fin, todo_el_dia,
-                         se_repite, regla_repeticion, calendario_id, serie_id, recurrencia_materializada)
-                        VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?, 1)""",
-                        (template["titulo"], template["descripcion"], occurrence_start,
-                         occurrence_end, int(template["todo_el_dia"]), container_id, series_id))
-                else:
-                    cursor.execute("""INSERT INTO agenda_tareas
-                        (titulo, descripcion, fecha_opcional, hora_opcional, hora_bloque,
-                         duracion_estimada, completada, lista_id, se_repite, regla_repeticion, serie_id)
-                        VALUES (?, ?, ?, ?, ?, ?, 0, ?, 0, NULL, ?)""",
-                        (template["titulo"], template["descripcion"], day,
-                         template["hora_opcional"], template["hora_bloque"],
-                         template["duracion_estimada"], container_id, series_id))
-            cursor.execute("""UPDATE agenda_series SET generada_hasta = ?
-                              WHERE tipo = ? AND serie_id = ?""",
-                           (dates[-1] if dates else target.isoformat(), tipo, series_id))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
+    with serialized_app_db_write():
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        try:
+            cursor.execute("""SELECT serie_id, fecha_inicio, regla_repeticion, plantilla,
+                                     contenedor_id, generada_hasta
+                              FROM agenda_series WHERE tipo = ? AND activa = 1 AND generada_hasta < ?""",
+                           (tipo, target.isoformat()))
+            for series_id, start, rule_json, template_json, container_id, generated in cursor.fetchall():
+                rule = json.loads(rule_json)
+                template = json.loads(template_json)
+                dates = recurring_dates(start, rule, extend_from=target, after=date.fromisoformat(generated))
+                for day in dates:
+                    if tipo == "evento":
+                        occurrence_start = day + template["hora_inicio"]
+                        duration = template["duracion_segundos"]
+                        occurrence_end = (
+                            (datetime.fromisoformat(occurrence_start) + timedelta(seconds=duration)).isoformat()
+                            if duration is not None else None
+                        )
+                        cursor.execute("""INSERT INTO agenda_eventos
+                            (titulo, descripcion, fecha_inicio, fecha_fin, todo_el_dia,
+                             se_repite, regla_repeticion, calendario_id, serie_id, recurrencia_materializada)
+                            VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?, 1)""",
+                            (template["titulo"], template["descripcion"], occurrence_start,
+                             occurrence_end, int(template["todo_el_dia"]), container_id, series_id))
+                    else:
+                        cursor.execute("""INSERT INTO agenda_tareas
+                            (titulo, descripcion, fecha_opcional, hora_opcional, hora_bloque,
+                             duracion_estimada, completada, lista_id, se_repite, regla_repeticion, serie_id)
+                            VALUES (?, ?, ?, ?, ?, ?, 0, ?, 0, NULL, ?)""",
+                            (template["titulo"], template["descripcion"], day,
+                             template["hora_opcional"], template["hora_bloque"],
+                             template["duracion_estimada"], container_id, series_id))
+                cursor.execute("""UPDATE agenda_series SET generada_hasta = ?
+                                  WHERE tipo = ? AND serie_id = ?""",
+                               (dates[-1] if dates else target.isoformat(), tipo, series_id))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
 
 def agenda_detener_serie(tipo: str, serie_id: int) -> bool:
@@ -2345,7 +2367,11 @@ def agenda_obtener_eventos(
     fecha_hasta: Optional[str] = None,
 ) -> list:
     conn = get_connection()
-    _extender_series(conn, "evento", fecha_hasta or date.today().isoformat())
+    try:
+        _extender_series(conn, "evento", fecha_hasta or date.today().isoformat())
+    except Exception:
+        conn.close()
+        raise
     cursor = conn.cursor()
     # fecha_inicio se compara como texto (formato "YYYY-MM-DDTHH:MM:SS") -- un
     # fecha_hasta "pelado" (solo fecha, sin hora, ej. "2026-09-16") queda
@@ -2593,7 +2619,11 @@ def agenda_obtener_tareas(
 ) -> list:
     conn = get_connection()
     target = max(date.today(), date.fromisoformat(fecha_hasta[:10])) if fecha_hasta else date.today()
-    _extender_series(conn, "tarea", target.isoformat())
+    try:
+        _extender_series(conn, "tarea", target.isoformat())
+    except Exception:
+        conn.close()
+        raise
     cursor = conn.cursor()
     query = """
         SELECT t.id, t.titulo, t.descripcion, t.fecha_opcional, t.hora_opcional,
@@ -2873,8 +2903,12 @@ def agenda_resumen_semana(desde: str, hasta: str) -> dict:
     if hasta and "T" not in hasta:
         hasta = f"{hasta}T23:59:59.999999"
     conn = get_connection()
-    _extender_series(conn, "evento", hasta)
-    _extender_series(conn, "tarea", hasta)
+    try:
+        _extender_series(conn, "evento", hasta)
+        _extender_series(conn, "tarea", hasta)
+    except Exception:
+        conn.close()
+        raise
     cursor = conn.cursor()
 
     # Tareas completadas en el rango (con fecha en el rango)

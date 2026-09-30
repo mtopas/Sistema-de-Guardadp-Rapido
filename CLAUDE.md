@@ -332,3 +332,10 @@ antes de tocar `jarvis/vault/`, `jarvis/db/`, o `project/app/vault/`.
 2. Verificar que `estado-actual.md` no esté desactualizado revisando el git log de la sesión.
 3. Para cambios de arquitectura: revisar `jarvis/jarvis-spec.html` §15 y §25.
 4. Al terminar la sesión: actualizar `Cerebro/estado-actual.md` y agregar entrada en `Cerebro/decisiones-implementacion.md` si hubo decisiones que divergen del spec.
+
+---
+
+## Slash Commands y Roles
+- `/orquestador` — Inicia el rol de Tech Lead / Coordinador (lee `Cerebro/PROMPT-MAESTRO-ORQUESTADOR.md` y `Cerebro/Handoff.md`).
+- `/trabajador` — Inicia la sesión técnica de ejecución en Modo Cavernícola (lee `Cerebro/PROMPT-MAESTRO-TRABAJADOR.md`).
+

@@ -148,10 +148,21 @@ El contenedor **no** lee tu PC: primero copiás, después rebuild en el gabinete
 
 **1. Copiar (desde Windows, en la raíz del repo o en `project/`):**
 
+> **⚠ NUNCA copiar `database/`, `uploads/` ni `vault/` del Windows al homelab.**
+> La DB canónica vive en el homelab; la de Windows es réplica de solo lectura.
+> El 2026-09-30 un `scp -r ./project` sin exclusión pisó `app.db` del homelab
+> con la réplica local y se perdieron datos de Agenda/feedback/settings que hubo
+> que restaurar desde backup. Usar siempre `--exclude` o copiar carpetas puntuales.
+
 ```powershell
-# Proyecto completo (sin venv ni node_modules)
+# Proyecto completo — EXCLUYENDO database/, uploads/ y vault/ (datos del homelab)
 cd D:\SGR
-scp -r ./project mtopas@192.168.137.10:~/
+# tar + ssh evita que scp -r copie la DB local encima de la del homelab.
+# Las exclusiones van ancladas a project/: project/app/vault/ es código y debe viajar.
+tar czf - --exclude='project/database' --exclude='project/uploads' --exclude='project/vault' `
+    --exclude='venv' --exclude='node_modules' --exclude='__pycache__' `
+    --exclude='.env' -C D:\SGR project `
+  | ssh mtopas@192.168.137.10 "tar xzf - -C ~/"
 ```
 
 ```powershell

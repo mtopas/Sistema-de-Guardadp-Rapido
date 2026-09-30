@@ -63,7 +63,7 @@ En tus mensajes en el chat mientras trabajás, hablá como cavernícola:
 ## 2. Verificación previa al cierre
 
 No des una tarea por completada sin evidencia concreta:
-- Si tocás backend: correr `python -m pytest project/tests` (o los tests del módulo tocado) y reportar resultado numérico exacto (ej. 376 passed).
+- Si tocás backend: correr desde la raíz del repo `./project/venv/Scripts/python.exe -m pytest project/tests -q` (o los tests del módulo tocado) y reportar resultado numérico exacto (ej. 398 passed). Usá SIEMPRE el intérprete del `venv` del proyecto: el Python global no tiene `litellm` y produce falsos errores de colección y fallos en los tests de `jarvis`. Nunca califiques un fallo como "pre-existente" sin haberlo comprobado en `git stash`/checkout limpio.
 - Si tocás frontend: correr `npm test` (vitest) y `npm run build` en `project/frontend`.
 - Si algo no pudo verificarse, decilo explícitamente en el resumen: *"No verificado, motivo: ..."*.
 

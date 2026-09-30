@@ -1,0 +1,30 @@
+{
+  "name": "sgr-orbita",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "@fontsource/ibm-plex-sans": "^5.2.0",
+    "@fontsource/syne": "^5.2.0",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@testing-library/react": "^16.3.3",
+    "@vitejs/plugin-react": "^4.3.4",
+    "esbuild": "^0.25.12",
+    "eslint": "^9.39.5",
+    "globals": "^16.5.0",
+    "jsdom": "^26.1.0",
+    "prettier": "^3.9.9",
+    "vite": "^6.4.1"
+  }
+}

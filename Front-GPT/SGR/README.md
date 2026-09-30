@@ -80,6 +80,6 @@ tests/              Lógica, cliente HTTP e interacción sin navegador
 
 ## Alcance de lectura
 
-Dentro de `D:\SGR\project` se leyeron únicamente `README.md` y `requirements.txt`. No se accedió a `project/frontend`, al código del backend, a sus bases ni a sus otros documentos. El nuevo código y sus archivos generados están contenidos en `D:\SGR\Front-GPT\SGR`.
+Dentro de `project/` se leyeron únicamente `README.md` y `requirements.txt`. No se accedió a `project/frontend`, al código del backend, a sus bases ni a sus otros documentos. El nuevo código y sus archivos generados están contenidos en `Front-GPT/SGR/`.
 
 Por esa restricción, la integración se implementó usando la documentación y la adaptación al OpenAPI que entrega el servidor al abrir la aplicación. Las pruebas de integración usan contratos controlados: **no equivalen a una validación contra el backend real**. Un endpoint no ofrecido o un error de contrato se muestra en pantalla, conservando los datos existentes.

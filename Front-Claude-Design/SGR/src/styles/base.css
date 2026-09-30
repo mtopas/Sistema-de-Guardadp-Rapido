@@ -1,0 +1,604 @@
+@tailwind base;
+@tailwind components;
+
+/* Las utilidades de Tailwind se emiten AL FINAL del archivo (ver la última línea):
+   así `pl-9`, `items-start` o `text-txt-sub` ganan sobre las clases de componente
+   de abajo (.input, .overlay, .btn), que si no las pisarían por orden de cascada. */
+
+/* ═══════════════════════════════════════════════════════════════════
+   SGR · Front-Claude-Design
+   Tokens como CSS vars (igual que ClaudeDesign/) para que el tema se
+   cambie en caliente sin recompilar Tailwind. Los temas viven en
+   src/lib/theme.js y solo escriben estas variables en :root.
+   ═══════════════════════════════════════════════════════════════════ */
+
+:root {
+  --bg: #0b0a12;
+  --surface: #17152233;
+  --sidebar: #0e0d16;
+  --panel-bg: #161425;
+  --elev: #201d33;
+
+  --accent: #8b5cf6;
+  --accent-light: #c4b5fd;
+  --accent-deep: #6d28d9;
+
+  --text: #f4f2fb;
+  --text-2: #d9d5ea;
+  --subtext: #9b95b8;
+  --mute: #6b6685;
+  --border: rgb(255 255 255 / 8%);
+  --border-2: rgb(255 255 255 / 16%);
+
+  --success: #34d399;
+  --warning: #fbbf24;
+  --danger: #fb7185;
+  --info: #60a5fa;
+  --income: #34d399;
+  --expense: #fb7185;
+
+  /* Paleta de ramas: categorías, calendarios, hábitos, series de gráficos */
+  --b1: #8b5cf6; --b2: #06b6d4; --b3: #10b981; --b4: #f59e0b; --b5: #ef4444;
+  --b6: #3b82f6; --b7: #f97316; --b8: #14b8a6; --b9: #a855f7; --b10: #f43f5e;
+  --b11: #84cc16; --b12: #ec4899;
+
+  --radius: 14px;
+  --dur: 240ms;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --shell-rail: 76px;
+}
+
+/* Modo claro: mismos nombres, otros valores. */
+:root[data-mode='light'] {
+  --bg: #f6f4fc;
+  --surface: #ffffffcc;
+  --sidebar: #ffffff;
+  --panel-bg: #ffffff;
+  --elev: #f1eefb;
+  --text: #191727;
+  --text-2: #3a3654;
+  --subtext: #6b6685;
+  --mute: #9a94b3;
+  --border: rgb(20 16 40 / 10%);
+  --border-2: rgb(20 16 40 / 18%);
+  --accent-light: #7c3aed;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Sora', 'Inter', system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden; /* el scroll lo manejan los paneles */
+}
+
+/* Respeto por quien pidió menos movimiento. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  html { scroll-behavior: auto; }
+}
+
+/* ── Tipografía utilitaria ─────────────────────────────────────────── */
+.serif { font-family: 'Playfair Display', Georgia, serif; }
+.mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-feature-settings: 'tnum'; }
+.tnum { font-variant-numeric: tabular-nums; }
+
+.label {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--subtext);
+}
+
+.grad-text {
+  background: linear-gradient(115deg, var(--accent) 0%, var(--accent-light) 55%, var(--b2) 100%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: gradientPan 9s var(--ease) infinite alternate;
+}
+
+/* ── Superficies ───────────────────────────────────────────────────── */
+.panel {
+  position: relative;
+  background: color-mix(in srgb, var(--panel-bg) 78%, transparent);
+  backdrop-filter: blur(18px) saturate(1.25);
+  -webkit-backdrop-filter: blur(18px) saturate(1.25);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+/* Borde superior iridiscente: le da el aire "holográfico" sin costo de render. */
+.panel-lit::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--accent) 70%, transparent),
+    color-mix(in srgb, var(--b2) 60%, transparent),
+    transparent
+  );
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+.panel-solid {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.surface {
+  background: color-mix(in srgb, var(--elev) 55%, transparent);
+  border-radius: 12px;
+}
+
+.glow { box-shadow: 0 18px 50px -18px color-mix(in srgb, var(--accent) 65%, transparent); }
+.glow-sm { box-shadow: 0 8px 22px -8px color-mix(in srgb, var(--accent) 55%, transparent); }
+
+/* Tarjeta que reacciona al hover: sube, se ilumina y revela un halo. */
+.lift {
+  transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+.lift:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  box-shadow: 0 22px 48px -24px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+/* Halo decorativo de las tarjetas de KPI: sobre blanco se lee como una mancha. */
+.stat-glow { opacity: 0.16; }
+:root[data-mode='light'] .stat-glow { opacity: 0.09; }
+
+/* Halo que sigue al cursor (variables --mx/--my las setea useSpotlight). */
+.spotlight { position: relative; overflow: hidden; }
+.spotlight::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    240px circle at var(--mx, 50%) var(--my, 0%),
+    color-mix(in srgb, var(--accent) 16%, transparent),
+    transparent 70%
+  );
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease);
+  pointer-events: none;
+}
+.spotlight:hover::after { opacity: 1; }
+
+/* ── Botones ───────────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 13px;
+  border-radius: 11px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  background: color-mix(in srgb, var(--elev) 70%, transparent);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 180ms var(--ease);
+}
+.btn:hover:not(:disabled) {
+  border-color: var(--border-2);
+  background: var(--elev);
+  transform: translateY(-1px);
+}
+.btn:active:not(:disabled) { transform: scale(0.975); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.btn-primary {
+  position: relative;
+  color: #fff;
+  border-color: transparent;
+  background: linear-gradient(115deg, var(--accent-deep), var(--accent) 45%, var(--b2));
+  background-size: 200% 100%;
+  box-shadow: 0 10px 26px -12px color-mix(in srgb, var(--accent) 80%, transparent);
+}
+.btn-primary:hover:not(:disabled) { background-position: 100% 0; filter: brightness(1.08); }
+
+.btn-ghost { background: transparent; border-color: transparent; color: var(--text-2); }
+.btn-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--elev) 80%, transparent); color: var(--text); }
+
+.btn-danger {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 38%, transparent);
+}
+.btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 26%, transparent); }
+
+.btn-sm { padding: 5px 9px; font-size: 12px; border-radius: 9px; }
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--subtext);
+  cursor: pointer;
+  transition: all 180ms var(--ease);
+}
+.icon-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--elev) 85%, transparent);
+  color: var(--text);
+  transform: translateY(-1px);
+}
+.icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── Inputs ────────────────────────────────────────────────────────── */
+.input,
+.select,
+.textarea {
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: 11px;
+  font: inherit;
+  color: var(--text);
+  background: color-mix(in srgb, var(--elev) 60%, transparent);
+  border: 1px solid var(--border);
+  outline: none;
+  transition: border-color 180ms var(--ease), box-shadow 180ms var(--ease), background 180ms var(--ease);
+}
+.input:focus,
+.select:focus,
+.textarea:focus {
+  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+  background: color-mix(in srgb, var(--elev) 85%, transparent);
+}
+.input::placeholder,
+.textarea::placeholder { color: var(--mute); }
+.textarea { resize: vertical; min-height: 84px; line-height: 1.55; }
+.select { appearance: none; padding-right: 30px; cursor: pointer; }
+.select option { background: var(--panel-bg); color: var(--text); }
+
+input[type='date'],
+input[type='time'],
+input[type='datetime-local'],
+input[type='month'] { color-scheme: dark; }
+:root[data-mode='light'] input[type='date'],
+:root[data-mode='light'] input[type='time'],
+:root[data-mode='light'] input[type='datetime-local'],
+:root[data-mode='light'] input[type='month'] { color-scheme: light; }
+
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--b2));
+  outline: none;
+}
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--accent);
+  cursor: pointer;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent);
+  transition: transform 180ms var(--ease);
+}
+input[type='range']::-webkit-slider-thumb:hover { transform: scale(1.18); }
+
+/* ── Chips / badges / tabs ─────────────────────────────────────────── */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-2);
+  background: color-mix(in srgb, var(--elev) 70%, transparent);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 6px;
+  border-radius: 9px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--subtext);
+  background: color-mix(in srgb, var(--elev) 80%, transparent);
+  border: 1px solid var(--border);
+}
+
+.tabs {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--elev) 55%, transparent);
+  border: 1px solid var(--border);
+}
+.tab {
+  position: relative;
+  padding: 6px 13px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--subtext);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 180ms var(--ease);
+}
+.tab:hover { color: var(--text-2); }
+.tab[data-on='true'] { color: #fff; }
+.tab-pill {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 10px;
+  background: linear-gradient(115deg, var(--accent-deep), var(--accent));
+  box-shadow: 0 6px 18px -8px color-mix(in srgb, var(--accent) 85%, transparent);
+}
+
+/* ── Scrollbars ────────────────────────────────────────────────────── */
+.scroll { overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+::-webkit-scrollbar { width: 7px; height: 7px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 65%, transparent), color-mix(in srgb, var(--b2) 55%, transparent));
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, var(--accent), var(--b2)); }
+
+/* ── Focus visible global ──────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 85%, transparent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* ── Utilidades ────────────────────────────────────────────────────── */
+.truncate1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.clamp2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.clamp3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.divider { border: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--border-2), transparent); }
+.no-drag { user-select: none; -webkit-user-drag: none; }
+
+/* ── Keyframes ─────────────────────────────────────────────────────── */
+@keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+@keyframes slideUp { from { opacity: 0; transform: translateY(10px) } to { opacity: 1; transform: none } }
+@keyframes slideDown { from { opacity: 0; transform: translateY(-10px) } to { opacity: 1; transform: none } }
+@keyframes slideInRight { from { opacity: 0; transform: translateX(16px) } to { opacity: 1; transform: none } }
+@keyframes slideInLeft { from { opacity: 0; transform: translateX(-16px) } to { opacity: 1; transform: none } }
+@keyframes scaleIn { from { opacity: 0; transform: scale(0.94) } to { opacity: 1; transform: scale(1) } }
+@keyframes popIn {
+  0% { transform: scale(0.6); opacity: 0 }
+  55% { transform: scale(1.14); opacity: 1 }
+  100% { transform: scale(1) }
+}
+@keyframes pop { 0%,100% { transform: scale(1) } 40% { transform: scale(1.32) } 72% { transform: scale(0.95) } }
+/* Entrada de nodos SVG: va en un <g> propio, porque en SVG el atributo
+   `transform` y la propiedad CSS `transform` son la misma y se pisan. */
+@keyframes nodeIn {
+  0% { transform: scale(0.2); opacity: 0 }
+  60% { transform: scale(1.12); opacity: 1 }
+  100% { transform: scale(1) }
+}
+@keyframes gradientPan { from { background-position: 0% 50% } to { background-position: 100% 50% } }
+@keyframes float { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-8px) } }
+@keyframes breathe { 0%,100% { opacity: 0.45; transform: scale(1) } 50% { opacity: 0.85; transform: scale(1.05) } }
+@keyframes spin { to { transform: rotate(360deg) } }
+@keyframes shimmer { from { background-position: -160% 0 } to { background-position: 260% 0 } }
+@keyframes drawIn { from { stroke-dashoffset: var(--len, 1000) } to { stroke-dashoffset: 0 } }
+@keyframes growY { from { transform: scaleY(0) } to { transform: scaleY(1) } }
+@keyframes growX { from { transform: scaleX(0) } to { transform: scaleX(1) } }
+@keyframes ring {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent) }
+  100% { box-shadow: 0 0 0 14px transparent }
+}
+@keyframes auroraDrift {
+  0% { transform: translate3d(0,0,0) scale(1) }
+  33% { transform: translate3d(4%, -5%, 0) scale(1.12) }
+  66% { transform: translate3d(-5%, 4%, 0) scale(0.95) }
+  100% { transform: translate3d(0,0,0) scale(1) }
+}
+@keyframes scanline { from { transform: translateY(-100%) } to { transform: translateY(1200%) } }
+@keyframes blink { 0%,100% { opacity: 1 } 50% { opacity: 0.25 } }
+@keyframes marquee { from { transform: translateX(0) } to { transform: translateX(-50%) } }
+
+.a-fade { animation: fadeIn 260ms var(--ease) both; }
+.a-up { animation: slideUp 320ms var(--ease) both; }
+.a-down { animation: slideDown 300ms var(--ease) both; }
+.a-right { animation: slideInRight 320ms var(--ease) both; }
+.a-left { animation: slideInLeft 320ms var(--ease) both; }
+.a-scale { animation: scaleIn 220ms var(--ease) both; }
+.a-pop { animation: popIn 320ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+.a-pulse { animation: pop 320ms var(--ease); }
+.a-float { animation: float 6s ease-in-out infinite; }
+.a-spin { animation: spin 900ms linear infinite; }
+.a-ring { animation: ring 900ms var(--ease); }
+.a-blink { animation: blink 1.6s ease-in-out infinite; }
+.a-grow-y { transform-origin: bottom; animation: growY 620ms var(--ease) both; }
+.a-grow-x { transform-origin: left; animation: growX 620ms var(--ease) both; }
+
+/* Cascada: cada hijo entra un poco después que el anterior. */
+.stagger > * { animation: slideUp 360ms var(--ease) both; }
+.stagger > *:nth-child(1) { animation-delay: 0ms }
+.stagger > *:nth-child(2) { animation-delay: 45ms }
+.stagger > *:nth-child(3) { animation-delay: 90ms }
+.stagger > *:nth-child(4) { animation-delay: 135ms }
+.stagger > *:nth-child(5) { animation-delay: 180ms }
+.stagger > *:nth-child(6) { animation-delay: 225ms }
+.stagger > *:nth-child(7) { animation-delay: 270ms }
+.stagger > *:nth-child(8) { animation-delay: 315ms }
+.stagger > *:nth-child(n + 9) { animation-delay: 360ms }
+
+/* Skeleton de carga con barrido. */
+.skeleton {
+  border-radius: 10px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--elev) 70%, transparent) 0%,
+    color-mix(in srgb, var(--accent) 16%, transparent) 50%,
+    color-mix(in srgb, var(--elev) 70%, transparent) 100%
+  );
+  background-size: 220% 100%;
+  animation: shimmer 1.5s linear infinite;
+}
+
+/* ── Fondo aurora ──────────────────────────────────────────────────── */
+.aurora {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.aurora-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: 0.5;
+  will-change: transform;
+  animation: auroraDrift var(--t, 26s) ease-in-out infinite;
+}
+.aurora-grid {
+  position: absolute;
+  inset: -2px;
+  background-image: linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 46px 46px;
+  mask-image: radial-gradient(ellipse 85% 65% at 50% 40%, #000 30%, transparent 78%);
+  -webkit-mask-image: radial-gradient(ellipse 85% 65% at 50% 40%, #000 30%, transparent 78%);
+  opacity: 0.55;
+}
+/* En modo claro los blobs lavan el contenido: se bajan mucho. */
+:root[data-mode='light'] .aurora-blob { opacity: 0.16; filter: blur(110px); }
+:root[data-mode='light'] .aurora-noise { opacity: 0.02; }
+
+.aurora-noise {
+  position: absolute;
+  inset: 0;
+  opacity: 0.035;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ── Modales ───────────────────────────────────────────────────────── */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: color-mix(in srgb, #05040a 62%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  animation: fadeIn 200ms var(--ease) both;
+}
+.modal {
+  width: 100%;
+  max-height: calc(100vh - 44px);
+  display: flex;
+  flex-direction: column;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--panel-bg) 94%, transparent);
+  border: 1px solid var(--border-2);
+  box-shadow: 0 40px 90px -30px #000, 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+  animation: popIn 320ms cubic-bezier(0.34, 1.4, 0.64, 1) both;
+  overflow: hidden;
+}
+
+/* ── Tablas ────────────────────────────────────────────────────────── */
+.tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.tbl thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 9px 10px;
+  text-align: left;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--subtext);
+  background: color-mix(in srgb, var(--panel-bg) 96%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
+}
+.tbl tbody td { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.tbl tbody tr { transition: background 160ms var(--ease); }
+.tbl tbody tr:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.tbl .num { text-align: right; font-variant-numeric: tabular-nums; font-family: 'JetBrains Mono', monospace; }
+
+/* ── Editor de apuntes (contenteditable) ──────────────────────────── */
+.rich { outline: none; line-height: 1.65; font-size: 14px; }
+.rich:empty::before { content: attr(data-ph); color: var(--mute); }
+.rich h1 { font-size: 22px; font-weight: 700; margin: 14px 0 6px; }
+.rich h2 { font-size: 18px; font-weight: 600; margin: 12px 0 5px; }
+.rich h3 { font-size: 15px; font-weight: 600; margin: 10px 0 4px; }
+.rich p { margin: 7px 0; }
+.rich ul, .rich ol { padding-left: 22px; margin: 7px 0; }
+.rich li { margin: 3px 0; }
+.rich a { color: var(--accent-light); text-decoration: underline; text-underline-offset: 2px; }
+.rich code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12.5px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.rich pre {
+  padding: 11px 13px;
+  border-radius: 11px;
+  overflow: auto;
+  background: color-mix(in srgb, #000 35%, var(--elev));
+  border: 1px solid var(--border);
+}
+.rich blockquote {
+  margin: 9px 0;
+  padding: 3px 0 3px 13px;
+  border-left: 3px solid var(--accent);
+  color: var(--text-2);
+  font-style: italic;
+}
+.rich img { max-width: 100%; border-radius: 11px; margin: 8px 0; }
+.rich hr { border: 0; height: 1px; background: var(--border-2); margin: 14px 0; }
+
+/* ── Utilidades de Tailwind al final: ganan por orden de cascada ───── */
+@tailwind utilities;

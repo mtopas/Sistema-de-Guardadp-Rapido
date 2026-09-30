@@ -417,7 +417,14 @@ function Historial() {
                 }}
                 title={p == null ? `${fmtDate(iso)} · sin programar` : `${fmtDate(iso)} · ${Math.round(p * 100)}%`}
               >
-                <div className="mono text-[10.5px]" style={{ color: p != null && p > 0.6 ? '#fff' : 'var(--subtext)' }}>
+                <div
+                  className="mono text-[10.5px]"
+                  style={{
+                    // Sobre ámbar o verde saturado, el gris del tema no se lee.
+                    color: p != null && p > 0.25 ? 'rgb(255 255 255 / 92%)' : 'var(--subtext)',
+                    textShadow: p != null && p > 0.25 ? '0 1px 2px rgb(0 0 0 / 35%)' : 'none',
+                  }}
+                >
                   {d.getDate()}
                 </div>
                 {notas.length > 0 && (

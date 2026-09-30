@@ -64,18 +64,66 @@ logger = logging.getLogger(__name__)
 _eval_consecutive_failures: int = 0
 _eval_last_error: str | None = None
 
+_EVAL_HEALTH_POLICY = "passive_eval_health"
+
+
+def _persist_eval_health() -> None:
+    """Persiste el estado de salud del evaluador en jarvis_policies (DB) para
+    que el proceso backend pueda leerlo via get_eval_health(). Sin esto, el
+    endpoint /jarvis/health siempre reporta 0 fallas porque las variables
+    en memoria solo existen en el proceso del worker.
+    """
+    conn = get_connection()
+    try:
+        value = json.dumps({
+            "consecutive_failures": _eval_consecutive_failures,
+            "last_error": _eval_last_error,
+        })
+        with conn:
+            existing = conn.execute(
+                "SELECT id FROM jarvis_policies WHERE policy_type = ? LIMIT 1",
+                (_EVAL_HEALTH_POLICY,),
+            ).fetchone()
+            now_iso = datetime.now(timezone.utc).isoformat()
+            if existing:
+                conn.execute(
+                    "UPDATE jarvis_policies SET value = ?, created_at = ? WHERE id = ?",
+                    (value, now_iso, existing["id"]),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO jarvis_policies (id, policy_type, value, created_at) VALUES (?, ?, ?, ?)",
+                    (uuid.uuid4().hex, _EVAL_HEALTH_POLICY, value, now_iso),
+                )
+    except Exception as exc:
+        logger.warning("[jarvis.captures.passive] _persist_eval_health falló: %s", exc)
+    finally:
+        conn.close()
+
 
 def get_eval_health() -> dict:
     """Estado de salud del evaluador de captura pasiva (fallas del modelo).
 
-    Expuesto en /jarvis/health. consecutive_failures > 0 indica que el modelo
-    local (Ollama) no está respondiendo o devuelve basura; 0 con last_error
-    None significa que nunca falló o se recuperó.
+    Lee de DB (jarvis_policies) para funcionar correctamente desde el proceso
+    backend, que no comparte memoria con el worker donde corren las evaluaciones.
     """
-    return {
-        "consecutive_failures": _eval_consecutive_failures,
-        "last_error": _eval_last_error,
-    }
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT value FROM jarvis_policies WHERE policy_type = ? ORDER BY created_at DESC LIMIT 1",
+            (_EVAL_HEALTH_POLICY,),
+        ).fetchone()
+        if row:
+            data = json.loads(row["value"])
+            return {
+                "consecutive_failures": data.get("consecutive_failures", 0),
+                "last_error": data.get("last_error"),
+            }
+    except Exception:
+        pass
+    finally:
+        conn.close()
+    return {"consecutive_failures": 0, "last_error": None}
 
 
 _EVAL_PROMPT = """\
@@ -210,10 +258,12 @@ def evaluate_for_capture(text: str) -> dict | None:
             _eval_last_error = f"JSON no encontrado en respuesta del modelo: {raw[:200]}"
             logger.warning("[jarvis.captures.passive] Evaluación falló (consecutivas: %d): %s",
                            _eval_consecutive_failures, _eval_last_error)
+            _persist_eval_health()
             return None
         verdict = json.loads(raw[start:end])
         _eval_consecutive_failures = 0
         _eval_last_error = None
+        _persist_eval_health()
         if not verdict.get("worth_capturing"):
             return None
         content = (verdict.get("content") or "").strip()
@@ -226,6 +276,7 @@ def evaluate_for_capture(text: str) -> dict | None:
         _eval_last_error = str(exc)
         logger.warning("[jarvis.captures.passive] Evaluación falló (consecutivas: %d): %s",
                        _eval_consecutive_failures, _eval_last_error)
+        _persist_eval_health()
         return None
 
 

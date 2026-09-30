@@ -46,3 +46,11 @@ Consolidacion.txt
 SGR-JARVIS-Catalogo-de-Features-2026-09-21.md
 SGR-JARVIS-Estado-del-Arte-y-Benchmark-2026-09-21.md
 SGR-JARVIS-Laboratorio-de-Repositorios-2026-09-21.md
+
+# Paquete de skills de video (hyperframes/heygen) que un instalador de skills
+# dejó en D:\SGR por error — no tiene relación con el proyecto. Se conservan
+# solo orquestador/ y trabajador/, que sí son de SGR.
+.agents/skills/*
+!.agents/skills/orquestador/
+!.agents/skills/trabajador/
+skills-lock.json

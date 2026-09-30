@@ -11,6 +11,33 @@ Formato de cada entrada:
 
 ---
 
+## 2026-09-30 — Incidente: deploy pisó app.db del homelab con réplica Windows
+
+Contexto: el procedimiento de "Actualizar código en el servidor" (HOMELAB.md) usaba
+`scp -r ./project` sin excluir `database/`, lo que copió la réplica local de Windows
+encima de la DB canónica del homelab. Se perdieron datos de Agenda (tareas 9→0,
+eventos 58→21, horario facultad 9→4, excepciones 3→0, series 1→0), feedback (14→0)
+y app_settings (1→0).
+
+Decisión:
+- Se restauró `app.db` desde el backup automático `app.db.bak-20260930-133414`.
+- Se corrigió HOMELAB.md para excluir `database/`, `uploads/` y `vault/` de la copia,
+  con advertencia explícita del incidente.
+- Se generó un reporte de rescate (`project/database/backup-incidente-20260930/reporte-rescate-hojas.md`)
+  para las 35 hojas divergentes entre las réplicas (no versionado).
+
+Diferencia con spec: N/A (procedimiento operativo, no spec).
+
+Impacto: HOMELAB.md (sección "Actualizar código en el servidor").
+
+Hallazgo adicional: las réplicas Windows↔homelab ya habían divergido en la tabla `hojas`
+ANTES del deploy (35 filas con diferencias: IDs reasignados independientemente, cambios de
+categoría, 6 hojas existían solo en un lado). Esto indica un hueco en el mecanismo de sync
+descrito en `project/SYNC-WINDOWS.md` que no está cubierto por los scripts sgr-sync-push/pull.
+Requiere investigación en un ticket aparte.
+
+---
+
 ## 2026-09-24 — Identidad/scopes reales para el Tool Registry: postergado hasta que haya una razón concreta
 
 Contexto: con el Tool Registry ya implementado (3 tools read-only: Agenda, Hábitos, Bóveda,

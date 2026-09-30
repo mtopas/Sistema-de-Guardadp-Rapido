@@ -782,6 +782,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if await fh.handle_fin_quick_capture(update, context, texto):
             return
 
+        # Registrar en conversation_messages para captura pasiva de Jarvis
+        jh.register_telegram_message(str(msg.chat.id), texto)
+
         # URL sola → Bóveda (el LLM suele clasificarla mal como consulta)
         if not _is_bare_link(texto):
             # ── LLM routing (texto libre sin prefijos) ─────────────

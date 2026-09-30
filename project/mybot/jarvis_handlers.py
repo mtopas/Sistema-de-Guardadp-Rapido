@@ -69,6 +69,25 @@ def jarvis_init() -> None:
         logger.warning("[jarvis_handlers] Jarvis no disponible — init omitida.")
 
 
+def register_telegram_message(chat_id: str, text: str) -> None:
+    """Registra un mensaje de texto libre del usuario en conversation_messages
+    para que scan_and_propose() (captura pasiva) pueda evaluarlo.
+
+    Solo se llama para texto libre que llega al LLM router o Bóveda — no para
+    pasos estructurados de Finanzas/Agenda ni respuestas a propuestas pendientes.
+    Nunca lanza: un fallo acá no debe romper el flujo normal del bot.
+    """
+    if not _JARVIS_AVAILABLE:
+        return
+    try:
+        from jarvis.conversation.service import add_message, get_or_create_conversation
+
+        conv_id = get_or_create_conversation("telegram", chat_id)
+        add_message(conv_id, "user", text)
+    except Exception as exc:
+        logger.warning("[jarvis_handlers] register_telegram_message falló: %s", exc)
+
+
 async def cmd_j(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Captura texto a Jarvis: /j <texto>"""
     if not _JARVIS_AVAILABLE:

@@ -20,6 +20,7 @@ import Habitos from "../src/Habitos";
 import Settings from "../src/Settings";
 import { sampleDB, emptyDB } from "../src/local";
 import { today } from "../src/domain";
+import { resources } from "../src/resources";
 let context;
 function Observer() {
   context = useApp();
@@ -116,7 +117,9 @@ test("Completar tarea y hábito actualiza estado persistido", async () => {
   result.unmount();
   wrap(<Habitos tab="hoy" setTab={() => {}} />);
   fireEvent.click(
-    screen.getByRole("button", { name: /Leer un capítulo,.*sin completar/ }),
+    screen.getAllByRole("button", {
+      name: /Leer un capítulo,.*sin completar/,
+    })[0],
   );
   const dialog = screen.getByRole("dialog");
   fireEvent.click(
@@ -178,10 +181,12 @@ test("Espacio local persiste al recargar y API fallida no modifica sus datos", a
     assert.equal(context.db.hojas.length, 8);
     await act(async () => context.setMode("api"));
     await waitFor(() => assert.equal(context.status, "offline"));
-    await assert.rejects(
-      () => context.mutate("hojas", "save", { titulo: "No guardar" }),
-      /Conectá/,
-    );
+    await act(async () => {
+      await assert.rejects(
+        () => context.mutate("hojas", "save", { titulo: "No guardar" }),
+        /Conectá/,
+      );
+    });
     assert.equal(
       JSON.parse(localStorage.getItem("sgr-orbita-v1-local")).hojas.length,
       8,
@@ -215,4 +220,141 @@ test("Navegación, captura rápida y búsqueda global funcionan por teclado", as
   await screen.findByRole("heading", { name: "Una idea. Un primer paso." });
   fireEvent.click(screen.getByRole("button", { name: /Crear un hábito/ }));
   await screen.findByRole("heading", { name: "Crear hábito" });
+});
+test("API: adapta formularios a nombres y enums del contrato, y envía el cuerpo correcto", async () => {
+  localStorage.setItem("sgr-orbita-v1-mode", JSON.stringify("api"));
+  const paths = Object.fromEntries(
+    Object.values(resources).map((r) => [r.path, { get: {} }]),
+  );
+  paths["/fin/movimientos"].post = {
+    requestBody: {
+      content: {
+        "application/json": {
+          schema: {
+            type: "object",
+            required: [
+              "descripcion",
+              "tipo",
+              "monto",
+              "fecha",
+              "cuenta_nombre",
+              "categoria_nombre",
+            ],
+            properties: {
+              descripcion: { type: "string" },
+              tipo: { type: "string", enum: ["income", "expense"] },
+              monto: { type: "number" },
+              fecha: { type: "string", format: "date" },
+              moneda: { type: "string", enum: ["ARS", "USD"], default: "ARS" },
+              cuenta_nombre: { type: "string" },
+              categoria_nombre: { type: "string" },
+            },
+          },
+        },
+      },
+    },
+  };
+  paths["/fin/fire-filas/{mes}"] = {
+    put: {
+      parameters: [
+        { name: "mes", in: "path", required: true, schema: { type: "string" } },
+      ],
+      requestBody: {
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["ahorrado"],
+              properties: { ahorrado: { type: "number" } },
+            },
+          },
+        },
+      },
+    },
+  };
+  const calls = [],
+    movements = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url, ...options });
+    const path = String(url).replace("/api", "").split("?")[0];
+    let data = [];
+    if (path === "/openapi.json") data = { paths };
+    else if (path === "/fin/cuentas")
+      data = [{ id: 17, nombre: "Banco de prueba" }];
+    else if (path === "/fin/categorias")
+      data = [{ id: 23, nombre: "Alimentos" }];
+    else if (path === "/fin/movimientos") {
+      if (options.method === "POST")
+        movements.push({ id: 9, ...JSON.parse(options.body) });
+      data = options.method === "POST" ? movements.at(-1) : movements;
+    } else if (path.startsWith("/fin/fire-filas/") && options.method === "PUT")
+      data = { mes: path.split("/").pop(), ...JSON.parse(options.body) };
+    return new Response(JSON.stringify(data), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  try {
+    wrap(<Observer />);
+    await waitFor(() => assert.equal(context.db.cuentas.length, 1));
+    await act(async () =>
+      context.setModal({ type: "form", resource: "movimientos" }),
+    );
+    fireEvent.change(screen.getByLabelText(/Descripción/), {
+      target: { value: "Almuerzo" },
+    });
+    fireEvent.change(screen.getByLabelText(/Importe/), {
+      target: { value: "4200" },
+    });
+    fireEvent.change(screen.getByLabelText(/^Cuenta/), {
+      target: { value: "Banco de prueba" },
+    });
+    fireEvent.change(screen.getByLabelText(/^Categoría/), {
+      target: { value: "Alimentos" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Guardar", exact: true }),
+    );
+    await waitFor(() => assert.equal(context.db.movimientos.length, 1));
+    const call = calls.find((c) => c.method === "POST");
+    const body = JSON.parse(call.body);
+    assert.equal(body.cuenta_nombre, "Banco de prueba");
+    assert.equal(body.categoria_nombre, "Alimentos");
+    assert.equal(body.tipo, "expense");
+    assert.equal(body.monto, 4200);
+    assert.equal(body.cuenta_id, undefined);
+    assert.ok(
+      calls
+        .filter(
+          (c) =>
+            String(c.url).includes("/fin/movimientos") && c.method === "GET",
+        )
+        .every((c) => !String(c.url).includes("fecha_desde")),
+    );
+    await act(async () =>
+      context.setModal({ type: "form", resource: "fireFilas" }),
+    );
+    fireEvent.change(screen.getByLabelText(/^Mes/), {
+      target: { value: "2026-09" },
+    });
+    fireEvent.change(screen.getByLabelText(/Saldo acumulado/), {
+      target: { value: "900" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Guardar", exact: true }),
+    );
+    await waitFor(() =>
+      assert.ok(
+        calls.some(
+          (c) => c.url === "/api/fin/fire-filas/2026-09" && c.method === "PUT",
+        ),
+      ),
+    );
+    const put = calls.find((c) => c.url === "/api/fin/fire-filas/2026-09");
+    assert.deepEqual(JSON.parse(put.body), { ahorrado: 900 });
+    await waitFor(() => assert.equal(context.modal, null));
+  } finally {
+    globalThis.fetch = original;
+  }
 });

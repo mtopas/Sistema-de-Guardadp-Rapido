@@ -19,12 +19,14 @@ function read(key, fallback) {
   }
 }
 export function Provider({ children }) {
-  const [mode, setModeState] = useState(() => read("-mode", "local")),
+  const [mode, setModeState] = useState(() => read("-mode", "api")),
     [base, setBase] = useState(() =>
       read("-base", import.meta.env.VITE_API_URL || "/api"),
     );
-  const [db, setDB] = useState(() => ({ ...emptyDB(), ...read("-local", {}) })),
-    [status, setStatus] = useState("local"),
+  const [db, setDB] = useState(() =>
+      mode === "local" ? { ...emptyDB(), ...read("-local", {}) } : emptyDB(),
+    ),
+    [status, setStatus] = useState(mode === "api" ? "connecting" : "local"),
     [errors, setErrors] = useState({}),
     [toast, setToast] = useState(null),
     [modal, setModal] = useState(null),
@@ -41,7 +43,9 @@ export function Provider({ children }) {
     dbRef = useRef(db),
     modeRef = useRef(mode),
     generation = useRef(0),
-    toastTimer = useRef();
+    toastTimer = useRef(),
+    queryRanges = useRef({}),
+    requestVersions = useRef({});
   dbRef.current = db;
   modeRef.current = mode;
   const notify = (message, type = "success") => {
@@ -54,6 +58,7 @@ export function Provider({ children }) {
     dbRef.current = value;
     setDB(value);
   };
+  useEffect(() => () => clearTimeout(toastTimer.current), []);
   const pathFor = (key) => {
     const p = resources[key].path;
     if (key === "feedback" && client.current.doc?.paths?.["/settings/feedback"])
@@ -62,17 +67,31 @@ export function Provider({ children }) {
   };
   async function refresh(key, params = {}) {
     if (modeRef.current !== "api") return;
+    queryRanges.current[key] = { ...queryRanges.current[key], ...params };
+    if (!client.current.doc) return;
     const token = generation.current;
+    const version = (requestVersions.current[key] || 0) + 1;
+    requestVersions.current[key] = version;
     try {
       const range = {
-        fecha_desde: addDays(today(), -370),
-        fecha_hasta: addDays(today(), 370),
-        desde: addDays(today(), -370),
-        hasta: addDays(today(), 370),
-        ...params,
+        ...(["eventos", "registros"].includes(key)
+          ? {
+              fecha_desde: addDays(today(), -370),
+              fecha_hasta: addDays(today(), 370),
+              desde: addDays(today(), -370),
+              hasta: addDays(today(), 370),
+            }
+          : {}),
+        ...queryRanges.current[key],
       };
-      const rows = await client.current.list(pathFor(key), range);
-      if (token !== generation.current) return;
+      let rows = await client.current.list(pathFor(key), range);
+      if (["fireFilas", "inflacion"].includes(key))
+        rows = rows.map((row) => ({ ...row, id: row.id ?? row.mes }));
+      if (
+        token !== generation.current ||
+        requestVersions.current[key] !== version
+      )
+        return;
       setDB((prev) => {
         const next = { ...prev, [key]: rows };
         dbRef.current = next;
@@ -80,20 +99,23 @@ export function Provider({ children }) {
       });
       setErrors((e) => ({ ...e, [key]: null }));
     } catch (e) {
-      if (token === generation.current)
+      if (
+        token === generation.current &&
+        requestVersions.current[key] === version
+      )
         setErrors((prev) => ({ ...prev, [key]: e.message }));
     }
   }
   async function connect() {
     setStatus("connecting");
     setErrors({});
+    setDB(emptyDB());
     const token = ++generation.current;
     try {
       client.current = new Client(base);
       await client.current.connect();
       if (token !== generation.current) return;
       setStatus("online");
-      setDB(emptyDB());
       await Promise.all(Object.keys(resources).map((key) => refresh(key)));
       for (const [key, path] of [
         ["config", "/fin/config"],
@@ -149,6 +171,35 @@ export function Provider({ children }) {
       );
     return path + "/" + encodeURIComponent(item.id ?? item.mes);
   }
+  function saveRoute(key, item = {}) {
+    const basePath = pathFor(key);
+    let path = item.id ? itemPath(key, item) : basePath;
+    if (
+      !item.id &&
+      client.current.doc &&
+      !["POST", "PUT"].some((method) =>
+        client.current.operation(basePath, method),
+      )
+    ) {
+      const template = Object.keys(client.current.doc.paths).find(
+        (p) =>
+          p.startsWith(basePath + "/") &&
+          /^\{[^}]+\}\/?$/.test(p.slice(basePath.length + 1)) &&
+          client.current.operation(p, "PUT"),
+      );
+      if (template)
+        path = template.replace(/\{([^}]+)\}/g, (_, param) =>
+          item[param] != null ? encodeURIComponent(item[param]) : `{${param}}`,
+        );
+    }
+    return {
+      path,
+      method: client.current.method(
+        path,
+        item.id ? ["PATCH", "PUT"] : ["POST", "PUT"],
+      ),
+    };
+  }
   async function mutate(key, action, payload) {
     try {
       let result;
@@ -161,25 +212,27 @@ export function Provider({ children }) {
           throw Error(
             "Conectá la API antes de guardar. Tus datos no se guardaron.",
           );
+        const target = saveRoute(key, payload);
         const path =
           action === "record"
             ? `/habitos/${encodeURIComponent(payload.habito_id)}/registro`
-            : payload.id || action === "delete"
+            : action === "delete"
               ? itemPath(key, payload)
-              : pathFor(key);
+              : target.path;
         const method =
           action === "delete"
             ? "DELETE"
             : action === "record"
               ? "PUT"
-              : payload.id
-                ? client.current.method(path, ["PATCH", "PUT"])
-                : client.current.method(path, ["POST", "PUT"]);
+              : target.method;
         const body = { ...payload };
         delete body.id;
         delete body.creado_en;
         delete body.actualizado_en;
         if (action === "record") delete body.habito_id;
+        for (const param of client.current.operation(path, method)
+          ?.parameters || [])
+          if (param.in === "path") delete body[param.name];
         result = await client.current.save(
           path,
           method,
@@ -246,6 +299,8 @@ export function Provider({ children }) {
     setModeState(value);
   };
   const seed = () => {
+    if (modeRef.current !== "local")
+      throw Error("Los ejemplos solo están disponibles en el espacio local.");
     if (Object.keys(resources).some((k) => (dbRef.current[k] || []).length))
       throw Error(
         "Los ejemplos solo se pueden cargar en un espacio local vacío.",
@@ -254,10 +309,31 @@ export function Provider({ children }) {
     notify("Ejemplos cargados en tu espacio local");
   };
   const importLocal = (value) => {
+    if (modeRef.current !== "local")
+      throw Error(
+        "La restauración JSON solo está disponible en el espacio local.",
+      );
     if (!value || typeof value !== "object" || Array.isArray(value))
       throw Error("El archivo no contiene un espacio SGR válido.");
-    for (const key of Object.keys(resources))
+    for (const key of Object.keys(resources)) {
       if (!Array.isArray(value[key])) throw Error(`Falta la colección ${key}.`);
+      if (
+        value[key].some(
+          (row) =>
+            !row ||
+            typeof row !== "object" ||
+            Array.isArray(row) ||
+            row.id == null,
+        )
+      )
+        throw Error(`La colección ${key} contiene un elemento inválido.`);
+    }
+    for (const key of ["config", "settings"])
+      if (
+        value[key] &&
+        (typeof value[key] !== "object" || Array.isArray(value[key]))
+      )
+        throw Error(`El campo ${key} no es válido.`);
     persist({ ...emptyDB(), ...value });
     notify("Espacio local restaurado");
   };
@@ -279,6 +355,7 @@ export function Provider({ children }) {
         client: client.current,
         pathFor,
         itemPath,
+        saveRoute,
         notify,
         toast,
         setToast,

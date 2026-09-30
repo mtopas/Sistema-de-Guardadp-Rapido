@@ -118,7 +118,9 @@ export default function App() {
   }, [route]);
   useEffect(() => {
     const onKey = (e) => {
-      const editable = e.target.closest(
+      if (document.querySelector('[role="dialog"]') && !command && !shortcuts)
+        return;
+      const editable = e.target?.closest?.(
         "input,textarea,select,[contenteditable]",
       );
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
@@ -196,7 +198,7 @@ export default function App() {
           </span>
           <span>
             <strong>
-              SGR<span>®</span>
+              SGR<span>✦</span>
             </strong>
             <small>ÓRBITA PERSONAL</small>
           </span>

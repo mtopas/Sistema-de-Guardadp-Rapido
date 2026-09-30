@@ -2,6 +2,7 @@ import { JSDOM } from "jsdom";
 import { build } from "esbuild";
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   url: "http://localhost:5174",
+  pretendToBeVisual: true,
 });
 for (const key of [
   "window",

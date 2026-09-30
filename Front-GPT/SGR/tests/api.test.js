@@ -129,3 +129,38 @@ test("Extrae listas de los formatos de respuesta habituales", () => {
   assert.deepEqual(unpack({ items: [{ id: 1 }] }), [{ id: 1 }]);
   assert.deepEqual(unpack({ movimientos: [{ id: 2 }] }), [{ id: 2 }]);
 });
+test("Paginación respeta el máximo publicado y el total reportado", async () => {
+  const c = new Client();
+  c.doc = {
+    paths: {
+      "/items": {
+        get: {
+          parameters: [
+            { in: "query", name: "limit", schema: { maximum: 2 } },
+            { in: "query", name: "offset" },
+          ],
+        },
+      },
+    },
+  };
+  let calls = 0;
+  c.request = async (path) => {
+    calls++;
+    const q = new URL(path, "http://test").searchParams;
+    assert.equal(q.get("limit"), "2");
+    const offset = Number(q.get("offset"));
+    return { items: [{ id: offset }], total: 3 };
+  };
+  assert.equal((await c.list("/items")).length, 3);
+  assert.equal(calls, 3);
+});
+test("Lee tablas mensuales y rechaza respuestas de forma desconocida", async () => {
+  const c = new Client();
+  c.request = async () => ({ "2026-09": 2.1, "2026-10": 1.8 });
+  assert.deepEqual(await c.list("/fin/inflacion"), [
+    { mes: "2026-09", porcentaje: 2.1 },
+    { mes: "2026-10", porcentaje: 1.8 },
+  ]);
+  c.request = async () => ({ unexpected: "not a list" });
+  await assert.rejects(() => c.list("/hojas"), /lista reconocible/);
+});

@@ -60,6 +60,13 @@ export function localMutation(previous, key, action, payload) {
         ))
     )
       throw Error("Esta categoría pertenece al sistema o a un objetivo.");
+    if (
+      key === "finCategorias" &&
+      db.movimientos.some((m) => String(m.categoria_id) === String(payload.id))
+    )
+      throw Error(
+        "Esta categoría tiene movimientos. Ocultala o reasignalos antes de eliminarla.",
+      );
     db[key] = db[key].filter((x) => String(x.id) !== String(payload.id));
     if (key === "habitos")
       db.registros = db.registros.filter(
@@ -86,6 +93,10 @@ export function localMutation(previous, key, action, payload) {
           : c,
       );
   } else if (action === "record") {
+    if (![0.5, 1].includes(Number(payload.valor)))
+      throw Error("El progreso debe ser parcial o completo.");
+    if (payload.fecha > today())
+      throw Error("No se puede registrar progreso en un día futuro.");
     const existing = db.registros.find(
       (r) =>
         String(r.habito_id) === String(payload.habito_id) &&
@@ -101,6 +112,30 @@ export function localMutation(previous, key, action, payload) {
       id: payload.id || id(),
       actualizado_en: new Date().toISOString(),
     };
+    if (
+      key === "movimientos" &&
+      (!Number.isFinite(Number(row.monto)) || num(row.monto) <= 0)
+    )
+      throw Error("El importe debe ser un número mayor que cero.");
+    if (["fireFilas", "inflacion"].includes(key)) {
+      const existing = db[key].find((entry) => entry.mes === row.mes);
+      if (existing) row.id = existing.id;
+    }
+    if (key === "finCategorias" && payload.id) {
+      const previousCategory = db.finCategorias.find(
+        (c) => String(c.id) === String(payload.id),
+      );
+      if (
+        (previousCategory?.objetivo_id ||
+          ["fire", "transferencia", "ajuste"].includes(
+            previousCategory?.nombre?.toLowerCase(),
+          )) &&
+        previousCategory.nombre !== row.nombre
+      )
+        throw Error(
+          "Las categorías del sistema o de objetivos no se pueden renombrar.",
+        );
+    }
     if (key === "objetivos" && !payload.id) {
       if (
         db.objetivos.some(
@@ -129,6 +164,8 @@ export function localMutation(previous, key, action, payload) {
       }
     }
     if (key === "transacciones") {
+      if (num(row.cantidad) <= 0 || num(row.precio) < 0)
+        throw Error("Revisá la cantidad y el precio de la operación.");
       const instrument = db.instrumentos.find(
         (i) => String(i.id) === String(row.instrumento_id),
       );

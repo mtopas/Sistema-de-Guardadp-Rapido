@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, lazy, Suspense } from "react";
 import {
   X,
   Plus,
@@ -19,6 +19,7 @@ import { useApp } from "./store";
 import { resources, labels } from "./resources";
 import { resolveSchema } from "./api";
 import { PALETTE, title, today, parseArray } from "./domain";
+const RichEditor = lazy(() => import("./RichEditor"));
 export function Button({
   children,
   icon: Icon,
@@ -184,22 +185,28 @@ export function MonthPicker({ value, onChange }) {
 }
 export function Modal({ title: heading, children, onClose, wide = false }) {
   const ref = useRef();
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   const savedFocus = useRef(document.activeElement);
   useEffect(() => {
     const old = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const focus = () =>
-      ref.current?.querySelector("input, textarea, select, button")?.focus();
+      (
+        ref.current?.querySelector(
+          'input:not([type="hidden"]), textarea, select, [contenteditable="true"]',
+        ) || ref.current?.querySelector("button")
+      )?.focus();
     focus();
     const handler = (e) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        onClose();
+        closeRef.current();
       }
       if (e.key === "Tab") {
         const items = [
           ...ref.current.querySelectorAll(
-            'button,input,textarea,select,a[href],[tabindex="0"]',
+            'button,input,textarea,select,a[href],[tabindex="0"],[contenteditable="true"]',
           ),
         ].filter((x) => !x.disabled && x.offsetParent !== null);
         if (!items.length) {
@@ -326,13 +333,10 @@ export function Manager({ resource }) {
 function schemaFields(resource, item, app) {
   const def = resources[resource];
   if (app.mode !== "api" || !app.client.doc) return def.fields;
-  const path = item?.id ? app.itemPath(resource, item) : app.pathFor(resource);
-  const method = item?.id
-    ? app.client.method(path, ["PATCH", "PUT"])
-    : app.client.method(path, ["POST", "PUT"]);
+  const { path, method } = app.saveRoute(resource, item);
   const schema = app.client.bodySchema(path, method);
   if (!schema.properties) return def.fields;
-  return Object.entries(schema.properties)
+  const fields = Object.entries(schema.properties)
     .filter(
       ([k, p]) =>
         !p.readOnly &&
@@ -378,12 +382,37 @@ function schemaFields(resource, item, app) {
         nameValue: !!source,
         required: (schema.required || []).includes(key),
         options: p.enum || known?.options,
-        default: p.default ?? known?.default,
+        default:
+          p.enum && !p.enum.includes(p.default ?? known?.default)
+            ? p.enum.includes(
+                { gasto: "expense", ingreso: "income" }[known?.default],
+              )
+              ? { gasto: "expense", ingreso: "income" }[known?.default]
+              : p.enum[0]
+            : (p.default ?? known?.default),
         min: p.minimum ?? known?.min,
         max: p.maximum ?? known?.max,
         schema: p,
       };
     });
+  for (const param of app.client.operation(path, method)?.parameters || []) {
+    if (
+      param.in === "path" &&
+      param.name !== "id" &&
+      !param.name.endsWith("_id") &&
+      !fields.some((f) => f.key === param.name)
+    ) {
+      fields.unshift({
+        ...def.fields.find((f) => f.key === param.name),
+        key: param.name,
+        label:
+          def.fields.find((f) => f.key === param.name)?.label || param.name,
+        type: param.name === "mes" ? "month" : "text",
+        required: true,
+      });
+    }
+  }
+  return fields;
 }
 export function ResourceForm({ resource, item = {}, defaults = {} }) {
   const app = useApp();
@@ -530,6 +559,23 @@ export function ResourceForm({ resource, item = {}, defaults = {} }) {
                               </option>
                             ))}
                     </select>
+                  ) : f.key === "apuntes" ? (
+                    <Suspense
+                      fallback={
+                        <textarea
+                          rows={5}
+                          aria-label="Apuntes"
+                          value={v}
+                          onChange={(e) => set(f.key, e.target.value)}
+                        />
+                      }
+                    >
+                      <RichEditor
+                        label="Apuntes"
+                        value={v}
+                        onChange={(value) => set(f.key, value)}
+                      />
+                    </Suspense>
                   ) : f.type === "textarea" ? (
                     <textarea
                       rows={5}

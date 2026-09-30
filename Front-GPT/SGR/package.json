@@ -7,11 +7,19 @@
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "test:ui": "node tests/run-ui.mjs",
+    "lint": "eslint src tests vite.config.js",
+    "format": "prettier --write src tests/*.js tests/*.jsx vite.config.js eslint.config.js"
   },
   "dependencies": {
     "@fontsource/ibm-plex-sans": "^5.2.0",
     "@fontsource/syne": "^5.2.0",
+    "@tiptap/extension-link": "^2.27.3",
+    "@tiptap/extension-placeholder": "^2.27.3",
+    "@tiptap/react": "^2.27.3",
+    "@tiptap/starter-kit": "^2.27.3",
+    "dompurify": "^3.4.16",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

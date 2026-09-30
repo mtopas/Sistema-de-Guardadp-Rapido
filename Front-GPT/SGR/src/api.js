@@ -153,22 +153,58 @@ export class Client {
       if (v !== undefined && (!this.doc || allowed.has(k)))
         query.set(k, String(v));
     const paginated = allowed.has("limit") && allowed.has("offset");
+    const pageSize = Math.max(
+      1,
+      Math.min(
+        500,
+        Number(
+          op?.parameters?.find((p) => p.name === "limit")?.schema?.maximum,
+        ) || 500,
+      ),
+    );
     const all = [];
     let offset = 0;
     do {
       if (paginated) {
-        query.set("limit", "500");
+        query.set("limit", String(pageSize));
         query.set("offset", String(offset));
       }
       const data = await this.request(
         this.path(path) + (query.size ? "?" + query : ""),
       );
-      const rows = unpack(data);
+      let rows = unpack(data);
+      if (
+        !Array.isArray(data) &&
+        data &&
+        typeof data === "object" &&
+        !Object.values(data).some(Array.isArray)
+      ) {
+        if (["/fin/inflacion", "/fin/fire-filas"].includes(path)) {
+          rows = Object.entries(data)
+            .filter(([mes]) => /^\d{4}-\d{2}$/.test(mes))
+            .map(([mes, value]) => ({
+              mes,
+              ...(typeof value === "object"
+                ? value
+                : {
+                    [path.endsWith("inflacion") ? "porcentaje" : "ahorrado"]:
+                      value,
+                  }),
+            }));
+        } else if (Object.keys(data).length)
+          throw new ApiError(
+            `La respuesta de ${path} no contiene una lista reconocible.`,
+          );
+      } else if (!rows.length && data && !Array.isArray(data)) {
+        rows = Object.values(data).find(Array.isArray) || [];
+      }
       all.push(...rows);
       if (
         !paginated ||
-        rows.length < 500 ||
-        (data?.total != null && all.length >= data.total)
+        !rows.length ||
+        (data?.total != null
+          ? all.length >= data.total
+          : rows.length < pageSize)
       )
         break;
       offset += rows.length;
@@ -176,7 +212,7 @@ export class Client {
         throw new ApiError(
           "La consulta supera 100.000 filas. Acotá el período.",
         );
-    } while (true);
+    } while (paginated);
     return all;
   }
   async save(path, method, body) {

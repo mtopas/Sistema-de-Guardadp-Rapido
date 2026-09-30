@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import DOMPurify from "dompurify";
 import {
   Network,
   LayoutGrid,
@@ -761,7 +762,14 @@ function NoteDetail({ note, category, onClose }) {
       {note.apuntes && (
         <>
           <div className="small-label">APUNTES</div>
-          <div className="note-content">{plain(note.apuntes)}</div>
+          <div
+            className="note-content rich-preview"
+            dangerouslySetInnerHTML={{
+              __html: DOMPurify.sanitize(note.apuntes, {
+                USE_PROFILES: { html: true },
+              }),
+            }}
+          />
         </>
       )}
       <Button

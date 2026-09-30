@@ -18,7 +18,7 @@ export const resources = {
       }),
       f("categoria_id", "Colección", "relation", { source: "categorias" }),
       f("contenido", "Contenido o URL", "textarea"),
-      f("apuntes", "Apuntes (HTML o texto)", "textarea"),
+      f("apuntes", "Apuntes", "textarea"),
       f("color", "Color", "color"),
     ],
   },

@@ -178,3 +178,66 @@ class TestGatherFinanzas:
         with self._mocks(), patch("assistant.requests.get", return_value=_resp(_RESUMEN_VACIO)):
             contexto = assistant._gather_finanzas("http://fake", "¿cuánto llevo ahorrado este año?")
         assert "objetivos_de_ahorro" in contexto
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Regresión — extra_str (fecha/cuotas) visible en el reply de $:
+# ──────────────────────────────────────────────────────────────────────────
+
+import asyncio
+
+class TestExtraStrEnReply:
+    """handle_fin_quick_capture debe interpolar extra_str (fecha + cuotas)
+    en el reply_text para que el usuario vea qué fecha y cuotas se parsearon."""
+
+    def _run(self, coro):
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+
+    def _make_update_context(self):
+        update = MagicMock()
+        update.effective_chat.id = 123
+
+        async def _noop(*a, **kw):
+            pass
+        update.message.reply_text = MagicMock(side_effect=_noop)
+        context = MagicMock()
+        context.user_data = {}
+        context.bot_data = {"api_base": "http://fake"}
+        return update, context
+
+    def test_cuotas_aparecen_en_reply(self):
+        update, context = self._make_update_context()
+        categorias = [{"id": 1, "nombre": "Servicios", "tipo_default": "expense", "oculta": False}]
+        with patch.object(fh, "_get_cuentas", return_value=CUENTAS), \
+             patch.object(fh, "_get_categorias", return_value=categorias), \
+             patch.object(fh, "_is_allowed", return_value=True):
+            self._run(fh.handle_fin_quick_capture(update, context, "$: gasto 4500 Spotify uala cuotas:3"))
+        args = update.message.reply_text.call_args
+        text = args[0][0] if args[0] else args[1].get("text", "")
+        assert "Cuotas: 3" in text
+
+    def test_fecha_aparece_en_reply(self):
+        update, context = self._make_update_context()
+        categorias = [{"id": 1, "nombre": "Servicios", "tipo_default": "expense", "oculta": False}]
+        with patch.object(fh, "_get_cuentas", return_value=CUENTAS), \
+             patch.object(fh, "_get_categorias", return_value=categorias), \
+             patch.object(fh, "_is_allowed", return_value=True):
+            self._run(fh.handle_fin_quick_capture(update, context, "$: gasto 4500 Spotify uala ayer"))
+        args = update.message.reply_text.call_args
+        text = args[0][0] if args[0] else args[1].get("text", "")
+        assert "Fecha:" in text
+
+    def test_fecha_sin_cuenta_tambien_aparece(self):
+        update, context = self._make_update_context()
+        categorias = [{"id": 1, "nombre": "Servicios", "tipo_default": "expense", "oculta": False}]
+        with patch.object(fh, "_get_cuentas", return_value=CUENTAS), \
+             patch.object(fh, "_get_categorias", return_value=categorias), \
+             patch.object(fh, "_is_allowed", return_value=True):
+            self._run(fh.handle_fin_quick_capture(update, context, "$: gasto 4500 Spotify"))
+        args = update.message.reply_text.call_args
+        text = args[0][0] if args[0] else args[1].get("text", "")
+        assert "Fecha:" in text

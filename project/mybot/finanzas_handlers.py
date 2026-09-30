@@ -942,14 +942,14 @@ async def handle_fin_quick_capture(update: Update, context: ContextTypes.DEFAULT
     if cuenta:
         # Cuenta detectada → pedir categoría
         await update.message.reply_text(
-            f"{tipo_icon} *{tipo_str} {_fmt_ars(parsed['monto'])}* — {desc_str}{cuenta_str}\n\n¿Qué categoría?",
+            f"{tipo_icon} *{tipo_str} {_fmt_ars(parsed['monto'])}* — {desc_str}{cuenta_str}{extra_str}\n\n¿Qué categoría?",
             parse_mode="Markdown",
             reply_markup=_kb_categorias(categorias, parsed["tipo"]),
         )
     else:
         # Sin cuenta → pedir cuenta primero
         await update.message.reply_text(
-            f"{tipo_icon} *{tipo_str} {_fmt_ars(parsed['monto'])}* — {desc_str}\n\n¿En qué cuenta?",
+            f"{tipo_icon} *{tipo_str} {_fmt_ars(parsed['monto'])}* — {desc_str}{extra_str}\n\n¿En qué cuenta?",
             parse_mode="Markdown",
             reply_markup=_kb_cuentas(cuentas),
         )

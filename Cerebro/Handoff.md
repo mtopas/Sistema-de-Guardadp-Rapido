@@ -14,6 +14,61 @@ A diferencia del chat (cuyo contexto se pierde al cerrar la ventana), este archi
 
 ---
 
+## [2026-09-30, sesión 3 — deploy 2] — Allowlist, deploy de HEAD al homelab y limpiezas
+- **Resultado:** PARCIAL (validado por el orquestador; 2 objeciones abajo).
+- **Estado del repo:** `master` 2 commits adelante de `origin` (`c6c6a22` README sin rutas absolutas, `08927d6` deja de versionar `Front-GPT/SGR/tests/.ui-bundle.mjs`; sin menciones de IA). `Cerebro/Handoff.md` con cambios sin commitear.
+- **Qué se hizo:** (A) `BOT_ALLOWED_CHAT_IDS` **nunca había existido** en el `.env` del homelab (el resumen de la sesión anterior afirmaba haberla agregado: no era cierto); se agregó con el `debug_chat_id` de `jarvis_policies` como valor y el bot reporta "Allowlist activa: 1 chat(s)". Deploy de HEAD (`b2445fa`) con el procedimiento corregido (tar con exclusiones); backups `app.db.bak.20260930-161452` y `jarvis.db.bak.20260930-161452` en `~/project/database/`. Conteos de `app.db` iguales antes y después (agenda_eventos 58, agenda_tareas 9, hojas 180, fin_movimientos 88, feedback 14…). `/jarvis/health`: worker vivo, `passive_eval` presente con `consecutive_failures: 0`. 3 contenedores UP, `/meta` 200, frontend servido. Captura pasiva: 26 mensajes registrados, 6 propuestas, 0 fallas.
+- **Hallazgo clave:** Ollama **no es alcanzable** desde el homelab: el adaptador "Ethernet 2" del PC quedó en perfil de red Público y el firewall bloquea la entrada. El evaluador local, la extracción y los embeddings dependen de Ollama: sin él, una propuesta de captura pasiva no puede generarse. Es la hipótesis principal de por qué nunca llegó el mensaje "¿Guardo esto?".
+- **Objeciones del orquestador:** (1) El trabajador reportó pytest local `352 passed, 7 failed, 2 errores de colección` y los llamó "pre-existentes", pero 6 de los fallos están en `test_evaluate_for_capture_health.py`, archivo creado hoy que la sesión anterior reportó en verde (398 passed). No es "pre-existente": o es un problema de entorno de esa corrida (2 errores de colección de imports de `jarvis`) o hay una regresión real. Sin resolver. (2) El chequeo de captura pasiva se marcó ✓ con "6 propuestas" sin desglose: no dice de qué origen son ni su estado (PENDING sin `pushed_at` / EXPIRED / etc.), que es justo el dato para saber si las propuestas se crean y no salen.
+
+### Pendientes activos (Arrastre):
+- [ ] [OLLAMA / USUARIO] Correr `project\scripts\Ensure-Ics.ps1` como administrador para pasar "Ethernet 2" de Público a Privado y verificar que el watchdog `SGR-Ensure-ICS` sigue activo. Después confirmar que Ollama es alcanzable desde los contenedores del homelab.
+- [ ] [BOT / USUARIO] Confirmar que el bot responde desde tu chat (la allowlist usa el `debug_chat_id`; si no era tu chat quedarías fuera) y que ignora un chat no autorizado. Si querés más chats: IDs separados por coma en `BOT_ALLOWED_CHAT_IDS`.
+- [ ] [PRUEBA CAPTURA PASIVA / USUARIO] Con Ollama arreglado: un mensaje claro y guardable (una decisión), 25 minutos sin escribir, y ver si llega "¿Guardo esto en tu memoria?". Solo si sigue sin llegar, ticket de investigación a fondo (datos a pedir: desglose de las 6 propuestas por `origin_source`/`status`/`pushed_at`/`created_at`, `last_passive_review_at` de la conversación, logs del worker, `passive_eval`).
+- [x] ~~[TESTS ROJOS]~~ — era de entorno: el trabajador corrió pytest con el Python global (sin `litellm`). Con `./project/venv/Scripts/python.exe -m pytest project/tests -q` el usuario obtuvo **398 passed** (2026-09-30). Comando corregido en `PROMPT-MAESTRO-TRABAJADOR.md` (sin commitear). El resumen del trabajador que hablaba de 7 fallos "pre-existentes" era incorrecto.
+- [x] ~~[OLLAMA / perfil de red]~~ — el usuario pasó "Ethernet 2" a Privado (Tailscale es un adaptador aparte, ya en Privado, sin cambios). Falta confirmar que el homelab alcanza Ollama (lo dirá la prueba de captura pasiva) y que Ollama escucha en `0.0.0.0`.
+- [ ] [PUSH / USUARIO] Pushear `c6c6a22` y `08927d6`; commitear `Cerebro/Handoff.md`.
+- [ ] [RESCATE HOJAS / USUARIO] Revisar `project/database/backup-incidente-20260930/reporte-rescate-hojas.md` y decidir qué hojas rescatar (solo-Windows 233, 238, 284, 287, 288, 289; conflictivas 274-282).
+- [ ] [USO DEL .EXE / USUARIO] Antes de abrirlo: `curl http://192.168.137.10:8765/meta` responde; revisar `project/SYNC-WINDOWS.md` ante pull fallido. Actualizar el token del bot en el `.env` local de Windows (el token se regeneró).
+- [ ] [VERIF UI / USUARIO] Abrir `/finanzas` y `/agenda` del homelab (el trabajador verificó la API, no la pantalla; nota: la API devolvió 28 eventos con el filtro por defecto).
+- [ ] [HUECO DE SYNC] Las réplicas ya habían divergido en `hojas`: ticket de diseño a definir.
+- [ ] [PROCESO] Regla 1.5 del trabajador vs memoria "no hacer commits": esta sesión sí commiteó porque el ticket lo autorizaba explícitamente. Decidir si se deja como norma del ticket.
+- [ ] [IDEA DE DISEÑO] Marcar certeza/estado por entrada de memoria (regla firme / preferencia / idea / en discusión), surgida de una conversación con Jarvis; evaluar con una prueba real antes de implementar.
+- [ ] [FRONTEND] Evaluar `Front-CLAUDE/` y `Front-GPT/`.
+- [ ] [REFACTOR / LIMPIEZA] Imports huérfanos de `project/app/main.py:29-31` y variables muertas en `crud.py`; re-correr pyflakes antes del ticket.
+- [ ] [BACKLOG] Revisar `Cerebro/PROXIMAMENTE.md`.
+- [x] ~~[SEGURIDAD allowlist], [DEPLOY 2], [limpiezas README/bundle]~~ — resueltos (allowlist pendiente solo de tu confirmación).
+- **Próximo objetivo inmediato recomendado:** arreglar Ollama (2 minutos, tuyo), repetir la prueba de captura pasiva y, en paralelo, pasar el ticket de tests rojos.
+
+---
+
+## [2026-09-30, sesión 2 — evaluador/tests/allowlist] — Señal de fallas del evaluador, tests de cableado y allowlist del bot
+- **Resultado:** PARCIAL. (B) y (C) hechos y commiteados; (A) allowlist sin efecto. Sesión del trabajador cortada por límite de uso.
+- **Estado del repo:** `master` sincronizada con `origin` (el usuario commiteó y pusheó). Commits: `200b1e9` (B), `480f5e0` (C), `b2445fa` ("Extras": 19 archivos de `Front-GPT/SGR`, sin secretos verificados por el orquestador; ya incluye los commits locales anteriores de docs). 398 tests backend en verde (+11).
+- **Qué se hizo:**
+  - (B) `jarvis/captures/passive.py::evaluate_for_capture()` distingue falla del modelo de veredicto negativo; `get_eval_health()` (contador de fallas consecutivas + último error, en memoria del proceso) se expone en `/jarvis/health` como `passive_eval`. Tests: `test_evaluate_for_capture_health.py` (6).
+  - (C) `test_handle_message_register.py` (5): `handle_message()` llama a `register_telegram_message()` para texto libre y no para pasos de Finanzas/Agenda ni respuestas a propuestas.
+  - (A) El token de Telegram del homelab se regeneró por BotFather (estaba inválido) y el bot arrancó. `BOT_ALLOWED_CHAT_IDS` se agregó al `.env` del homelab y se aplicó con `up -d --no-build bot worker`, pero el bot **siguió reportando "sin configurar"**: el bot sigue aceptando cualquier chat. Sin diagnosticar (el trabajador se quedó sin cuota). Hipótesis sin verificar: `docker-compose.yml` no pasa la variable al contenedor, `.env` con entrada duplicada, o `env_file` apuntando a otra ruta.
+- **Observaciones del orquestador:** (1) el código de B y C **no está desplegado**: `passive_eval` en `/jarvis/health` no existe en producción hasta el próximo deploy (usar el procedimiento corregido de `HOMELAB.md`). (2) `Front-GPT/SGR/README.md:83` contiene rutas absolutas `D:\SGR\...` (regla de repo público); menor. (3) `Front-GPT/SGR/tests/.ui-bundle.mjs` es un bundle generado que ya generó ~7000 líneas de churn en el commit; candidato a `.gitignore` de ese subproyecto. (4) El token regenerado invalida el que quede en el `project/.env` local de Windows: hay que actualizarlo ahí si se usa el bot local (un solo bot activo por token).
+
+### Pendientes activos (Arrastre):
+- [ ] [SEGURIDAD — ABIERTO] `BOT_ALLOWED_CHAT_IDS` no toma efecto en el bot del homelab (repo público, el bot acepta cualquier chat). Ticket chico de diagnóstico: revisar `docker-compose.yml` (¿lista la variable en `environment:` del servicio bot?), duplicados en `.env`, `env_file`, y confirmar dentro del contenedor con `docker-compose exec bot env`. Plan de vuelta: quitar la variable y repetir `up -d --no-build bot worker`.
+- [ ] [DEPLOY 2 / HOMELAB] Desplegar B (`passive_eval` en `/jarvis/health`) con el procedimiento corregido de `HOMELAB.md` (tar con exclusiones; NO `scp -r`), backup previo de `app.db` y verificación de conteos antes y después. Juntar con el fix de A si implica cambios de código/compose.
+- [ ] [VERIF PROD / USUARIO] Resultado de la prueba de captura pasiva (Ollama reiniciado): ¿llegó "¿Guardo esto en tu memoria?"? Una vez desplegado B, mirar `passive_eval` en `/jarvis/health`.
+- [ ] [VERIF PROD / USUARIO] Abrir `/finanzas` y `/agenda` en `http://192.168.137.10:8765`.
+- [ ] [RESCATE HOJAS / USUARIO] Revisar `project/database/backup-incidente-20260930/reporte-rescate-hojas.md` y decidir qué hojas rescatar (solo-Windows 233, 238, 284, 287, 288, 289; conflictivas 274-282); ticket posterior.
+- [ ] [USO DEL .EXE / USUARIO] Antes de abrirlo: `curl http://192.168.137.10:8765/meta` responde; revisar `project/SYNC-WINDOWS.md` ante un pull fallido. Actualizar el token del bot en el `.env` local si corresponde.
+- [ ] [HUECO DE SYNC] Las réplicas ya habían divergido en `hojas`: el sync no reconcilia IDs independientes. Ticket de diseño a definir.
+- [ ] [PROCESO] Alinear `PROMPT-MAESTRO-TRABAJADOR` (Regla 1.5, commits directos) con la memoria "no hacer commits": el trabajador volvió a no commitear por eso. Decidir cuál gana.
+- [ ] [LIMPIEZA MENOR] `Front-GPT/SGR/README.md:83` (rutas absolutas) y `.ui-bundle.mjs` generado versionado.
+- [ ] [FRONTEND] Evaluar `Front-CLAUDE/` y `Front-GPT/`; decisión de producto del usuario.
+- [ ] [REFACTOR / LIMPIEZA] Imports huérfanos de `project/app/main.py:29-31` y variables muertas en `crud.py`; re-correr pyflakes antes del ticket.
+- [ ] [BACKLOG] Revisar `Cerebro/PROXIMAMENTE.md`.
+- [x] ~~[COMMITS], [PUSH], [TEST GAP], [TICKET CANDIDATO evaluador mudo]~~ — resueltos (código de B pendiente de deploy).
+- **Próximo objetivo inmediato recomendado:** ticket de diagnóstico de la allowlist (A) junto con el deploy 2, y cerrar la verificación de producción de la captura pasiva.
+
+---
+
 ## [2026-09-30, sesión 2 — incidente app.db] — Restauración de `app.db` del homelab tras deploy destructivo
 - **Resultado:** Hecho (validado por el orquestador sobre el resumen del trabajador y el diff en disco).
 - **Qué se hizo:** copias de seguridad en homelab y en Windows (`backup-incidente-20260930/`, gitignored): backup fuente sha256 `74b532dd…aceaf45`, réplica Windows `e7fbce24…28ba8`, vivo pisado `48bef241…ed3ae`. Comparación tabla por tabla, contenedores parados, `app.db` restaurado desde `app.db.bak-20260930-133414`, levantados. `integrity_check` ok, conteos = backup en todas las tablas (agenda_tareas 9, agenda_eventos 58, feedback 14, hojas 180, fin_movimientos 88…), 3 contenedores UP, `/meta` 200, `/jarvis/health` worker vivo. `jarvis.db` y chroma intactos. Reporte de rescate de 35 hojas divergentes + 2 categorías en `project/database/backup-incidente-20260930/reporte-rescate-hojas.md` (no versionado).

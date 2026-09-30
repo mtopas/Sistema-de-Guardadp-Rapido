@@ -43,7 +43,7 @@ from jarvis.audit.service import (
 from jarvis.browse.service import browse_entries
 from jarvis.budget.tracker import get_status, spent_today, spent_today_by_model
 from jarvis.captures.clarification import infer_type_hint, needs_clarification
-from jarvis.captures.passive import accept_proposal, list_pending_proposals, reject_proposal
+from jarvis.captures.passive import accept_proposal, get_eval_health, list_pending_proposals, reject_proposal
 from jarvis.chats.service import create_chat, delete_chat, get_messages, list_chats, rename_chat
 from jarvis.config import JARVIS_DAILY_BUDGET_USD, JARVIS_DEFAULT_USER
 from jarvis.db.database import get_connection
@@ -409,7 +409,7 @@ def events_endpoint(limit: int = Query(default=20, ge=1, le=200)):
 @router.get("/health")
 def health_endpoint():
     """Señal real de que el worker sigue corriendo, vía heartbeat (Fase B6)."""
-    return {"worker_alive": get_worker_alive()}
+    return {"worker_alive": get_worker_alive(), "passive_eval": get_eval_health()}
 
 
 @router.get("/entries/{entry_id}")

@@ -61,6 +61,23 @@ from jarvis.db.database import get_connection
 
 logger = logging.getLogger(__name__)
 
+_eval_consecutive_failures: int = 0
+_eval_last_error: str | None = None
+
+
+def get_eval_health() -> dict:
+    """Estado de salud del evaluador de captura pasiva (fallas del modelo).
+
+    Expuesto en /jarvis/health. consecutive_failures > 0 indica que el modelo
+    local (Ollama) no está respondiendo o devuelve basura; 0 con last_error
+    None significa que nunca falló o se recuperó.
+    """
+    return {
+        "consecutive_failures": _eval_consecutive_failures,
+        "last_error": _eval_last_error,
+    }
+
+
 _EVAL_PROMPT = """\
 Analizá estos mensajes recientes escritos por el usuario (no incluyen las \
 respuestas de Jarvis, su segundo cerebro personal -- solo lo que el usuario \
@@ -167,6 +184,7 @@ def evaluate_for_capture(text: str) -> dict | None:
     externo -- es clasificación barata, mismo criterio que extract_entities()
     y needs_clarification()). Nunca lanza -- None si falla o no aplica.
     """
+    global _eval_consecutive_failures, _eval_last_error
     from jarvis.llm.client import call_llm
 
     if not text.strip():
@@ -188,8 +206,14 @@ def evaluate_for_capture(text: str) -> dict | None:
         )
         start, end = raw.find("{"), raw.rfind("}") + 1
         if start < 0 or end <= start:
+            _eval_consecutive_failures += 1
+            _eval_last_error = f"JSON no encontrado en respuesta del modelo: {raw[:200]}"
+            logger.warning("[jarvis.captures.passive] Evaluación falló (consecutivas: %d): %s",
+                           _eval_consecutive_failures, _eval_last_error)
             return None
         verdict = json.loads(raw[start:end])
+        _eval_consecutive_failures = 0
+        _eval_last_error = None
         if not verdict.get("worth_capturing"):
             return None
         content = (verdict.get("content") or "").strip()
@@ -198,7 +222,10 @@ def evaluate_for_capture(text: str) -> dict | None:
         question = (verdict.get("question") or "").strip() or "¿Guardo esto en tu memoria?"
         return {"content": content, "question": question}
     except Exception as exc:
-        logger.warning("[jarvis.captures.passive] Evaluación falló, no se propone nada: %s", exc)
+        _eval_consecutive_failures += 1
+        _eval_last_error = str(exc)
+        logger.warning("[jarvis.captures.passive] Evaluación falló (consecutivas: %d): %s",
+                       _eval_consecutive_failures, _eval_last_error)
         return None
 
 

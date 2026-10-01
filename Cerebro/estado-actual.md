@@ -1,5 +1,29 @@
 # Estado Actual de Jarvis
-Última actualización: 2026-09-28
+Última actualización: 2026-10-01
+
+## DEPLOYADO EN HOMELAB: --excluir-tickers + captura pasiva endurecida + limpieza (2026-10-01)
+
+Un solo deploy con todo el trabajo de la sesión. Backup previo:
+`~/project/database/app.db.bak-20261001-191501` y `jarvis.db.bak-20261001-191501`.
+
+- **TZX26 eliminado del homelab** vía `DELETE /fin/instrumentos/36` (bono CER vencido dado de
+  baja, tipado como `cedears`): 19→18 instrumentos y 35→34 transacciones; CRES y TXAR intactos.
+- **Importador `--excluir-tickers`** (`project/scripts/importar_operaciones.py`): omite tickers
+  dados de baja en órdenes y precios para que no reaparezcan en el próximo export. Comando
+  mensual actualizado con `--excluir-tickers TZX26`. Ver `project/Finanzas.md`.
+- **Captura pasiva endurecida** (`jarvis/captures/passive.py`): una evaluación fallida ya no
+  marca la conversación como revisada (reintenta, con tope `_MAX_EVAL_ATTEMPTS=3` por
+  conversación en memoria del worker); el parseo lee todos los objetos JSON y se queda con el
+  primer veredicto positivo. Ver `decisiones-implementacion.md` (2026-10-01).
+- **Limpieza** confirmada por pyflakes: imports/variables muertas en `app/main.py` y
+  `app/db/crud.py`.
+- `JARVIS_PASSIVE_CAPTURE_INACTIVITY_MINUTES`: **no hacía falta restaurar** — no está en `.env`
+  ni en el worker, así que ya usa el default 20 de `jarvis/config.py`.
+
+Verificación post-deploy (`192.168.137.10:8765`): 3 containers UP; `/meta` 200; `/jarvis/health`
+con `worker_alive: true` y `passive_eval` sano; 18 instrumentos (acciones 2, bonos 2, cedears 14)
+y 34 transacciones; TZX26 ausente; el bundle servido (`index-DPySS6hf.js`) coincide con el `dist`
+del host (imagen reconstruida). Suite contra HEAD: **455 backend passed**.
 
 ## DEPLOYADO EN HOMELAB: lote Jarvis + Finanzas + Agenda + Hábitos (2026-09-28)
 

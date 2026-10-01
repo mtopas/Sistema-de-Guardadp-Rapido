@@ -11,6 +11,9 @@ Uso (actualizar precios):
 - Dry-run por defecto: muestra lo que haría sin escribir.
 - --aplicar: ejecuta POST/PATCH contra la API.
 - --api: URL base de la API (default http://192.168.137.10:8765).
+- --excluir-tickers TICKER [TICKER ...]: omite esos tickers tanto al importar
+  órdenes como al actualizar precios (ej: --excluir-tickers TZX26). Útil para
+  un instrumento dado de baja que no se quiere volver a cargar desde el export.
 """
 import argparse
 import csv
@@ -77,13 +80,25 @@ TIPO_INSTRUMENTO_MAP = {
 }
 
 
-def parse_ordenes(path: str) -> tuple[list[dict], list[dict]]:
+def normalize_excluir(excluir) -> set[str]:
+    """Normaliza la lista de tickers a excluir a un set de mayúsculas sin
+    espacios. Acepta None, lista o iterable de strings."""
+    if not excluir:
+        return set()
+    return {t.strip().upper() for t in excluir if t and t.strip()}
+
+
+def parse_ordenes(path: str, excluir=None) -> tuple[list[dict], list[dict]]:
     """
     Parse broker orders CSV.
     Returns (orders_to_load, skipped_orders).
     Each order dict has normalized fields.
+
+    excluir: tickers a omitir (ver --excluir-tickers). Las órdenes de esos
+    tickers se reportan como omitidas, no se cargan.
     """
     enc = detect_encoding(path)
+    excluir = normalize_excluir(excluir)
     orders = []
     skipped = []
 
@@ -102,6 +117,16 @@ def parse_ordenes(path: str) -> tuple[list[dict], list[dict]]:
 
             operacion_lower = operacion_raw.lower()
             operacion_base = operacion_lower.replace(" 24hs", "").replace(" 48hs", "").strip()
+
+            if ticker.upper().strip() in excluir:
+                skipped.append({
+                    "id_orden": id_orden,
+                    "operacion": operacion_raw,
+                    "ticker": ticker,
+                    "fecha": fecha,
+                    "motivo": f"ticker excluido (--excluir-tickers): {ticker}",
+                })
+                continue
 
             if operacion_base in OPERACIONES_IGNORAR:
                 skipped.append({
@@ -234,29 +259,31 @@ def get_mep_for_date(mep_data: dict[str, float], fecha: str) -> tuple[float, str
     return 0.0, "sin cotización MEP disponible"
 
 
-def parse_tenencias_xlsx(path: str) -> dict[str, dict]:
+def parse_tenencias_xlsx(path: str, excluir=None) -> dict[str, dict]:
     """
     Parse tenencias XLSX using openpyxl.
     Falls back to subprocess with global Python if openpyxl not in venv.
     Returns {TICKER: {nominales, ppc, tipo, moneda, ...}}.
+
+    excluir: tickers a omitir (ver --excluir-tickers).
     """
     try:
         import openpyxl
-        return _parse_tenencias_xlsx_direct(path)
+        return _parse_tenencias_xlsx_direct(path, excluir)
     except ImportError:
-        return _parse_tenencias_xlsx_subprocess(path)
+        return _parse_tenencias_xlsx_subprocess(path, excluir)
 
 
-def _parse_tenencias_xlsx_direct(path: str) -> dict[str, dict]:
+def _parse_tenencias_xlsx_direct(path: str, excluir=None) -> dict[str, dict]:
     import openpyxl
     wb = openpyxl.load_workbook(path, read_only=True)
     ws = wb.active
     rows = list(ws.iter_rows(values_only=True))
     wb.close()
-    return _build_tenencias_from_rows(rows)
+    return _build_tenencias_from_rows(rows, excluir)
 
 
-def _parse_tenencias_xlsx_subprocess(path: str) -> dict[str, dict]:
+def _parse_tenencias_xlsx_subprocess(path: str, excluir=None) -> dict[str, dict]:
     """Parse XLSX using zipfile + xml.etree (no external dependencies)."""
     import zipfile
     import xml.etree.ElementTree as ET
@@ -300,20 +327,21 @@ def _parse_tenencias_xlsx_subprocess(path: str) -> dict[str, dict]:
         rows_data.append(tuple(cells))
 
     zf.close()
-    return _build_tenencias_from_rows(rows_data)
+    return _build_tenencias_from_rows(rows_data, excluir)
 
 
-def _build_tenencias_from_rows(rows) -> dict[str, dict]:
+def _build_tenencias_from_rows(rows, excluir=None) -> dict[str, dict]:
     if not rows:
         return {}
 
+    excluir = normalize_excluir(excluir)
     header = [str(c).strip() if c else "" for c in rows[0]]
     col = {name: i for i, name in enumerate(header)}
 
     tenencias = {}
     for row in rows[1:]:
         ticker = str(row[col.get("Ticker", 0)] if col.get("Ticker", 0) < len(row) else "").strip().upper()
-        if not ticker:
+        if not ticker or ticker in excluir:
             continue
         tipo_raw = str(row[col.get("Tipo de Instrumento", 1)] if col.get("Tipo de Instrumento", 1) < len(row) else "").strip()
 
@@ -343,15 +371,16 @@ def _build_tenencias_from_rows(rows) -> dict[str, dict]:
     return tenencias
 
 
-def parse_tenencias_csv_fallback(path: str) -> dict[str, dict]:
+def parse_tenencias_csv_fallback(path: str, excluir=None) -> dict[str, dict]:
     """Fallback: if XLSX can't be read, try CSV."""
     enc = detect_encoding(path)
+    excluir = normalize_excluir(excluir)
     tenencias = {}
     with open(path, encoding=enc, newline="") as f:
         reader = csv.DictReader(f, delimiter=";")
         for row in reader:
             ticker = row.get("Ticker", "").strip().upper()
-            if not ticker:
+            if not ticker or ticker in excluir:
                 continue
             tipo_raw = row.get("Tipo de Instrumento", "").strip()
             nominales = parse_decimal_safe(row.get("Nominales", "0")) or 0.0
@@ -412,19 +441,22 @@ def api_patch(base_url: str, path: str, data: dict):
 # Price update logic
 # ---------------------------------------------------------------------------
 
-def parse_tenencias_precios_csv(path: str) -> list[dict]:
+def parse_tenencias_precios_csv(path: str, excluir=None) -> list[dict]:
     """
     Parse broker holdings CSV (MisInstrumentos) for current prices.
     Columns: Ticker, Precio (ARS per unit), Valor actual, Moneda.
     Delimiter ;, encoding Latin-1 or UTF-8.
+
+    excluir: tickers a omitir (ver --excluir-tickers).
     """
     enc = detect_encoding(path)
+    excluir = normalize_excluir(excluir)
     items = []
     with open(path, encoding=enc, newline="") as f:
         reader = csv.DictReader(f, delimiter=";")
         for row in reader:
             ticker = (row.get("Ticker") or "").strip().upper()
-            if not ticker:
+            if not ticker or ticker in excluir:
                 continue
             precio_str = (row.get("Precio") or "").strip()
             precio_ars = parse_decimal_safe(precio_str)
@@ -521,6 +553,7 @@ def cmd_actualizar_precios(args):
     tenencias_path = args.actualizar_precios
     base_url = args.api
     aplicar = args.aplicar
+    excluir = normalize_excluir(getattr(args, "excluir_tickers", None))
 
     print("=" * 70)
     print("ACTUALIZACIÓN DE PRECIOS DESDE TENENCIAS DEL BROKER")
@@ -528,9 +561,11 @@ def cmd_actualizar_precios(args):
     print(f"Modo: {'APLICAR' if aplicar else 'DRY-RUN (sin escritura)'}")
     print(f"API: {base_url}")
     print(f"Archivo: {tenencias_path}")
+    if excluir:
+        print(f"Tickers excluidos (--excluir-tickers): {', '.join(sorted(excluir))}")
     print()
 
-    csv_items = parse_tenencias_precios_csv(tenencias_path)
+    csv_items = parse_tenencias_precios_csv(tenencias_path, excluir)
     print(f"  -> {len(csv_items)} filas en CSV")
 
     instruments = api_get(base_url, "/fin/instrumentos")
@@ -806,6 +841,9 @@ def main():
     parser.add_argument("--api", default="http://192.168.137.10:8765", help="URL base de la API")
     parser.add_argument("--actualizar-precios", metavar="CSV",
                         help="Actualizar precio_actual desde CSV de tenencias del broker (MisInstrumentos)")
+    parser.add_argument("--excluir-tickers", nargs="+", metavar="TICKER", default=[],
+                        help="Tickers a omitir en órdenes y precios (ej: --excluir-tickers TZX26). "
+                             "Evita que un instrumento dado de baja reaparezca en el próximo export.")
     args = parser.parse_args()
 
     if args.actualizar_precios:
@@ -822,9 +860,13 @@ def main():
     print(f"API: {args.api}")
     print()
 
+    excluir = normalize_excluir(args.excluir_tickers)
+    if excluir:
+        print(f"Tickers excluidos (--excluir-tickers): {', '.join(sorted(excluir))}")
+
     # 1. Parse sources
     print("Parseando órdenes...")
-    orders, skipped = parse_ordenes(args.ordenes)
+    orders, skipped = parse_ordenes(args.ordenes, excluir)
     print(f"  -> {len(orders)} ejecutadas, {len(skipped)} omitidas")
 
     print("Parseando dólar MEP histórico...")
@@ -834,9 +876,9 @@ def main():
     print("Parseando tenencias...")
     tenencias_path = Path(args.tenencias)
     if tenencias_path.suffix.lower() == ".xlsx":
-        tenencias = parse_tenencias_xlsx(str(tenencias_path))
+        tenencias = parse_tenencias_xlsx(str(tenencias_path), excluir)
     else:
-        tenencias = parse_tenencias_csv_fallback(str(tenencias_path))
+        tenencias = parse_tenencias_csv_fallback(str(tenencias_path), excluir)
     print(f"  -> {len(tenencias)} instrumentos")
 
     # 2. Read existing ledger

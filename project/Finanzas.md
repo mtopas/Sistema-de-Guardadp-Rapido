@@ -385,6 +385,11 @@ Parsing: `{tipo?} {monto} {descripción…} {cuenta_hint?}` — el último token
   python project/scripts/importar_operaciones.py --actualizar-precios <tenencias.csv> [--aplicar] [--api URL]
   ```
 - **Semántica `precio_actual`:** USD por unidad. `AhorroTab` calcula `cantidad × precio_actual` = valor USD; × MEP = valor ARS. Plazos fijos usan otra fórmula (`valorInstrumentoARS`).
+- **Excluir tickers** (`--excluir-tickers TICKER [TICKER ...]`): omite esos tickers tanto al importar órdenes como al actualizar precios. Pensado para un instrumento dado de baja en la cuenta que no se quiere volver a cargar — sin la exclusión, el próximo export de órdenes lo recrearía. Aplica en `parse_ordenes` (las órdenes del ticker van a *omitidas*), en `parse_tenencias_*` (conciliación/cargas iniciales) y en `parse_tenencias_precios_csv`. Case-insensitive. Ejemplo (caso TZX26, bono CER vencido dado de baja): la instancia ya se eliminó del homelab vía `DELETE /fin/instrumentos/{id}`; la exclusión evita que reaparezca.
+  ```bash
+  python project/scripts/importar_operaciones.py <ordenes.csv> <tenencias.csv> <mep.csv> --excluir-tickers TZX26 [--aplicar]
+  python project/scripts/importar_operaciones.py --actualizar-precios <tenencias.csv> --excluir-tickers TZX26 [--aplicar]
+  ```
 
 ### Deuda conocida
 
@@ -392,7 +397,6 @@ Parsing: `{tipo?} {monto} {descripción…} {cuenta_hint?}` — el último token
 |------|---------|
 | Migración `Ahorro` | Usuarios con movimientos en categoría legacy `Ahorro` deben reasignarlos manualmente a `FIRE` u objetivo |
 | Instrumentos avanzados | Ventas parciales, splits, dividendos |
-| TZX26 (bono vencido) | Compra cargada en el ledger pero sin venta/canje — posición sobrante vs tenencias actuales |
 | Campana notificaciones | Badge visual, sin handler (requiere `fin_alertas`) |
 | Atajos teclado avanzados | Vi/Ve/C (Dashboard), Ctrl+S/Supr (Datos), I/E (Ahorro/FIRE) — pendiente de levantar estado a store |
 | Fusionar categorías | Renombrar sí; merge de dos categorías en una — pendiente |

@@ -20,6 +20,7 @@ from importar_operaciones import (
     parse_tenencias_precios_csv,
     build_price_plan,
     apply_prices,
+    normalize_excluir,
 )
 
 
@@ -477,3 +478,75 @@ class TestApplyPrices:
         tzx26 = [u for u in unmatched if u["ticker"] == "TZX26"]
         assert len(tzx26) == 1
         assert tzx26[0]["precio_actual"] is None
+
+
+# ---------------------------------------------------------------------------
+# Tests: --excluir-tickers
+# ---------------------------------------------------------------------------
+
+ORDENES_ROWS_CON_EXCLUIDO = ORDENES_ROWS + [
+    "Compra 24hs;Ejecutada;100010;TZX26;Pesos;2026-07-20;10:00:00;200000;1,5;300000;1,5;200000",
+    "Venta 24hs;Ejecutada;100011;TZX26;Pesos;2026-08-20;10:00:00;200000;1,6;320000;1,6;200000",
+]
+
+TENENCIAS_PRECIOS_ROWS_CON_EXCLUIDO = TENENCIAS_PRECIOS_ROWS_UTF8 + [
+    "TZX26;Cedears;200000;200000;1,60;1,50;6,67;20000,00;320000,00;Pesos",
+]
+
+
+@pytest.fixture
+def ordenes_con_excluido(tmp_path):
+    p = tmp_path / "ordenes_excluido.csv"
+    _write_csv(str(p), ORDENES_HEADER, ORDENES_ROWS_CON_EXCLUIDO)
+    return str(p)
+
+
+@pytest.fixture
+def tenencias_precios_con_excluido(tmp_path):
+    p = tmp_path / "tenencias_excluido.csv"
+    _write_tenencias_precios(str(p), TENENCIAS_PRECIOS_ROWS_CON_EXCLUIDO)
+    return str(p)
+
+
+class TestExcluirTickers:
+    def test_normalize_excluir_none_empty(self):
+        assert normalize_excluir(None) == set()
+        assert normalize_excluir([]) == set()
+
+    def test_normalize_excluir_upper_strip(self):
+        assert normalize_excluir([" tzx26 ", "cres"]) == {"TZX26", "CRES"}
+
+    def test_ordenes_excluye_ticker(self, ordenes_con_excluido):
+        orders, skipped = parse_ordenes(ordenes_con_excluido, excluir=["TZX26"])
+        tickers = [o["ticker"] for o in orders]
+        assert "TZX26" not in tickers
+        # las de TZX26 van a skipped con el motivo correcto
+        tzx_skip = [s for s in skipped if s["ticker"].upper() == "TZX26"]
+        assert len(tzx_skip) == 2
+        assert all("excluido" in s["motivo"] for s in tzx_skip)
+
+    def test_ordenes_sin_excluir_carga_ticker(self, ordenes_con_excluido):
+        orders, _ = parse_ordenes(ordenes_con_excluido)
+        tickers = [o["ticker"] for o in orders]
+        assert "TZX26" in tickers
+
+    def test_ordenes_excluir_case_insensitive(self, ordenes_con_excluido):
+        orders, _ = parse_ordenes(ordenes_con_excluido, excluir=["tzx26"])
+        assert "TZX26" not in [o["ticker"] for o in orders]
+
+    def test_precios_excluye_ticker(self, tenencias_precios_con_excluido):
+        items = parse_tenencias_precios_csv(tenencias_precios_con_excluido, excluir=["TZX26"])
+        assert "TZX26" not in {i["ticker"] for i in items}
+        # el resto sigue estando
+        assert "AAPL" in {i["ticker"] for i in items}
+
+    def test_precios_sin_excluir_incluye_ticker(self, tenencias_precios_con_excluido):
+        items = parse_tenencias_precios_csv(tenencias_precios_con_excluido)
+        assert "TZX26" in {i["ticker"] for i in items}
+
+    def test_otros_tickers_no_se_tocan(self, ordenes_con_excluido):
+        # CRES/TXAR-style: excluir TZX26 no debe afectar a AAPL/BOND1
+        orders, _ = parse_ordenes(ordenes_con_excluido, excluir=["TZX26"])
+        tickers = {o["ticker"] for o in orders}
+        assert "AAPL" in tickers
+        assert "BOND1" in tickers

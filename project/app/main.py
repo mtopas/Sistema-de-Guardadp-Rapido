@@ -27,8 +27,6 @@ from app.config import DEBUG, DB_PATH, VAULT_ROOT, SGR_VERSION
 from app.paths import data_root, dist_directory, uploads_directory
 from app.vault.guard import ensure_vault_mounted
 from app.db.crud import (
-    actualizar_apuntes,
-    actualizar_icono,
     actualizar_hoja,
     actualizar_link_preview,
     actualizar_categoria,
@@ -100,7 +98,6 @@ from app.db.crud import (
     fin_actualizar_transaccion_instrumento,
     fin_crear_transaccion_unificada,
     fin_eliminar_transaccion_instrumento,
-    fin_instrumento_tiene_transacciones,
     # Agenda
     agenda_obtener_calendarios,
     agenda_crear_calendario,

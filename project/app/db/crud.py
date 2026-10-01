@@ -1,6 +1,5 @@
 from datetime import datetime, date, timedelta
 import json
-import os
 import re
 import sqlite3
 import time
@@ -3210,7 +3209,6 @@ def habitos_registros_upsert(
              nota = CASE WHEN ? THEN excluded.nota ELSE habitos_registros.nota END""",
         (habito_id, fecha, valor, nota, creado_en, int(actualizar_nota)),
     )
-    rid = cursor.lastrowid
     conn.commit()
     cursor.execute(
         "SELECT id, habito_id, fecha, valor, nota, creado_en FROM habitos_registros WHERE habito_id = ? AND fecha = ?",
@@ -3300,7 +3298,6 @@ def habitos_stats(habito_id: int) -> Optional[dict]:
         return _habito_is_scheduled(h, fecha_str)
 
     start_str = h["creado_en"][:10] if h["creado_en"] else "2000-01-01"
-    today_str  = today.isoformat()
 
     # Current streak (backwards from today)
     streak_cur = 0
@@ -3315,7 +3312,6 @@ def habitos_stats(habito_id: int) -> Optional[dict]:
                 streak_cur += 1
             elif d < today:
                 break
-        from datetime import timedelta
         d = d - timedelta(days=1)
 
     # Max streak (forward pass)

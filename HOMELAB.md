@@ -124,6 +124,26 @@ Al pie de la pantalla nano muestra `^O Write Out` y `^X Exit` (`^` = tecla **Ctr
 
 Si el archivo no existía, nano lo crea al guardar.
 
+#### Al agregar variables al `.env` — cuidá el salto de línea
+
+Cada variable va en **su propia línea**, y el archivo debe terminar con un salto de
+línea. Si agregás una variable pegada al final de la línea anterior (sin `Enter`
+previo), el parser las lee como una sola y la config queda rota de forma silenciosa —
+eso fue exactamente lo que tiró la captura pasiva una vez (la variable nueva quedó
+pegada a la anterior). Después de editar, verificá sin imprimir tokens:
+
+```bash
+grep -nc '' ~/project/.env                 # cantidad de líneas (debe subir 1 por variable nueva)
+grep -n 'JARVIS_PASSIVE' ~/project/.env    # cada match en su propia línea numerada, nunca dos en la misma
+tail -c1 ~/project/.env | od -An -c         # debe mostrar '\n' (termina en salto de línea)
+```
+
+> **`OLLAMA_BASE_URL` siempre apunta a la IP del host, nunca a `localhost`.** Ollama
+> corre en el Windows host (`192.168.137.1:11434`), no dentro del contenedor:
+> `OLLAMA_BASE_URL=http://192.168.137.1:11434`. Un `localhost`/`127.0.0.1` ahí hace que
+> el worker/bot busquen Ollama dentro de su propio contenedor y toda evaluación local
+> (captura pasiva, extracción) falle. Ver también la sección "Docker Compose".
+
 ---
 
 ### Desde Windows — ir al repo
@@ -243,6 +263,16 @@ cd ~/project
 docker build --network=host -t sgr-app:latest -f Dockerfile ..
 docker-compose up -d --no-build
 ```
+
+> **Copiar `dist/` al host NO alcanza.** El `dist/` vive *dentro* de la imagen Docker
+> (`COPY project/frontend/dist ./frontend/dist`): el contenedor sirve lo que quedó
+> horneado en la imagen, no lo que haya en `~/project/frontend/dist` del host. Si copiás
+> el `dist/` nuevo pero no reconstruís la imagen, el navegador sigue viendo el bundle
+> viejo. Hay que `docker build ... && docker-compose up -d --no-build` (el `--no-build`
+> NO reconstruye: levanta con la imagen que acabás de buildear a mano con `--network=host`;
+> `docker-compose build` **no** aplica `--network=host` y falla el DNS del gabinete). Señal
+> de que el rebuild funcionó: el `assets/index-*.js` que sirve `curl http://192.168.137.10:8765/`
+> coincide con el hash del `dist/` del host.
 
 **Importante — `.dockerignore` está en `~`, NO en `~/project/`.** El build context de
 `docker-compose.yml` es `..` relativo a `project/docker-compose.yml` — en el gabinete eso

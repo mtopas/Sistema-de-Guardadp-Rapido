@@ -11,6 +11,42 @@ Formato de cada entrada:
 
 ---
 
+## 2026-10-01 — Captura pasiva: falla del evaluador vs veredicto negativo + parseo multi-JSON
+
+Contexto: dos debilidades en `jarvis/captures/passive.py`.
+(a) Una evaluación FALLIDA (modelo caído / respuesta sin JSON) devolvía `None` igual
+que un veredicto negativo legítimo, y `_review_conversation()` marcaba la conversación
+como revisada en ambos casos. Con Ollama caído, los mensajes se perdían para siempre
+(nunca se reintentaban).
+(b) El parseo (fix `bfa853c`, `raw_decode` desde el primer `{`) tomaba solo el PRIMER
+objeto JSON. gemma3 suele emitir un objeto por mensaje del usuario; si el primero era
+negativo y uno posterior positivo, el positivo se perdía.
+
+Decisión:
+- Se extrajo el núcleo a `_evaluate_for_capture_ex(text) -> (verdict, failed)`:
+  `failed=True` solo ante falla real (excepción del modelo o cero JSON parseables);
+  `failed=False` tanto para veredicto negativo como positivo. `evaluate_for_capture()`
+  queda como wrapper fino que preserva su contrato histórico (devuelve `None` en ambos
+  no-positivos), para no romper llamadores ni tests existentes.
+- `_review_conversation()` ya NO marca revisada ante `failed=True`: el próximo tick del
+  scan reintenta. Tope de reintentos por conversación `_MAX_EVAL_ATTEMPTS=3` con un dict
+  en memoria del worker (`_eval_attempts_by_conv`), SIN cambios de esquema de DB (fuera
+  de alcance) y sin tocar `jarvis_policies` (salud global, no por-fila). Tras 3 fallas
+  consecutivas de la misma conversación se la marca revisada y se la abandona, para no
+  entrar en bucle ni gastar llamadas con el modelo caído. El contador se reinicia al
+  reiniciar el worker (límite natural de reintento; la salud sostenida ya la observa
+  `get_eval_health()`).
+- Nuevo `_extract_verdicts(raw)` devuelve todos los objetos JSON de nivel superior; se
+  elige el primero con `worth_capturing` truthy y contenido.
+
+Diferencia con spec: N/A (robustez operativa).
+
+Impacto: `jarvis/captures/passive.py`; tests `project/tests/test_evaluate_for_capture_health.py`
+(`TestReviewConversationFailure`, `test_multi_json_primer_negativo_toma_positivo`,
+`test_multi_json_con_prosa_alrededor`).
+
+---
+
 ## 2026-09-30 — Incidente: deploy pisó app.db del homelab con réplica Windows
 
 Contexto: el procedimiento de "Actualizar código en el servidor" (HOMELAB.md) usaba

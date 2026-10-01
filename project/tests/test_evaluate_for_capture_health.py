@@ -11,14 +11,51 @@ proceso, pero el endpoint /jarvis/health lo sirve el backend (proceso
 separado del worker) — siempre reportaba 0 fallas. Fix: persistir en
 jarvis_policies y leer de ahí.
 """
+import uuid
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 from jarvis.captures import passive
+from jarvis.db.database import get_connection
 
 
 def _reset_eval_counters():
     passive._eval_consecutive_failures = 0
     passive._eval_last_error = None
+    passive._eval_attempts_by_conv.clear()
+
+
+def _insert_conversation(conv_id="conv-eval-1", channel="telegram", channel_id="456",
+                         user_text="decidimos pagar anual", last_review=None):
+    """Inserta una conversación con un mensaje de usuario para ejercer
+    _review_conversation() contra una DB real."""
+    conn = get_connection()
+    try:
+        with conn:
+            conn.execute(
+                "INSERT INTO conversations (id, channel, channel_id, user_id, last_passive_review_at) "
+                "VALUES (?, ?, ?, 'default', ?)",
+                (conv_id, channel, channel_id, last_review),
+            )
+            conn.execute(
+                "INSERT INTO conversation_messages (id, conversation_id, role, content, created_at) "
+                "VALUES (?, ?, 'user', ?, ?)",
+                (uuid.uuid4().hex, conv_id, user_text,
+                 datetime.now(timezone.utc).isoformat()),
+            )
+    finally:
+        conn.close()
+
+
+def _get_last_review(conv_id):
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT last_passive_review_at FROM conversations WHERE id = ?", (conv_id,)
+        ).fetchone()
+        return row["last_passive_review_at"] if row else None
+    finally:
+        conn.close()
 
 
 class TestEvaluateForCaptureHealth:
@@ -103,6 +140,105 @@ class TestEvaluateForCaptureHealth:
         assert "libros" in result["content"].lower() or "leer" in result["content"].lower()
         health = passive.get_eval_health()
         assert health["consecutive_failures"] == 0
+
+    def test_multi_json_primer_negativo_toma_positivo(self, tmp_jarvis_db):
+        """Dos JSON pegados: el primero negativo, el segundo positivo → se
+        queda con el positivo (antes raw_decode tomaba solo el primero y se
+        perdía)."""
+        multi_json = (
+            '{"worth_capturing": false, "content": null, "question": null}'
+            '{"worth_capturing": true, "content": "Pagar el hosting anual.", '
+            '"question": "¿Guardo esto en tu memoria?"}'
+        )
+        with patch("jarvis.llm.client.call_llm", return_value=multi_json):
+            result = passive.evaluate_for_capture("¿cuánto sale? al final pago anual")
+        assert result is not None
+        assert "hosting" in result["content"].lower() or "anual" in result["content"].lower()
+        assert passive.get_eval_health()["consecutive_failures"] == 0
+
+    def test_multi_json_con_prosa_alrededor(self, tmp_jarvis_db):
+        """Texto fuera de los objetos JSON no debe impedir el parseo."""
+        raw = (
+            'Claro, acá va mi análisis:\n'
+            '{"worth_capturing": false, "content": null, "question": null}\n'
+            'y además:\n'
+            '{"worth_capturing": true, "content": "Decisión importante.", "question": "¿Guardo?"}\n'
+            'Fin.'
+        )
+        with patch("jarvis.llm.client.call_llm", return_value=raw):
+            result = passive.evaluate_for_capture("algo")
+        assert result is not None
+        assert result["content"] == "Decisión importante."
+
+
+class TestReviewConversationFailure:
+    """_review_conversation() NO marca revisada una conversación si el
+    evaluador falló (modelo caído / sin JSON), con un tope de reintentos."""
+
+    def setup_method(self):
+        _reset_eval_counters()
+
+    def teardown_method(self):
+        _reset_eval_counters()
+
+    def test_falla_no_marca_revisada(self, tmp_jarvis_db):
+        _insert_conversation()
+        conv = {"id": "conv-eval-1", "channel": "telegram", "channel_id": "456",
+                "user_id": "default", "last_passive_review_at": None}
+        now = datetime.now(timezone.utc)
+        with patch("jarvis.llm.client.call_llm", side_effect=ConnectionError("refused")):
+            proposed = passive._review_conversation(conv, now)
+        assert proposed is False
+        # NO se marcó revisada: el próximo tick reintenta.
+        assert _get_last_review("conv-eval-1") is None
+        assert passive._eval_attempts_by_conv.get("conv-eval-1") == 1
+
+    def test_falla_tope_marca_revisada_y_abandona(self, tmp_jarvis_db):
+        _insert_conversation()
+        conv = {"id": "conv-eval-1", "channel": "telegram", "channel_id": "456",
+                "user_id": "default", "last_passive_review_at": None}
+        now = datetime.now(timezone.utc)
+        with patch("jarvis.llm.client.call_llm", side_effect=ConnectionError("refused")):
+            for _ in range(passive._MAX_EVAL_ATTEMPTS):
+                passive._review_conversation(conv, now)
+        # Al alcanzar el tope se marca revisada y se limpia el contador.
+        assert _get_last_review("conv-eval-1") is not None
+        assert "conv-eval-1" not in passive._eval_attempts_by_conv
+
+    def test_veredicto_negativo_si_marca_revisada(self, tmp_jarvis_db):
+        _insert_conversation()
+        conv = {"id": "conv-eval-1", "channel": "telegram", "channel_id": "456",
+                "user_id": "default", "last_passive_review_at": None}
+        now = datetime.now(timezone.utc)
+        neg = '{"worth_capturing": false, "content": null, "question": null}'
+        with patch("jarvis.llm.client.call_llm", return_value=neg):
+            proposed = passive._review_conversation(conv, now)
+        assert proposed is False
+        # Veredicto negativo legítimo SÍ marca revisada (no es una falla).
+        assert _get_last_review("conv-eval-1") is not None
+
+    def test_exito_tras_fallas_limpia_contador(self, tmp_jarvis_db):
+        _insert_conversation()
+        conv = {"id": "conv-eval-1", "channel": "telegram", "channel_id": "456",
+                "user_id": "default", "last_passive_review_at": None}
+        now = datetime.now(timezone.utc)
+        with patch("jarvis.llm.client.call_llm", side_effect=ConnectionError("refused")):
+            passive._review_conversation(conv, now)
+        assert passive._eval_attempts_by_conv.get("conv-eval-1") == 1
+        neg = '{"worth_capturing": false, "content": null, "question": null}'
+        with patch("jarvis.llm.client.call_llm", return_value=neg):
+            passive._review_conversation(conv, now)
+        assert "conv-eval-1" not in passive._eval_attempts_by_conv
+        assert _get_last_review("conv-eval-1") is not None
+
+
+class TestHealthDbSeparado:
+
+    def setup_method(self):
+        _reset_eval_counters()
+
+    def teardown_method(self):
+        _reset_eval_counters()
 
     def test_health_lee_de_db_no_de_memoria(self, tmp_jarvis_db):
         """get_eval_health() lee de DB: si otro proceso escribió ahí, lo ve.

@@ -66,6 +66,21 @@ _eval_last_error: str | None = None
 
 _EVAL_HEALTH_POLICY = "passive_eval_health"
 
+# Tope de reintentos por conversación ante fallas del evaluador (modelo caído /
+# respuesta sin JSON). Mecanismo mínimo elegido a propósito: un contador en
+# memoria del proceso del worker, SIN cambios de esquema de DB (fuera de alcance
+# del ticket) y SIN tocar jarvis_policies (que es salud global, no por-fila).
+# Justificación: una falla NO marca la conversación como revisada, así que el
+# mismo texto se reintenta en el próximo tick del scan en vez de perderse (bug
+# original). El tope evita el otro extremo -- reintentar infinitamente y gastar
+# llamadas al modelo mientras Ollama sigue caído: tras _MAX_EVAL_ATTEMPTS fallas
+# consecutivas para la MISMA conversación se la marca revisada y se la deja ir.
+# Que el contador se reinicie al reiniciar el worker es aceptable e incluso
+# deseable: un restart es un límite natural de reintento, y la salud sostenida
+# del modelo ya la observa get_eval_health() (contador global persistido en DB).
+_MAX_EVAL_ATTEMPTS = 3
+_eval_attempts_by_conv: dict[str, int] = {}
+
 
 def _persist_eval_health() -> None:
     """Persiste el estado de salud del evaluador en jarvis_policies (DB) para
@@ -227,16 +242,50 @@ def get_unreviewed_user_text(conversation_id: str, since: str | None) -> str:
         conn.close()
 
 
-def evaluate_for_capture(text: str) -> dict | None:
-    """¿Esta conversación amerita proponer una captura? Modelo local (nunca el
-    externo -- es clasificación barata, mismo criterio que extract_entities()
-    y needs_clarification()). Nunca lanza -- None si falla o no aplica.
+def _extract_verdicts(raw: str) -> list[dict]:
+    """Devuelve TODOS los objetos JSON de nivel superior presentes en la
+    respuesta del modelo, en orden. gemma3 suele emitir un objeto por mensaje
+    del usuario (o antepone/pospone texto), así que no alcanza con tomar solo
+    el primero con raw_decode (fix bfa853c): si el primero es negativo y uno
+    posterior es positivo, antes se perdía. Recorre la cadena saltando lo que
+    no sea JSON decodificable.
+    """
+    decoder = json.JSONDecoder()
+    verdicts: list[dict] = []
+    i = 0
+    n = len(raw)
+    while i < n:
+        brace = raw.find("{", i)
+        if brace < 0:
+            break
+        try:
+            obj, end = decoder.raw_decode(raw, brace)
+        except json.JSONDecodeError:
+            # Esa '{' no abría un objeto válido: avanzar un carácter y seguir.
+            i = brace + 1
+            continue
+        if isinstance(obj, dict):
+            verdicts.append(obj)
+        i = end
+    return verdicts
+
+
+def _evaluate_for_capture_ex(text: str) -> tuple[dict | None, bool]:
+    """Núcleo de evaluate_for_capture(). Devuelve (verdict, failed):
+      - (dict, False)  -> amerita captura (verdict = {content, question}).
+      - (None, False)  -> veredicto negativo legítimo (o texto vacío).
+      - (None, True)   -> FALLA del evaluador (modelo caído / sin JSON).
+
+    La distinción falla/negativo (que evaluate_for_capture() colapsa a None
+    para no romper su contrato público) es la que _review_conversation() usa
+    para NO marcar revisada una conversación cuyo texto nunca llegó a
+    evaluarse de verdad.
     """
     global _eval_consecutive_failures, _eval_last_error
     from jarvis.llm.client import call_llm
 
     if not text.strip():
-        return None
+        return None, False
     try:
         raw = call_llm(
             messages=[
@@ -252,32 +301,54 @@ def evaluate_for_capture(text: str) -> dict | None:
             model=JARVIS_LOCAL_MODEL,
             temperature=0.0,
         )
-        start, end = raw.find("{"), raw.rfind("}") + 1
-        if start < 0 or end <= start:
-            _eval_consecutive_failures += 1
-            _eval_last_error = f"JSON no encontrado en respuesta del modelo: {raw[:200]}"
-            logger.warning("[jarvis.captures.passive] Evaluación falló (consecutivas: %d): %s",
-                           _eval_consecutive_failures, _eval_last_error)
-            _persist_eval_health()
-            return None
-        verdict, _ = json.JSONDecoder().raw_decode(raw, start)
-        _eval_consecutive_failures = 0
-        _eval_last_error = None
-        _persist_eval_health()
-        if not verdict.get("worth_capturing"):
-            return None
-        content = (verdict.get("content") or "").strip()
-        if not content:
-            return None
-        question = (verdict.get("question") or "").strip() or "¿Guardo esto en tu memoria?"
-        return {"content": content, "question": question}
     except Exception as exc:
         _eval_consecutive_failures += 1
         _eval_last_error = str(exc)
         logger.warning("[jarvis.captures.passive] Evaluación falló (consecutivas: %d): %s",
                        _eval_consecutive_failures, _eval_last_error)
         _persist_eval_health()
-        return None
+        return None, True
+
+    verdicts = _extract_verdicts(raw)
+    if not verdicts:
+        _eval_consecutive_failures += 1
+        _eval_last_error = f"JSON no encontrado en respuesta del modelo: {raw[:200]}"
+        logger.warning("[jarvis.captures.passive] Evaluación falló (consecutivas: %d): %s",
+                       _eval_consecutive_failures, _eval_last_error)
+        _persist_eval_health()
+        return None, True
+
+    # Hubo al menos un JSON parseable: el modelo respondió, no es una falla.
+    _eval_consecutive_failures = 0
+    _eval_last_error = None
+    _persist_eval_health()
+
+    # Quedarse con el PRIMER veredicto positivo (worth_capturing truthy) con
+    # contenido, aunque antes hubiera negativos -- antes se tomaba solo el
+    # primer objeto y un positivo posterior se perdía.
+    for verdict in verdicts:
+        if not verdict.get("worth_capturing"):
+            continue
+        content = (verdict.get("content") or "").strip()
+        if not content:
+            continue
+        question = (verdict.get("question") or "").strip() or "¿Guardo esto en tu memoria?"
+        return {"content": content, "question": question}, False
+
+    return None, False
+
+
+def evaluate_for_capture(text: str) -> dict | None:
+    """¿Esta conversación amerita proponer una captura? Modelo local (nunca el
+    externo -- es clasificación barata, mismo criterio que extract_entities()
+    y needs_clarification()). Nunca lanza -- None si falla o no aplica.
+
+    Wrapper de _evaluate_for_capture_ex() que preserva el contrato histórico
+    (None tanto en falla como en veredicto negativo). Los llamadores que
+    necesitan distinguir ambos casos usan _evaluate_for_capture_ex().
+    """
+    verdict, _failed = _evaluate_for_capture_ex(text)
+    return verdict
 
 
 def scan_and_propose(now: datetime | None = None) -> dict:
@@ -325,13 +396,34 @@ def scan_and_propose(now: datetime | None = None) -> dict:
 
 
 def _review_conversation(conv: dict, now: datetime) -> bool:
-    text = get_unreviewed_user_text(conv["id"], conv.get("last_passive_review_at"))
+    conv_id = conv["id"]
+    text = get_unreviewed_user_text(conv_id, conv.get("last_passive_review_at"))
     now_iso = now.isoformat()
-    verdict = evaluate_for_capture(text)
-    # Se marca revisada SIEMPRE, proponga o no -- si no, el mismo texto
-    # descartado se re-evaluaría (y potencialmente re-preguntaría) en cada
-    # vuelta del scan mientras la conversación siga sin mensajes nuevos.
-    mark_reviewed(conv["id"], now_iso)
+    verdict, failed = _evaluate_for_capture_ex(text)
+
+    if failed:
+        # El texto NO llegó a evaluarse (modelo caído / sin JSON). No se marca
+        # revisada: así el próximo tick del scan lo reintenta en vez de
+        # perderlo para siempre. Tope por conversación para no quedar en bucle
+        # ni gastar llamadas si el modelo sigue caído -- ver _MAX_EVAL_ATTEMPTS.
+        attempts = _eval_attempts_by_conv.get(conv_id, 0) + 1
+        _eval_attempts_by_conv[conv_id] = attempts
+        if attempts >= _MAX_EVAL_ATTEMPTS:
+            logger.warning(
+                "[jarvis.captures.passive] %d fallas consecutivas evaluando "
+                "conversation_id=%s; se marca revisada y se abandona para no "
+                "entrar en bucle.", attempts, conv_id,
+            )
+            _eval_attempts_by_conv.pop(conv_id, None)
+            mark_reviewed(conv_id, now_iso)
+        return False
+
+    # Evaluación exitosa (positiva o negativa): se limpia el contador de
+    # reintentos y se marca revisada SIEMPRE, proponga o no -- si no, el mismo
+    # texto descartado se re-evaluaría (y potencialmente re-preguntaría) en
+    # cada vuelta del scan mientras la conversación siga sin mensajes nuevos.
+    _eval_attempts_by_conv.pop(conv_id, None)
+    mark_reviewed(conv_id, now_iso)
     if not verdict:
         return False
 

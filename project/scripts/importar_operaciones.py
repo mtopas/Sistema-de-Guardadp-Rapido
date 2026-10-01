@@ -2,11 +2,14 @@
 """
 Importador de operaciones de broker al ledger de Finanzas (fin_transacciones_instrumento).
 
-Uso:
+Uso (importar operaciones):
     python importar_operaciones.py ordenes.csv tenencias.xlsx mep.csv [--aplicar] [--api URL]
 
+Uso (actualizar precios):
+    python importar_operaciones.py --actualizar-precios tenencias.csv [--aplicar] [--api URL]
+
 - Dry-run por defecto: muestra lo que haría sin escribir.
-- --aplicar: ejecuta POST contra la API.
+- --aplicar: ejecuta POST/PATCH contra la API.
 - --api: URL base de la API (default http://192.168.137.10:8765).
 """
 import argparse
@@ -392,6 +395,188 @@ def api_post(base_url: str, path: str, data: dict):
         return {"error": error_body, "status": e.code}, e.code
 
 
+def api_patch(base_url: str, path: str, data: dict):
+    url = f"{base_url}{path}"
+    body = json.dumps(data).encode("utf-8")
+    req = urllib.request.Request(url, data=body, method="PATCH")
+    req.add_header("Content-Type", "application/json")
+    try:
+        resp = urllib.request.urlopen(req)
+        return json.loads(resp.read().decode()), resp.status
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode()
+        return {"error": error_body, "status": e.code}, e.code
+
+
+# ---------------------------------------------------------------------------
+# Price update logic
+# ---------------------------------------------------------------------------
+
+def parse_tenencias_precios_csv(path: str) -> list[dict]:
+    """
+    Parse broker holdings CSV (MisInstrumentos) for current prices.
+    Columns: Ticker, Precio (ARS per unit), Valor actual, Moneda.
+    Delimiter ;, encoding Latin-1 or UTF-8.
+    """
+    enc = detect_encoding(path)
+    items = []
+    with open(path, encoding=enc, newline="") as f:
+        reader = csv.DictReader(f, delimiter=";")
+        for row in reader:
+            ticker = (row.get("Ticker") or "").strip().upper()
+            if not ticker:
+                continue
+            precio_str = (row.get("Precio") or "").strip()
+            precio_ars = parse_decimal_safe(precio_str)
+            moneda = (row.get("Moneda") or "").strip()
+            valor_actual_str = (row.get("Valor actual") or "").strip()
+            valor_actual = parse_decimal_safe(valor_actual_str)
+            items.append({
+                "ticker": ticker,
+                "precio_ars": precio_ars,
+                "moneda_csv": moneda,
+                "valor_actual_csv": valor_actual,
+            })
+    return items
+
+
+def build_price_plan(
+    csv_items: list[dict],
+    instruments: list[dict],
+    mep_rate: float,
+) -> tuple[list[dict], list[dict]]:
+    """
+    Match CSV tickers to API instruments and compute precio_actual in USD.
+    Returns (matched, unmatched_instruments).
+    matched: [{inst_id, ticker, precio_actual_old, precio_ars, precio_usd_new, mep_used}, ...]
+    unmatched: instruments without a CSV row.
+    """
+    csv_by_ticker = {}
+    for item in csv_items:
+        csv_by_ticker[item["ticker"]] = item
+
+    matched = []
+    unmatched = []
+
+    for inst in instruments:
+        ticker = (inst.get("ticker") or "").upper().strip()
+        csv_row = csv_by_ticker.pop(ticker, None)
+        if csv_row is None:
+            unmatched.append(inst)
+            continue
+
+        precio_ars = csv_row["precio_ars"]
+        if precio_ars is None or precio_ars <= 0:
+            unmatched.append(inst)
+            continue
+
+        precio_usd = precio_ars / mep_rate if mep_rate > 0 else 0.0
+
+        matched.append({
+            "inst_id": inst["id"],
+            "ticker": ticker,
+            "tipo": inst.get("tipo", ""),
+            "cantidad": inst.get("cantidad", 0),
+            "precio_actual_old": inst.get("precio_actual"),
+            "precio_ars": precio_ars,
+            "precio_usd_new": round(precio_usd, 6),
+            "mep_used": mep_rate,
+            "moneda_csv": csv_row["moneda_csv"],
+            "valor_actual_csv": csv_row["valor_actual_csv"],
+        })
+
+    return matched, unmatched
+
+
+def apply_prices(matched: list[dict], base_url: str, dry_run: bool = True):
+    """PATCH precio_actual for each matched instrument. Idempotent."""
+    results = []
+    for item in matched:
+        new_price = item["precio_usd_new"]
+        old_price = item["precio_actual_old"]
+
+        if old_price is not None and abs(old_price - new_price) < 1e-6:
+            results.append({**item, "status": "unchanged"})
+            continue
+
+        if dry_run:
+            results.append({**item, "status": "dry-run"})
+            continue
+
+        resp, status = api_patch(
+            base_url,
+            f"/fin/instrumentos/{item['inst_id']}",
+            {"precio_actual": new_price},
+        )
+        if status in (200, 201):
+            results.append({**item, "status": "updated"})
+        else:
+            results.append({**item, "status": f"error ({status})", "error": resp})
+
+    return results
+
+
+def cmd_actualizar_precios(args):
+    """Entry point for --actualizar-precios mode."""
+    tenencias_path = args.actualizar_precios
+    base_url = args.api
+    aplicar = args.aplicar
+
+    print("=" * 70)
+    print("ACTUALIZACIÓN DE PRECIOS DESDE TENENCIAS DEL BROKER")
+    print("=" * 70)
+    print(f"Modo: {'APLICAR' if aplicar else 'DRY-RUN (sin escritura)'}")
+    print(f"API: {base_url}")
+    print(f"Archivo: {tenencias_path}")
+    print()
+
+    csv_items = parse_tenencias_precios_csv(tenencias_path)
+    print(f"  -> {len(csv_items)} filas en CSV")
+
+    instruments = api_get(base_url, "/fin/instrumentos")
+    print(f"  -> {len(instruments)} instrumentos en API")
+
+    config = api_get(base_url, "/fin/config")
+    mep_rate = float(config.get("dolar_mep") or config.get("dolar_oficial") or 0)
+    print(f"  -> MEP vigente: {mep_rate}")
+
+    if mep_rate <= 0:
+        print("ERROR: no hay cotización MEP en fin_config. Abortando.")
+        sys.exit(1)
+
+    matched, unmatched = build_price_plan(csv_items, instruments, mep_rate)
+
+    print(f"\n{'=' * 70}")
+    print("PLAN DE ACTUALIZACIÓN")
+    print("=" * 70)
+    print(f"{'Ticker':<10} {'Tipo':<10} {'Cant':>10} {'P.ARS':>14} {'P.USD nuevo':>14} {'P.USD viejo':>14} {'Estado'}")
+    print("-" * 90)
+
+    results = apply_prices(matched, base_url, dry_run=not aplicar)
+
+    for r in results:
+        old_str = f"{r['precio_actual_old']:.6f}" if r['precio_actual_old'] is not None else "null"
+        print(f"{r['ticker']:<10} {r['tipo']:<10} {r['cantidad']:>10.2f} {r['precio_ars']:>14.2f} {r['precio_usd_new']:>14.6f} {old_str:>14} {r['status']}")
+
+    if unmatched:
+        print(f"\n{'=' * 70}")
+        print("INSTRUMENTOS SIN FILA EN CSV (no se tocan)")
+        print("=" * 70)
+        for inst in unmatched:
+            print(f"  {inst.get('ticker', '?'):<10} tipo={inst.get('tipo', '?'):<10} cant={inst.get('cantidad', 0):.2f}")
+
+    updated = sum(1 for r in results if r["status"] == "updated")
+    unchanged = sum(1 for r in results if r["status"] == "unchanged")
+    errors = sum(1 for r in results if r["status"].startswith("error"))
+
+    print(f"\nResumen: {updated} actualizados, {unchanged} sin cambio, {errors} errores, {len(unmatched)} sin CSV")
+
+    if not aplicar:
+        print(f"\n{'=' * 70}")
+        print("DRY-RUN completado. Para aplicar: agregar --aplicar")
+        print("=" * 70)
+
+
 # ---------------------------------------------------------------------------
 # Core logic
 # ---------------------------------------------------------------------------
@@ -614,12 +799,21 @@ def reconcile(
 
 def main():
     parser = argparse.ArgumentParser(description="Importar operaciones de broker al ledger de Finanzas")
-    parser.add_argument("ordenes", help="Ruta al CSV de órdenes del broker")
-    parser.add_argument("tenencias", help="Ruta al XLSX/CSV de tenencias actuales")
-    parser.add_argument("mep", help="Ruta al CSV de dólar MEP histórico")
+    parser.add_argument("ordenes", nargs="?", help="Ruta al CSV de órdenes del broker")
+    parser.add_argument("tenencias", nargs="?", help="Ruta al XLSX/CSV de tenencias actuales")
+    parser.add_argument("mep", nargs="?", help="Ruta al CSV de dólar MEP histórico")
     parser.add_argument("--aplicar", action="store_true", help="Ejecutar las operaciones (default: dry-run)")
     parser.add_argument("--api", default="http://192.168.137.10:8765", help="URL base de la API")
+    parser.add_argument("--actualizar-precios", metavar="CSV",
+                        help="Actualizar precio_actual desde CSV de tenencias del broker (MisInstrumentos)")
     args = parser.parse_args()
+
+    if args.actualizar_precios:
+        cmd_actualizar_precios(args)
+        return
+
+    if not args.ordenes or not args.tenencias or not args.mep:
+        parser.error("Se requieren ordenes, tenencias y mep para importar operaciones")
 
     print("=" * 70)
     print("IMPORTADOR DE OPERACIONES DE BROKER")

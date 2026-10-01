@@ -17,6 +17,9 @@ from importar_operaciones import (
     get_mep_for_date,
     build_load_plan,
     reconcile,
+    parse_tenencias_precios_csv,
+    build_price_plan,
+    apply_prices,
 )
 
 
@@ -321,3 +324,156 @@ class TestReconcile:
         x_row = [r for r in result if r["ticker"] == "X"][0]
         assert not x_row["ok"]
         assert x_row["diff"] > 0
+
+
+# ---------------------------------------------------------------------------
+# Fixtures: price update
+# ---------------------------------------------------------------------------
+
+TENENCIAS_PRECIOS_HEADER = "Ticker;Tipo de Instrumento;Acciones;Nominales;Precio;Precio promedio de compra;Variacion porcentual;Ganancia;Valor actual;Moneda"
+
+TENENCIAS_PRECIOS_ROWS_UTF8 = [
+    "AAPL;Cedears;10;10;15500,00;14000,00;10,71;15000,00;155000,00;Pesos",
+    "GOOGL;Cedears;5;5;9200,50;8500,00;8,24;3502,50;46002,50;Pesos",
+    "SPY;Cedears;3;3;8100,00;7500,00;8,00;1800,00;24300,00;Pesos",
+    "AO28;Bonos;100;100;1200,00;1100,00;9,09;10000,00;120000,00;Pesos",
+    "NOENAPI;Cedears;2;2;5000,00;4500,00;11,11;1000,00;10000,00;Pesos",
+]
+
+TENENCIAS_PRECIOS_ROWS_LATIN1 = [
+    "AAPL;Cedears;10;10;15500,00;14000,00;10,71;15000,00;155000,00;Pesos",
+    "MSFT;Cedears;6;6;7800,00;7000,00;11,43;4800,00;46800,00;D\xf3lares",
+]
+
+
+def _write_tenencias_precios(path, rows, encoding="utf-8"):
+    with open(path, "w", encoding=encoding, newline="") as f:
+        f.write(TENENCIAS_PRECIOS_HEADER + "\n")
+        for row in rows:
+            f.write(row + "\n")
+
+
+@pytest.fixture
+def tenencias_precios_file(tmp_path):
+    p = tmp_path / "tenencias.csv"
+    _write_tenencias_precios(str(p), TENENCIAS_PRECIOS_ROWS_UTF8)
+    return str(p)
+
+
+@pytest.fixture
+def tenencias_precios_latin1(tmp_path):
+    p = tmp_path / "tenencias_latin1.csv"
+    _write_tenencias_precios(str(p), TENENCIAS_PRECIOS_ROWS_LATIN1, encoding="latin-1")
+    return str(p)
+
+
+MOCK_INSTRUMENTS = [
+    {"id": 1, "tipo": "cedears", "ticker": "AAPL", "cantidad": 10, "costo_usd": 100.0, "precio_actual": None},
+    {"id": 2, "tipo": "cedears", "ticker": "GOOGL", "cantidad": 5, "costo_usd": 50.0, "precio_actual": None},
+    {"id": 3, "tipo": "cedears", "ticker": "SPY", "cantidad": 3, "costo_usd": 30.0, "precio_actual": None},
+    {"id": 4, "tipo": "bonos", "ticker": "AO28", "cantidad": 100, "costo_usd": 80.0, "precio_actual": None},
+    {"id": 5, "tipo": "cedears", "ticker": "TZX26", "cantidad": 200000, "costo_usd": 500.0, "precio_actual": None},
+]
+
+MEP_RATE = 1548.10
+
+
+# ---------------------------------------------------------------------------
+# Tests: parse_tenencias_precios_csv
+# ---------------------------------------------------------------------------
+
+class TestParseTenenciasPrecios:
+    def test_parse_utf8(self, tenencias_precios_file):
+        items = parse_tenencias_precios_csv(tenencias_precios_file)
+        assert len(items) == 5
+        aapl = [i for i in items if i["ticker"] == "AAPL"][0]
+        assert abs(aapl["precio_ars"] - 15500.0) < 0.01
+
+    def test_parse_latin1(self, tenencias_precios_latin1):
+        items = parse_tenencias_precios_csv(tenencias_precios_latin1)
+        assert len(items) == 2
+        msft = [i for i in items if i["ticker"] == "MSFT"][0]
+        assert abs(msft["precio_ars"] - 7800.0) < 0.01
+
+    def test_comma_decimal(self, tenencias_precios_file):
+        items = parse_tenencias_precios_csv(tenencias_precios_file)
+        googl = [i for i in items if i["ticker"] == "GOOGL"][0]
+        assert abs(googl["precio_ars"] - 9200.50) < 0.01
+
+    def test_valor_actual_parsed(self, tenencias_precios_file):
+        items = parse_tenencias_precios_csv(tenencias_precios_file)
+        aapl = [i for i in items if i["ticker"] == "AAPL"][0]
+        assert abs(aapl["valor_actual_csv"] - 155000.0) < 0.01
+
+
+# ---------------------------------------------------------------------------
+# Tests: build_price_plan
+# ---------------------------------------------------------------------------
+
+class TestBuildPricePlan:
+    def test_matching(self, tenencias_precios_file):
+        csv_items = parse_tenencias_precios_csv(tenencias_precios_file)
+        matched, unmatched = build_price_plan(csv_items, MOCK_INSTRUMENTS, MEP_RATE)
+        matched_tickers = {m["ticker"] for m in matched}
+        assert "AAPL" in matched_tickers
+        assert "GOOGL" in matched_tickers
+        assert "AO28" in matched_tickers
+
+    def test_unmatched_instruments(self, tenencias_precios_file):
+        csv_items = parse_tenencias_precios_csv(tenencias_precios_file)
+        matched, unmatched = build_price_plan(csv_items, MOCK_INSTRUMENTS, MEP_RATE)
+        unmatched_tickers = {u["ticker"] for u in unmatched}
+        assert "TZX26" in unmatched_tickers
+
+    def test_conversion_ars_to_usd(self, tenencias_precios_file):
+        csv_items = parse_tenencias_precios_csv(tenencias_precios_file)
+        matched, _ = build_price_plan(csv_items, MOCK_INSTRUMENTS, MEP_RATE)
+        aapl = [m for m in matched if m["ticker"] == "AAPL"][0]
+        expected_usd = 15500.0 / MEP_RATE
+        assert abs(aapl["precio_usd_new"] - expected_usd) < 0.001
+
+    def test_mep_stored(self, tenencias_precios_file):
+        csv_items = parse_tenencias_precios_csv(tenencias_precios_file)
+        matched, _ = build_price_plan(csv_items, MOCK_INSTRUMENTS, MEP_RATE)
+        for m in matched:
+            assert m["mep_used"] == MEP_RATE
+
+
+# ---------------------------------------------------------------------------
+# Tests: apply_prices
+# ---------------------------------------------------------------------------
+
+class TestApplyPrices:
+    def _make_matched(self):
+        return [
+            {"inst_id": 1, "ticker": "AAPL", "tipo": "cedears", "cantidad": 10,
+             "precio_actual_old": None, "precio_ars": 15500.0,
+             "precio_usd_new": 10.012919, "mep_used": 1548.1,
+             "moneda_csv": "Pesos", "valor_actual_csv": 155000.0},
+            {"inst_id": 2, "ticker": "GOOGL", "tipo": "cedears", "cantidad": 5,
+             "precio_actual_old": 5.0, "precio_ars": 9200.50,
+             "precio_usd_new": 5.943285, "mep_used": 1548.1,
+             "moneda_csv": "Pesos", "valor_actual_csv": 46002.5},
+        ]
+
+    def test_dry_run_no_writes(self):
+        matched = self._make_matched()
+        results = apply_prices(matched, "http://fake:8765", dry_run=True)
+        assert all(r["status"] == "dry-run" for r in results)
+
+    def test_idempotent_unchanged(self):
+        matched = [
+            {"inst_id": 1, "ticker": "AAPL", "tipo": "cedears", "cantidad": 10,
+             "precio_actual_old": 10.012919, "precio_ars": 15500.0,
+             "precio_usd_new": 10.012919, "mep_used": 1548.1,
+             "moneda_csv": "Pesos", "valor_actual_csv": 155000.0},
+        ]
+        results = apply_prices(matched, "http://fake:8765", dry_run=False)
+        assert results[0]["status"] == "unchanged"
+
+    def test_position_without_csv_untouched(self, tenencias_precios_file):
+        csv_items = parse_tenencias_precios_csv(tenencias_precios_file)
+        matched, unmatched = build_price_plan(csv_items, MOCK_INSTRUMENTS, MEP_RATE)
+        tzx26 = [u for u in unmatched if u["ticker"] == "TZX26"]
+        assert len(tzx26) == 1
+        assert tzx26[0]["precio_actual"] is None

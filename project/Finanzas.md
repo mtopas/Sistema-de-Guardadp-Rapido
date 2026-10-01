@@ -376,10 +376,15 @@ Parsing: `{tipo?} {monto} {descripción…} {cuenta_hint?}` — el último token
 - **Tipos de instrumento ampliados:** `acciones`, `bonos`, `cedears`, `ons`, `crypto` (antes solo los últimos tres). Afecta validación en `POST /fin/transacciones`, backfill en `database.py`, dropdown en `GlobalLedgerPanel`, y lógica `isStock` en `AhorroTab`.
 - **Idempotencia:** por `id Orden` en nota + clave compuesta (ticker+fecha+cantidad+precio+tipo). Correr dos veces no duplica.
 - **TC:** MEP histórico del día exacto; fallback al último hábil anterior. Todas las operaciones del broker son en ARS.
-- **Comando para el mes que viene:**
+- **Comando importar operaciones:**
   ```bash
   python project/scripts/importar_operaciones.py <ordenes.csv> <tenencias.csv> <mep.csv> [--aplicar] [--api URL]
   ```
+- **Actualizar precios** (`--actualizar-precios`): carga `precio_actual` (USD por unidad) desde el CSV de tenencias del broker (MisInstrumentos, `;`, Latin-1). Convierte `Precio` (ARS) ÷ MEP vigente (`fin_config.dolar_mep`). Empareja por ticker; instrumentos sin fila en el CSV no se tocan. Idempotente (segunda corrida = unchanged).
+  ```bash
+  python project/scripts/importar_operaciones.py --actualizar-precios <tenencias.csv> [--aplicar] [--api URL]
+  ```
+- **Semántica `precio_actual`:** USD por unidad. `AhorroTab` calcula `cantidad × precio_actual` = valor USD; × MEP = valor ARS. Plazos fijos usan otra fórmula (`valorInstrumentoARS`).
 
 ### Deuda conocida
 

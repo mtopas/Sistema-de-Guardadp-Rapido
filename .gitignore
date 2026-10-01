@@ -54,3 +54,7 @@ SGR-JARVIS-Laboratorio-de-Repositorios-2026-09-21.md
 !.agents/skills/orquestador/
 !.agents/skills/trabajador/
 skills-lock.json
+
+# Exportes del broker con nombre y números de cuenta (datos personales reales) — nunca versionar
+(MisInstrumentos)*.csv
+*MisInstrumentos*.csv

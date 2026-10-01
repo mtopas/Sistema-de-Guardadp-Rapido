@@ -369,12 +369,25 @@ Parsing: `{tipo?} {monto} {descripción…} {cuenta_hint?}` — el último token
 - **Bot:** `/ahorro` y `/objetivo` por categoría o descripción (= nombre del cajón); categorías ocultas filtradas en teclados.
 - **Dashboard emergencia:** `fetchFinEmergencia` calcula desde `finMovimientosAll` en cliente. El endpoint deprecated queda disponible para compatibilidad.
 
+### Importador de operaciones del broker (oct 2026)
+
+- **Script:** `project/scripts/importar_operaciones.py` — CLI reutilizable, dry-run por defecto, `--aplicar` para escribir contra la API.
+- **Fuentes:** CSV de órdenes del broker (`;`, Latin-1 o UTF-8) + CSV/XLSX de tenencias (conciliación) + CSV de dólar MEP histórico (tipo de cambio).
+- **Tipos de instrumento ampliados:** `acciones`, `bonos`, `cedears`, `ons`, `crypto` (antes solo los últimos tres). Afecta validación en `POST /fin/transacciones`, backfill en `database.py`, dropdown en `GlobalLedgerPanel`, y lógica `isStock` en `AhorroTab`.
+- **Idempotencia:** por `id Orden` en nota + clave compuesta (ticker+fecha+cantidad+precio+tipo). Correr dos veces no duplica.
+- **TC:** MEP histórico del día exacto; fallback al último hábil anterior. Todas las operaciones del broker son en ARS.
+- **Comando para el mes que viene:**
+  ```bash
+  python project/scripts/importar_operaciones.py <ordenes.csv> <tenencias.csv> <mep.csv> [--aplicar] [--api URL]
+  ```
+
 ### Deuda conocida
 
 | Ítem | Detalle |
 |------|---------|
 | Migración `Ahorro` | Usuarios con movimientos en categoría legacy `Ahorro` deben reasignarlos manualmente a `FIRE` u objetivo |
 | Instrumentos avanzados | Ventas parciales, splits, dividendos |
+| TZX26 (bono vencido) | Compra cargada en el ledger pero sin venta/canje — posición sobrante vs tenencias actuales |
 | Campana notificaciones | Badge visual, sin handler (requiere `fin_alertas`) |
 | Atajos teclado avanzados | Vi/Ve/C (Dashboard), Ctrl+S/Supr (Datos), I/E (Ahorro/FIRE) — pendiente de levantar estado a store |
 | Fusionar categorías | Renombrar sí; merge de dos categorías en una — pendiente |

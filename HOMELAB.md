@@ -202,8 +202,9 @@ docker build --network=host -t sgr-app:latest -f Dockerfile ..
 docker-compose up -d --no-build
 ```
 
-`./database` es volumen: un `scp -r ./project` **no** pisa `app.db`/`jarvis.db` salvo que
-copies `database/` explícitamente.
+`./database` es volumen del contenedor, pero en el host es una carpeta común: un `scp -r ./project`
+**sí** pisa `app.db` con la réplica de Windows (incidente 2026-09-30). Copiá siempre con las
+exclusiones de arriba (tar), nunca `scp -r` del proyecto entero.
 
 ---
 

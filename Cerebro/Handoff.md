@@ -14,6 +14,65 @@ A diferencia del chat (cuyo contexto se pierde al cerrar la ventana), este archi
 
 ---
 
+## [2026-10-01, sesión 5 — importador de operaciones] — Carga del ledger desde el broker + fix del parseo del evaluador
+- **Resultado:** Hecho con observaciones (validado por el orquestador contra commits, API y backups del homelab).
+- **Qué se hizo:** (a) Captura pasiva por Telegram: causa raíz = `json.loads()` fallaba con "Extra data" cuando el modelo devolvía un JSON por cada mensaje; fix con `raw_decode()` (`bfa853c`, +1 test), desplegado por el usuario con `scp` + `docker build` + recreate del worker (la prueba por Telegram sigue sin cerrarse). (b) Importador: `project/scripts/importar_operaciones.py` (CLI, dry-run por defecto, idempotente por `id Orden`, TC MEP histórico real tomado de un CSV de cotizaciones), 35 operaciones ejecutadas cargadas (21 omitidas: depósitos, transferencias, canceladas, rechazadas), 19 instrumentos, 16/16 posiciones concilian con el CSV de tenencias; tipos `bonos` y `cedears` ampliados en backend y frontend. Commits `7afe3e2`, `e7fb8b5`, `4b9d797` (sin datos personales, verificado). 430 tests.
+- **Estado del repo:** `master` con commits locales sin pushear (`550e80a`, `bfa853c`, `7afe3e2`, `e7fb8b5`, `4b9d797`); sin commitear: `.gitignore` (patrón del CSV de tenencias, datos personales), `Cerebro/Handoff.md`, `HOMELAB.md`.
+- **Hallazgos del orquestador:** (1) **Se perdieron instrumentos NO del broker antes de la importación:** el backup `app.db.bak-20260930-133414` y `app.db.bak.20260930-161452` tienen 15 instrumentos y 8 transacciones (7 acciones/CEDEARs cargadas a mano, 1 ON, **6 plazos fijos UVA de Brubank y 1 FCI "Renta Fija - Viaje Caro"**); el backup previo a la importación (`app.db.bak-20261001-144304`) ya tenía 0 instrumentos y 0 transacciones. Hoy el vivo tiene 19 instrumentos y 35 transacciones, ningún plazo fijo ni FCI. Alguien vació la tabla entre el 30/09 16:14 y el 01/10 14:43; no consta quién ni si fue intencional. (2) Los cambios de frontend (`GlobalLedgerPanel.jsx`, `AhorroTab.jsx`, tipos `bonos`/`cedears`) **no están desplegados**: el Ahorro del homelab puede no mostrar bien las posiciones nuevas. (3) `TZX26` (bono CER vencido) quedó tipado como `cedears` con 205425 nominales; falta decidir canje/vencimiento. (4) El flujo mensual necesita tres archivos (órdenes, tenencias y CSV de MEP), hay fricción. (5) El resumen sugería "sincronizar `app.db` del homelab a Windows": hacerlo SOLO con el pull del `.exe` (jamás `scp` de Windows hacia el homelab), recordando que el pull pisa las hojas solo-Windows (preservadas en `backup-incidente-20260930/`).
+
+### Pendientes activos (Arrastre):
+- [x] ~~[PLAZOS FIJOS BRUBANK / FCI]~~ — el usuario confirmó que borró varias cosas a propósito (2026-10-01); no hay nada que restaurar. Siguen en `app.db.bak.20260930-161452` por si hiciera falta.
+- [ ] [DEPLOY FRONTEND — BLOQUEA VER EL PORTAFOLIO] El `dist/` nuevo (commit `6f37afa`, secciones Bonos y Cedears en Ahorro) está copiado al host pero el contenedor sigue sirviendo el de la imagen. Reconstruir con `docker build --network=host -t sgr-app:latest -f Dockerfile ..` + `docker-compose up -d --no-build` (NO `docker-compose build`: no aplica `--network=host`, ver `HOMELAB.md`); revisar la sección "Deploy del frontend al homelab" (`.dockerignore` en `~`). Verificar Ahorro con las posiciones nuevas. EVIDENCIA (orquestador, 2026-10-01): el contenedor sirve `index-Bq5QJ3nY.js` (viejo) y el `dist` del host tiene `index-DPySS6hf.js` (nuevo): falta solo reconstruir la imagen; el trabajador lo había atribuido a service worker/render sin comprobarlo. Después del rebuild, hard refresh del navegador.
+- [x] ~~[precio_actual]~~ — hecho (`71e59f6`, `--actualizar-precios`): 16 instrumentos actualizados en el homelab (USD por unidad = precio ARS ÷ MEP vigente 1548,10; TZX26, CRES y TXAR sin fila no se tocan); portafolio por API $2.469.480 vs CSV $2.469.476 ARS (dif. $4 por redondeo); 441 tests. Backup `~/project/database/app.db.bak-20261001_*`. Comando mensual: `python project/scripts/importar_operaciones.py --actualizar-precios <MisInstrumentos.csv> --aplicar`. Observación: la conversión usa el MEP vigente, no el de la fecha de la foto.
+- [ ] [PRUEBA TELEGRAM / USUARIO] Cerrar la prueba de captura pasiva por Telegram con el fix `raw_decode` ya desplegado: texto sin palabras de compra (el bot derivó dos mensajes a categorías de Bóveda/Agenda); después restaurar `JARVIS_PASSIVE_CAPTURE_INACTIVITY_MINUTES=20` (hoy 3) y recrear el worker. Si no llega: ticket sobre qué handler consume cada texto libre.
+- [ ] [TICKET — MEDIO] Captura pasiva: (a) una evaluación fallida igual marca la conversación como revisada (se pierden mensajes si Ollama está caído); (b) el parseo toma solo el primer veredicto JSON (leer todos y quedarse con el primero positivo).
+- [ ] [TZX26] Decidir canje/vencimiento del bono y su tipado.
+- [ ] [PUSH / COMMITS / USUARIO] Pushear los 5 commits locales; commitear `.gitignore`, `Cerebro/Handoff.md` y `HOMELAB.md`.
+- [ ] [RESCATE HOJAS / USUARIO] Revisar `project/database/backup-incidente-20260930/reporte-rescate-hojas.md`; decidir qué hojas rescatar. Hacerlo ANTES de abrir el `.exe` (su pull pisa la copia local).
+- [ ] [USO DEL .EXE / USUARIO] Antes de abrirlo: `curl http://192.168.137.10:8765/meta`; revisar `project/SYNC-WINDOWS.md` ante pull fallido; actualizar el token del bot en el `.env` local.
+- [ ] [VERIF UI / USUARIO] Abrir `/finanzas` y `/agenda` del homelab.
+- [ ] [DOCS] `HOMELAB.md`: salto de línea final al editar `.env`; `OLLAMA_BASE_URL` con la IP del host (esta línea y la del `scp -r` ya corregida están sin commitear).
+- [ ] [HUECO DE SYNC] Las réplicas ya habían divergido en `hojas`: ticket de diseño.
+- [ ] [DISEÑO — NO URGENTE] Propuestas del canal desktop solo visibles con el navegador abierto; empujarlas también por Telegram. Calidad de respuesta del router de Telegram (informe genérico ante una frase).
+- [ ] [IDEA] Certeza/estado por entrada de memoria de Jarvis; evaluar con prueba real.
+- [ ] [FRONTEND] Evaluar `Front-CLAUDE/`, `Front-GPT/` y `Front-Claude-Design/`.
+- [ ] [VIDEO PROMO] Prompt entregado al usuario; pendiente de ejecución (sandbox con `seed_demo.py`, nunca en producción).
+- [ ] [REFACTOR / LIMPIEZA] Imports huérfanos de `project/app/main.py:29-31` y variables muertas en `crud.py`; re-correr pyflakes.
+- [ ] [BACKLOG] Revisar `Cerebro/PROXIMAMENTE.md`.
+- [x] ~~[Deploy 3 de `550e80a`]~~ — incluido al desplegar `passive.py` de `bfa853c`.
+- **Próximo objetivo inmediato recomendado:** aclarar los plazos fijos de Brubank (si fueron borrados sin querer, cuanto antes) y desplegar el frontend.
+
+---
+
+## [2026-09-30, sesión 4 — captura pasiva] — Causa raíz de que no llegara "¿Guardo esto?" y fix de salud del evaluador
+- **Resultado:** Hecho con un caveat (el canal Telegram sigue sin probarse). Validado por el orquestador: commit `550e80a` limpio (sin secretos ni menciones de IA), 399 passed.
+- **Causa raíz (2 problemas del `.env` del homelab, no de código):** (1) falta de salto de línea al agregar `BOT_ALLOWED_CHAT_IDS` (en el ticket anterior): quedó pegada a `JARVIS_LOCAL_MODEL`, dando el modelo corrupto `gemma3:12bBOT_ALLOWED_CHAT_IDS=...` y dejando esa variable sin definir como tal; (2) `OLLAMA_BASE_URL=http://localhost:11434` es inalcanzable desde Docker (`localhost` es el contenedor); ahora `http://192.168.137.1:11434`. Los `sed` los ejecutó el usuario (el sistema denegó editar el `.env` remoto).
+- **Prueba E2E:** mensaje → registro → scan → evaluador (Ollama/gemma3:12b) → propuesta → banner en el frontend. Fue por `/jarvis` (canal `desktop`), donde la propuesta aparece por polling del frontend y no se empuja a Telegram (por diseño). Para la prueba se bajó `JARVIS_PASSIVE_CAPTURE_INACTIVITY_MINUTES` a 3.
+- **Bug de código corregido:** `get_eval_health()` leía memoria del backend, no del worker (siempre 0 fallas). Ahora persiste en `jarvis_policies` (`_persist_eval_health()`); test `test_health_lee_de_db_no_de_memoria`. Commit `550e80a`, **sin desplegar**.
+- **Objeción del orquestador:** que `/help` responda NO demuestra que la allowlist esté activa: con la variable sin definir el bot acepta a cualquiera y también responde. Durante el lapso del `.env` roto el bot pudo estar abierto. Hay que verificarlo en el log.
+
+### Pendientes activos (Arrastre):
+- [ ] [USUARIO — URGENTE] Verificar la allowlist: `ssh mtopas@192.168.137.10 "docker logs project-bot-1 2>&1 | grep -i allowlist"` debe decir "Allowlist activa: 1 chat(s)". Revisar también que cada variable del `.env` del homelab esté en su propia línea (`grep -n "BOT_ALLOWED_CHAT_IDS\|JARVIS_LOCAL_MODEL\|OLLAMA_BASE_URL" ~/project/.env`, sin mostrar tokens).
+- [ ] [USUARIO] Restaurar `JARVIS_PASSIVE_CAPTURE_INACTIVITY_MINUTES=20` (hoy en 3 por la prueba) y recrear el worker con `docker-compose up -d --no-build --force-recreate worker` (comando del resumen del trabajador); confirmar con `grep` que quedó en una línea propia.
+- [ ] [PRUEBA TELEGRAM / USUARIO] Con el entorno estable: un mensaje claro y guardable por **Telegram** (no por `/jarvis`), esperar el timeout sin escribir y confirmar que la propuesta llega por Telegram. Es el escenario original y sigue sin probarse.
+- [ ] [DEPLOY 3] Desplegar `550e80a` (health real del evaluador) con el procedimiento corregido de `HOMELAB.md`, backup previo y conteos antes/después.
+- [ ] [PUSH / USUARIO] Pushear `550e80a`; commitear `Cerebro/Handoff.md`.
+- [ ] [DOCS] En `HOMELAB.md`: (a) al agregar variables al `.env` verificar salto de línea final (esta causa raíz); (b) `OLLAMA_BASE_URL` debe apuntar a la IP del host (192.168.137.1), nunca a `localhost`.
+- [ ] [DISEÑO — NO URGENTE] Las propuestas del canal desktop solo se ven con el navegador abierto; evaluar empujarlas también por Telegram.
+- [ ] [RESCATE HOJAS / USUARIO] Revisar `project/database/backup-incidente-20260930/reporte-rescate-hojas.md` y decidir qué hojas rescatar.
+- [ ] [USO DEL .EXE / USUARIO] Antes de abrirlo: `curl http://192.168.137.10:8765/meta` responde; revisar `project/SYNC-WINDOWS.md` ante pull fallido; actualizar el token del bot en el `.env` local.
+- [ ] [VERIF UI / USUARIO] Abrir `/finanzas` y `/agenda` del homelab.
+- [ ] [HUECO DE SYNC] Las réplicas ya habían divergido en `hojas`: ticket de diseño a definir.
+- [ ] [PROCESO] Regla 1.5 del trabajador: se deja como norma que el ticket autorice commits explícitamente (así funcionó en las últimas sesiones).
+- [ ] [IDEA DE DISEÑO] Certeza/estado por entrada de memoria (regla firme / preferencia / idea / en discusión); evaluar con prueba real.
+- [ ] [FRONTEND] Evaluar `Front-CLAUDE/`, `Front-GPT/` y `Front-Claude-Design/`.
+- [ ] [REFACTOR / LIMPIEZA] Imports huérfanos de `project/app/main.py:29-31` y variables muertas en `crud.py`; re-correr pyflakes.
+- [ ] [BACKLOG] Revisar `Cerebro/PROXIMAMENTE.md`.
+- [x] ~~[Ollama / red]~~ y ~~[captura pasiva sin propuestas]~~ — causa raíz hallada y corregida (arriba); falta solo la prueba por Telegram.
+- **Próximo objetivo inmediato recomendado:** verificar la allowlist en el log (2 minutos), restaurar el timeout a 20 y hacer la prueba por Telegram.
+
+---
+
 ## [2026-09-30, sesión 3 — deploy 2] — Allowlist, deploy de HEAD al homelab y limpiezas
 - **Resultado:** PARCIAL (validado por el orquestador; 2 objeciones abajo).
 - **Estado del repo:** `master` 2 commits adelante de `origin` (`c6c6a22` README sin rutas absolutas, `08927d6` deja de versionar `Front-GPT/SGR/tests/.ui-bundle.mjs`; sin menciones de IA). `Cerebro/Handoff.md` con cambios sin commitear.
@@ -34,7 +93,8 @@ A diferencia del chat (cuyo contexto se pierde al cerrar la ventana), este archi
 - [ ] [HUECO DE SYNC] Las réplicas ya habían divergido en `hojas`: ticket de diseño a definir.
 - [ ] [PROCESO] Regla 1.5 del trabajador vs memoria "no hacer commits": esta sesión sí commiteó porque el ticket lo autorizaba explícitamente. Decidir si se deja como norma del ticket.
 - [ ] [IDEA DE DISEÑO] Marcar certeza/estado por entrada de memoria (regla firme / preferencia / idea / en discusión), surgida de una conversación con Jarvis; evaluar con una prueba real antes de implementar.
-- [ ] [FRONTEND] Evaluar `Front-CLAUDE/` y `Front-GPT/`.
+- [ ] [FRONTEND] Evaluar `Front-CLAUDE/`, `Front-GPT/` y `Front-Claude-Design/` (mergeada el 2026-09-30 desde `claude/busy-thompson-4nkk5c`, commit `e7fa3e0`; además trae un ajuste de contraste de los números de día del calendario de Hábitos: commit `329e978`, en la carpeta nueva).
+- [x] ~~[RAMAS]~~ — todas las ramas (2 locales, 5 remotas) mergeadas y borradas el 2026-09-30; queda solo `master`.
 - [ ] [REFACTOR / LIMPIEZA] Imports huérfanos de `project/app/main.py:29-31` y variables muertas en `crud.py`; re-correr pyflakes antes del ticket.
 - [ ] [BACKLOG] Revisar `Cerebro/PROXIMAMENTE.md`.
 - [x] ~~[SEGURIDAD allowlist], [DEPLOY 2], [limpiezas README/bundle]~~ — resueltos (allowlist pendiente solo de tu confirmación).

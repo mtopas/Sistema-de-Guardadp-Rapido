@@ -10,6 +10,8 @@ import {
 
 const TIPOS = [
   { id: 'acciones',       labelKey: 'tipoAcciones'     },
+  { id: 'bonos',          labelKey: 'tipoBonos'        },
+  { id: 'cedears',        labelKey: 'tipoCedears'      },
   { id: 'fci',            labelKey: 'tipoFCI'          },
   { id: 'plazo_fijo',     labelKey: 'tipoPlazoFijo'    },
   { id: 'plazo_fijo_uva', labelKey: 'tipoPlazoFijoUVA' },
@@ -796,7 +798,7 @@ function DistribBar({ items, dolar }) {
   }, [items, dolar])
 
   const COLORS = {
-    acciones: 'var(--accent)', fci: 'var(--success)', plazo_fijo: 'var(--warning)',
+    acciones: 'var(--accent)', bonos: '#0ea5e9', cedears: '#6366f1', fci: 'var(--success)', plazo_fijo: 'var(--warning)',
     plazo_fijo_uva: '#0d9488', ons: '#8b5cf6', crypto: '#ec4899', otros: 'var(--subtext)',
   }
 

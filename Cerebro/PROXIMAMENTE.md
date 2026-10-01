@@ -366,8 +366,12 @@ Telegram, `SGR_SYNC_TOKEN` obligatorio.
   ya está pasando.
 - `transfer_group_id` con ambos lados de una transferencia en una sola transacción SQL, en vez
   de dos movimientos independientes vinculados solo por convención.
-- Reconciliación de importaciones CSV: staging antes de confirmar, matching, detección de
-  duplicados con score.
+- ~~Reconciliación de importaciones CSV: staging antes de confirmar, matching, detección de
+  duplicados~~ **Cubierto para operaciones del broker, oct 2026** — `project/scripts/importar_operaciones.py`
+  hace dry-run (staging) por defecto, matching contra tenencias/ledger (`build_load_plan`,
+  `reconcile`) e idempotencia por `id Orden` + clave compuesta. Sigue pendiente solo el
+  matching **con score** (hoy es coincidencia exacta) y que el flujo sea para CSV genéricos,
+  no solo el export del broker.
 - Presupuesto mensual por categoría, gastos recurrentes como entidades (no inferidos por
   texto), forecast 30/60/90 días.
 - Reglas de clasificación personales entrenables antes de recurrir al LLM en cada captura.

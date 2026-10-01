@@ -1412,10 +1412,10 @@ def listar_transacciones_global(
 def crear_transaccion_unificada(body: FinTransaccionCreateUnified):
     if body.tipo not in ("compra", "venta"):
         raise HTTPException(status_code=400, detail="tipo debe ser 'compra' o 'venta'")
-    if body.instrumento_tipo not in ("acciones", "ons", "crypto"):
+    if body.instrumento_tipo not in ("acciones", "bonos", "cedears", "ons", "crypto"):
         raise HTTPException(
             status_code=400,
-            detail="instrumento_tipo debe ser 'acciones', 'ons' o 'crypto'",
+            detail="instrumento_tipo debe ser 'acciones', 'bonos', 'cedears', 'ons' o 'crypto'",
         )
     try:
         return fin_crear_transaccion_unificada(

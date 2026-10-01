@@ -941,7 +941,7 @@ def _apply_migrations(cursor):
     cursor.execute(
         """SELECT i.id, i.cantidad, i.costo_usd
            FROM fin_instrumentos i
-           WHERE i.tipo IN ('acciones', 'ons', 'crypto')
+           WHERE i.tipo IN ('acciones', 'bonos', 'cedears', 'ons', 'crypto')
              AND i.cantidad > 0
              AND i.costo_usd IS NOT NULL
              AND NOT EXISTS (

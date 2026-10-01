@@ -840,7 +840,7 @@ function TipoSection({ tipo, items, lang, addInstrumento }) {
   const isPFUVA  = tipo === 'plazo_fijo_uva'
   const isFCI    = tipo === 'fci'
   const isOtros  = tipo === 'otros'
-  const isStock  = ['acciones', 'ons', 'crypto'].includes(tipo)
+  const isStock  = ['acciones', 'bonos', 'cedears', 'ons', 'crypto'].includes(tipo)
 
   const totalValorHoy = useMemo(
     () => (isPFUVA ? sumValorUvaHoy(items, uvaHoy) : null),
@@ -946,7 +946,7 @@ function ledgerEntidadKey(inst, lang) {
 }
 
 function ledgerIndividualLabel(inst) {
-  if (['acciones', 'ons', 'crypto'].includes(inst.tipo)) {
+  if (['acciones', 'bonos', 'cedears', 'ons', 'crypto'].includes(inst.tipo)) {
     return (inst.ticker ?? '').trim() || (inst.nombre ?? '').trim() || '?'
   }
   if (inst.tipo === 'fci') {

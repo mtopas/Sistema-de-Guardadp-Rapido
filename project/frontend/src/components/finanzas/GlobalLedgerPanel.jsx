@@ -79,7 +79,7 @@ export default function GlobalLedgerPanel() {
       <p className="text-[11px] mt-2" style={{ color: 'var(--subtext)' }}>Cada ticker se vincula con su posición. ARS usa el tipo de cambio registrado en la compra para conservar el PPC.</p>
       <form onSubmit={save} className="flex flex-wrap gap-2 mt-3 items-end">
         <label className="flex flex-col gap-1 min-w-[95px]"><span className="text-[10px] uppercase" style={{ color: 'var(--subtext)' }}>Operación</span><select style={fieldStyle} value={form.tipo} onChange={e => set('tipo', e.target.value)}><option value="compra">Compra</option><option value="venta">Venta</option></select></label>
-        <label className="flex flex-col gap-1 min-w-[95px]"><span className="text-[10px] uppercase" style={{ color: 'var(--subtext)' }}>Instrumento</span><select style={fieldStyle} value={form.instrumento_tipo} disabled={!!editingId} onChange={e => set('instrumento_tipo', e.target.value)}><option value="acciones">Acciones</option><option value="ons">ONs</option><option value="crypto">Crypto</option></select></label>
+        <label className="flex flex-col gap-1 min-w-[95px]"><span className="text-[10px] uppercase" style={{ color: 'var(--subtext)' }}>Instrumento</span><select style={fieldStyle} value={form.instrumento_tipo} disabled={!!editingId} onChange={e => set('instrumento_tipo', e.target.value)}><option value="acciones">Acciones</option><option value="bonos">Bonos</option><option value="cedears">Cedears</option><option value="ons">ONs</option><option value="crypto">Crypto</option></select></label>
         {input('Ticker', 'ticker')}
         {input('Nombre', 'nombre')}
         {input('Fecha', 'fecha', 'date')}

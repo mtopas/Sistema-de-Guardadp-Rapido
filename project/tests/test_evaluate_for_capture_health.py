@@ -88,6 +88,22 @@ class TestEvaluateForCaptureHealth:
         assert result is None
         assert passive._eval_consecutive_failures == 5
 
+    def test_modelo_devuelve_json_multiple_toma_primero(self, tmp_jarvis_db):
+        """Modelo devuelve dos JSON pegados (un veredicto por mensaje del
+        usuario) → raw_decode parsea el primero sin fallar."""
+        multi_json = (
+            '{"worth_capturing": true, "content": "Leer 3 libros por año.", '
+            '"question": "¿Guardo esto en tu memoria?"}'
+            '{"worth_capturing": true, "content": "Pagar hosting anual.", '
+            '"question": "¿Guardo esto en tu memoria?"}'
+        )
+        with patch("jarvis.llm.client.call_llm", return_value=multi_json):
+            result = passive.evaluate_for_capture("leer 3 libros; pagar hosting anual")
+        assert result is not None
+        assert "libros" in result["content"].lower() or "leer" in result["content"].lower()
+        health = passive.get_eval_health()
+        assert health["consecutive_failures"] == 0
+
     def test_health_lee_de_db_no_de_memoria(self, tmp_jarvis_db):
         """get_eval_health() lee de DB: si otro proceso escribió ahí, lo ve.
         Regresión del bug donde el backend (proceso separado del worker)

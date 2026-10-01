@@ -260,7 +260,7 @@ def evaluate_for_capture(text: str) -> dict | None:
                            _eval_consecutive_failures, _eval_last_error)
             _persist_eval_health()
             return None
-        verdict = json.loads(raw[start:end])
+        verdict, _ = json.JSONDecoder().raw_decode(raw, start)
         _eval_consecutive_failures = 0
         _eval_last_error = None
         _persist_eval_health()

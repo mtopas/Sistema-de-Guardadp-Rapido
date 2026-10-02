@@ -14,6 +14,54 @@ A diferencia del chat (cuyo contexto se pierde al cerrar la ventana), este archi
 
 ---
 
+## [2026-10-02, sesión 7 — retiro del `.exe` y del sync] — Sync homelab↔Windows eliminado
+- **Resultado:** Hecho (validado por el orquestador contra git y producción en solo lectura).
+- **Contexto:** el usuario confirmó que no usa el `.exe` (solo el homelab por Tailscale). Se cerró también la revisión de hojas: las 14 notas "faltantes" ya estaban en el homelab bajo otros ids; el usuario no rescató ninguna.
+- **Estado del repo:** `master` 3 commits adelante de `origin` (`4a5a11f` scripts y docs, `7f98031` endpoints y panel de Ajustes, `9ce7ccb` verificación post-deploy), sin trailers de IA. Eliminados `run_sgr.py`, `sgr.spec` y 5 scripts de sync (siguen en el historial); `SYNC-WINDOWS.md` y `BUILD.md` quedan como históricos; nuevo `project/scripts/dev-config.ps1` (el sandbox `dev-start`/`dev-stop` se conserva); `CLAUDE.md`/`HOMELAB.md`/`README.md` actualizados. Tests: 455 passed backend, 188 frontend.
+- **Verificado en producción:** `GET /sync/export` → 404 y `POST /sync/import` → 405 (sin ruta POST; el 405 lo produce el catch-all de la SPA), 3 contenedores UP (el trabajador reportó además `/jarvis/health` sano y conteos de `app.db` iguales antes y después). Backups `~/project/database/app.db.bak-20261002-150258` y `jarvis.db.bak-20261002-150258`. En esta PC no había tareas, procesos ni accesos directos del `.exe`; el watchdog `SGR-Ensure-ICS` no se tocó.
+- **Hallazgo a confirmar (orquestador):** `fin_movimientos` bajó de 88 (backup del 2026-09-30 13:34) a 17 en el backup del 2026-10-01 14:43, o sea ANTES del importador y de este deploy; hoy hay 19. Coincide con el momento en que el usuario vació instrumentos y dijo haber borrado "varias cosas a propósito". No lo asumí: queda para que el usuario confirme que la limpieza de movimientos fue deliberada (los 88 siguen en `app.db.bak-20260930-133414`).
+
+### Pendientes activos (Arrastre):
+- [ ] [PUSH / USUARIO] Pushear los 3 commits locales y commitear `Cerebro/Handoff.md`.
+- [x] ~~[MOVIMIENTOS 88→17]~~ — el usuario confirmó (2026-10-02) que borró él mismo todo en Finanzas a propósito; no hay nada que restaurar (los 88 siguen en `app.db.bak-20260930-133414`).
+- [ ] [VERIF / USUARIO] Hard refresh del navegador (PWA) y revisar Ahorro (Bonos/Cedears con valores, diálogo del tacho) y que Ajustes ya no muestre el panel de sync.
+- [ ] [OPCIONAL] Quitar `HOMELAB_HOST=` del `.env` del homelab (inerte, ya nadie lo lee): editar solo esa línea y `docker-compose up -d --no-build` (no `restart`).
+- [ ] [IDEA FINANZAS] Registrar ganancia realizada en las ventas (hoy la venta descuenta al PPC y el TC de la venta es solo informativo); anotar en `Finanzas-Roadmap.md`.
+- [ ] [BACKLOG] Auditar `Cerebro/PROXIMAMENTE.md` ítem por ítem contra el código (solo se verificó uno).
+- [ ] [DISEÑO — NO URGENTE] Propuestas del canal desktop solo visibles con el navegador abierto (empujarlas por Telegram); calidad de respuesta del router de Telegram (informe genérico ante una frase).
+- [ ] [IDEA] Certeza/estado por entrada de memoria de Jarvis; evaluar con prueba real.
+- [ ] [FRONTEND] Evaluar `Front-CLAUDE/`, `Front-GPT/` y `Front-Claude-Design/`.
+- [ ] [VIDEO PROMO] Prompt entregado; pendiente de ejecución (sandbox con `seed_demo.py`, nunca producción). Ahora hay una skill `/brag` instalada, evaluar usarla.
+- [ ] [MENSUAL] Flujo del importador: `python project/scripts/importar_operaciones.py <ordenes.csv> <tenencias.csv> <mep.csv> --aplicar --excluir-tickers TZX26`, luego `--actualizar-precios <tenencias.csv> --aplicar` (conversión con el MEP vigente, no el de la foto).
+- [x] ~~[RESCATE HOJAS], [DEUDA DE SYNC / .exe], [USO DEL .EXE]~~ — resueltos: no hay pérdida de notas y el `.exe` y el sync fueron retirados.
+- **Próximo objetivo inmediato recomendado:** confirmar lo de los movimientos y pushear. No quedan pendientes técnicos urgentes.
+
+---
+
+## [2026-10-02, sesión 6 — pendientes técnicos + IBIT] — Limpieza, captura pasiva endurecida, deploy único y restauración de IBIT
+- **Resultado:** Hecho (validado por el orquestador contra git y contra el homelab en solo lectura). Suite reproducida por el trabajador con el venv del proyecto: **455 passed** (441 + 8 de `--excluir-tickers` + 6 de captura pasiva), sin skips ni fallos; no la corrí yo.
+- **Estado del repo:** `master` 8 commits adelante de `origin`, árbol limpio, sin trailers de IA ni datos personales en el diff: `1412eda` (`--excluir-tickers` en el importador), `77f68be` (captura pasiva ante fallas del evaluador), `40c655e` (HOMELAB: salto de línea del `.env`, `OLLAMA_BASE_URL`, rebuild del frontend), `4a78646` (imports/variables muertas confirmados por pyflakes), `51783fc` (PROXIMAMENTE), `1d00b76` (estado-actual), `c058290` (confirmación al eliminar un activo), `f5637f1` (HOMELAB: `scp -r` anida `dist/dist`). Los seis primeros eran de la misma sesión del trabajador; su resumen intermedio no me llegó y los validé por `git log`/`--stat`. TZX26: 19→18 instrumentos y 35→34 transacciones; backup `app.db.bak-20261001-191501`. PROXIMAMENTE.md: el trabajador tocó UN solo ítem (reconciliación de importaciones CSV, tachado parcial, verificado contra el código); el mensaje del commit `51783fc` sobrevende ("verificados uno por uno"): los ~40 ítems restantes NO se auditaron.
+- **Verificado en producción:** 3 contenedores UP; `/jarvis/health` con worker vivo y `passive_eval` sin fallas; 18 instrumentos; TZX26 ausente; CRES y TXAR en cero (historial intacto); IBIT presente (cant 21, precio 5,006137); el bundle servido (`index-NROL1Fux.js`) es el del `dist` del host (imagen reconstruida); `JARVIS_PASSIVE_CAPTURE_INACTIVITY_MINUTES` ya no está en el `.env` ni en el contenedor del worker, o sea que rige el default de 20 minutos.
+- **Incidente: IBIT borrado por accidente.** El tacho de Ahorro borraba el instrumento y sus transacciones en cascada con un solo clic. El usuario borró IBIT sin querer; se restauró por API desde el backup `app.db.bak-20261001-191501` (2 compras re-posteadas; ids internos nuevos 44/49/50), sin tocar el resto. Mitigación: `window.confirm` explícito (no cubierto por vitest) en `DeleteCell`.
+- **Hallazgo:** el `scp -r project/frontend/dist` documentado **anidaba** el build en `dist/dist/` y el rebuild servía el bundle viejo; el trabajador lo corrigió en producción y en `HOMELAB.md`. Con esto el deploy de Bonos/Cedears en Ahorro quedó efectivo.
+
+### Pendientes activos (Arrastre):
+- [ ] [PUSH / USUARIO] Pushear los 8 commits locales.
+- [ ] [BACKLOG] Auditar `Cerebro/PROXIMAMENTE.md` ítem por ítem contra el código (solo se verificó uno). Ticket chico de baja prioridad.
+- [ ] [VERIF / USUARIO] Hard refresh del navegador para tomar el bundle nuevo (la app es PWA con service worker); abrir Ahorro y confirmar Bonos/Cedears con valores y el diálogo del tacho.
+- [x] ~~[RESCATE HOJAS]~~ — cerrado el 2026-10-02: el trabajador comparó por contenido las 14 notas de los grupos A (solo Windows, 6) y B (mismo id/contenido distinto, 8): TODAS ya existen en el homelab bajo otro id (los ids se reasignaron de forma independiente en cada réplica; en varios casos la versión del homelab es más completa). Grupo D (14, solo cambio de categoría) ya está en Basura en el homelab; grupo C (6 solo-homelab) no se pierde. El usuario no eligió ninguna nota. No hay pérdida de contenido. Material de la revisión (gitignored, datos personales): `project/database/backup-incidente-20260930/revision-hojas.html`.
+- [ ] [DECISIÓN — DEUDA DE SYNC / USUARIO] El usuario aclaró que usa SGR solo vía el homelab por Tailscale y NO abre el `.exe`. El sync homelab↔Windows (`SYNC-WINDOWS.md`) sobrescribe una réplica con la otra sin merge y reasigna ids de forma independiente: es la causa de la divergencia de `hojas` y un riesgo latente si el `.exe` se abre por error (el push al cerrar podría pisar el homelab). Opciones: (a) retirar el `.exe` y el sync de la PC y deprecar `SYNC-WINDOWS.md` (recomendada si no se usa), o (b) rediseñar el sync con merge por contenido e ids estables. Mientras tanto: NO abrir el `.exe`.
+- [ ] [IDEA FINANZAS] Registrar ganancia realizada en las ventas (hoy la venta descuenta al PPC y el TC de la venta es solo informativo); anotar en `Finanzas-Roadmap.md`.
+- [ ] [DISEÑO — NO URGENTE] Propuestas del canal desktop solo visibles con el navegador abierto (empujarlas por Telegram); calidad de respuesta del router de Telegram (informe genérico ante una frase).
+- [ ] [IDEA] Certeza/estado por entrada de memoria de Jarvis; evaluar con prueba real.
+- [ ] [FRONTEND] Evaluar `Front-CLAUDE/`, `Front-GPT/` y `Front-Claude-Design/`.
+- [ ] [VIDEO PROMO] Prompt entregado; pendiente de ejecución (sandbox con `seed_demo.py`, nunca producción). Ahora hay una skill `/brag` instalada, evaluar usarla.
+- [ ] [MENSUAL] Flujo con tres archivos: `python project/scripts/importar_operaciones.py <ordenes.csv> <tenencias.csv> <mep.csv> --aplicar --excluir-tickers TZX26` y luego `--actualizar-precios <tenencias.csv> --aplicar` (la conversión usa el MEP vigente, no el de la foto).
+- [x] ~~[TZX26], [precio_actual], [DEPLOY FRONTEND], [timeout 20 min], [captura pasiva por Telegram], [tests/docs HOMELAB], [imports huérfanos], [plazos fijos Brubank]~~ — resueltos. `PROXIMAMENTE.md`: revisión completa pasa al pendiente [BACKLOG] de arriba.
+- **Próximo objetivo inmediato recomendado:** verificar la pantalla de Ahorro (hard refresh) y decidir la deuda de sync (retirar el `.exe` o rediseñar). No quedan pendientes con riesgo de pérdida de datos conocidos.
+
+---
+
 ## [2026-10-01, sesión 5 — importador de operaciones] — Carga del ledger desde el broker + fix del parseo del evaluador
 - **Resultado:** Hecho con observaciones (validado por el orquestador contra commits, API y backups del homelab).
 - **Qué se hizo:** (a) Captura pasiva por Telegram: causa raíz = `json.loads()` fallaba con "Extra data" cuando el modelo devolvía un JSON por cada mensaje; fix con `raw_decode()` (`bfa853c`, +1 test), desplegado por el usuario con `scp` + `docker build` + recreate del worker (la prueba por Telegram sigue sin cerrarse). (b) Importador: `project/scripts/importar_operaciones.py` (CLI, dry-run por defecto, idempotente por `id Orden`, TC MEP histórico real tomado de un CSV de cotizaciones), 35 operaciones ejecutadas cargadas (21 omitidas: depósitos, transferencias, canceladas, rechazadas), 19 instrumentos, 16/16 posiciones concilian con el CSV de tenencias; tipos `bonos` y `cedears` ampliados en backend y frontend. Commits `7afe3e2`, `e7fb8b5`, `4b9d797` (sin datos personales, verificado). 430 tests.

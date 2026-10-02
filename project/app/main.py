@@ -767,6 +767,41 @@ async def refrescar_preview(hoja_id: int):
     return {"link_preview": preview}
 
 
+@app.get("/hojas/{hoja_id}/sugerir-categoria")
+def sugerir_categoria_hoja(hoja_id: int):
+    """Sugerencia de categoría por IA para una hoja (#11b), bajo demanda.
+
+    Reusa el clasificador y el umbral del triage de Inbox de Jarvis, con el
+    modelo LOCAL (el contenido no sale a un modelo externo). Nunca mueve la hoja
+    ni lanza 5xx por el LLM: si Jarvis/Ollama no responde, el selector sigue
+    funcionando sin sugerencia."""
+    hoja = obtener_hoja_por_id(hoja_id)
+    if hoja is None:
+        raise HTTPException(status_code=404, detail="Hoja no encontrada")
+
+    cuerpo = re.sub(r"<[^>]+>", " ", hoja.get("apuntes") or "")
+    contenido = f"{hoja.get('contenido') or ''}\n{cuerpo}".strip()
+
+    try:
+        from jarvis.ingestion.inbox_triage import sugerir_destino_para_hoja
+        resultado = sugerir_destino_para_hoja(contenido)
+    except Exception as exc:  # pragma: no cover - defensa ante Jarvis no disponible
+        if DEBUG:
+            print(f"sugerir_categoria_hoja: jarvis no disponible: {exc}")
+        return {"suficiente": True, "destino": None, "categoria_id": None,
+                "categoria_nombre": None, "error": "no_disponible"}
+
+    categoria_id = None
+    categoria_nombre = None
+    destino = resultado.get("destino")
+    if destino:
+        match = next((c for c in obtener_categorias() if c.get("ruta") == destino), None)
+        if match:
+            categoria_id = match["id"]
+            categoria_nombre = match["nombre"]
+    return {**resultado, "categoria_id": categoria_id, "categoria_nombre": categoria_nombre}
+
+
 @app.get("/hojas/recientes")
 def listar_hojas_recientes(limit: int = Query(20, ge=1, le=100)):
     return obtener_hojas_recientes(limit)

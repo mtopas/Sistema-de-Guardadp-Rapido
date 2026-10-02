@@ -270,43 +270,53 @@ Contenido de la nota:
 Destino:"""
 
 
-def _classify_destination(entry: dict) -> str | None:
-    """None si el LLM respondió NO_SE, si la respuesta no es exactamente una
-    de las 8 opciones permitidas, o si la llamada falló -- mismo criterio
-    anti-alucinación que _synthesize_entity_summary()/_CREATE_PROMPT
-    (jarvis/audit/service.py): nunca se acepta una carpeta que no esté en la
-    lista cerrada, cualquier cosa rara se trata como "sin dato", no como
-    error a reintentar.
-    """
-    from jarvis.llm.client import call_reason
-    from jarvis.privacy.gateway import filter_context
+def classify_destination_from_content(content: str, *, local_only: bool = False) -> str | None:
+    """Clasifica un texto crudo en una de las 8 carpetas fijas, o None.
 
-    if not filter_context([entry]):
+    None si el LLM respondió NO_SE, si la respuesta no es exactamente una de las
+    opciones permitidas, o si la llamada falló -- mismo criterio anti-alucinación
+    que _synthesize_entity_summary()/_CREATE_PROMPT (jarvis/audit/service.py):
+    nunca se acepta una carpeta fuera de la lista cerrada, cualquier cosa rara se
+    trata como "sin dato".
+
+    `local_only=True` fuerza el modelo LOCAL (gemma3:12b vía LiteLLM) en vez del
+    de razonamiento externo: así el contenido NUNCA sale de la máquina. Es el
+    modo que usa la sugerencia bajo demanda de categoría en la Bóveda (#11b),
+    donde la privacidad del contenido no puede depender del Privacy Gateway.
+    """
+    content = (content or "").strip()
+    if not content:
         return None
-    content = (entry.get("content_processed") or entry.get("content_raw") or "").strip()
 
     truncated = content
     if len(truncated) > _MAX_CONTENT_CHARS_FOR_PROMPT:
         truncated = truncated[:_MAX_CONTENT_CHARS_FOR_PROMPT].rstrip() + "…"
 
     options_text = "\n".join(f"- {opt}" for opt in _DEST_OPTIONS)
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Clasificás notas personales en una carpeta de una lista "
+                "cerrada, o decís NO_SE si no hay señal suficiente. Nunca "
+                "inventás una carpeta fuera de la lista."
+            ),
+        },
+        {
+            "role": "user",
+            "content": _TRIAGE_PROMPT.format(options=options_text, content=truncated),
+        },
+    ]
     try:
-        raw = call_reason(
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "Clasificás notas personales en una carpeta de una lista "
-                        "cerrada, o decís NO_SE si no hay señal suficiente. Nunca "
-                        "inventás una carpeta fuera de la lista."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": _TRIAGE_PROMPT.format(options=options_text, content=truncated),
-                },
-            ]
-        )
+        if local_only:
+            from jarvis.config import JARVIS_LOCAL_MODEL
+            from jarvis.llm.client import call_llm
+
+            raw = call_llm(messages=messages, model=JARVIS_LOCAL_MODEL)
+        else:
+            from jarvis.llm.client import call_reason
+
+            raw = call_reason(messages=messages)
     except Exception as exc:
         logger.warning("[jarvis.ingestion.inbox_triage] Clasificación falló: %s", exc)
         return None
@@ -315,6 +325,51 @@ def _classify_destination(entry: dict) -> str | None:
     if text in _DEST_OPTIONS_SET:
         return text
     return None
+
+
+def _classify_destination(entry: dict) -> str | None:
+    """Clasificación para el triage automático del worker: pasa por el Privacy
+    Gateway (puede salir al modelo externo de razonamiento) y reusa el núcleo
+    `classify_destination_from_content`."""
+    from jarvis.privacy.gateway import filter_context
+
+    if not filter_context([entry]):
+        return None
+    content = (entry.get("content_processed") or entry.get("content_raw") or "").strip()
+    return classify_destination_from_content(content, local_only=False)
+
+
+# ── Sugerencia bajo demanda para la Bóveda (#11b, modelo LOCAL) ─────────────
+
+_URL_RE = re.compile(r"https?://\S+")
+
+
+def _texto_sin_links(content: str) -> str:
+    return _URL_RE.sub("", content or "").strip()
+
+
+def contenido_suficiente_para_sugerir(content: str) -> bool:
+    """True si el texto (sin contar las URLs) alcanza el piso de contenido del
+    triage. Una nota que es solo un link, o con muy poco texto, queda por debajo
+    -- mismo umbral JARVIS_INBOX_TRIAGE_MIN_CONTENT_CHARS que el triage."""
+    return len(_texto_sin_links(content)) >= JARVIS_INBOX_TRIAGE_MIN_CONTENT_CHARS
+
+
+def sugerir_destino_para_hoja(content: str) -> dict:
+    """Sugerencia de categoría para una hoja de la Bóveda, bajo demanda (#11b).
+
+    Reusa la lógica de clasificación y el umbral de contenido del triage, pero
+    SIEMPRE con el modelo local (el contenido no sale a un modelo externo) y sin
+    mover nada: solo sugiere. Si no hay contenido suficiente (p. ej. solo un
+    link) devuelve `suficiente=False`; si Ollama no responde o el modelo dice
+    NO_SE, devuelve `destino=None` sin lanzar (el selector sigue usable)."""
+    if not contenido_suficiente_para_sugerir(content):
+        return {
+            "suficiente": False,
+            "destino": None,
+            "motivo": "falta descripción o resumen para sugerir",
+        }
+    return {"suficiente": True, "destino": classify_destination_from_content(content, local_only=True)}
 
 
 # ── Candidata -> propuesta ───────────────────────────────────────────────

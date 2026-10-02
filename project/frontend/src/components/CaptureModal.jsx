@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { X, FileText, Link as LinkIcon, Image as ImageIcon, Sparkles, Zap, BookOpen, Target, Calendar, TrendingUp } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { detectType } from '../utils/detectType'
+import { tituloDesdeCuerpo, textoPlanoAHtml, primerLinkEnCuerpo } from '../utils/cuerpoHoja'
 import { API_URL, DEBUG } from '../config'
 import CategoryPicker from './CategoryPicker'
 import LinkPreview from './LinkPreview'
@@ -138,9 +139,18 @@ export default function CaptureModal() {
     if (tipo === 'foto') {
       if (!fotoUrl) { showToast('Subí una foto', 'error'); return }
       payload.contenido = fotoUrl
-    } else {
+    } else if (tipo === 'link') {
+      // Link puro: la URL sigue en `contenido` (sin migración; el banner y la
+      // preview del link siguen funcionando como hasta ahora).
       if (!contenido.trim()) { showToast('Escribí algo', 'error'); return }
       payload.contenido = contenido.trim()
+    } else {
+      // Texto (#12 + #13): el textarea es el CUERPO. Va a `apuntes`; el título
+      // (`contenido`) se autogenera de la primera línea y queda editable luego.
+      const cuerpo = contenido.trim()
+      if (!cuerpo) { showToast('Escribí algo', 'error'); return }
+      payload.contenido = tituloDesdeCuerpo(cuerpo)
+      payload.apuntes = textoPlanoAHtml(cuerpo)
     }
     setSaving(true)
     try {
@@ -436,7 +446,7 @@ export default function CaptureModal() {
               ref={textareaRef}
               value={contenido}
               onChange={e => setContenido(e.target.value)}
-              placeholder="Pegá un link, escribí texto, o usá la cámara…"
+              placeholder="Escribí tu nota — la primera línea será el título. O pegá un link…"
               rows={4}
               className="w-full rounded-xl px-3 py-2.5 text-[15px] outline-none resize-none border transition-colors"
               style={{

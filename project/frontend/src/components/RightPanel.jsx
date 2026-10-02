@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowRight, Calendar, FileText, Image as ImageIcon, Link as LinkIcon, Pencil, Tag } from 'lucide-react'
 import { useStore } from '../store/useStore'
@@ -6,7 +6,10 @@ import { buildCategoriaColorMap } from '../utils/categoriaColors'
 import { extractTags } from '../utils/tags'
 import { getLeafIcon } from '../utils/leafIcons'
 import { getHojaDisplayTitle, getHojaImageUrl } from '../utils/hojaUtils'
+import { buildHojaContextItems } from '../utils/hojaMenu'
+import AgendaContextMenu from './agenda/AgendaContextMenu'
 import EditHojaModal from './EditHojaModal'
+import DeleteHojaModal from './DeleteHojaModal'
 
 function relativeDate(value) {
   if (!value) return ''
@@ -34,7 +37,23 @@ export default function RightPanel({ selectedHojaId, onSelectHoja }) {
   const hojasRecientes = useStore(s => s.hojasRecientes)
   const fetchHojasRecientes = useStore(s => s.fetchHojasRecientes)
   const categorias = useStore(s => s.categorias)
+  const lang = useStore(s => s.lang)
   const [editHoja, setEditHoja] = useState(null)
+  const [deleteHoja, setDeleteHoja] = useState(null)
+  const [hojaMenu, setHojaMenu] = useState(null)
+
+  const openHojaContextMenu = useCallback((e, hoja) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setHojaMenu({ x: e.clientX, y: e.clientY, hoja })
+  }, [])
+
+  const hojaMenuItems = useCallback((hoja) => buildHojaContextItems(hoja, {
+    lang,
+    onOpen: h => navigate(`/hoja/${h.id}`),
+    onEdit: h => setEditHoja(h),
+    onDelete: h => setDeleteHoja(h),
+  }), [lang, navigate])
 
   const colorMap = useMemo(() => buildCategoriaColorMap(categorias), [categorias])
   useEffect(() => { fetchHojasRecientes() }, [hojas, fetchHojasRecientes])
@@ -59,7 +78,7 @@ export default function RightPanel({ selectedHojaId, onSelectHoja }) {
             const Icon = getLeafIcon(hoja.icono, hoja.tipo)
             const active = hoja.id === selectedHojaId
             return (
-              <button key={hoja.id} type="button" onClick={() => onSelectHoja?.(hoja.id)} className="w-full min-h-[58px] px-2.5 py-2 text-left flex items-center gap-2.5 border transition-colors" style={{ background: active ? `color-mix(in oklch, ${color} 12%, var(--surface))` : 'var(--surface)', borderColor: active ? color : 'color-mix(in oklch, var(--border) 80%, transparent)', borderRadius: 8 }}>
+              <button key={hoja.id} type="button" onClick={() => onSelectHoja?.(hoja.id)} onContextMenu={e => openHojaContextMenu(e, hoja)} className="w-full min-h-[58px] px-2.5 py-2 text-left flex items-center gap-2.5 border transition-colors" style={{ background: active ? `color-mix(in oklch, ${color} 12%, var(--surface))` : 'var(--surface)', borderColor: active ? color : 'color-mix(in oklch, var(--border) 80%, transparent)', borderRadius: 8 }}>
                 <span className="w-8 h-8 flex items-center justify-center flex-none" style={{ color, background: `color-mix(in oklch, ${color} 15%, transparent)`, borderRadius: 7 }}><Icon size={15} /></span>
                 <span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium" style={{ color: 'var(--text)' }}>{getHojaDisplayTitle(hoja)}</span><span className="mt-0.5 flex items-center justify-between gap-2 text-[10px]" style={{ color: 'var(--subtext)' }}><NoteType tipo={hoja.tipo} color={color} /> <span>{relativeDate(hoja.fecha_actualizado || hoja.fecha)}</span></span></span>
               </button>
@@ -81,7 +100,22 @@ export default function RightPanel({ selectedHojaId, onSelectHoja }) {
           </div>
         ) : <div className="px-4 py-6 text-xs leading-relaxed" style={{ color: 'var(--subtext)' }}>Seleccioná una hoja para revisar su contenido y abrirla en el editor.</div>}
       </section>
+      {hojaMenu && (
+        <AgendaContextMenu
+          x={hojaMenu.x}
+          y={hojaMenu.y}
+          items={hojaMenuItems(hojaMenu.hoja)}
+          onClose={() => setHojaMenu(null)}
+        />
+      )}
+
       <EditHojaModal hoja={editHoja} onClose={() => setEditHoja(null)} />
+
+      <DeleteHojaModal
+        hoja={deleteHoja}
+        onClose={() => setDeleteHoja(null)}
+        onDeleted={(id) => { if (id === selectedHojaId) onSelectHoja?.(null) }}
+      />
     </aside>
   )
 }

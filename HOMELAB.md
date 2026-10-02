@@ -249,11 +249,23 @@ npm run build   # genera project/frontend/dist/ -- VITE_API_URL sin setear = fet
 
 **2. Copiar el build + el `Dockerfile` (que ahora sí copia `frontend/dist`):**
 
+> **⚠ Borrá el `dist/` remoto ANTES del `scp -r`.** Si `~/project/frontend/dist`
+> ya existe, `scp -r project/frontend/dist ...:~/project/frontend/dist` **anida** el
+> build dentro (`~/project/frontend/dist/dist/`) en vez de reemplazarlo: el
+> `COPY project/frontend/dist` del `Dockerfile` toma el `dist/` viejo del nivel de
+> arriba y el rebuild sirve el bundle anterior (el `index-*.js` servido no coincide
+> con el del `dist` local). Pasó el 2026-10-02. Por eso el `rm -rf` primero:
+
 ```powershell
 cd D:\SGR
 scp project/Dockerfile mtopas@192.168.137.10:~/project/Dockerfile
+ssh mtopas@192.168.137.10 "rm -rf ~/project/frontend/dist"
 scp -r project/frontend/dist mtopas@192.168.137.10:~/project/frontend/dist
 ```
+
+(Alternativa sin la trampa: el `tar ... project | ssh ... tar xzf -` de "Actualizar código
+en el servidor" arriba ya reemplaza el `dist/` en su lugar, porque extrae sobre el árbol
+existente; el `scp -r` es el que anida.)
 
 **3. Rebuild + reiniciar** (mismos comandos que "Actualizar código en el servidor" arriba):
 

@@ -496,7 +496,7 @@ function AccionesRows({ items }) {
         <InstReadOnlyCell tdStyle={{ textAlign: 'right', color: plColor }}>
           {pl != null ? `${pl.diff >= 0 ? '+' : ''}${fmtUSD(pl.diff)} (${pl.pct >= 0 ? '+' : ''}${pl.pct.toFixed(1)}%)` : '—'}
         </InstReadOnlyCell>
-        <DeleteCell id={inst.id} />
+        <DeleteCell inst={inst} />
       </tr>
     )
   })
@@ -524,7 +524,7 @@ function FCIRows({ items }) {
           inputStyle={{ textAlign: 'right', color: 'var(--accent)' }}
         />
         <InstReadOnlyCell tdStyle={{ textAlign: 'right' }}>{fmtUSD(valor)}</InstReadOnlyCell>
-        <DeleteCell id={inst.id} />
+        <DeleteCell inst={inst} />
       </tr>
     )
   })
@@ -555,7 +555,7 @@ function PlazoFijoRows({ items }) {
         <InstDateCell inst={inst} field="fecha_vencimiento" />
         <InstReadOnlyCell tdStyle={{ textAlign: 'right', color: 'var(--success)' }}>{fmtARS(intereses)}</InstReadOnlyCell>
         <InstReadOnlyCell tdStyle={{ textAlign: 'right', fontWeight: 600 }}>{fmtARS(total)}</InstReadOnlyCell>
-        <DeleteCell id={inst.id} />
+        <DeleteCell inst={inst} />
       </tr>
     )
   })
@@ -610,7 +610,7 @@ function PlazoFijoUVARows({ items, uvaHoy }) {
             </div>
           ) : '—'}
         </InstReadOnlyCell>
-        <DeleteCell id={inst.id} />
+        <DeleteCell inst={inst} />
       </tr>
     )
   })
@@ -639,18 +639,25 @@ function OtrosRows({ items }) {
           tdStyle={{ textAlign: 'right' }}
           inputStyle={{ textAlign: 'right' }}
         />
-        <DeleteCell id={inst.id} />
+        <DeleteCell inst={inst} />
       </tr>
     )
   })
 }
 
-function DeleteCell({ id }) {
+function DeleteCell({ inst }) {
   const del = useStore(s => s.deleteFinInstrumento)
+  const lang = useStore(s => s.lang)
+  const label = inst.ticker || inst.nombre || inst.sociedad || inst.entidad || `#${inst.id}`
+  const onDelete = () => {
+    if (window.confirm(t(lang, 'finInstrDeleteConfirm').replace('{name}', label))) del(inst.id)
+  }
   return (
     <td style={{ ...TD, textAlign: 'center' }}>
       <button
-        onClick={() => del(id)}
+        onClick={onDelete}
+        title={t(lang, 'finInstrDeleteTitle')}
+        aria-label={t(lang, 'finInstrDeleteTitle')}
         style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--subtext)', padding: 2, lineHeight: 0 }}
         onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
         onMouseLeave={e => (e.currentTarget.style.color = 'var(--subtext)')}

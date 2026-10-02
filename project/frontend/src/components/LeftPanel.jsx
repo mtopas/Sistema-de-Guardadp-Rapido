@@ -14,6 +14,8 @@ import EditHojaModal from './EditHojaModal'
 import DeleteHojaModal from './DeleteHojaModal'
 import DeleteCategoriaModal from './DeleteCategoriaModal'
 import { getHojaDisplayTitle } from '../utils/hojaUtils'
+import MoverCategoriaInline from './MoverCategoriaInline'
+import { RUTA_SIN_CATEGORIZAR } from '../utils/categoriaInline'
 import { API_URL } from '../config'
 
 const LS_TREE_KEY = 'sgr-boveda-tree-open'
@@ -236,10 +238,20 @@ function CategoryItem({
           {catHojas.length > 0 && (
             <div className="space-y-0.5" style={{ paddingLeft: 6 + (depth + 1) * 12 }}>
               {catHojas.map(h => (
-                <NoteCard key={h.id} hoja={h} dotColor={color}
-                  onClick={() => onNoteClick(h.id)}
-                  onContextMenu={onHojaContextMenu}
-                  query={query} />
+                cat.ruta === RUTA_SIN_CATEGORIZAR ? (
+                  <div key={h.id} className="space-y-1 pb-1">
+                    <NoteCard hoja={h} dotColor={color}
+                      onClick={() => onNoteClick(h.id)}
+                      onContextMenu={onHojaContextMenu}
+                      query={query} />
+                    <div className="px-2.5"><MoverCategoriaInline hoja={h} /></div>
+                  </div>
+                ) : (
+                  <NoteCard key={h.id} hoja={h} dotColor={color}
+                    onClick={() => onNoteClick(h.id)}
+                    onContextMenu={onHojaContextMenu}
+                    query={query} />
+                )
               ))}
             </div>
           )}

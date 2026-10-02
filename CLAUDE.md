@@ -8,8 +8,8 @@ Guía para agentes en este repositorio.
 | `project/Finanzas.md` | Finanzas: reglas, API, componentes, bot |
 | `project/Finanzas-Roadmap.md` | Pendientes y deuda Finanzas |
 | `project/Boveda.md`, `Agenda.md`, `Habitos.md`, `Bot.md` | Otros módulos (en `project/` si existen) |
-| `project/SYNC-WINDOWS.md` | Sync homelab ↔ `.exe` (pull al abrir, push al cerrar, dev sandbox) |
-| `HOMELAB.md` | Docker, ICS, sync homelab ↔ Windows |
+| `project/SYNC-WINDOWS.md` | Histórico: diseño del sync homelab ↔ `.exe` (retirado 2026-10-02) |
+| `HOMELAB.md` | Docker, ICS, deploy y acceso remoto del homelab |
 
 ---
 
@@ -53,7 +53,7 @@ cada vez que cambia (ver `HOMELAB.md`).
 
 | Qué        | Puerto / URL                                                          |
 | ---------- | --------------------------------------------------------------------- |
-| API SGR    | **8765** — `uvicorn … --port 8765`, `.exe`, `app/config.py`           |
+| API SGR    | **8765** — `uvicorn … --port 8765`, `app/config.py`                   |
 | Vite (dev) | **5173** — llama a `http://127.0.0.1:8765` (`frontend/src/config.js`) |
 | Override   | `SGR_PORT`, `API_BASE_URL` en `.env` — ver `project/.env.example`     |
 
@@ -69,9 +69,14 @@ cd project
 python seed_demo.py   # ADVERTENCIA: borra toda la DB y inserta datos de ejemplo
 ```
 
-### Ejecutable Windows
+### Ejecutable Windows (retirado 2026-10-02)
 
-Ver `project/BUILD.md` — PyInstaller desde `project/` → `dist/SGR/`; abre `http://127.0.0.1:8765/`; datos en `project/database/` (fuera de `dist/`). El bot **no** va en el `.exe` (proceso aparte, misma API `:8765`).
+El `.exe` y el sync homelab ↔ Windows ya no se mantienen ni se distribuyen: el usuario opera SGR solo
+desde el homelab (`192.168.137.10:8765`) por Tailscale. Se eliminaron `run_sgr.py`, `sgr.spec`, los
+endpoints `/sync/*`, la variable `SGR_SYNC_TOKEN` y los scripts `sgr-sync-*`/`sync-config`/`verify-sync`/`sgr-abrir`
+(siguen en el historial de git). `project/BUILD.md` y `project/SYNC-WINDOWS.md` quedan como registro
+histórico del empaquetado y del porqué del retiro. El desarrollo local se mantiene (`dev-start.ps1`:
+uvicorn `:8765` + Vite `:5173` sobre un sandbox `app.db.dev`).
 
 ---
 
@@ -219,7 +224,7 @@ Reglas que aplican desde ahora, para cualquier agente que trabaje en este repo:
   `C:\Users\<usuario>`) como default de una variable en código nuevo. Usar el patrón ya establecido:
   default calculado en base a la ubicación del propio módulo/script (`project_dir()` en
   `app/paths.py`, `_BASE` en `jarvis/config.py`, `$PSScriptRoot` en los `.ps1`), con override por
-  env var. Ver `project/app/config.py::VAULT_ROOT` y `project/scripts/sync-config.ps1` como
+  env var. Ver `project/app/config.py::VAULT_ROOT` y `project/scripts/dev-config.ps1` como
   referencia de cómo se resolvió esto.
 - **Nunca commitear secrets/tokens/API keys reales** — solo nombres de variable en `.env.example`,
   nunca un valor real. Si un archivo de config necesita un valor real para funcionar (tokens de

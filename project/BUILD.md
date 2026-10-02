@@ -1,5 +1,12 @@
 # Recompilar SGR (.exe)
 
+> **⚠️ El `.exe` ya no se mantiene ni se distribuye (2026-10-02).** El usuario usa SGR solo desde el
+> homelab (`192.168.137.10:8765`) por Tailscale. Se eliminaron el entry point (`run_sgr.py`) y el
+> spec de PyInstaller (`sgr.spec`), junto con el mecanismo de sync homelab ↔ Windows (ver
+> [`SYNC-WINDOWS.md`](SYNC-WINDOWS.md)). Las instrucciones de abajo quedan **solo como referencia
+> histórica**; los archivos que mencionan (`run_sgr.py`, `sgr.spec`) ya no existen en el árbol pero
+> siguen en el historial de git si alguna vez hiciera falta reconstruir el empaquetado.
+
 Ejecutá **todo** esto en cada cambio (backend o frontend), desde la carpeta **`project`** del repositorio:
 
 ```bash
@@ -67,8 +74,6 @@ Tras cambios en `run_sgr.py` o el puerto, volvé a correr PyInstaller (`python -
 | Uploads | `project/uploads/` | `project/uploads/` |
 
 El bot de Telegram (`mybot/bot.py`) **no** se incluye en el `.exe`; sigue siendo un proceso aparte apuntando a la misma API.
-
-**Homelab + `.exe` en Windows:** la DB canónica vive en el gabinete; antes de abrir el ejecutable conviene sincronizar. Diseño y scripts previstos: [`SYNC-WINDOWS.md`](SYNC-WINDOWS.md).
 
 ## Tabs Finanzas en blanco / 404 en `/assets/FireTab-….js`
 

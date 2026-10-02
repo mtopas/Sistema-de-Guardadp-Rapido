@@ -1,5 +1,19 @@
 # Sincronización homelab ↔ Windows (.exe)
 
+> **⚠️ DEPRECADO (2026-10-02).** Este mecanismo de sync y el `.exe` de Windows fueron retirados.
+> El usuario opera SGR **solo desde el homelab** (`192.168.137.10:8765`) por Tailscale, así que ya
+> no existen dos réplicas que sincronizar. El sync pisaba una base con la otra **sin merge** y
+> reasignaba ids por su cuenta (causa de la divergencia de `hojas` y del incidente del 2026-09-30),
+> y exponía `POST /sync/import`, capaz de reemplazar la base de producción entera.
+>
+> Se eliminaron: los endpoints `/sync/export` y `/sync/import`, la variable `SGR_SYNC_TOKEN`, los
+> scripts `sgr-sync-*.ps1`, `sync-config.ps1`, `verify-sync.ps1`, `sgr-abrir.ps1`, y el entry point
+> del `.exe` (`run_sgr.py` + `sgr.spec`). Todo sigue en el historial de git.
+>
+> Este archivo se conserva **solo como registro histórico del diseño y del porqué se retiró** — no
+> describe nada vigente. El desarrollo local sigue existiendo (ver `dev-start.ps1`: uvicorn `:8765`
+> + Vite `:5173` sobre un sandbox `app.db.dev`).
+
 ## Problema a resolver
 
 **Desincronización de la base de datos:** el mismo producto (SGR) opera sobre **dos archivos SQLite distintos** que divergen con el uso normal.

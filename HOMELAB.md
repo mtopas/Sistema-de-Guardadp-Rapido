@@ -1,94 +1,57 @@
 # Homelab SGR — Cheatsheet y referencia
 
 > **Repo público desde 2026-09-22.** Este archivo queda versionado — no pegar acá tokens, passwords,
-> ni valores reales de `SGR_SYNC_TOKEN`/`TELEGRAM_BOT_TOKEN`/etc. Los ejemplos de IP/usuario que ya
+> ni valores reales de `TELEGRAM_BOT_TOKEN`/etc. Los ejemplos de IP/usuario que ya
 > hay abajo (`192.168.137.x`, `mtopas`) se dejaron como están (rango LAN estándar de ICS, no un
 > secreto), pero cualquier valor nuevo que sea realmente sensible va a `.env` (gitignoreado), nunca
 > a este archivo. Ver `CLAUDE.md` sección "Repo público" para el detalle completo.
 
 Gabinete Ubuntu con **backend + bot** en Docker. API en **`:8765`** (no `:8000`).
 
-### ⚠️ Dos bases de datos (causa típica: “el bot guardó pero no lo veo en Finanzas”)
+### ⚠️ La base canónica vive en el homelab
 
 | Dónde corrés | API que usa | Archivo `app.db` |
 | :--- | :--- | :--- |
-| **Vite en Windows** (`npm run dev`) | `http://127.0.0.1:8765` | `project/database/app.db` en la PC |
-| **Bot en Docker (homelab)** | `http://backend:8765` en el gabinete | `~/project/database/app.db` en Ubuntu |
+| **Producción (uso diario)** | homelab `192.168.137.10:8765` (por Tailscale) | `~/project/database/app.db` en Ubuntu — **canónica** |
+| **Bot en Docker (homelab)** | `http://backend:8765` en el gabinete | la misma `~/project/database/app.db` |
+| **Dev en Windows** (`dev-start.ps1`) | `http://127.0.0.1:8765` | `project/database/app.db.dev` — sandbox aislado, nunca es producción |
 
-Son **dos SQLite distintas** que se sincronizan con los scripts de `project/scripts/`. La **canónica** vive en el homelab; Windows mantiene una **réplica** local para el `.exe`. Especificación completa en [`project/SYNC-WINDOWS.md`](project/SYNC-WINDOWS.md).
+La **única** base de producción es la del homelab. El `.exe` de Windows y el mecanismo de sync
+homelab ↔ Windows **se retiraron el 2026-10-02** (ver abajo): ya no hay una segunda réplica que
+mantener alineada, así que desapareció la causa de "el bot guardó pero no lo veo en Finanzas" y del
+incidente de pérdida de datos del 2026-09-30.
 
 ---
 
-### Sync homelab ↔ Windows
+### Sync homelab ↔ Windows — RETIRADO (2026-10-02)
 
-Stack homelab: `backend` + `bot` en Docker, siempre encendidos. El `.exe` en Windows sincroniza al abrir y al cerrar usando los scripts de `project/scripts/`.
+El `.exe` de Windows y su sync automático con el homelab se eliminaron. El usuario opera SGR solo
+desde el homelab por Tailscale, así que no existen dos réplicas que sincronizar. El sync pisaba una
+base con la otra **sin merge** y reasignaba ids por su cuenta (causa de la divergencia de `hojas` y
+del incidente del 2026-09-30), y exponía `POST /sync/import`, capaz de reemplazar la base de
+producción entera.
 
-**Prerrequisito único: clave SSH sin contraseña** (para scp de uploads):
+Se eliminaron: los endpoints `/sync/export` y `/sync/import`, la variable `SGR_SYNC_TOKEN`, los
+scripts `sgr-sync-pull.ps1`, `sgr-sync-push.ps1`, `sync-config.ps1`, `verify-sync.ps1`,
+`sgr-abrir.ps1`, y el entry point del `.exe` (`run_sgr.py` + `sgr.spec`). Todo sigue en el historial
+de git. El diseño histórico y el porqué del retiro quedan en
+[`project/SYNC-WINDOWS.md`](project/SYNC-WINDOWS.md).
 
-```powershell
-# En Windows — generar clave si no existe
-ssh-keygen -t ed25519 -C “sgr-sync”
-# Copiar al homelab
-type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh mtopas@192.168.137.10 “mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys”
-# Verificar (debe conectar sin pedir contraseña)
-ssh mtopas@192.168.137.10 “echo OK”
-```
-
-**Configurar `project/scripts/sync-config.ps1`** (una vez):
-
-```powershell
-$HomelabHost    = “192.168.137.10”   # IP del gabinete
-$HomelabUser    = “mtopas”
-$HomelabProject = “~/project”
-$SgrExe         = “D:\SGR\project\dist\SGR\SGR.exe”
-$LocalDataRoot  = “D:\SGR\project”
-$SyncToken      = “”                  # Igual al SGR_SYNC_TOKEN en .env del homelab (si se configuró)
-```
-
-**Flujo de uso diario:**
-
-```
-Doble clic en acceso directo → sgr-abrir.ps1
-  ├─ Pull: GET http://homelab:8765/sync/export → app.db local   (sin parar Docker)
-  ├─ Lanza SGR.exe → trabaja normalmente
-  └─ Al cerrar: si la DB cambió (SHA-256) → “¿Subir cambios?” → POST /sync/import
-```
-
-**Scripts disponibles:**
-
-| Script | Uso |
-| :--- | :--- |
-| `sgr-abrir.ps1` | Launcher completo (pull → exe → push opcional). Poner como acceso directo. |
-| `sgr-sync-pull.ps1` | Solo pull manual (si querés actualizar sin abrir el exe). |
-| `sgr-sync-push.ps1` | Solo push manual (si cerraste sin hacer push). |
-| `dev-start.ps1` | Sandbox de desarrollo: copia DB a `.dev`, levanta uvicorn aislado. |
-| `dev-stop.ps1` | Limpia archivos `.dev` si `dev-start` terminó de forma abrupta. |
-
-**Desarrollo local** (para modificar el código):
+**Desarrollo local** (lo único que se conserva del lado de Windows):
 
 ```powershell
-# Terminal 1 — uvicorn aislado en app.db.dev (nunca toca la DB de producción local)
+# Terminal 1 — uvicorn aislado en app.db.dev (nunca toca ninguna DB de producción)
 .\project\scripts\dev-start.ps1   # Ctrl+C para parar; limpia .dev automáticamente
 
 # Terminal 2 — frontend
 cd project\frontend && npm run dev
 ```
 
-**Verificar sync tras pull:**
-
-```powershell
-# Compara counts locales vs homelab
-curl -s http://127.0.0.1:8765/meta    # local (con exe corriendo)
-curl -s http://192.168.137.10:8765/meta  # homelab
-```
-
-**Backup automático en el homelab:** antes de cada push (POST /sync/import), el servidor crea `database/app.db.bak.<timestamp>`. Para limpiar backups viejos:
-
-```bash
-# En el homelab
-ls ~/project/database/app.db.bak.*
-rm ~/project/database/app.db.bak.<timestamp_viejo>
-```
+| Script | Uso |
+| :--- | :--- |
+| `dev-config.ps1` | Rutas locales del sandbox (sourced por `dev-start`/`dev-stop`). |
+| `dev-start.ps1` | Sandbox de desarrollo: copia DB a `.dev`, levanta uvicorn aislado. |
+| `dev-stop.ps1` | Limpia archivos `.dev` si `dev-start` terminó de forma abrupta. |
 
 ---
 
@@ -582,7 +545,7 @@ En lugar de instalar dependencias en el sistema host, usamos **Docker** (`projec
 
 ### Arquitectura
 
-Backend + bot + worker en Docker (`docker-compose.yml`), desplegados 2026-08-26. DB canónica en `~/project/database/`. El `.exe` en Windows mantiene una réplica local y sincroniza con `sgr-abrir.ps1` (pull al abrir, push opcional al cerrar). Ver [`project/SYNC-WINDOWS.md`](project/SYNC-WINDOWS.md).
+Backend + bot + worker en Docker (`docker-compose.yml`), desplegados 2026-08-26. DB canónica (única) en `~/project/database/`. El `.exe` de Windows y el sync homelab ↔ Windows se retiraron el 2026-10-02 (ver sección "Sync homelab ↔ Windows — RETIRADO" más arriba y [`project/SYNC-WINDOWS.md`](project/SYNC-WINDOWS.md)); el acceso remoto es por Tailscale directo al homelab.
 
 **Jarvis vive fuera de `project/`, en `~/jarvis` (hermano de `~/project`, mismo layout que el repo — ver CLAUDE.md).** El build context de `docker-compose.yml` es por eso el **root del repo** (`context: ..` desde `project/docker-compose.yml`, `dockerfile: project/Dockerfile`), no `project/` como antes de que Jarvis existiera — el `Dockerfile` copia `project/app`, `project/mybot` **y** `jarvis` en la misma imagen. Los tres servicios comparten `jarvis.db` + `database/chroma/` vía volumes (`JARVIS_DB_PATH`/`JARVIS_CHROMA_PATH`).
 

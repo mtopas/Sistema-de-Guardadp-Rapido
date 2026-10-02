@@ -2,7 +2,7 @@
 ## dev-start.ps1 ya hace esta limpieza automaticamente en su bloque finally.
 ## Usar este script solo si quedaron archivos .dev huerfanos.
 
-. "$PSScriptRoot\sync-config.ps1"
+. "$PSScriptRoot\dev-config.ps1"
 
 $DevDb  = "$LocalDataRoot\database\app.db.dev"
 $DevWal = "$DevDb-wal"

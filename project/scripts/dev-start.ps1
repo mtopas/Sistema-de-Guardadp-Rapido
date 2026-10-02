@@ -9,7 +9,7 @@
 ##
 ## Al hacer Ctrl+C en la Terminal 1, el script limpia app.db.dev y boveda.dev automaticamente.
 
-. "$PSScriptRoot\sync-config.ps1"
+. "$PSScriptRoot\dev-config.ps1"
 
 $DevDb    = "$LocalDataRoot\database\app.db.dev"
 $DevWal   = "$DevDb-wal"

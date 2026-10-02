@@ -414,6 +414,14 @@ html[data-theme="blanco-negro"] .btn-ghost:hover {
 .ProseMirror p + p { margin-top: 0.4rem; }
 .ProseMirror ul,
 .ProseMirror ol { padding-left: 1.25rem; margin: 0.25rem 0; }
+/* @tailwind base (preflight) resetea list-style a none; lo restituimos para que
+   se vean los marcadores de viñeta/numeración en el editor. */
+.ProseMirror ul { list-style-type: disc; }
+.ProseMirror ol { list-style-type: decimal; }
+.ProseMirror ul ul { list-style-type: circle; }
+.ProseMirror ul ul ul { list-style-type: square; }
+.ProseMirror ol ol { list-style-type: lower-alpha; }
+.ProseMirror ol ol ol { list-style-type: lower-roman; }
 .ProseMirror h1 { font-size: 1.1rem; font-weight: 600; margin: 0.5rem 0 0.25rem; }
 .ProseMirror h2 { font-size: 1rem;   font-weight: 600; margin: 0.5rem 0 0.25rem; }
 .ProseMirror strong { font-weight: 600; }
@@ -427,6 +435,12 @@ html[data-theme="blanco-negro"] .btn-ghost:hover {
 .apuntes-preview p + p { margin-top: 0.4rem; }
 .apuntes-preview ul,
 .apuntes-preview ol  { padding-left: 1.25rem; margin: 0.3rem 0; }
+.apuntes-preview ul { list-style-type: disc; }
+.apuntes-preview ol { list-style-type: decimal; }
+.apuntes-preview ul ul { list-style-type: circle; }
+.apuntes-preview ul ul ul { list-style-type: square; }
+.apuntes-preview ol ol { list-style-type: lower-alpha; }
+.apuntes-preview ol ol ol { list-style-type: lower-roman; }
 .apuntes-preview li  { margin: 0.15rem 0; }
 .apuntes-preview h1  { font-size: 1.05rem; font-weight: 700; margin: 0.6rem 0 0.2rem; }
 .apuntes-preview h2  { font-size: 0.95rem; font-weight: 600; margin: 0.5rem 0 0.2rem; }

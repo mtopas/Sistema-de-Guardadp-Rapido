@@ -13,6 +13,7 @@ import { getCategoriaColor } from '../utils/categoriaColors'
 import { extractTags } from '../utils/tags'
 import { DEBUG } from '../config'
 import { getHojaImageUrl, getHojaEditableApuntes } from '../utils/hojaUtils'
+import { primerLinkEnCuerpo } from '../utils/cuerpoHoja'
 
 function EditorToolbar({ editor, color }) {
   if (!editor) return null
@@ -128,6 +129,12 @@ export default function DetailScreen() {
 
   const tags = extractTags(hoja.contenido, hoja.apuntes)
   const imageUrl = getHojaImageUrl(hoja)
+  // Preview (#10): primer link del cuerpo (`apuntes`), en cualquier posición;
+  // para una hoja tipo=link legacy (URL en `contenido`, cuerpo vacío) cae a la
+  // URL del contenido. Las fotos nunca muestran preview de link.
+  const urlPreview = hoja.tipo === 'foto'
+    ? null
+    : (primerLinkEnCuerpo(hoja.apuntes) || (hoja.tipo === 'link' ? primerLinkEnCuerpo(hoja.contenido) : null))
 
   return (
     <div className="flex flex-col h-full" style={{ background: 'var(--bg)' }}>
@@ -205,14 +212,14 @@ export default function DetailScreen() {
         </div>
 
         {/* Link preview */}
-        {hoja.tipo === 'link' && (
+        {urlPreview && (
           <div>
-            <a href={hoja.contenido} target="_blank" rel="noopener noreferrer"
+            <a href={urlPreview} target="_blank" rel="noopener noreferrer"
               className="text-xs break-all block px-3 py-2 rounded-xl mb-2"
               style={{ color, background: color + '12', border: `1px solid ${color}30` }}>
-              {hoja.contenido}
+              {urlPreview}
             </a>
-            <LinkPreview url={hoja.contenido} />
+            <LinkPreview url={urlPreview} />
           </div>
         )}
 

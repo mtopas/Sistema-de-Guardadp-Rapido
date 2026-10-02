@@ -108,10 +108,12 @@ export default function CaptureModal() {
     return () => document.removeEventListener('keydown', trap)
   }, [open])
 
-  // Debounced link preview
+  // Debounced link preview (#10): link puro -> la URL del contenido; texto ->
+  // el primer link que aparezca en cualquier parte del cuerpo.
   useEffect(() => {
-    if (tipo !== 'link') { setPreviewUrl(''); return }
-    const t = setTimeout(() => setPreviewUrl(contenido.trim()), 600)
+    const candidato = tipo === 'link' ? contenido.trim() : primerLinkEnCuerpo(contenido)
+    if (!candidato) { setPreviewUrl(''); return }
+    const t = setTimeout(() => setPreviewUrl(candidato), 600)
     return () => clearTimeout(t)
   }, [contenido, tipo])
 
@@ -460,7 +462,7 @@ export default function CaptureModal() {
           )}
 
           {/* Link preview */}
-          {previewUrl && tipo === 'link' && (
+          {previewUrl && (
             <div className="mt-3 animate-in">
               <LinkPreview url={previewUrl} />
             </div>

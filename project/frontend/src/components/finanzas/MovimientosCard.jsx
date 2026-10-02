@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useStore } from '../../store/useStore'
 import { t } from '../../utils/i18n'
-import { fmtARS, fmtUSD, isTransferencia } from '../../data/finanzas'
+import { fmtARS, fmtUSD, isTransferencia, etiquetaMovimiento } from '../../data/finanzas'
 import { buildCategories } from './CategoryDonutCard'
 import CardHeader from './CardHeader'
 import MovimientosTableModal from './MovimientosTableModal'
@@ -48,7 +48,7 @@ export default function MovimientosListCard({ type = 'expense', filterCat = null
           )}
           {items.map((m, i) => {
             const monto  = m.monto ?? 0
-            const desc   = m.descripcion ?? ''
+            const label  = etiquetaMovimiento(m)
             const cat    = m.categoria_nombre ?? ''
             const method = m.cuenta_nombre ?? ''
             const date   = m.fecha ? new Date(m.fecha).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' }) : ''
@@ -69,7 +69,7 @@ export default function MovimientosListCard({ type = 'expense', filterCat = null
                 />
                 <div className="flex-1 min-w-0">
                   <div className="text-[12.5px] font-medium truncate" style={{ color: 'var(--text)' }}>
-                    {icon} {desc}
+                    {icon} {label}
                   </div>
                   <div className="text-[10.5px] flex items-center gap-1.5 mt-0.5" style={{ color: 'var(--subtext)' }}>
                     <span>{cat}</span>

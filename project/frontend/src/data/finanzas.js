@@ -66,6 +66,18 @@ export function descripcionMovimiento(mov) {
 }
 
 /**
+ * Etiqueta visible de un movimiento en listados (Recientes/Dashboard): la
+ * descripción si existe; si está vacía, cae a la categoría (#15). Preserva
+ * mayúsculas, a diferencia de `descripcionMovimiento` (que normaliza para
+ * comparar). Acepta el campo `descripcion`/`categoria_nombre`.
+ */
+export function etiquetaMovimiento(mov) {
+  const desc = String(mov?.descripcion ?? '').trim()
+  if (desc) return desc
+  return String(mov?.categoria_nombre ?? '').trim()
+}
+
+/**
  * Cajón por nombre de categoría/objetivo: coincide categoría O descripción (igualdad exacta, sin importar mayúsculas).
  */
 export function movimientoAsignadoACajon(mov, nombre) {

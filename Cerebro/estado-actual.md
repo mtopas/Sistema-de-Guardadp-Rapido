@@ -20,7 +20,18 @@ sync pisaba una base SQLite con la otra sin merge (causa del incidente del 2026-
 - Detalle y motivos en `decisiones-implementacion.md` (2026-10-02).
 
 Verificación en repo: **455 backend passed**, **188 frontend passed**, `npm run build` OK.
-Deploy al homelab: ver sección de verificación post-deploy de esta misma fecha, más abajo.
+
+**Deploy al homelab (2026-10-02).** Backups previos:
+`~/project/database/app.db.bak-20261002-150258` y `jarvis.db.bak-20261002-150258`. Procedimiento de
+`HOMELAB.md` (tar de `project` con `--exclude` de `database`/`uploads`/`vault`; `rm -rf` + `scp -r`
+del `dist`; `docker build --network=host -t sgr-app:latest` + `docker-compose up -d --no-build`).
+`SGR_SYNC_TOKEN` no estaba en el `.env` del homelab (nada que quitar); `HOMELAB_HOST=` sigue ahí pero
+ya no lo lee nadie (quedó inerte). Verificación post-deploy (`192.168.137.10:8765`): 3 containers UP;
+`/meta` 200; `/jarvis/health` con `worker_alive: true` y `passive_eval` sano; `GET /sync/export` →
+404 y `POST /sync/import` → 405 (ruta eliminada; el 405 lo da el catch-all GET de la SPA, no una ruta
+de sync); `/settings/status` ya sin `sync` ni `homelab_configured`; `GET /` sirve la SPA
+(`<title>Bóveda</title>`, bundle `index-o_mlYJZE.js` = build local). Counts app.db antes == después:
+hojas 186, movimientos 19, eventos 58, habitos 0, feedback 15.
 
 ## DEPLOYADO EN HOMELAB: --excluir-tickers + captura pasiva endurecida + limpieza (2026-10-01)
 

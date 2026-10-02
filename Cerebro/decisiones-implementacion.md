@@ -11,6 +11,41 @@ Formato de cada entrada:
 
 ---
 
+## 2026-10-02 — Retiro del `.exe` de Windows y del sync homelab ↔ Windows
+
+Contexto: el usuario opera SGR únicamente desde el homelab (`192.168.137.10:8765`) por Tailscale;
+el `.exe` de Windows dejó de usarse. El mecanismo de sync homelab ↔ Windows sobrescribía una base
+SQLite con la otra **sin merge** y reasignaba ids por su cuenta (causa de la divergencia de `hojas`
+y del incidente del 2026-09-30), y exponía `POST /sync/import`, capaz de reemplazar la base de
+producción entera con el archivo subido. Verificado el 2026-10-02 que las notas divergentes del
+incidente no se perdieron (ya estaban en el homelab bajo otros ids).
+
+Decisión: retirar por completo el `.exe` y el sync, conservando el desarrollo local, el bot, Jarvis
+e ICS/Ollama/Tailscale.
+- Backend: eliminados los endpoints `GET /sync/export` y `POST /sync/import`, el helper
+  `_check_sync_token()` y la variable `SGR_SYNC_TOKEN` (`app/main.py`). `/settings/status` ya no
+  lee `sync-status.json` ni expone los campos `sync` ni `homelab_configured`.
+- Frontend: eliminado el panel "Sincronización con homelab" del tab Datos de `SettingsScreen.jsx`
+  (quedaba colgado mostrando "Sin registro todavía").
+- Scripts: eliminados `sgr-sync-pull.ps1`, `sgr-sync-push.ps1`, `sync-config.ps1`,
+  `verify-sync.ps1` y `sgr-abrir.ps1`. El sandbox de desarrollo (`dev-start.ps1`/`dev-stop.ps1`)
+  se conserva y pasa a leer un nuevo `dev-config.ps1` con solo rutas locales (antes dependía de
+  `sync-config.ps1`).
+- `.exe`: eliminados `run_sgr.py` (entry PyInstaller, que contenía todo el cliente de sync) y
+  `sgr.spec`. Todo queda en el historial de git.
+- Docs: `SYNC-WINDOWS.md` y `BUILD.md` quedan marcados como históricos; se limpiaron las
+  referencias vivas al sync en `CLAUDE.md`, `HOMELAB.md`, `README.md` y `.env.example`.
+- Decisión propia (no en el ticket, elegida por ser lo más limpio): borrar `run_sgr.py`/`sgr.spec`
+  en vez de dejar código muerto, y limpiar el panel de sync en lugar de dejarlo vacío.
+
+Diferencia con spec: no aplica (afecta infraestructura de SGR, no Jarvis).
+
+Impacto: `project/app/main.py`, `project/frontend/src/screens/SettingsScreen.jsx`,
+`project/scripts/*`, `project/run_sgr.py`, `project/sgr.spec`, `project/tests/test_settings_routes.py`
+(actualizado + guarda de regresión de que `sync`/`homelab_configured` no vuelven), y docs varias.
+
+---
+
 ## 2026-10-01 — Captura pasiva: falla del evaluador vs veredicto negativo + parseo multi-JSON
 
 Contexto: dos debilidades en `jarvis/captures/passive.py`.

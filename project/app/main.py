@@ -582,18 +582,11 @@ def estado_ajustes(request: Request):
     tables = {"hojas": "hojas", "movimientos": "fin_movimientos", "eventos": "agenda_eventos", "habitos": "habitos", "feedback": "feedback"}
     counts = {key: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for key, table in tables.items()}
     conn.close()
-    status_path = Path(DB_PATH).parent / "sync-status.json"
-    try:
-        sync = json.loads(status_path.read_text(encoding="utf-8-sig"))
-    except (OSError, ValueError):
-        sync = None
     client_host = request.client.host if request.client else ""
     return {
         "source": "local" if client_host in ("127.0.0.1", "::1") else "servidor",
         "db_path": str(Path(DB_PATH).resolve()),
         "counts": counts,
-        "sync": sync,
-        "homelab_configured": bool(os.getenv("HOMELAB_HOST", "").strip()),
         "backup_available": client_host in ("127.0.0.1", "::1"),
         "version": app.version,
     }
@@ -2122,108 +2115,6 @@ def batch_upsert_registros(body: HabitoRegistroBatch):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-# --- Sync homelab ↔ Windows ---
-
-_SYNC_TOKEN = os.getenv("SGR_SYNC_TOKEN", "")
-
-
-def _check_sync_token(request: Request) -> None:
-    """Sin SGR_SYNC_TOKEN configurado, antes quedaba "fail open" (cualquiera
-    que llegue a :8765 podía pegarle a /sync/import y reemplazar la DB
-    canónica completa) -- ahora "fail closed": sin token configurado, los dos
-    endpoints de sync se rechazan (2026-09-21, ver auditoría externa en
-    Cerebro/PROXIMAMENTE.md). No afecta el resto del backend -- solo estos 2
-    endpoints, a propósito, para no trabar toda la app si a alguien se le
-    olvidó configurar la env var sin darse cuenta de por qué el resto dejó de
-    andar."""
-    if not _SYNC_TOKEN:
-        raise HTTPException(
-            status_code=503,
-            detail="Sync deshabilitado: configurá SGR_SYNC_TOKEN en el servidor.",
-        )
-    if request.headers.get("X-Sync-Token") != _SYNC_TOKEN:
-        raise HTTPException(status_code=401, detail="Token de sync inválido")
-
-
-@app.get("/sync/export")
-def sync_export(request: Request):
-    """Backup SQLite online (sin parar el servidor). Usado por sgr-sync-pull.ps1."""
-    _check_sync_token(request)
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
-        tmp_path = tmp.name
-    try:
-        src = sqlite3.connect(DB_PATH)
-        dst = sqlite3.connect(tmp_path)
-        src.backup(dst)
-        src.close()
-        dst.close()
-        with open(tmp_path, "rb") as f:
-            data = f.read()
-    finally:
-        try:
-            os.unlink(tmp_path)
-        except Exception:
-            pass
-    return Response(
-        content=data,
-        media_type="application/octet-stream",
-        headers={"Content-Disposition": 'attachment; filename="app.db"'},
-    )
-
-
-@app.post("/sync/import")
-async def sync_import(request: Request, file: UploadFile = File(...)):
-    """Reemplaza la DB canónica con el archivo subido. Usado por sgr-sync-push.ps1."""
-    _check_sync_token(request)
-
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
-        tmp_path = tmp.name
-        tmp.write(await file.read())
-
-    try:
-        # Validar integridad y tablas mínimas antes de tocar producción
-        try:
-            check = sqlite3.connect(tmp_path)
-            result = check.execute("PRAGMA integrity_check").fetchone()
-            if result[0] != "ok":
-                raise HTTPException(status_code=400, detail="integrity_check falló en el archivo subido")
-            tables = {r[0] for r in check.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-            check.close()
-            required = {"fin_movimientos", "hojas", "habitos"}
-            missing = required - tables
-            if missing:
-                raise HTTPException(status_code=400, detail=f"Tablas faltantes: {missing}")
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"DB inválida: {exc}")
-
-        # Backup server-side con timestamp antes de sobrescribir
-        bak_path = str(Path(DB_PATH).parent / f"app.db.bak.{int(time.time())}")
-        try:
-            prod = sqlite3.connect(DB_PATH)
-            bak = sqlite3.connect(bak_path)
-            prod.backup(bak)
-            prod.close()
-            bak.close()
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"No se pudo crear backup server-side: {exc}")
-
-        # Reemplazar producción
-        src = sqlite3.connect(tmp_path)
-        dst = sqlite3.connect(DB_PATH)
-        src.backup(dst)
-        src.close()
-        dst.close()
-
-        return {"ok": True, "mensaje": "Base de datos importada", "backup": bak_path}
-    finally:
-        try:
-            os.unlink(tmp_path)
-        except Exception:
-            pass
 
 
 # --- SPA (UI empaquetada / producción; puerto por defecto :8765 vía SGR_PORT) ---

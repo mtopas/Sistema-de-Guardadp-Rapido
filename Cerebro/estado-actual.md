@@ -1,5 +1,26 @@
 # Estado Actual de Jarvis
-Última actualización: 2026-10-01
+Última actualización: 2026-10-02
+
+## Retirado el `.exe` de Windows y el sync homelab ↔ Windows (2026-10-02)
+
+El usuario opera SGR solo desde el homelab por Tailscale; el `.exe` y su sync dejaron de usarse. El
+sync pisaba una base SQLite con la otra sin merge (causa del incidente del 2026-09-30) y exponía
+`POST /sync/import`, capaz de reemplazar la base de producción entera.
+
+- **Backend** (`app/main.py`): eliminados `GET /sync/export`, `POST /sync/import`,
+  `_check_sync_token()` y `SGR_SYNC_TOKEN`. `/settings/status` ya no devuelve `sync` ni
+  `homelab_configured` (dejó de leer `sync-status.json`).
+- **Frontend**: quitado el panel "Sincronización con homelab" del tab Datos de `SettingsScreen.jsx`.
+- **Scripts**: eliminados `sgr-sync-pull/push`, `sync-config`, `verify-sync`, `sgr-abrir`. El
+  sandbox dev se conserva: `dev-start`/`dev-stop` ahora leen `dev-config.ps1` (solo rutas).
+- **`.exe`**: eliminados `run_sgr.py` y `sgr.spec` (quedan en el historial de git). `BUILD.md` y
+  `SYNC-WINDOWS.md` quedan como históricos.
+- **Tests**: `test_settings_routes.py::test_status_reports_real_counts_and_remote_backup_is_forbidden`
+  actualizado; agrega guarda de regresión de que `sync`/`homelab_configured` no reaparecen.
+- Detalle y motivos en `decisiones-implementacion.md` (2026-10-02).
+
+Verificación en repo: **455 backend passed**, **188 frontend passed**, `npm run build` OK.
+Deploy al homelab: ver sección de verificación post-deploy de esta misma fecha, más abajo.
 
 ## DEPLOYADO EN HOMELAB: --excluir-tickers + captura pasiva endurecida + limpieza (2026-10-01)
 
@@ -1286,6 +1307,7 @@ esta sesión, en vez de dos forks sueltos sobre el mismo working directory.
 3. **`SGR_SYNC_TOKEN` obligatorio** — `project/app/main.py::_check_sync_token()`: sin token
    configurado, `/sync/export` y `/sync/import` ahora rechazan con 503 (antes: fail open,
    cualquiera podía reemplazar la DB canónica completa sin token).
+   **(SUPERADO 2026-10-02: el sync y estos endpoints se retiraron por completo — ver tope del archivo.)**
 4. **Avisos de "guardado falso"** — 8 mutaciones de `useStore.js` (Finanzas: movimientos;
    Agenda: tareas; Hábitos: registros) ahora llaman `showToast(..., 'error')` cuando el fetch
    real falla, en vez de fallback silencioso. Hallazgo real no anticipado: `TareaModal.jsx` y

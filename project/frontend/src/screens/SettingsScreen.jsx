@@ -99,7 +99,6 @@ export default function SettingsScreen() {
     return () => { active = false }
   }, [tab, fetchFeedback])
 
-  const sync = status?.sync
   const feedbackSorted = [...feedbackList].sort((a, b) => (b.id || 0) - (a.id || 0))
 
   async function saveName(event) {
@@ -148,7 +147,6 @@ export default function SettingsScreen() {
 
     {tab === 'data' && <><div className="settings-intro"><h2>{copy.dataTitle}</h2><p>{copy.dataIntro}</p></div>
       <div className="settings-status-hero"><div className="settings-status-top"><span className={`settings-status-dot ${statusError ? 'is-error' : ''}`} />{statusError ? copy.unavailable : status ? copy.connected : copy.checking}<button type="button" onClick={refreshStatus} disabled={statusLoading} title={copy.refresh} aria-label={copy.refresh}><RefreshCw size={16} className={statusLoading ? 'settings-spinning' : ''} /></button></div><div className="settings-status-main"><div><span className="settings-overline">{copy.source}</span><strong>{status ? (status.source === 'local' ? copy.local : copy.server) : '—'}</strong></div><HardDrive size={42} strokeWidth={1.1} /></div></div>
-      <div className="settings-card-grid"><div className="settings-card"><span className="settings-overline">{copy.homelab}</span><strong>{status?.homelab_configured ? copy.configured : copy.unconfigured}</strong><p>{sync ? `${sync.direction === 'push' ? copy.push : copy.pull} · ${sync.ok ? copy.success : copy.failed}` : copy.never}</p></div><div className="settings-card"><span className="settings-overline">{copy.lastSync}</span><strong>{sync ? formatDate(sync.at, lang) : '—'}</strong><p>{sync ? (sync.ok ? copy.success : copy.failed) : copy.never}</p></div></div>
       <div className="settings-card settings-backup-card"><div className="settings-backup-icon"><Download size={23} /></div><div><strong>{copy.backup}</strong><p>{status?.backup_available ? copy.backupHint : copy.backupRemote}</p></div>{status?.backup_available && <a className="settings-primary" href={`${API_URL}/settings/backup`}><Download size={15} />{copy.backup}</a>}</div>
       <div className="settings-counts"><span className="settings-overline">{copy.counts}</span><div>{['hojas', 'movimientos', 'eventos', 'habitos'].map(key => <div key={key}><strong>{status?.counts?.[key] ?? '—'}</strong><span>{copy[key]}</span></div>)}</div></div></>}
 

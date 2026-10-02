@@ -35,20 +35,17 @@ def test_profile_persists_and_feedback_can_be_edited_and_deleted(client):
 
 
 @pytest.mark.integration
-def test_status_reports_real_counts_and_remote_backup_is_forbidden(client, tmp_app_db):
+def test_status_reports_real_counts_and_remote_backup_is_forbidden(client):
     client.post('/feedback', json={'contenido': 'Primero'})
-    status_file = tmp_app_db.parent / 'sync-status.json'
-    status_file.write_text(
-        '{"direction":"pull","ok":true,"at":"2026-09-24T12:00:00"}', encoding='utf-8-sig'
-    )
-    try:
-        status = client.get('/settings/status').json()
-        assert status['counts']['feedback'] == 1
-        assert status['sync']['direction'] == 'pull'
-        assert status['db_path']
-        assert client.get('/settings/backup').status_code == 403
-    finally:
-        status_file.unlink(missing_ok=True)
+    status = client.get('/settings/status').json()
+    assert status['counts']['feedback'] == 1
+    assert status['db_path']
+    # El sync homelab <-> Windows se retiro el 2026-10-02: /settings/status ya no
+    # expone 'sync' ni 'homelab_configured'. Si alguien reintroduce esos campos,
+    # este assert vuelve a fallar.
+    assert 'sync' not in status
+    assert 'homelab_configured' not in status
+    assert client.get('/settings/backup').status_code == 403
 
 
 @pytest.mark.integration

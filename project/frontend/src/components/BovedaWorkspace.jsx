@@ -1,7 +1,9 @@
 import { useCallback, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Compass, FileText, FolderTree, Link2, List, Network, Search, Tags } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { buildCategoriaColorMap } from '../utils/categoriaColors'
+import { buildHojaContextItems } from '../utils/hojaMenu'
 import { extractTags } from '../utils/tags'
 import { getHojaDisplayTitle } from '../utils/hojaUtils'
 import { getLeafIcon } from '../utils/leafIcons'
@@ -68,8 +70,10 @@ function HojaRow({ hoja, color, active, onOpen, onContextMenu }) {
 }
 
 export default function BovedaWorkspace({ onOpenHoja, onHojaDeleted, searchQuery = '', selectedHojaId = null }) {
+  const navigate = useNavigate()
   const hojas = useStore(s => s.hojas)
   const categorias = useStore(s => s.categorias)
+  const lang = useStore(s => s.lang)
   const [view, setView] = useState('grafo')
   const [selectedTag, setSelectedTag] = useState(null)
   const [query, setQuery] = useState('')
@@ -83,10 +87,12 @@ export default function BovedaWorkspace({ onOpenHoja, onHojaDeleted, searchQuery
     setHojaMenu({ x: e.clientX, y: e.clientY, hoja })
   }, [])
 
-  const buildHojaContextItems = useCallback((hoja) => [
-    { label: 'Editar Hoja', onClick: () => setEditHoja(hoja) },
-    { label: 'Eliminar Hoja', danger: true, onClick: () => setDeleteHoja(hoja) },
-  ], [])
+  const hojaMenuItems = useCallback((hoja) => buildHojaContextItems(hoja, {
+    lang,
+    onOpen: h => navigate(`/hoja/${h.id}`),
+    onEdit: h => setEditHoja(h),
+    onDelete: h => setDeleteHoja(h),
+  }), [lang, navigate])
 
   const colorMap = useMemo(() => buildCategoriaColorMap(categorias), [categorias])
   const today = localDate(new Date())
@@ -196,7 +202,7 @@ export default function BovedaWorkspace({ onOpenHoja, onHojaDeleted, searchQuery
         <AgendaContextMenu
           x={hojaMenu.x}
           y={hojaMenu.y}
-          items={buildHojaContextItems(hojaMenu.hoja)}
+          items={hojaMenuItems(hojaMenu.hoja)}
           onClose={() => setHojaMenu(null)}
         />
       )}

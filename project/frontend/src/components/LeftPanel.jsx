@@ -1,7 +1,9 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { ChevronDown, ChevronRight, Plus, FolderPlus, ChevronsUpDown, Sparkles } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { extractTags } from '../utils/tags'
+import { buildHojaContextItems } from '../utils/hojaMenu'
 import { buildCategoriaColorMap } from '../utils/categoriaColors'
 import { t } from '../utils/i18n'
 import { getLeafIcon } from '../utils/leafIcons'
@@ -249,6 +251,7 @@ function CategoryItem({
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function LeftPanel({ onOpenHoja, onHojaDeleted, searchQuery = '' }) {
+  const navigate        = useNavigate()
   const hojas           = useStore(s => s.hojas)
   const categorias      = useStore(s => s.categorias)
   const lang            = useStore(s => s.lang)
@@ -328,14 +331,12 @@ export default function LeftPanel({ onOpenHoja, onHojaDeleted, searchQuery = '' 
     setHojaMenu({ x: e.clientX, y: e.clientY, hoja })
   }, [])
 
-  const buildHojaContextItems = useCallback((hoja) => [
-    { label: 'Editar Hoja', onClick: () => setEditHoja(hoja) },
-    {
-      label: 'Eliminar Hoja',
-      danger: true,
-      onClick: () => setDeleteHoja(hoja),
-    },
-  ], [])
+  const hojaMenuItems = useCallback((hoja) => buildHojaContextItems(hoja, {
+    lang,
+    onOpen: h => navigate(`/hoja/${h.id}`),
+    onEdit: h => setEditHoja(h),
+    onDelete: h => setDeleteHoja(h),
+  }), [lang, navigate])
 
   // Búsqueda semántica: debounce 350ms, cancela resultados viejos si cambia
   // la query o se apaga el modo antes de que vuelva el fetch.
@@ -517,7 +518,7 @@ export default function LeftPanel({ onOpenHoja, onHojaDeleted, searchQuery = '' 
         <AgendaContextMenu
           x={hojaMenu.x}
           y={hojaMenu.y}
-          items={buildHojaContextItems(hojaMenu.hoja)}
+          items={hojaMenuItems(hojaMenu.hoja)}
           onClose={() => setHojaMenu(null)}
         />
       )}

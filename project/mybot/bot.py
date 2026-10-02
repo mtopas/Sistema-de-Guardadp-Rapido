@@ -36,6 +36,7 @@ from api_config import API_BASE
 # api_config ya insertó project/ en sys.path -- ver docstring de app/vault/guard.py
 # (riesgo 1 de Cerebro/decisiones/2026-09-11-share-smb-boveda-homelab.md).
 from app.config import VAULT_ROOT
+from app.hoja_cuerpo import texto_plano_a_html, titulo_desde_cuerpo
 from app.vault.guard import ensure_vault_mounted
 
 import agenda_handlers as ah
@@ -508,6 +509,15 @@ async def _save_draft(
             draft = url
             if comentario:
                 apuntes = (apuntes or "") + f"<p>{escape(comentario)}</p>"
+    elif tipo == "texto" and not lugar and not (apuntes or "").strip():
+        # Modelo "un solo campo de cuerpo" (#12 + #13): la nota escrita va al
+        # CUERPO (`apuntes`) y el título (`contenido`) se autogenera de la
+        # primera línea. Mismo criterio que la app (frontend cuerpoHoja.js).
+        # Se excluye la ubicación (lugar != None): ese pin ya trae su propio
+        # `contenido` y no es una nota de texto libre.
+        cuerpo_html = texto_plano_a_html(draft)
+        apuntes = cuerpo_html or apuntes
+        draft = titulo_desde_cuerpo(draft)
 
     r = _post_hoja(draft, cat["id"], tipo=tipo, apuntes=apuntes,
                    lugar=lugar, latitud=lat, longitud=lon)

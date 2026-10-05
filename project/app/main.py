@@ -139,7 +139,8 @@ from app.db.crud import (
 from app.db.database import init_db
 from app import semantic
 from app.models.categoria import CategoriaCreate, CategoriaPatch
-from app.models.hoja import HojaCreate, HojaPatch
+from app.models.hoja import HojaCreate, HojaPatch, TituloIARequest
+from app.hoja_cuerpo import titulo_desde_cuerpo, primer_link_en_cuerpo
 
 # Integración Jarvis — graceful si el paquete no está instalado
 try:
@@ -800,6 +801,85 @@ def sugerir_categoria_hoja(hoja_id: int):
             categoria_id = match["id"]
             categoria_nombre = match["nombre"]
     return {**resultado, "categoria_id": categoria_id, "categoria_nombre": categoria_nombre}
+
+
+def _cuerpo_texto_de_hoja(hoja: dict) -> str:
+    """Texto plano de una hoja para alimentar al generador de título: el cuerpo
+    (`apuntes`, sin HTML) y, si está vacío, el `contenido`. En el modelo de
+    cuerpo único el `apuntes` trae el texto y el link; el `contenido` es solo el
+    título provisional, así que no hace falta duplicarlo cuando hay cuerpo."""
+    cuerpo = re.sub(r"<[^>]+>", " ", hoja.get("apuntes") or "")
+    cuerpo = re.sub(r"\s+", " ", cuerpo).strip()
+    return cuerpo or (hoja.get("contenido") or "").strip()
+
+
+@app.post("/hojas/{hoja_id}/titulo-ia")
+async def refinar_titulo_ia(hoja_id: int, data: TituloIARequest, background_tasks: BackgroundTasks):
+    """Mejora el título de una hoja con IA (modelo LOCAL), bajo demanda.
+
+    GUARDAR NUNCA ESPERA A ESTO: la hoja ya fue creada con su título provisional
+    y este endpoint solo la mejora en segundo plano. Reglas:
+      - No pisa una edición manual: solo reemplaza el título si el actual sigue
+        siendo EXACTAMENTE el provisional (recibido o recalculado del cuerpo).
+      - Renombrado seguro: aplica el cambio por el MISMO camino que la edición de
+        título desde la app (`actualizar_hoja` con `contenido`), que reescribe el
+        .md y la fila sin inventar otro mecanismo.
+      - El contenido NO sale a un modelo externo (generar_titulo usa el local).
+      - La metadata del link se reusa de la preview ya existente o de
+        `GET /preview` (sin fetch nuevo), y es dato no confiable en el prompt.
+
+    Devuelve {"titulo": <nuevo>|null, "pregunta": <str>|null}. Nunca 5xx por el
+    LLM: si falla, Ollama está caído o no alcanza la info, devuelve titulo=null
+    (y eventualmente una pregunta) sin tocar la hoja."""
+    from jarvis.captures.titulos import generar_titulo
+
+    hoja = obtener_hoja_por_id(hoja_id)
+    if hoja is None:
+        raise HTTPException(status_code=404, detail="Hoja no encontrada")
+
+    cuerpo = _cuerpo_texto_de_hoja(hoja)
+    provisional = data.titulo_provisional
+    if provisional is None:
+        provisional = titulo_desde_cuerpo(cuerpo)
+
+    # No pisar una edición manual (ni un título IA ya aplicado antes).
+    if (hoja.get("contenido") or "") != provisional:
+        return {"titulo": None, "pregunta": None}
+
+    # Metadata del link (dato no confiable): preview ya guardada o, si no hay,
+    # el primer link del cuerpo via GET /preview. Nunca un fetch nuevo distinto.
+    link_meta = hoja.get("link_preview")
+    if not link_meta:
+        url = primer_link_en_cuerpo(cuerpo) or (
+            primer_link_en_cuerpo(hoja.get("contenido")) if hoja.get("tipo") == "link" else None
+        )
+        if url:
+            link_meta = await _fetch_link_preview(url)
+
+    cuerpo_para_ia = cuerpo
+    if data.respuesta and data.respuesta.strip():
+        cuerpo_para_ia = f"{cuerpo}\n{data.respuesta.strip()}".strip()
+
+    try:
+        resultado = generar_titulo(cuerpo_para_ia, link_meta)
+    except Exception as exc:  # pragma: no cover - generar_titulo ya es defensivo
+        if DEBUG:
+            print(f"refinar_titulo_ia: generar_titulo falló: {exc}")
+        return {"titulo": None, "pregunta": None}
+
+    titulo = resultado.get("titulo")
+    if titulo and titulo != (hoja.get("contenido") or ""):
+        actualizar_hoja(hoja_id, {"contenido": titulo})
+        actualizada = obtener_hoja_por_id(hoja_id)
+        if actualizada:
+            background_tasks.add_task(
+                semantic.index_hoja, hoja_id, actualizada.get("contenido", ""),
+                actualizada.get("categoria_nombre", ""), actualizada.get("tipo", "texto"),
+                actualizada.get("apuntes") or "",
+            )
+        return {"titulo": titulo, "pregunta": None}
+
+    return {"titulo": None, "pregunta": resultado.get("pregunta")}
 
 
 @app.get("/hojas/recientes")

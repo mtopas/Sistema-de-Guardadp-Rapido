@@ -23,3 +23,15 @@ class HojaPatch(BaseModel):
     contenido:   Optional[str] = None
     categoria_id: Optional[int] = None
     tipo:        Optional[str] = None
+
+
+class TituloIARequest(BaseModel):
+    """Refinamiento del título por IA (POST /hojas/{id}/titulo-ia).
+
+    `titulo_provisional`: el título con el que se creó la hoja. El refinamiento
+    solo reemplaza el título si el actual sigue siendo EXACTAMENTE este valor
+    (no pisa una edición manual). Si no se pasa, el backend lo recalcula del
+    cuerpo. `respuesta`: dato extra que dio el usuario cuando la IA pidió una
+    aclaración (flujo del bot) -- se suma al cuerpo para generar el título."""
+    titulo_provisional: Optional[str] = None
+    respuesta: Optional[str] = None

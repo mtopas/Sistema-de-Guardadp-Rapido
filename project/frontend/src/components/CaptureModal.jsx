@@ -29,6 +29,7 @@ export default function CaptureModal() {
   const captureDefaultCategoriaId = useStore(s => s.captureDefaultCategoriaId)
   const categorias               = useStore(s => s.categorias)
   const crearHoja                = useStore(s => s.crearHoja)
+  const refinarTituloHoja        = useStore(s => s.refinarTituloHoja)
   const addHabito                = useStore(s => s.addHabito)
   const addAgendaEvento          = useStore(s => s.addAgendaEvento)
   const addAgendaTarea           = useStore(s => s.addAgendaTarea)
@@ -141,24 +142,27 @@ export default function CaptureModal() {
     if (tipo === 'foto') {
       if (!fotoUrl) { showToast('Subí una foto', 'error'); return }
       payload.contenido = fotoUrl
-    } else if (tipo === 'link') {
-      // Link puro: la URL sigue en `contenido` (sin migración; el banner y la
-      // preview del link siguen funcionando como hasta ahora).
-      if (!contenido.trim()) { showToast('Escribí algo', 'error'); return }
-      payload.contenido = contenido.trim()
     } else {
-      // Texto (#12 + #13): el textarea es el CUERPO. Va a `apuntes`; el título
-      // (`contenido`) se autogenera de la primera línea y queda editable luego.
+      // Texto y link (#12 + #13 + #10): el textarea es el CUERPO. Va a `apuntes`
+      // (el link, si hay, vive ahí y de ahí sale su preview); el título
+      // (`contenido`) se autogenera de la primera línea y después lo mejora la
+      // IA en segundo plano. Las notas con link pasan a "cuerpo único": ya no
+      // guardan la URL cruda en `contenido`, así la IA puede titularlas sin
+      // romper la preview.
       const cuerpo = contenido.trim()
       if (!cuerpo) { showToast('Escribí algo', 'error'); return }
+      payload.tipo = 'texto'
       payload.contenido = tituloDesdeCuerpo(cuerpo)
       payload.apuntes = textoPlanoAHtml(cuerpo)
     }
     setSaving(true)
     try {
-      await crearHoja(payload)
+      const id = await crearHoja(payload)
       if (DEBUG) console.log('captureModal save:', payload.tipo)
       if (categoriaId) localStorage.setItem(LS_LAST_CAT_BOVEDA, String(categoriaId))
+      // Refinamiento del título por IA en segundo plano: NO bloquea el guardado
+      // ni el cierre del modal (solo notas de texto; las fotos no se tocan).
+      if (id && payload.tipo === 'texto') refinarTituloHoja(id, payload.contenido)
       showToast('Guardado ✓')
       close()
     } catch (e) {

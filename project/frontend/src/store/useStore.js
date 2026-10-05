@@ -1959,12 +1959,42 @@ export const useStore = create((set, get) => ({
         body: JSON.stringify(payload),
       })
       if (!res.ok) throw new Error((await res.json()).detail)
+      const data = await res.json().catch(() => ({}))
       await get().fetchHojas()  // replace temp with real data
       if (DEBUG) console.log('crearHoja:', payload.tipo)
+      return data.id ?? null   // id real para el refinamiento de título IA
     } catch (e) {
       // Rollback optimistic entry
       set(state => ({ hojas: state.hojas.filter(h => h.id !== tempId) }))
       throw e
+    }
+  },
+
+  /**
+   * Mejora el título de una hoja con IA en segundo plano (modelo local).
+   * GUARDAR NUNCA ESPERA A ESTO: se dispara después de crear la hoja, sin
+   * bloquear el modal. Si falla, tarda o el modelo está caído, no pasa nada
+   * visible y la hoja queda con su título provisional. Solo reemplaza el título
+   * si el actual sigue siendo el provisional (el backend aplica esa regla).
+   */
+  refinarTituloHoja: async (id, tituloProvisional) => {
+    if (!id) return
+    try {
+      const res = await fetch(`${API_URL}/hojas/${id}/titulo-ia`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ titulo_provisional: tituloProvisional }),
+      })
+      if (!res.ok) return
+      const data = await res.json().catch(() => ({}))
+      if (!data.titulo) return   // sin cambios (pregunta/fallback) -> nada visible
+      set(state => ({
+        hojas: state.hojas.map(h => h.id === id ? { ...h, contenido: data.titulo } : h),
+        hojasRecientes: state.hojasRecientes.map(h => h.id === id ? { ...h, contenido: data.titulo } : h),
+      }))
+      if (DEBUG) console.log('refinarTituloHoja:', id, '->', data.titulo)
+    } catch (_) {
+      // Silencioso a propósito: el título provisional ya quedó guardado.
     }
   },
 

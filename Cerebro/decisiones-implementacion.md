@@ -11,6 +11,57 @@ Formato de cada entrada:
 
 ---
 
+## 2026-10-05 — Título de las hojas pensado por IA (modelo local) + notas con link a cuerpo único
+
+Contexto: una nota mandada por el bot (un link + el comentario "Herramienta para que Jarvis pueda
+escanear docs o imágenes.") quedaba con la URL cruda como título. El título determinístico de la
+primera línea (`app/hoja_cuerpo.py::titulo_desde_cuerpo`) no alcanza cuando la señal buena está en
+el comentario y en la metadata del link.
+
+Decisión: la IA genera el título leyendo el cuerpo de la nota + la metadata de la preview del link,
+siempre en segundo plano y nunca bloqueando el guardado.
+- **Generador** `jarvis/captures/titulos.py::generar_titulo(cuerpo, link_meta)`: LiteLLM, modelo
+  LOCAL (`JARVIS_LOCAL_MODEL`), temperatura 0, parseo JSON tolerante (`_primer_json`, mismo criterio
+  que `passive.py::_extract_verdicts`), nunca lanza. Devuelve `{"titulo"|null, "pregunta"|null}`:
+  título si alcanza la info, pregunta corta si no (jamás inventa). Saneo: hashtags, URL, comillas,
+  prefijo "Título:", tope 80. La metadata del link es dato NO confiable (delimitada, recortada,
+  con instrucción explícita de ignorar prompt-injection).
+- **Endpoint** `POST /hojas/{id}/titulo-ia` (`app/main.py`): aplica la regla 2 (solo reemplaza si el
+  título actual sigue siendo EXACTAMENTE el provisional —recibido o recalculado del cuerpo—, nunca
+  pisa una edición manual) y usa el MISMO camino que la edición de título (`crud.actualizar_hoja`
+  con `contenido`). Reusa la preview guardada o `GET /preview`, sin fetch nuevo. Nunca 5xx por el LLM.
+- **Renombrado**: `actualizar_hoja` al cambiar `contenido` reescribe el H1 del `.md` y la fila pero
+  **NO renombra el archivo** (el nombre queda del alta, único y seguro). O sea el título IA se aplica
+  exactamente igual que una edición manual de título; no hay mecanismo de renombrado nuevo, ni
+  colisiones, ni carrera con el sync del vault.
+- **Notas con link → cuerpo único** (decidido con el usuario): para que una nota con link pueda tener
+  un título lindo sin romper la preview, la URL pasa a vivir en el CUERPO (`apuntes`) y `contenido`
+  es el título; la nota se guarda como `texto` (la preview sale del primer link del cuerpo, #10).
+  Aplica solo a notas NUEVAS (app `CaptureModal` + bot `_save_draft`); las existentes quedan igual.
+  Motivo: con `tipo=link` la URL está en `contenido` y cambiarla rompe `frontmatter.url` y borra
+  `link_preview`; además el frontend saca la URL de la preview desde `contenido`. No se eligió
+  "mantener tipo=link tocando crear_hoja/preview" (más invasivo) ni "solo notas de texto" (no
+  resolvía el caso que motivó el pedido).
+- **App**: `crearHoja` devuelve el id real y `CaptureModal` dispara `refinarTituloHoja` sin bloquear
+  Ctrl+Enter ni el cierre; si falla/tarda, la nota queda con el provisional (silencioso).
+- **Bot**: tras guardar, `_refinar_titulo_bot` corre vía `context.application.create_task` (el POST
+  al endpoint en un thread para no bloquear el event loop). Si el generador pide una aclaración, el
+  bot pregunta UNA vez (pendiente en `user_data["boveda_title_question"]` con vencimiento,
+  `handle_pending_title_question` consumido antes del routing de texto libre, igual que las
+  aclaraciones de Jarvis); "no sé"/sin respuesta/vencida/`/cancel` → queda el provisional. La nota
+  nunca se pierde por una pregunta.
+
+Diferencia con el ticket: la regla de diseño #3 asumía que la edición de título "renombra el
+archivo"; en realidad no lo hace (el `.md` conserva el nombre del alta). Se respetó la intención
+(reusar el mismo PATCH, no inventar otro renombrado) sobre la letra.
+
+Impacto: `jarvis/captures/titulos.py` (nuevo), `app/main.py` (endpoint + helper), `app/models/hoja.py`
+(`TituloIARequest`), `frontend/src/store/useStore.js` (`crearHoja` devuelve id, `refinarTituloHoja`),
+`frontend/src/components/CaptureModal.jsx`, `mybot/bot.py`. Tests: `test_boveda_titulo_ia.py`,
+`test_bot_titulo_ia.py`, `useStore.tituloIA.test.js` y ajustes en `test_bot_hoja_cuerpo.py`.
+
+---
+
 ## 2026-10-02 — Retiro del `.exe` de Windows y del sync homelab ↔ Windows
 
 Contexto: el usuario opera SGR únicamente desde el homelab (`192.168.137.10:8765`) por Tailscale;

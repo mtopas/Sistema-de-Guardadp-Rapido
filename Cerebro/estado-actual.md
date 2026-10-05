@@ -1,5 +1,26 @@
 # Estado Actual de Jarvis
-Última actualización: 2026-10-02
+Última actualización: 2026-10-05
+
+## Título de las hojas por IA + notas con link a cuerpo único (2026-10-05)
+
+El título de una nota de Bóveda lo propone la IA (modelo LOCAL) leyendo el cuerpo + la metadata de la
+preview del link; siempre en segundo plano, nunca bloquea el guardado. **Pendiente de deploy al
+homelab** al momento de escribir esto (fases commiteadas y suites en verde).
+
+- **Generador**: `jarvis/captures/titulos.py::generar_titulo(cuerpo, link_meta)` → `{"titulo"|null,
+  "pregunta"|null}` (LiteLLM, `JARVIS_LOCAL_MODEL`, temp 0, nunca lanza; sanea hashtags/URL/comillas,
+  tope 80; metadata del link tratada como dato no confiable).
+- **Endpoint**: `POST /hojas/{id}/titulo-ia` — no pisa ediciones manuales (solo reemplaza si el
+  título actual == provisional), aplica por `crud.actualizar_hoja` (que NO renombra el `.md`, igual
+  que la edición manual de título), reusa preview existente o `GET /preview`.
+- **Notas con link NUEVAS → cuerpo único**: la URL va al cuerpo (`apuntes`), `contenido` es el título
+  y se guarda como `texto` (app `CaptureModal` + bot `_save_draft`). Las existentes no se tocan.
+- **Bot**: refinamiento vía `context.application.create_task`; si falta info pregunta UNA vez
+  (`handle_pending_title_question`, pendiente en `user_data` con vencimiento); `/cancel`/"no sé"/
+  timeout → queda el provisional. La nota nunca se pierde.
+- **Tests**: `test_boveda_titulo_ia.py`, `test_bot_titulo_ia.py`, `useStore.tituloIA.test.js`.
+- Detalle y motivos (incl. por qué cuerpo único y no otras opciones) en `decisiones-implementacion.md`
+  (2026-10-05).
 
 ## Retirado el `.exe` de Windows y el sync homelab ↔ Windows (2026-10-02)
 

@@ -142,6 +142,15 @@ Modal Hábitos en `HabitosScreen`: `NuevoHabitoModal` (TopBar CTA o botón del p
 
 - **Categorias** (árbol `padre_id`) + **Hojas** (`tipo`: texto | link | foto; TipTap en `apuntes`).
 - UI: `LeftPanel`, `NetworkGraph`, `RightPanel`.
+- **Modelo cuerpo único** (#12/#13/#10): el texto va al CUERPO (`apuntes`) y el título (`contenido`) se
+  autogenera (`app/hoja_cuerpo.py::titulo_desde_cuerpo`). Las notas con link NUEVAS también son cuerpo
+  único (la URL vive en el cuerpo, no cruda en `contenido`; se guardan como `texto`) — las existentes
+  no se tocan. La preview sale del primer link del cuerpo.
+- **Título por IA** (2026-10-05): tras crear una hoja, app y bot disparan `POST /hojas/{id}/titulo-ia`
+  en segundo plano (modelo LOCAL, `jarvis/captures/titulos.py`). Nunca bloquea el guardado, solo
+  reemplaza si el título actual sigue siendo el provisional (no pisa ediciones manuales), y aplica por
+  el mismo `actualizar_hoja` que la edición manual (que NO renombra el `.md`). El bot pregunta UNA vez
+  si falta info. Ver `decisiones-implementacion.md` (2026-10-05).
 
 ### Finanzas (resumen)
 

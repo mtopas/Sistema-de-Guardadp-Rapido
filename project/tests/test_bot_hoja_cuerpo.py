@@ -3,7 +3,9 @@ mismo modelo título/cuerpo que la app.
 
 - Una nota de TEXTO sale con el título autogenerado en `contenido` y el cuerpo
   en `apuntes` (HTML), no todo el texto apelmazado en `contenido`.
-- Un link PURO conserva la URL en `contenido` (sin cambios).
+- Un link (puro o con comentario) pasa a "cuerpo único": la URL vive en el
+  CUERPO (`apuntes`), no cruda en `contenido`, y la nota se guarda como `texto`
+  (2026-10-05, título por IA).
 - Una FOTO no se toca (título/caption en `contenido`, img en `apuntes`).
 
 Si alguien revierte el cableado de _save_draft a `app.hoja_cuerpo`, estos tests
@@ -59,11 +61,26 @@ class TestSaveDraftCuerpo:
         assert args[0] == "Ver esto ahora"
         assert "https://ejemplo.com/post" in kwargs["apuntes"]
 
-    async def test_link_puro_conserva_url_en_contenido(self):
+    async def test_link_puro_pasa_a_cuerpo_unico(self):
         payload = {"draft": "https://ejemplo.com/articulo", "tipo": "link"}
         args, kwargs = await _run_save(payload)
-        assert args[0] == "https://ejemplo.com/articulo"
-        assert kwargs["tipo"] == "link"
+        # La URL ya NO va cruda en contenido: la nota es texto y la URL vive en
+        # el cuerpo (de ahí sale su preview); el título lo mejora la IA después.
+        assert kwargs["tipo"] == "texto"
+        assert "https://ejemplo.com/articulo" in kwargs["apuntes"]
+
+    async def test_link_con_comentario_cuerpo_unico(self):
+        payload = {
+            "draft": "https://ejemplo.com/ocr\nHerramienta para escanear docs",
+            "tipo": "link",
+        }
+        args, kwargs = await _run_save(payload)
+        assert kwargs["tipo"] == "texto"
+        # El comentario queda en el cuerpo junto con la URL.
+        assert "Herramienta para escanear docs" in kwargs["apuntes"]
+        assert "https://ejemplo.com/ocr" in kwargs["apuntes"]
+        # El contenido (título provisional) ya no es la URL cruda.
+        assert args[0] != "https://ejemplo.com/ocr"
 
     async def test_foto_no_se_toca(self):
         payload = {

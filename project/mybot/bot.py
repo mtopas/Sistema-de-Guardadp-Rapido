@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -56,6 +57,13 @@ TELEGRAM_READ_TIMEOUT = float(os.environ.get("TELEGRAM_READ_TIMEOUT", "30"))
 TELEGRAM_PROXY_URL = os.environ.get("TELEGRAM_PROXY_URL", "").strip() or None
 # -1 = reintentar bootstrap indefinidamente (evita crash loop en Docker si Telegram tarda)
 TELEGRAM_BOOTSTRAP_RETRIES = int(os.environ.get("TELEGRAM_BOOTSTRAP_RETRIES", "-1"))
+
+# Ventana para responder la pregunta de título IA pendiente (una sola ronda).
+# El refinamiento del título por IA puede tardar en frío (carga del modelo),
+# por eso la llamada HTTP al endpoint usa un timeout generoso -- pero siempre
+# corre en segundo plano, nunca bloquea el guardado de la nota.
+_TITULO_IA_QUESTION_TIMEOUT_S = 180
+_TITULO_IA_HTTP_TIMEOUT_S = 130
 
 # Archivo local para persistir el chat_id entre reinicios
 _CHAT_ID_FILE  = Path(__file__).parent / "chat_id.json"
@@ -486,6 +494,7 @@ async def _save_draft(
     cat: dict,
     message,
     pending: dict | None = None,
+    context: ContextTypes.DEFAULT_TYPE | None = None,
 ) -> bool:
     src     = pending or ud
     draft   = (src.get("draft") or "").strip()
@@ -502,22 +511,20 @@ async def _save_draft(
         )
         return False
 
-    if tipo == "link":
-        url = _extract_url(draft)
-        if url:
-            comentario = draft.replace(url, "", 1).strip()
-            draft = url
-            if comentario:
-                apuntes = (apuntes or "") + f"<p>{escape(comentario)}</p>"
-    elif tipo == "texto" and not lugar and not (apuntes or "").strip():
-        # Modelo "un solo campo de cuerpo" (#12 + #13): la nota escrita va al
-        # CUERPO (`apuntes`) y el título (`contenido`) se autogenera de la
-        # primera línea. Mismo criterio que la app (frontend cuerpoHoja.js).
+    hizo_cuerpo_unico = False
+    if tipo in ("texto", "link") and not lugar and not (apuntes or "").strip():
+        # Modelo "un solo campo de cuerpo" (#12 + #13 + #10): la nota escrita va
+        # al CUERPO (`apuntes`) y el título (`contenido`) se autogenera de la
+        # primera línea, para después mejorarlo con IA. Las notas con link ya no
+        # dejan la URL cruda como título: el link vive en el cuerpo (de ahí sale
+        # su preview) y el título lo piensa la IA. Mismo criterio que la app.
         # Se excluye la ubicación (lugar != None): ese pin ya trae su propio
         # `contenido` y no es una nota de texto libre.
         cuerpo_html = texto_plano_a_html(draft)
         apuntes = cuerpo_html or apuntes
         draft = titulo_desde_cuerpo(draft)
+        tipo = "texto"
+        hizo_cuerpo_unico = True
 
     r = _post_hoja(draft, cat["id"], tipo=tipo, apuntes=apuntes,
                    lugar=lugar, latitud=lat, longitud=lon)
@@ -534,6 +541,110 @@ async def _save_draft(
 
     tipo_label = {"link": "🔗", "foto": "📷", "texto": "📝"}.get(tipo, "📝")
     await message.reply_text(f"{tipo_label} Guardado en [{cat['nombre']}] ✓")
+
+    # Refinamiento del título por IA en segundo plano (no bloquea el guardado).
+    if hizo_cuerpo_unico and context is not None:
+        try:
+            hid = r.json().get("id")
+        except Exception:
+            hid = None
+        if hid:
+            context.application.create_task(
+                _refinar_titulo_bot(hid, draft, message, context)
+            )
+    return True
+
+
+async def _post_titulo_ia(hoja_id: int, titulo_provisional: str, respuesta: str | None = None) -> dict | None:
+    """Llama al endpoint de refinamiento de título (modelo local) sin bloquear
+    el event loop del bot: el `requests.post` (que puede tardar en frío mientras
+    Ollama carga el modelo) corre en un thread aparte. Devuelve el JSON
+    {"titulo": ..., "pregunta": ...} o None ante cualquier falla."""
+    body = {"titulo_provisional": titulo_provisional}
+    if respuesta:
+        body["respuesta"] = respuesta
+    try:
+        r = await asyncio.to_thread(
+            requests.post,
+            f"{API_BASE}/hojas/{hoja_id}/titulo-ia",
+            json=body,
+            timeout=_TITULO_IA_HTTP_TIMEOUT_S,
+        )
+        if r.status_code != 200:
+            return None
+        return r.json()
+    except Exception as e:
+        logger.debug("titulo-ia falló (hoja %s): %s", hoja_id, e)
+        return None
+
+
+async def _refinar_titulo_bot(hoja_id: int, titulo_provisional: str, message, context) -> None:
+    """Mejora el título de una hoja recién creada. Si el generador pide una
+    aclaración (info insuficiente), se la pregunta UNA vez al usuario; la nota ya
+    está guardada, así que nunca se pierde por una pregunta sin responder."""
+    data = await _post_titulo_ia(hoja_id, titulo_provisional)
+    if not data:
+        return
+    titulo = data.get("titulo")
+    if titulo:
+        try:
+            await message.reply_text(f"✏️ Título: {titulo}")
+        except Exception:
+            pass
+        return
+    pregunta = data.get("pregunta")
+    if not pregunta:
+        return
+    context.user_data["boveda_title_question"] = {
+        "hoja_id": hoja_id,
+        "titulo_provisional": titulo_provisional,
+        "expira_en": _time.time() + _TITULO_IA_QUESTION_TIMEOUT_S,
+    }
+    try:
+        await message.reply_text(
+            f"🏷 {pregunta}\n"
+            "_Respondé para mejorar el título, o mandá /cancel para dejarlo como está._",
+            parse_mode="Markdown",
+        )
+    except Exception:
+        context.user_data.pop("boveda_title_question", None)
+
+
+_TITULO_NO_SE = {"no sé", "no se", "nose", "ni idea", "no", "ns", "-"}
+
+
+async def handle_pending_title_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Consume la respuesta a una pregunta de título IA pendiente, si hay una.
+
+    Debe llamarse ANTES del routing de texto libre -- si no, la respuesta se
+    tomaría como una nota nueva. Una sola ronda: responda lo que responda (o
+    "no sé"), la pregunta se cierra. La nota ya quedó guardada con el título
+    provisional; esto solo la mejora. Devuelve True si consumió el mensaje."""
+    ud = context.user_data
+    pending = ud.get("boveda_title_question")
+    if not pending:
+        return False
+    msg = update.message
+    texto = (msg.text or "").strip() if msg and msg.text else ""
+    if not texto:
+        return False
+
+    # Vencida: no la consumas (dejá que el mensaje siga su curso normal).
+    if _time.time() > pending.get("expira_en", 0):
+        ud.pop("boveda_title_question", None)
+        return False
+
+    ud.pop("boveda_title_question", None)
+
+    if texto.lower() in _TITULO_NO_SE:
+        await msg.reply_text("Listo, lo dejo con el título que tiene.")
+        return True
+
+    data = await _post_titulo_ia(pending["hoja_id"], pending["titulo_provisional"], respuesta=texto)
+    if data and data.get("titulo"):
+        await msg.reply_text(f"✏️ Título: {data['titulo']}")
+    else:
+        await msg.reply_text("Lo dejo con el título que tiene.")
     return True
 
 
@@ -757,6 +868,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         if await jh.handle_pending_audit_proposal(update, context):
             return
+        if await handle_pending_title_question(update, context):
+            return
 
     # Extraer texto del forward si es un forward
     texto = None
@@ -839,7 +952,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _invalidate_cat_cache(context.bot_data)
         cat = {"id": data["id"], "nombre": data["nombre"]}
         pending = ud.get("boveda_creating") or _boveda_payload_from_ud(ud)
-        await _save_draft(ud, context.bot_data, cat, msg, pending=pending)
+        await _save_draft(ud, context.bot_data, cat, msg, pending=pending, context=context)
         _finish_boveda_flow(ud)
         return
 
@@ -869,7 +982,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rapido = _load_rapido()
     if rapido.get("activo") and rapido.get("cat_id"):
         cat = {"id": rapido["cat_id"], "nombre": rapido["cat_nombre"]}
-        await _save_draft(ud, context.bot_data, cat, msg)
+        await _save_draft(ud, context.bot_data, cat, msg, context=context)
         _finish_boveda_flow(ud)
         return
 
@@ -1007,7 +1120,7 @@ async def handle_forward(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rapido = _load_rapido()
     if rapido.get("activo") and rapido.get("cat_id"):
         cat = {"id": rapido["cat_id"], "nombre": rapido["cat_nombre"]}
-        await _save_draft(ud, context.bot_data, cat, msg)
+        await _save_draft(ud, context.bot_data, cat, msg, context=context)
         _finish_boveda_flow(ud)
         return
 
@@ -1076,7 +1189,7 @@ async def _handle_boveda_callback(update: Update, context: ContextTypes.DEFAULT_
             await query.edit_message_text(f"Guardando en [{cat['nombre']}]…")
         except Exception:
             pass
-        await _save_draft(ud, context.bot_data, cat, query.message, pending=pending)
+        await _save_draft(ud, context.bot_data, cat, query.message, pending=pending, context=context)
         _finish_boveda_flow(ud, picker_message_id=mid)
         return True
 

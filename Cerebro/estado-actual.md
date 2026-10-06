@@ -4,8 +4,16 @@
 ## Título de las hojas por IA + notas con link a cuerpo único (2026-10-05)
 
 El título de una nota de Bóveda lo propone la IA (modelo LOCAL) leyendo el cuerpo + la metadata de la
-preview del link; siempre en segundo plano, nunca bloquea el guardado. **Pendiente de deploy al
-homelab** al momento de escribir esto (fases commiteadas y suites en verde).
+preview del link; siempre en segundo plano, nunca bloquea el guardado. **Desplegado al homelab el
+2026-10-06** (commits `b8dc245`, `6432bfe`, `877a9a5`, `8a8f7af`; push a origin/master hecho).
+Verificado en producción: 3 contenedores UP, `/meta` 200 (hojas 190, fin_movimientos 23 — sin cambios
+antes/después; categorias 27, instrumentos 20 idénticos), `/jarvis/health` worker vivo y `passive_eval`
+sano, bundle servido = `index-CSKwzYuf.js` (= build local de HEAD), endpoint nuevo responde sin escribir
+(404 en hoja inexistente; `{titulo:null,pregunta:null}` cuando el provisional no coincide). Backup previo:
+`app.db.bak-pre-tituloia-*` y `jarvis.db.bak-pre-tituloia-*` en `~/project/database/`. Prueba en sandbox
+local con Ollama real (gemma3:12b): título limpio en español con texto+metadata (~14 s caliente; en frío
+>120 s cae al provisional por el timeout de Ollama, sin error), no pisa ediciones manuales, y link sin
+contexto dispara la pregunta → respuesta → título.
 
 - **Generador**: `jarvis/captures/titulos.py::generar_titulo(cuerpo, link_meta)` → `{"titulo"|null,
   "pregunta"|null}` (LiteLLM, `JARVIS_LOCAL_MODEL`, temp 0, nunca lanza; sanea hashtags/URL/comillas,

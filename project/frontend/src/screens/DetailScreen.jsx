@@ -156,7 +156,7 @@ export default function DetailScreen() {
       </div>
 
       {/* Body */}
-      <div className="flex-1 overflow-y-auto px-4 lg:px-6 py-5">
+      <div className="flex-1 overflow-y-auto px-4 lg:px-6 pt-5 pb-24 md:pb-5">
       <div className="grid xl:grid-cols-[minmax(0,1fr)_260px] gap-5 max-w-6xl mx-auto">
       <div className="min-w-0 space-y-5">
 
@@ -244,7 +244,7 @@ export default function DetailScreen() {
         </div>
 
       </div>
-      <aside className="hidden xl:block border rounded-lg h-fit p-4" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+      <aside data-testid="hoja-info-panel" className="block border rounded-lg h-fit p-4" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
         <h2 className="text-[11px] uppercase tracking-[0.12em] font-semibold" style={{ color: 'var(--subtext)' }}>Información</h2>
         <dl className="mt-4 space-y-3 text-xs">
           <div>

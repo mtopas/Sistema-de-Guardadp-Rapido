@@ -3232,7 +3232,7 @@ def mobile_resumen_hoy(fecha_hoy: str, hora_actual: str) -> dict:
     alertas = []
     for cuenta in cuentas:
         for moneda, key in (("ARS", "ars"), ("USD", "usd")):
-            saldo = float(cuenta.get(key) or 0)
+            saldo = round(float(cuenta.get(key) or 0), 2)
             if saldo < 0:
                 alertas.append({
                     "tipo": "saldo_negativo",

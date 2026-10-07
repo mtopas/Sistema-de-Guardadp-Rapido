@@ -69,6 +69,32 @@ def test_mobile_hoy_agrega_solo_datos_accionables(client):
 
 
 @pytest.mark.integration
+def test_mobile_hoy_normaliza_saldos_antes_de_alertar(client):
+    residuo = client.post("/fin/cuentas", json={
+        "nombre": "Brubank",
+        "tipo": "bank",
+        "saldo_ars": -1.8189894035458565e-11,
+    }).json()
+    centavo = client.post("/fin/cuentas", json={
+        "nombre": "Cuenta con descubierto",
+        "tipo": "bank",
+        "saldo_ars": -0.01,
+    }).json()
+
+    response = client.get("/mobile/hoy?fecha=2026-10-07&hora=10:00")
+
+    assert response.status_code == 200
+    assert response.json()["alertas_financieras"] == [{
+        "tipo": "saldo_negativo",
+        "cuenta_id": centavo["id"],
+        "cuenta": "Cuenta con descubierto",
+        "moneda": "ARS",
+        "monto": -0.01,
+    }]
+    assert residuo["ars"] == pytest.approx(-1.8189894035458565e-11)
+
+
+@pytest.mark.integration
 def test_mobile_hoy_valida_fecha_y_hora(client):
     response = client.get("/mobile/hoy?fecha=07-10-2026&hora=ahora")
     assert response.status_code == 422

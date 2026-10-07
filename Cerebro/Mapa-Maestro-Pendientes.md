@@ -36,19 +36,17 @@ los enlaza.
 
 ### Verificaciones, decisiones y operaciones inmediatas
 
-- **Pruebas reales del título por IA y del flujo de captura por Telegram** — **decidido**, P1;
-  ejecutar las cuatro pruebas: nota con link en la app, edición manual que no debe ser pisada,
-  link sin contexto por Telegram que debe preguntar y texto claro por Telegram. Usar menú de
-  categorías o modo rápido, no texto libre suelto. Dependencias: homelab desplegado, Ollama y
-  Telegram disponibles. Fuente: [Handoff.md](Handoff.md), sesión 2026-10-06; [estado-actual.md](estado-actual.md).
-- **Pruebas manuales de uso post-deploy** — **decidido**, P1; hacer hard refresh de la PWA y
-  revisar también Ahorro (Bonos/Cedears con valores y diálogo de borrado), Ajustes sin panel de
-  sync, nota larga con link intermedio, categorización inline con/sin sugerencia, "Últimas hojas",
-  lista numerada y movimiento sin descripción. Dependencia: sesión del usuario. Fuente:
-  [Handoff.md](Handoff.md), sesiones 2026-10-02 y 2026-10-06.
-- **Pushear los commits locales posteriores al último push** — **decidido**, P1; después de
-  revisar el commit documental de esta sesión. Dependencia: revisión del diff local. Fuente:
-  [Handoff.md](Handoff.md), sesión 2026-10-06.
+- **Pruebas reales del título por IA y del flujo de captura por Telegram** — **resuelto**, P1;
+  verificadas por el usuario el 2026-10-07: la nota con link conserva una descripción útil como
+  título, la edición manual no se pisa, el bot obtiene título desde metadata cuando alcanza y el
+  texto claro se guarda en el cuerpo con título IA. Fuente: [Handoff.md](Handoff.md), sesión
+  2026-10-07; [estado-actual.md](estado-actual.md).
+- **Pruebas manuales post-deploy de Ahorro** — **resuelto**, P1; el usuario confirmó el 2026-10-07
+  que Bonos/Cedears muestran valores y que aparece el diálogo de confirmación antes de borrar. El
+  resto de la tanda ya estaba validado. Fuente: [Handoff.md](Handoff.md), sesiones 2026-10-02,
+  2026-10-06 y 2026-10-07.
+- **Push de commits locales** — **resuelto**, P1; el usuario confirmó el push el 2026-10-07. Fuente:
+  [Handoff.md](Handoff.md), sesión 2026-10-07.
 - **Borrar la nota de feedback #1 y hacer smoke test** — **decidido**, P2; es una escritura sobre
   datos reales y la debe ejecutar el usuario o un ticket autorizado. Dependencia: confirmación del
   usuario. Fuente: [Handoff.md](Handoff.md), sesión 2026-10-06.

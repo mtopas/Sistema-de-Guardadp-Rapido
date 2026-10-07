@@ -28,10 +28,13 @@ A diferencia del chat (cuyo contexto se pierde al cerrar la ventana), este archi
 
 ### Pendientes activos (arrastre consolidado)
 
-- [ ] [VERIF / USUARIO] Ejecutar las cuatro pruebas reales del título por IA y captura de Telegram;
-  además hacer hard refresh y revisar Ahorro, Ajustes, nota larga/link, categorías, listas y
-  movimientos sin descripción.
-- [ ] [PUSH / USUARIO] Pushear los commits locales posteriores a esta sesión.
+- [x] ~~[VERIF / USUARIO]~~ — título IA y captura por Telegram verificados el 2026-10-07: título
+  descriptivo válido para nota con link, edición manual preservada, metadata suficiente en bot y
+  texto claro guardado como cuerpo con título IA. Hard refresh, Ajustes sin panel de sync, lista
+  numerada y categoría en movimiento sin descripción también confirmados.
+- [x] ~~[VERIF / USUARIO]~~ — Ahorro validado el 2026-10-07: Bonos/Cedears muestran valores y el
+  diálogo de confirmación aparece antes de borrar. Queda cerrada la tanda manual post-deploy.
+- [x] ~~[PUSH / USUARIO]~~ — commits locales pusheados por el usuario el 2026-10-07.
 - [ ] [LIMPIEZA] Borrar la nota de feedback #1 con smoke test; limpiar, cuando convenga, el bundle
   JavaScript viejo del homelab y la variable inerte `HOMELAB_HOST=`.
 - [ ] [T6/T7/T8] Implementar o planificar autoetiquetado conservador, transparencia de Proyectos

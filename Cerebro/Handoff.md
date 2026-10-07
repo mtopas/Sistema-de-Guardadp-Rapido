@@ -1,5 +1,43 @@
 # Handoffs de Coordinación — SGR / Jarvis
 
+## [2026-10-07, sesión 23 — cierre de base semanal de calidad de Jarvis]
+
+- **Resultado:** Hecho en `master`. La Fase 1 de calidad semanal de Jarvis queda implementada en
+  `bb87344` (`Implementar revisión semanal de calidad de Jarvis`): ledger técnico aditivo,
+  agregación semanal determinística y snapshots write-once, sin texto sensible ni dependencia
+  funcional de la telemetría.
+- **Contrato operativo:** `POST /jarvis/quality/snapshots/{YYYY-MM-DD}` genera o devuelve un
+  snapshot existente; `GET` consulta el snapshot. Solo se aceptan lunes de semanas ya cerradas en
+  `America/Argentina/Buenos_Aires`. La F1 no incluye UI, scheduler, LLM ni métricas fuera de
+  Jarvis.
+- **Verificación reportada por la sesión trabajadora:** 548 tests backend aprobados y
+  `git diff --check` correcto. Se agregaron regresiones de privacidad/metadata, fallo inocuo de
+  telemetría, Agenda, límites ART, período abierto y write-once. Los consumidores de `query()`
+  en bot, API y tests conservaron su contrato.
+- **Evidencia inspeccionada por orquestación:** `bb87344` está en `master`, el árbol está limpio,
+  y el commit contiene el ledger, servicio de calidad, endpoints, pruebas y documentación en
+  `Cerebro/` y `CLAUDE.md`. No se ejecutó nuevamente la suite desde esta sesión.
+- **Próxima dirección:** antes de proponer automatización o una Fase 2, generar y revisar al menos
+  un snapshot de una semana cerrada con uso real; no inferir calidad semántica de estas métricas.
+
+### Pendientes activos (arrastre consolidado)
+
+- [ ] [DEPLOY AGRUPADO — T4 + T6 + MÓVIL] Cuando el usuario lo indique, desplegar `d619160`,
+  `58995a3`, `ce66321`, `75c8dc2` y `735ac13` al homelab según `HOMELAB.md`, sin copiar
+  `database/`, `uploads/` ni `vault`; verificar pregunta de Agenda viva, tags IA/chip/filtro/grafo
+  de Bóveda y ausencia de alerta para residuos monetarios.
+- [ ] [MÓVIL — USUARIO] Usar `/mobile` con texto real: Gasto, Bóveda, Tarea, Hábito y Jarvis;
+  confirmar que la selección de destino y deshacer resultan naturales antes de abrir voz.
+- [ ] [MÓVIL — VOZ] Después de validar texto, diseñar spike de interacción, HTTPS/permisos, STT
+  local/backend, latencia, privacidad y compatibilidad. Mantener fallback de texto y sin escucha.
+- [ ] [JARVIS — CALIDAD SEMANAL F1] Al cerrar una semana con uso real, generar y revisar su
+  snapshot manual. Recién entonces decidir si corresponde scheduler, UI, feedback explícito o
+  análisis semántico; mantener privacidad y alcance local.
+- [ ] [LIMPIEZA / RESTO] Borrar feedback #1 con smoke test, tareas operativas y backlog conforme
+  al Mapa Maestro.
+
+---
+
 Este archivo es la **cadena de custodia persistente** entre sesiones del Orquestador de SGR.
 A diferencia del chat (cuyo contexto se pierde al cerrar la ventana), este archivo mantiene la memoria viva del proyecto en disco.
 

@@ -217,14 +217,13 @@ consolidan ítems repetidos del roadmap y de [PROXIMAMENTE.md](PROXIMAMENTE.md).
   siete días y la explícita sale de la pregunta. El detector requiere marcador de Agenda o la
   excepción temporal “qué tengo hoy/mañana/esta semana”. Dependencia: deploy y prueba real.
   Fuente: commits `d619160` y `58995a3`; [Handoff.md](Handoff.md), T4.
-- **Revisión semanal de calidad de Jarvis** — **decidido**, P2: primera fase local y sin UI,
-  con telemetría técnica mínima por consulta, agregado determinístico semanal y snapshot
-  reproducible. Medirá volumen por día/canal/ruta, latencia, uso de contexto y errores o fallos
-  de tools; no copiará texto de mensajes al registro analítico ni invocará un LLM. El período se
-  calcula en `America/Argentina/Buenos_Aires`. El análisis semántico local de casos seleccionados,
-  feedback explícito y medición cross-módulo quedan para fases posteriores. Dependencia: definir e
-  implementar el contrato del reporte, luego observar una semana real antes de automatizar su
-  generación. Fuente: decisión de producto 2026-10-07.
+- **Revisión semanal de calidad de Jarvis** — **implementado, observación pendiente**, P2: Fase 1
+  local y sin UI en `bb87344`: telemetría técnica mínima por consulta, agregado determinístico y
+  snapshot semanal write-once. Mide volumen por día/canal/ruta, latencia, contexto y errores o
+  fallos de tools; no copia texto de mensajes ni invoca un LLM. El período se calcula en
+  `America/Argentina/Buenos_Aires`. Dependencia: generar y revisar una semana cerrada de uso real
+  antes de automatizar. El análisis semántico local, feedback explícito y medición cross-módulo
+  quedan para fases posteriores. Fuente: [Handoff.md](Handoff.md), sesión 23.
 - **Autoetiquetado inteligente de Bóveda (T6)** — **implementado, deploy pendiente**, P1: tags
   conservadores y removibles, sin alta si la IA no tiene confianza explícita >= 0.8. T7 ya está
   desplegado; T6 requiere deploy y validación real con Ollama. Fuente: commits `ce66321` y

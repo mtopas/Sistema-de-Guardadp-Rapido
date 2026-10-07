@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect } from 'react'
-import { BrowserRouter, Route, Routes, useLocation } from 'react-router-dom'
+import { BrowserRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { useStore } from './store/useStore'
+import { isStandalonePwa, shouldRedirectPwaHome } from './pwaEntry'
 
 const Layout = lazy(() => import('./components/Layout'))
 const BrowseScreen = lazy(() => import('./screens/BrowseScreen'))
@@ -133,6 +134,19 @@ function AppContent() {
   )
 }
 
+function PwaEntryRedirect() {
+  const location = useLocation()
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    if (shouldRedirectPwaHome(location.pathname, isStandalonePwa())) {
+      navigate('/mobile', { replace: true })
+    }
+  }, [location.pathname, navigate])
+
+  return null
+}
+
 export default function App() {
   return (
     <BrowserRouter
@@ -141,6 +155,7 @@ export default function App() {
         v7_relativeSplatPath: true,
       }}
     >
+      <PwaEntryRedirect />
       <AppContent />
     </BrowserRouter>
   )

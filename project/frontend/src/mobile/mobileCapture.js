@@ -9,6 +9,10 @@ export const MOBILE_ACTIONS = [
   { id: 'jarvis', label: 'Preguntar a Jarvis', eyebrow: 'Consulta', prompt: '¿Qué querés saber?', placeholder: '¿Qué tengo pendiente esta semana?' },
 ]
 
+export function mobileCategoryOption(category) {
+  return { value: category.name, label: category.name }
+}
+
 export function localISODate(now = new Date()) {
   const year = now.getFullYear()
   const month = String(now.getMonth() + 1).padStart(2, '0')

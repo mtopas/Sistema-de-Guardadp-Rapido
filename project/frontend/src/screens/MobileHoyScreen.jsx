@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import { API_URL } from '../config'
 import {
-  MOBILE_ACTIONS, loadMobileTargets, mobileDestination,
+  MOBILE_ACTIONS, loadMobileTargets, mobileCategoryOption, mobileDestination,
   submitMobileCapture, undoMobileCapture,
 } from '../mobile/mobileCapture'
 
@@ -328,7 +328,10 @@ export default function MobileHoyScreen() {
                         <span className="mb-1 block text-[10px] font-bold uppercase tracking-wider">Categoría</span>
                         <select name="category" value={fields.categoryName || ''} onChange={event => setFields({ ...fields, categoryName: event.target.value })} className="w-full border border-[#20211e]/25 bg-white px-3 py-3 outline-none focus:border-[#20211e]">
                           <option value="">Elegir…</option>
-                          {targets.categories?.map(category => <option key={category.id} value={category.nombre}>{category.nombre}</option>)}
+                          {targets.categories?.map(category => {
+                            const option = mobileCategoryOption(category)
+                            return <option key={category.id} value={option.value}>{option.label}</option>
+                          })}
                         </select>
                       </label>
                     </div>

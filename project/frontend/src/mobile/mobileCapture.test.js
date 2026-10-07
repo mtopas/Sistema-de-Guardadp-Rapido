@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   MOBILE_ACTIONS,
+  mobileCategoryOption,
   loadMobileTargets,
   mobileDestination,
   submitMobileCapture,
@@ -30,6 +31,17 @@ describe('captura móvil intencional', () => {
     expect(fetchMock.mock.calls[0][0]).toMatch(/\/categorias$/)
     expect(targets.inbox.id).toBe(2)
     expect(mobileDestination('boveda', {}, targets)).toBe('Bóveda · 00 - Sin categorizar')
+  })
+
+  it('expone name como valor y etiqueta seleccionable de Gasto', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([{ id: 3, name: 'Efectivo' }]))
+      .mockResolvedValueOnce(jsonResponse([{ id: 8, name: 'Comida', tipo: 'expense', oculta: false }]))
+
+    const targets = await loadMobileTargets('gasto', fetchMock)
+
+    expect(targets.categories).toEqual([{ id: 8, name: 'Comida', tipo: 'expense', oculta: false }])
+    expect(mobileCategoryOption(targets.categories[0])).toEqual({ value: 'Comida', label: 'Comida' })
   })
 
   it('crea una tarea para hoy en la lista elegida', async () => {

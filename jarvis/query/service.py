@@ -10,6 +10,7 @@ La Privacy Gateway ya filtra entradas antes del modelo externo (spec §17).
 import logging
 from datetime import date, datetime, timedelta, timezone
 import re
+import time
 
 from jarvis.chats.service import autoname_if_untitled
 from jarvis.config import JARVIS_DEFAULT_USER
@@ -22,6 +23,7 @@ from jarvis.conversation.service import (
 from jarvis.entities.service import get_entries_for_entity, match_entities_in_text
 from jarvis.llm.client import call_reason
 from jarvis.privacy.gateway import filter_context
+from jarvis.quality import service as quality
 from jarvis.retriever.retriever import retrieve
 from jarvis.tools import DEFAULT_EXECUTOR
 
@@ -47,93 +49,141 @@ def query(
             "context_sent": int,    # fragmentos que pasaron el Privacy Gateway
         }
     """
-    # Conversación
-    if conversation_id is None:
-        conversation_id = get_or_create_conversation(
-            channel=channel,
-            channel_id=channel_id,
-            user_id=user_id,
-        )
-    else:
-        # conversation_id puede venir del cliente (frontend, localStorage) y quedar
-        # huérfano si jarvis.db se resetea/migra — recrearla evita un FOREIGN KEY
-        # constraint failed en el add_message() de abajo.
-        ensure_conversation(conversation_id, channel=channel, channel_id=channel_id, user_id=user_id)
-    add_message(conversation_id, "user", question)
-    # Multi-chat (Mejoras_Jarvis.md punto 3): el primer mensaje de un chat sin
-    # título le da nombre automáticamente — nunca pisa un título ya puesto por
-    # el usuario. No-op para channel='telegram' (esa tabla nunca expone título
-    # en UI, ver jarvis/chats/service.py).
-    autoname_if_untitled(conversation_id, question)
+    started = time.perf_counter()
+    occurred_at = datetime.now(timezone.utc)
+    route = "rag"
+    result_category = "query_error"
+    error_code = None
+    tool_name = None
+    tool_ok = None
+    context_count = 0
+    context_sent = 0
+    stage = "conversation"
 
-    agenda_query = _resolve_agenda_query(question)
-    agenda_events = None
-    agenda_error = None
-    if agenda_query is not None:
-        result = DEFAULT_EXECUTOR.execute("agenda.list_events", "1.0.0", agenda_query)
-        if result.ok:
-            agenda_events = result.data.get("eventos", []) if isinstance(result.data, dict) else []
+    try:
+        # Conversación
+        if conversation_id is None:
+            conversation_id = get_or_create_conversation(
+                channel=channel,
+                channel_id=channel_id,
+                user_id=user_id,
+            )
         else:
-            agenda_error = result.error.get("message", "error desconocido") if result.error else "error desconocido"
+            # conversation_id puede venir del cliente (frontend, localStorage) y quedar
+            # huérfano si jarvis.db se resetea/migra — recrearla evita un FOREIGN KEY
+            # constraint failed en el add_message() de abajo.
+            ensure_conversation(conversation_id, channel=channel, channel_id=channel_id, user_id=user_id)
+        add_message(conversation_id, "user", question)
+        # Multi-chat: el primer mensaje de un chat sin título le da nombre automáticamente.
+        autoname_if_untitled(conversation_id, question)
 
-    # La Agenda en vivo es la única fuente para esta rama. No usar RAG: evita que un
-    # evento histórico copiado a memoria pueda competir con el resultado actual.
-    context_entries = [] if agenda_query is not None else retrieve(question, n_results=8, user_id=user_id)
+        agenda_query = _resolve_agenda_query(question)
+        agenda_events = None
+        agenda_error = None
+        if agenda_query is not None:
+            route = "agenda_live"
+            tool_name = "agenda.list_events"
+            stage = "tool"
+            result = DEFAULT_EXECUTOR.execute("agenda.list_events", "1.0.0", agenda_query)
+            tool_ok = bool(result.ok)
+            if result.ok:
+                agenda_events = result.data.get("eventos", []) if isinstance(result.data, dict) else []
+            else:
+                error_code = "agenda_tool_error"
+                agenda_error = result.error.get("message", "error desconocido") if result.error else "error desconocido"
 
-    # Privacy Gateway — bloquear fragmentos que no pueden salir al modelo externo
-    safe_entries = filter_context(context_entries)
-    blocked = len(context_entries) - len(safe_entries)
-    if blocked:
-        logger.info(
-            "[jarvis.query] %d fragmento(s) bloqueados por Privacy Gateway user=%s",
-            blocked, user_id,
+        # La Agenda en vivo es la única fuente para esta rama. No usar RAG.
+        stage = "retrieval"
+        context_entries = [] if agenda_query is not None else retrieve(
+            question, n_results=8, user_id=user_id
+        )
+        context_count = len(context_entries)
+
+        # Privacy Gateway — bloquear fragmentos que no pueden salir al modelo externo.
+        safe_entries = filter_context(context_entries)
+        context_sent = len(safe_entries)
+        blocked = context_count - context_sent
+        if blocked:
+            logger.info(
+                "[jarvis.query] %d fragmento(s) bloqueados por Privacy Gateway user=%s",
+                blocked, user_id,
+            )
+
+        # Historial conversacional (spec §7: últimos 8-10 mensajes).
+        history = get_recent_messages(conversation_id, limit=10)
+        # La pregunta recién insertada es solo el último mensaje; las anteriores
+        # con el mismo texto siguen siendo parte del historial.
+        if history and history[-1]["role"] == "user" and history[-1]["content"] == question:
+            history = history[:-1]
+
+        # Entidades conocidas mencionadas en la pregunta — sección aparte.
+        entity_sections = "" if agenda_query is not None else _build_entity_sections(question, user_id)
+
+        messages = _build_messages(
+            question,
+            safe_entries,
+            history,
+            had_blocked=blocked > 0,
+            entity_sections=entity_sections,
+            agenda_events=agenda_events,
+            agenda_error=agenda_error,
         )
 
-    # Historial conversacional (spec §7: últimos 8-10 mensajes)
-    history = get_recent_messages(conversation_id, limit=10)
-    # La pregunta recién insertada es solo el último mensaje; las anteriores
-    # con el mismo texto siguen siendo parte del historial.
-    if history and history[-1]["role"] == "user" and history[-1]["content"] == question:
-        history = history[:-1]
+        # Llamar al modelo de razonamiento (maneja budget EXHAUSTED internamente).
+        stage = "llm"
+        answer = call_reason(messages)
 
-    # Entidades conocidas mencionadas en la pregunta (0.2 Slice 3) — sección aparte
-    # "Lo que sé sobre [nombre]" con sus entradas vinculadas, también filtradas por
-    # el Privacy Gateway antes de ir al prompt del modelo externo.
-    entity_sections = "" if agenda_query is not None else _build_entity_sections(question, user_id)
+        # Persistir respuesta.
+        stage = "response_persistence"
+        add_message(conversation_id, "assistant", answer)
 
-    # Construir mensaje para el modelo
-    messages = _build_messages(
-        question,
-        safe_entries,
-        history,
-        had_blocked=blocked > 0,
-        entity_sections=entity_sections,
-        agenda_events=agenda_events,
-        agenda_error=agenda_error,
-    )
+        result_category = "tool_error" if tool_ok is False else "success"
+        sources = [
+            {
+                "id": e["id"],
+                "type": e.get("type", "RAW"),
+                "title_hint": _title_hint(e),
+            }
+            for e in safe_entries[:5]
+        ]
 
-    # Llamar al modelo de razonamiento (maneja budget EXHAUSTED internamente)
-    answer = call_reason(messages)
-
-    # Persistir respuesta
-    add_message(conversation_id, "assistant", answer)
-
-    sources = [
-        {
-            "id": e["id"],
-            "type": e.get("type", "RAW"),
-            "title_hint": _title_hint(e),
+        return {
+            "answer": answer,
+            "sources": sources,
+            "conversation_id": conversation_id,
+            "context_count": context_count,
+            "context_sent": context_sent,
         }
-        for e in safe_entries[:5]
-    ]
-
-    return {
-        "answer": answer,
-        "sources": sources,
-        "conversation_id": conversation_id,
-        "context_count": len(context_entries),
-        "context_sent": len(safe_entries),
-    }
+    except Exception:
+        result_category = "tool_error" if stage == "tool" else "query_error"
+        if error_code is None:
+            error_code = {
+                "conversation": "conversation_error",
+                "tool": "tool_execution_error",
+                "retrieval": "retrieval_error",
+                "llm": "llm_error",
+                "response_persistence": "response_persistence_error",
+            }.get(stage, "query_error")
+        raise
+    finally:
+        try:
+            quality.record_query_telemetry(
+                occurred_at=occurred_at,
+                channel=channel,
+                conversation_id=conversation_id,
+                route=route,
+                result=result_category,
+                duration_ms=(time.perf_counter() - started) * 1000,
+                context_retrieved=context_count,
+                context_sent=context_sent,
+                tool_name=tool_name,
+                tool_ok=tool_ok,
+                error_code=error_code,
+            )
+        except Exception as exc:  # defensa si se reemplaza el writer en tests/runtime
+            logger.warning(
+                "[jarvis.quality] writer de telemetría falló (%s)", type(exc).__name__
+            )
 
 
 def _build_messages(

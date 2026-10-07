@@ -1,6 +1,25 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-10-07
 
+## Base de revisión semanal de calidad de Jarvis — Fase 1 (2026-10-07)
+
+Jarvis registra cada consulta en `jarvis_query_telemetry`, una tabla aditiva que conserva solo
+fecha/hora UTC, canal (`telegram`/`desktop`), conversación, ruta (`rag`/`agenda_live`), resultado
+(`success`/`tool_error`/`query_error`), duración, conteos de contexto, tool y código de error
+categorizado. No persiste preguntas, respuestas, argumentos de tools ni mensajes de error. La
+escritura es best-effort: si falla, la respuesta normal continúa.
+
+El agregado se calcula por semanas lunes-domingo en `America/Argentina/Buenos_Aires` y suma mensajes
+por día/canal/rol desde `conversations` + `conversation_messages`, consultas por ruta/resultado,
+duración promedio/máxima, contexto, fallos de tools, errores categorizados y señales objetivas de
+fricción (sin contexto, filtrado de privacidad y fallos). El snapshot se guarda write-once en
+`jarvis_quality_snapshots`; una segunda generación devuelve el existente sin modificarlo. Solo se
+aceptan semanas cerradas.
+
+Endpoints internos manuales: `POST /jarvis/quality/snapshots/{YYYY-MM-DD}` genera o devuelve el
+snapshot; `GET /jarvis/quality/snapshots/{YYYY-MM-DD}` consulta el resumen. No hay UI, scheduler,
+LLM ni envío fuera del equipo en esta fase.
+
 ## Consulta viva de Agenda desde Jarvis (2026-10-07)
 
 Las preguntas acotadas de Agenda (hoy, mañana, semana y próximos eventos) ejecutan bajo demanda

@@ -343,4 +343,36 @@ CREATE TABLE IF NOT EXISTS jarvis_audit_proposals (
 
 CREATE INDEX IF NOT EXISTS idx_jap_status ON jarvis_audit_proposals(status);
 CREATE INDEX IF NOT EXISTS idx_jap_channel ON jarvis_audit_proposals(channel, channel_id);
+
+-- Telemetría técnica de consultas (revisión semanal de calidad, Fase 1).
+-- Nunca guarda pregunta, respuesta, argumentos de tools ni mensajes de error.
+CREATE TABLE IF NOT EXISTS jarvis_query_telemetry (
+    id                    TEXT PRIMARY KEY,
+    occurred_at           DATETIME NOT NULL,
+    channel               TEXT NOT NULL CHECK (channel IN ('telegram','desktop')),
+    conversation_id       TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+    route                 TEXT NOT NULL CHECK (route IN ('rag','agenda_live')),
+    result                TEXT NOT NULL CHECK (result IN ('success','tool_error','query_error')),
+    duration_ms           REAL NOT NULL CHECK (duration_ms >= 0),
+    context_retrieved     INTEGER NOT NULL DEFAULT 0 CHECK (context_retrieved >= 0),
+    context_sent          INTEGER NOT NULL DEFAULT 0 CHECK (context_sent >= 0),
+    tool_name             TEXT,
+    tool_ok               INTEGER CHECK (tool_ok IS NULL OR tool_ok IN (0,1)),
+    error_code            TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_jqt_occurred ON jarvis_query_telemetry(occurred_at);
+CREATE INDEX IF NOT EXISTS idx_jqt_route_result
+    ON jarvis_query_telemetry(route, result);
+
+-- Snapshot semanal inmutable. summary_json contiene únicamente agregados y
+-- categorías; no es una caché regenerable ni un volcado de conversaciones.
+CREATE TABLE IF NOT EXISTS jarvis_quality_snapshots (
+    week_start            TEXT PRIMARY KEY,
+    week_end              TEXT NOT NULL,
+    timezone              TEXT NOT NULL,
+    schema_version        INTEGER NOT NULL DEFAULT 1,
+    summary_json          TEXT NOT NULL,
+    created_at            DATETIME NOT NULL
+);
 """

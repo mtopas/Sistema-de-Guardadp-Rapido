@@ -11,6 +11,37 @@ Formato de cada entrada:
 
 ---
 
+## 2026-10-07 — Base local de revisión semanal de calidad de Jarvis (Fase 1)
+
+Contexto: se necesita observar si Jarvis funciona bien semana a semana sin convertir el historial
+conversacional en un corpus analítico ni depender de un modelo para producir el reporte.
+
+Decisión:
+- Agregar `jarvis_query_telemetry` al esquema aditivo de `jarvis.db`. La taxonomía mínima es
+  `route=rag|agenda_live`, `result=success|tool_error|query_error` y códigos fijos por etapa/tool.
+  La fila guarda metadata técnica y conteos, nunca pregunta, respuesta, argumentos ni error crudo.
+- Instrumentar `jarvis/query/service.py` alrededor del flujo completo. La escritura de telemetría
+  está protegida por captura de excepciones en el writer y en el call site, por lo que no cambia la
+  respuesta ni convierte la observabilidad en dependencia funcional.
+- Implementar `jarvis/quality/service.py` con límites de lunes 00:00 a lunes 00:00 locales en
+  `America/Argentina/Buenos_Aires`, convertidos a UTC para filtrar. El resumen contiene mensajes
+  diarios por canal/rol, consultas por ruta/resultado, promedio y máximo de duración, contexto,
+  tools, errores categorizados y señales objetivas de fricción.
+- Persistir cada resumen en `jarvis_quality_snapshots` con `INSERT OR IGNORE` y clave
+  `week_start`. No existe actualización ni regeneración: una semana ya registrada devuelve la
+  fila existente. Exponer generación y consulta manual mediante
+  `/jarvis/quality/snapshots/{week_start}` (POST/GET).
+
+Diferencia con spec: ninguna funcional; se eligieron nombres de ruta y contrato de respuesta
+concretos para esta primera fase.
+
+Impacto: `jarvis/db/schema.py`, `jarvis/quality/service.py`, `jarvis/query/service.py`,
+`jarvis/api/router.py`, `project/tests/test_jarvis_quality.py`.
+
+Límites explícitos: no se interpreta semánticamente el contenido, no se guardan textos en el
+ledger/snapshot, no se agregan métricas de otros módulos, no hay UI ni scheduler, y la generación
+debe invocarse manualmente para una semana cerrada.
+
 ## 2026-10-07 — Consulta viva de Agenda bajo demanda en Jarvis
 
 Contexto: el chat de Jarvis consultaba únicamente memoria RAG, pero Agenda es una fuente operativa

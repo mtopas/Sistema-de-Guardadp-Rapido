@@ -16,6 +16,8 @@ Endpoints:
     GET  /jarvis/projects/vault   — lectura de Bóveda/01 - Proyectos con procedencia
     GET  /jarvis/events           — últimos eventos del worker (tab Debug)
     GET  /jarvis/health           — señal real de "worker vivo" (heartbeat)
+    POST /jarvis/quality/snapshots/{week_start} — genera snapshot semanal cerrado
+    GET  /jarvis/quality/snapshots/{week_start} — consulta snapshot inmutable
     GET  /jarvis/chats            — lista de chats web (multi-chat)
     POST /jarvis/chats            — crear chat
     PATCH  /jarvis/chats/{id}     — renombrar chat
@@ -29,6 +31,7 @@ Endpoints:
 """
 import logging
 import uuid
+from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -52,6 +55,11 @@ from jarvis.entities.service import get_entries_for_entity, list_entities
 from jarvis.events.service import list_recent_events
 from jarvis.memory.service import capture_raw, edit_entry, forget_entry, get_entry
 from jarvis.projects.service import list_projects_with_activity, read_vault_project_section
+from jarvis.quality.service import (
+    WeekNotClosedError,
+    create_weekly_snapshot,
+    get_weekly_snapshot,
+)
 from jarvis.query.service import query as _run_query
 from jarvis.stats.service import count_entries_by_type
 from jarvis.tags.service import get_entries_for_tag, list_tags_with_counts
@@ -417,6 +425,26 @@ def events_endpoint(limit: int = Query(default=20, ge=1, le=200)):
 def health_endpoint():
     """Señal real de que el worker sigue corriendo, vía heartbeat (Fase B6)."""
     return {"worker_alive": get_worker_alive(), "passive_eval": get_eval_health()}
+
+
+@router.post("/quality/snapshots/{week_start}")
+def create_quality_snapshot_endpoint(week_start: date):
+    """Genera el snapshot técnico inmutable de una semana lunes-domingo cerrada."""
+    try:
+        return create_weekly_snapshot(week_start)
+    except WeekNotClosedError as exc:
+        raise HTTPException(status_code=400, detail="La semana solicitada todavía no está cerrada.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/quality/snapshots/{week_start}")
+def get_quality_snapshot_endpoint(week_start: date):
+    """Devuelve el snapshot semanal sin recalcularlo ni modificarlo."""
+    snapshot = get_weekly_snapshot(week_start)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="No existe snapshot para esa semana.")
+    return snapshot
 
 
 @router.get("/entries/{entry_id}")

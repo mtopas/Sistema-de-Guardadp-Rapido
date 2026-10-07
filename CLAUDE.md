@@ -15,6 +15,11 @@ Guía para agentes en este repositorio.
 
 ## Commands
 
+Jarvis expone endpoints internos para revisión semanal: `POST`/`GET`
+`/jarvis/quality/snapshots/{YYYY-MM-DD}`. Solo aceptan semanas lunes-domingo cerradas en
+`America/Argentina/Buenos_Aires`; el snapshot es local, write-once y no contiene contenido
+conversacional.
+
 ### Backend (FastAPI)
 
 ```bash

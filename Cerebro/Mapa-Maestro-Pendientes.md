@@ -1,0 +1,357 @@
+# Mapa Maestro de Pendientes — SGR / Jarvis
+
+**Actualizado:** 2026-10-07
+**Propósito:** inventario consolidado de pendientes, planes, roadmaps e ideas futuras vigentes.
+
+Este documento no reemplaza la cadena de custodia operativa: [Cerebro/Handoff.md](Handoff.md)
+sigue registrando el cambio más reciente de cada sesión. El mapa reúne el inventario completo y
+deduplicado para planificar.
+
+## Regla de lectura y mantenimiento
+
+- Leer este mapa al iniciar toda planificación relevante.
+- Actualizarlo al cerrar cada trabajo que resuelva, cree, descarte o repriorice un pendiente.
+- Mantener el Handoff actualizado en el mismo cierre; el Handoff tiene prioridad operativa y el
+  mapa tiene prioridad como inventario consolidado.
+- Estados usados: **decidido** (dirección definida, ejecución o verificación pendiente),
+  **por diseñar** (falta resolver diseño), **diferido** (postergado explícitamente) e **idea**
+  (posibilidad sin compromiso).
+- Prioridad: P0 urgente, P1 alta, P2 media, P3 baja/no urgente. Si la fuente no asigna prioridad,
+  se indica **sin prioridad asignada**.
+
+### Jerarquía aplicada
+
+1. Estado real y decisiones recientes: [estado-actual.md](estado-actual.md) y
+   [decisiones-implementacion.md](decisiones-implementacion.md).
+2. Cadena operativa: [Handoff.md](Handoff.md), tomando como vigente el bloque más reciente por
+   fecha.
+3. Roadmaps y documentos de diseño: [PROXIMAMENTE.md](PROXIMAMENTE.md), los roadmaps de módulos,
+   [PLAN-OLLAMA.md](../PLAN-OLLAMA.md) y los planes de Jarvis.
+
+Los roadmaps dentro de `project/` siguen siendo fuentes de detalle por módulo. En esta sesión no
+se modifican porque fueron declarados fuera de alcance; este archivo es el índice consolidado que
+los enlaza.
+
+## 1. Ahora / pendientes de trabajos previos
+
+### Verificaciones, decisiones y operaciones inmediatas
+
+- **Pruebas reales del título por IA y del flujo de captura por Telegram** — **decidido**, P1;
+  ejecutar las cuatro pruebas: nota con link en la app, edición manual que no debe ser pisada,
+  link sin contexto por Telegram que debe preguntar y texto claro por Telegram. Usar menú de
+  categorías o modo rápido, no texto libre suelto. Dependencias: homelab desplegado, Ollama y
+  Telegram disponibles. Fuente: [Handoff.md](Handoff.md), sesión 2026-10-06; [estado-actual.md](estado-actual.md).
+- **Pruebas manuales de uso post-deploy** — **decidido**, P1; hacer hard refresh de la PWA y
+  revisar también Ahorro (Bonos/Cedears con valores y diálogo de borrado), Ajustes sin panel de
+  sync, nota larga con link intermedio, categorización inline con/sin sugerencia, "Últimas hojas",
+  lista numerada y movimiento sin descripción. Dependencia: sesión del usuario. Fuente:
+  [Handoff.md](Handoff.md), sesiones 2026-10-02 y 2026-10-06.
+- **Pushear los commits locales posteriores al último push** — **decidido**, P1; después de
+  revisar el commit documental de esta sesión. Dependencia: revisión del diff local. Fuente:
+  [Handoff.md](Handoff.md), sesión 2026-10-06.
+- **Borrar la nota de feedback #1 y hacer smoke test** — **decidido**, P2; es una escritura sobre
+  datos reales y la debe ejecutar el usuario o un ticket autorizado. Dependencia: confirmación del
+  usuario. Fuente: [Handoff.md](Handoff.md), sesión 2026-10-06.
+- **Limpiar el bundle JavaScript viejo del homelab** — **diferido**, P3; el `index.html` ya apunta
+  al bundle nuevo y el archivo es inofensivo. Dependencia: acceso al host y limpieza segura del
+  directorio `dist/assets`. Fuente: [Handoff.md](Handoff.md), sesión 2026-10-06.
+- **Quitar `HOMELAB_HOST=` del `.env` del homelab** — **diferido**, P3; variable inerte, solo si
+  se quiere eliminar ruido. Dependencia: edición controlada del `.env` y `docker-compose up -d
+  --no-build`; no usar `restart`. Fuente: [Handoff.md](Handoff.md), sesión 2026-10-02.
+- **Importación mensual de operaciones** — **decidido**, P2; ejecutar el flujo documentado con
+  `--excluir-tickers TZX26` y luego actualizar precios con el MEP vigente. Dependencia: disponer de
+  los tres CSV del mes y revisar el dry-run antes de aplicar. Fuente: [Handoff.md](Handoff.md),
+  sesión 2026-10-06; [Finanzas-Roadmap.md](../project/Finanzas-Roadmap.md).
+
+### Tickets pequeños desbloqueados
+
+- **Autoetiquetado conservador de hojas con IA** — **decidido**, P1; tags fáciles de quitar, sin
+  agregar si la IA no está segura o no hace falta. Dependencia: decidir interfaz concreta y
+  reutilizar el catálogo/clasificador de Jarvis. Fuente: [Handoff.md](Handoff.md), T6/#6;
+  [triaje-feedback-2026-10-02.md](triaje-feedback-2026-10-02.md).
+- **Transparencia de Proyectos en Jarvis** — **decidido**, P1; mostrar actividad y leer la sección
+  `01 - Proyectos` de la Bóveda. Dependencia: verificar montaje y frecuencia de actualización de
+  `D:\Boveda` en el homelab. Fuente: [Handoff.md](Handoff.md), T7/#4.
+- **Carga manual de tiempo en pantalla en Hábitos** — **decidido**, P1; semana lunes-domingo,
+  siete totales diarios, top cinco apps, horas semanales y métricas total/promedio/mejor/peor día;
+  falta decidir si habrá meta diaria. Dependencia: definición de meta y modelo de datos de la
+  pantalla. Fuente: [Handoff.md](Handoff.md), T8/#14.
+- **Latencia de la sugerencia de categoría** — **decidido**, P2; evaluar precalentamiento de
+  Ollama (`keep_alive`) y/o mensaje de espera más claro. Dependencia: no cambiar timeouts sin
+  medir de nuevo en homelab. Fuente: [Handoff.md](Handoff.md), sesión 2026-10-06.
+- **Umbral de sugerencia de categoría** — **por diseñar**, P2; revisar si el umbral compartido de
+  aproximadamente 400 caracteres deja demasiadas notas rápidas sin sugerencia. Dependencia:
+  observar uso real y separar, si corresponde, el umbral del triaje de Inbox. Fuente:
+  [Handoff.md](Handoff.md), sesiones 2026-10-02/06.
+- **Jarvis debe leer Agenda en vivo** — **por diseñar**, P1; decidir cómo cablear
+  `agenda.list_events` al chat, porque el Tool Registry existe pero todavía no hay loop de tool
+  calling en la conversación. Dependencia: diseño del loop, permisos y contexto de respuesta.
+  Fuente: [Handoff.md](Handoff.md), T4/#3; [PROXIMAMENTE.md](PROXIMAMENTE.md).
+
+### Gaps documentados que siguen abiertos
+
+- **Tests de regresión para escritura del vault de Bóveda** — **decidido**, P2; agregar cobertura
+  aislada para frontmatter, preservación de identidad y sincronización antes de volver a tocar esa
+  zona sensible. Dependencia: fixture de vault temporal. Fuente: [estado-actual.md](estado-actual.md),
+  cierre de auditoría de Bóveda 2026-09-25.
+- **Indexación semántica con frontmatter roto o colisión `UNIQUE`** — **por diseñar**, P2;
+  reproducir y determinar causa raíz antes de corregir. Dependencia: fixture que reproduzca la
+  nota de `Jarvis/Entidades` y el camino de sync. Fuente: [estado-actual.md](estado-actual.md),
+  hallazgos nuevos del cierre de auditoría de Bóveda.
+- **Botones de guardar/eliminar inaccesibles en mobile/tablet** — **por diseñar**, P2; definir
+  ubicación responsive manteniendo el pedido de conservarlos bajo Información. Dependencia:
+  decisión visual y prueba en viewport menor que `xl`. Fuente: [estado-actual.md](estado-actual.md),
+  hallazgos nuevos de la auditoría frontend.
+- **Validación silenciosa de valores inválidos en registros batch de Hábitos** — **por diseñar**,
+  P2; medir alcance y decidir si rechazar, normalizar o informar cada valor inválido. Dependencia:
+  casos reales y contrato API. Fuente: [estado-actual.md](estado-actual.md), hallazgos nuevos.
+- **Clave i18n `goalEmergency*` sin consumidores** — **idea**, P3; limpiar solo en una pasada de
+  deuda menor, sin prioridad funcional. Dependencia: confirmar que no la usa una pantalla externa.
+  Fuente: [estado-actual.md](estado-actual.md), hallazgos nuevos.
+- **Propuestas del canal desktop y router de Telegram** — **por diseñar**, P3; hacer que las
+  propuestas relevantes también lleguen por Telegram y mejorar el diagnóstico de frases ambiguas.
+  Dependencia: definir canal prioritario y dataset de casos. Fuente: [Handoff.md](Handoff.md),
+  sesión 2026-10-06.
+- **Certeza/estado por entrada de memoria de Jarvis** — **idea**, P3; evaluar en uso real si hace
+  falta distinguir regla firme, preferencia, idea y discusión. Dependencia: prueba real y criterio
+  de presentación. Fuente: [Handoff.md](Handoff.md), sesión 2026-10-06.
+- **Evaluación de `Front-CLAUDE/`, `Front-GPT/` y `Front-Claude-Design/`** — **idea**, P3;
+  comparar si aportan algo que deba incorporarse al runtime. Dependencia: objetivo visual concreto
+  y revisión de licencia/alcance. Fuente: [Handoff.md](Handoff.md), sesión 2026-10-06.
+- **Video promocional** — **idea**, P3; ejecutar el prompt en sandbox, nunca en producción.
+  Dependencia: definir si se prioriza y usar la skill de video disponible. Fuente:
+  [Handoff.md](Handoff.md), sesión 2026-10-06.
+
+## 2. Futuro
+
+### Bóveda
+
+Fuente primaria de detalle: [project/Boveda-Roadmap.md](../project/Boveda-Roadmap.md). Los grupos
+consolidan ítems repetidos del roadmap y de [PROXIMAMENTE.md](PROXIMAMENTE.md).
+
+- **Grafo y conocimiento conectado** — **idea**, P3: modo solo-rama, layout por tags, navegación
+  por teclado, tags como enlaces y grafo por `[[wikilinks]]` con backlinks/preview. Dependencias:
+  decidir modelo de tags y enlaces estables por `vault_id`. Fuente: [Boveda-Roadmap.md](../project/Boveda-Roadmap.md);
+  [PROXIMAMENTE.md](PROXIMAMENTE.md).
+- **Mover y buscar mejor** — **por diseñar**, P2: drag & drop de hojas entre categorías,
+  resaltado dentro de apuntes, buscador híbrido compartido (FTS5 + embeddings + recencia) y una
+  bandeja web de `00 - Sin categorizar` con acciones rápidas. Dependencias: decidir contrato de
+  búsqueda y si la bandeja complementa al triaje de Jarvis. Fuente: [Boveda-Roadmap.md](../project/Boveda-Roadmap.md);
+  [PROXIMAMENTE.md](PROXIMAMENTE.md).
+- **Editor TipTap enriquecido** — **idea**, P3: resaltar `#tag` inline, pegar URL como card
+  embed, experiencia WYSIWYG con Markdown nativo y selector de color coherente en todas las rutas.
+  Dependencias: no romper el modelo actual de cuerpo único. Fuente: [Boveda-Roadmap.md](../project/Boveda-Roadmap.md);
+  [PROXIMAMENTE.md](PROXIMAMENTE.md).
+- **Captura y responsive** — **por diseñar**, P2: recordatorios en CaptureModal, drag & drop de
+  imágenes, share target, layout adaptable, detalle full-screen móvil, panel contextual Ctrl+M y
+  Ctrl+K. Dependencias: notificaciones y revisión visual móvil. Fuente: [Boveda-Roadmap.md](../project/Boveda-Roadmap.md).
+- **Menú contextual completo** — **por diseñar**, P2: acciones para categorías, hojas y nota
+  abierta (renombrar, eliminar con aviso, copiar, duplicar, exportar, abrir links, recordatorios).
+  Dependencias: definir soft delete/papelera e historial. Fuente: [Boveda-Roadmap.md](../project/Boveda-Roadmap.md).
+- **Rendimiento y backend de Bóveda** — **diferido**, P2: paginación, cache de previews, FTS5,
+  indexación fuera del request con watcher/poller y tabla de estado. Dependencias: medir volumen
+  real del vault y elegir fuente de verdad de búsqueda. Fuente: [Boveda-Roadmap.md](../project/Boveda-Roadmap.md);
+  [PROXIMAMENTE.md](PROXIMAMENTE.md).
+- **Rendimiento de frontend** — **diferido**, P2: `fetchHojas` lazy por ruta, selectores Zustand
+  finos y `useDeferredValue` para búsqueda/highlight. Dependencia: medir re-render y carga inicial.
+  Fuente: [Boveda-Roadmap.md](../project/Boveda-Roadmap.md).
+- **Notificaciones de hojas** — **por diseñar**, P2: fecha/hora, tabla de pendientes, scheduler,
+  campana web y teclado de Telegram. Dependencias: diseño de notificaciones unificadas. Fuente:
+  [Boveda-Roadmap.md](../project/Boveda-Roadmap.md).
+- **Ciclo de vida y portabilidad** — **idea**, P3: papelera, duplicado, historial, métricas,
+  export JSON/ZIP e import desde Notion/Obsidian/Markdown. Dependencias: política de retención y
+  formato de exportación. Fuente: [Boveda-Roadmap.md](../project/Boveda-Roadmap.md).
+
+### Jarvis
+
+- **Agenda y contexto vivo** — **por diseñar**, P1: resolver el acceso en vivo a eventos y tareas
+  pendientes sin duplicar estado en `memory_entries`; escoger entre contexto read-only, ingestión
+  con expiración o consulta directa a `app.db`, y fijar ventana temporal. Dependencias: loop de
+  tools y política de actualización. Fuente: [PROXIMAMENTE.md](PROXIMAMENTE.md), "Ingestión de
+  Agenda"; [Handoff.md](Handoff.md), T4.
+- **Triage y organización inteligente de Bóveda** — **decidido**, P1: T6 autoetiquetado y T7
+  transparencia de proyectos; mantener aprobación humana y clasificador conservador. Dependencias:
+  montaje/mtime de `D:\Boveda`, UX y tags removibles. Fuente: [Handoff.md](Handoff.md), T6/T7.
+- **Memoria conversacional de sesión** — **decidido**, P2: contexto por `chat_id`, últimos cuatro
+  turnos, limpieza por diez minutos o `/nuevo`, sin mezclar comandos de captura. Dependencia:
+  validar con las 30 frases de uso real. Fuente: [PLAN-OLLAMA.md](../PLAN-OLLAMA.md), Capa 5.
+- **Calibración formal del router/RAG** — **por diseñar**, P2: correr y conservar resultados de
+  las 30 frases, incluyendo ambiguos y citas de Bóveda. Dependencias: Ollama disponible, dataset
+  aislado y criterios de aceptación. Fuente: [PLAN-OLLAMA.md](../PLAN-OLLAMA.md), Testing/Roadmap.
+- **Endpoint de Debug completo** — **diferido**, P3: decidir entre tabla de eventos o lectura de
+  logs para exponer el stream; el panel actual usa datos disponibles y declara el límite. Fuente:
+  [PLAN-IMPLEMENTACION-BACKEND.md](<../ClaudeDesign - Jarvis/PLAN-IMPLEMENTACION-BACKEND.md>), Fase B5;
+  [PLAN-IMPLEMENTACION.md](<../ClaudeDesign - Jarvis/PLAN-IMPLEMENTACION.md>), Fase 6.
+- **QA visual y operativo del rediseño de Jarvis** — **decidido**, P2: confirmar contraste en seis
+  temas, captura con/sin aclaración, tabs, entidades, polling y ausencia de memory leak del canvas.
+  Dependencia: sesión manual con DevTools y Ollama. Fuente: [PLAN-IMPLEMENTACION.md](<../ClaudeDesign - Jarvis/PLAN-IMPLEMENTACION.md>), Fase 7.
+- **Cierre QA del plan backend** — **decidido**, P2: confirmar contra entorno real que los endpoints
+  B1-B4, health y configuración documentada conservan comportamiento; dejar tabla final de fases
+  listas versus opcionales. Dependencia: DB de scratch, Ollama y worker real. Fuente:
+  [PLAN-IMPLEMENTACION-BACKEND.md](<../ClaudeDesign - Jarvis/PLAN-IMPLEMENTACION-BACKEND.md>), Fase B7.
+- **Evaluation harness** — **diferido**, P3: dataset versionado, F1/recall@5/MRR, groundedness,
+  aceptación, latencia y costo. Dependencia: priorización de Jarvis y fixtures estables. Fuente:
+  [PROXIMAMENTE.md](PROXIMAMENTE.md), "Diferido — Jarvis".
+- **Citas por afirmación y respuestas con “no lo sé”** — **diferido**, P3; exige asociar cada
+  afirmación con un fragmento y umbral de evidencia. Dependencia: diseño de contrato de fuentes.
+  Fuente: [PROXIMAMENTE.md](PROXIMAMENTE.md), "Diferido — Jarvis".
+- **Brief diario y revisión semanal cross-módulo** — **idea**, P3: JSON determinístico de Agenda,
+  Hábitos, Finanzas y Bóveda, comando `/semana` y regeneración en Revisión. Dependencia: definir
+  métricas y período. Fuente: [PROXIMAMENTE.md](PROXIMAMENTE.md), "Diferido — Jarvis".
+- **Panel de calidad y operación** — **idea**, P3: salud de Ollama, backlog, embeddings,
+  presupuesto y última consolidación. Dependencia: decidir qué métricas son accionables. Fuente:
+  [PROXIMAMENTE.md](PROXIMAMENTE.md), "Diferido — Jarvis".
+- **Separar mantenimiento y consolidación** — **diferido**, P3; dividir módulos grandes por caso
+  de uso sin cambiar funcionalidad. Dependencia: evidencia de que el tamaño impide operar. Fuente:
+  [PROXIMAMENTE.md](PROXIMAMENTE.md), "Diferido — Jarvis".
+- **Investigación de patrones externos** — **por diseñar**, P3: decidir si abrir ola 2 del
+  laboratorio (Khoj, OVOS, Home Assistant) y si convertir en ADR alguno de los patrones de ola 1:
+  capability floor, progressive discovery, approval surface, autonomía graduada o recall gate.
+  Dependencia: necesidad concreta y revisión de licencias. Fuente: [PROXIMAMENTE.md](PROXIMAMENTE.md),
+  laboratorio Jarvis-Research.
+- **Spike Agent Router / Model Router / Policy Engine** — **idea**, P3; validar si el Tool Registry
+  y el policy store actuales alcanzan antes de agregar una capa Agent Router. Dependencia: Jarvis
+  con más de un flujo/agente real. Fuente: [PROXIMAMENTE.md](PROXIMAMENTE.md), ADR-005.
+
+### Agenda
+
+Fuente primaria de detalle: [project/Agenda-Roadmap.md](../project/Agenda-Roadmap.md).
+
+- **UX y menú contextual** — **idea**, P3: colapsar HOY en móvil y agregar acciones por slot,
+  bloque, hábito, día, lista y calendario. Dependencias: definir acciones destructivas y navegación.
+  Fuente: [Agenda-Roadmap.md](../project/Agenda-Roadmap.md).
+- **Validaciones y datos enriquecidos** — **por diseñar**, P2: validar `fecha_inicio < fecha_fin`,
+  adjuntos y ubicación/enlace de Meet. Dependencias: contrato API y almacenamiento de uploads.
+  Fuente: [Agenda-Roadmap.md](../project/Agenda-Roadmap.md).
+- **Notificaciones de Agenda** — **diferido**, P2: tabla de recordatorios, reglas por tipo,
+  store, Settings y scheduler. Se consolida con las notificaciones cross-módulo. Dependencias:
+  canal, anticipación y outbox. Fuente: [Agenda-Roadmap.md](../project/Agenda-Roadmap.md);
+  [PROXIMAMENTE.md](PROXIMAMENTE.md).
+- **Vínculos reales entre módulos** — **por diseñar**, P2: Bóveda↔Agenda por `hoja_id` y
+  Finanzas↔Agenda por `movimiento_id`, además de planificar vs ejecución real. Dependencias:
+  decidir cardinalidad, borrado y navegación. Fuente: [Agenda-Roadmap.md](../project/Agenda-Roadmap.md);
+  [PROXIMAMENTE.md](PROXIMAMENTE.md).
+- **Agenda de largo plazo** — **idea**, P3: plantillas de semana, modo focus, alto contraste y
+  semana como tab independiente. Dependencia: uso real y priorización. Fuente:
+  [Agenda-Roadmap.md](../project/Agenda-Roadmap.md).
+- **Recurrencia estándar** — **diferido**, P3: evaluar RFC 5545 (`RRULE`/`EXDATE`/
+  `RECURRENCE-ID`) frente al modelo actual materializado. Dependencia: necesidad de excepciones y
+  edición de series. Fuente: [PROXIMAMENTE.md](PROXIMAMENTE.md), "Diferido — Agenda".
+
+### Finanzas
+
+Fuente primaria de detalle: [project/Finanzas-Roadmap.md](../project/Finanzas-Roadmap.md).
+
+- **Ganancia realizada en ventas** — **por diseñar**, P2: registrar resultado realizado; hoy la
+  venta descuenta PPC y el TC es informativo. Dependencia: definir moneda, costo y momento de
+  reconocimiento. Fuente: [Handoff.md](Handoff.md); [Finanzas-Roadmap.md](../project/Finanzas-Roadmap.md).
+- **Migración y ledger** — **decidido**, P2: reasignar categoría legacy `Ahorro` a `FIRE`/objetivo;
+  editar hora y paginar tabla global cuando supere 2000 operaciones. Dependencia: confirmación del
+  usuario para la migración y volumen real. Fuente: [Finanzas-Roadmap.md](../project/Finanzas-Roadmap.md).
+- **Bot y categorías** — **por diseñar**, P2: `/alertas`, fusionar categorías y job opcional de
+  migración automática de `Ahorro`. Dependencia: modelo de alertas y resolución de conflictos.
+  Fuente: [Finanzas-Roadmap.md](../project/Finanzas-Roadmap.md).
+- **Notificaciones financieras** — **diferido**, P2: `fin_alertas`, evaluación de metas/objetivos/
+  cuotas/inflación/FIRE/dólar/saldo, campana web y Telegram. Dependencia: notificaciones unificadas.
+  Fuente: [Finanzas-Roadmap.md](../project/Finanzas-Roadmap.md); [PROXIMAMENTE.md](PROXIMAMENTE.md).
+- **Atajos y offline durable** — **por diseñar**, P2: atajos de Dashboard/Datos/Ahorro/FIRE y
+  reemplazo del fallback temporal por outbox IndexedDB + `Idempotency-Key`. Dependencia: decidir
+  estado global y contrato de idempotencia. Fuente: [Finanzas-Roadmap.md](../project/Finanzas-Roadmap.md);
+  [PROXIMAMENTE.md](PROXIMAMENTE.md).
+- **Herramientas de análisis** — **idea**, P3: wizard de transferencias, reconciliación CSV genérica
+  con score, PDF/PNG, comparación mensual, presupuesto/forecast 30/60/90 y reglas personales de
+  clasificación. Dependencia: evidencia de uso y formato de datos. Fuente: [Finanzas-Roadmap.md](../project/Finanzas-Roadmap.md);
+  [PROXIMAMENTE.md](PROXIMAMENTE.md).
+- **Cobertura de helpers financieros** — **idea**, P3: sumar tests específicos para
+  `isTransferencia`, contribución FIRE, acumulados y proyección FIRE. Dependencia: fijar casos
+  esperados de negocio. Fuente: [Finanzas-Roadmap.md](../project/Finanzas-Roadmap.md).
+- **Decisiones financieras de fondo** — **diferido**, P3: migrar `REAL` a centavos, agrupar ambos
+  lados de una transferencia y rediseñar los KPIs del Dashboard. Dependencia: evidencia de errores
+  reales y decisión de producto. Fuente: [PROXIMAMENTE.md](PROXIMAMENTE.md), "Diferido — Finanzas".
+
+### Hábitos
+
+Fuente primaria de detalle: [project/Habitos-Roadmap.md](../project/Habitos-Roadmap.md).
+
+- **Tiempo en pantalla** — **decidido**, P1: carga manual semanal con top cinco apps, horas y
+  métricas comparativas. Dependencia: decidir meta diaria. Fuente: [Handoff.md](Handoff.md), T8.
+- **Organización y carga** — **idea**, P3: agrupar por categoría, ordenar manualmente, skeleton y
+  virtualización de la grilla. El orden manual requiere migración y DnD. Fuente: [Habitos-Roadmap.md](../project/Habitos-Roadmap.md).
+- **Grilla, modales y accesibilidad** — **idea**, P3: anillo animado, animación al completar,
+  contraste WCAG y context menu. Dependencia: revisión visual. Fuente: [Habitos-Roadmap.md](../project/Habitos-Roadmap.md).
+- **Rendimiento e interacción contextual** — **diferido**, P3: selectores finos, preload y Ctrl+M
+  contextual. Dependencia: medir re-render y priorizar frente a otras rutas. Fuente: [Habitos-Roadmap.md](../project/Habitos-Roadmap.md).
+- **Notificaciones de Hábitos** — **diferido**, P2: recordatorio por hora, resumen nocturno, racha
+  en riesgo, momentum negativo y campana. Dependencia: sistema unificado. Fuente:
+  [Habitos-Roadmap.md](../project/Habitos-Roadmap.md); [PROXIMAMENTE.md](PROXIMAMENTE.md).
+- **Bot de Hábitos** — **idea**, P3: mostrar en `/habitos` los hábitos no programados del día con
+  estado informativo. Dependencia: definir si se implementa junto con Agenda o en el módulo propio.
+  Fuente: [Habitos-Roadmap.md](../project/Habitos-Roadmap.md).
+- **Modelo de hábitos** — **diferido**, P3: motor único backend, versionado de programación, tipos
+  de conteo/duración/ánimo/meta semanal y pausas/excepciones. Dependencia: compatibilidad con
+  historial existente. Fuente: [PROXIMAMENTE.md](PROXIMAMENTE.md), "Diferido — Hábitos".
+- **Producto de largo plazo** — **idea**, P3: export/import, vista anual, vacaciones, meta semanal,
+  widget PWA, hábito ancla, modo focus y dashboard de consistencia. Dependencia: uso sostenido.
+  Fuente: [Habitos-Roadmap.md](../project/Habitos-Roadmap.md).
+
+### Plataforma, homelab, seguridad y datos
+
+- **Migraciones con historial y respaldo** — **diferido**, P2: `schema_version`, backup automático
+  pre-migración y registro de cambios. Dependencia: diseñar recuperación y compatibilidad offline.
+  Fuente: [PROXIMAMENTE.md](PROXIMAMENTE.md), triage de informe externo.
+- **Red de seguridad automatizada** — **diferido**, P2: CI en cada push y tres E2E faltantes
+  (Telegram↔web, Hábitos↔Telegram, Jarvis con fuente válida). Dependencia: decidir si se quiere
+  automatización continua para un repo personal. Fuente: [PROXIMAMENTE.md](PROXIMAMENTE.md),
+  "Diferido — sin red de seguridad automatizada".
+- **Offline completo** — **diferido**, P2: outbox IndexedDB, reintentos, pantalla de cambios
+  pendientes e `Idempotency-Key` server-side. Dependencia: contrato único por módulo. Fuente:
+  [PROXIMAMENTE.md](PROXIMAMENTE.md), "Diferido — offline falso".
+- **Plataforma web** — **diferido**, P2: lazy-load por ruta, dividir bundle, separar store por
+  módulo, renombrar manifest PWA y auditar accesibilidad. Dependencia: medición de bundle y
+  navegación actual. Fuente: [PROXIMAMENTE.md](PROXIMAMENTE.md), "Diferido — plataforma web".
+- **Respaldos y tamaño del repositorio** — **diferido**, P2: inventariar SQLite/Chroma versionados,
+  limpiar historial si procede, backups 3-2-1 y restore drill periódico. Dependencia: política de
+  retención y confirmación del usuario. Fuente: [PROXIMAMENTE.md](PROXIMAMENTE.md), privacidad/tamaño.
+- **Seguridad de superficies web** — **diferido**, P1: SSRF en preview, validación real de
+  uploads, sanitización de HTML, headers CSP/X-Content-Type/Referrer y bind local detrás de
+  Tailscale Serve. Dependencia: modelo de exposición y pruebas de compatibilidad. Fuente:
+  [PROXIMAMENTE.md](PROXIMAMENTE.md), "Diferido — seguridad".
+- **Homelab resiliente** — **diferido**, P2: red directa sin ICS, health checks live/ready/deps,
+  estado persistente del bot fuera del mount read-only, deploy reproducible con tags por SHA y
+  observabilidad mínima. Dependencia: decidir qué automatización compensa el mantenimiento.
+  Fuente: [PROXIMAMENTE.md](PROXIMAMENTE.md), "Diferido — Homelab".
+- **Deuda de estructura del backend** — **diferido**, P3: reducir el crecimiento de monolitos
+  (`main.py`, `crud.py`, `useStore.js`, `agenda_handlers.py`) con una partición que respete la
+  decisión vigente de no crear `app/routes/`/`app/services/` por reflejo. Dependencia: criterio de
+  partición y evidencia de dolor operativo. Fuente: [PROXIMAMENTE.md](PROXIMAMENTE.md), triage del
+  informe externo.
+- **Distribución para terceros** — **diferido**, P3: Dockerfiles multi-stage, compose instalable,
+  volúmenes y README de instalación. Dependencia: decidir si habrá terceros; hoy nadie más corre
+  SGR. Fuente: [PROXIMAMENTE.md](PROXIMAMENTE.md), infraestructura/distribución.
+- **Notificaciones unificadas** — **diferido**, P2: tabla común, evaluación, scheduler, entrega
+  Telegram y campana web para Bóveda/Finanzas/Agenda/Hábitos. Dependencia: resolver primero los
+  modelos específicos y canales. Fuente: [PROXIMAMENTE.md](PROXIMAMENTE.md), "Notificaciones unificadas".
+
+### Investigación y visión
+
+- **Vault externo de Obsidian** — **por diseñar**, P2: decidir ruta física, alcance inicial,
+  separación del vault que Jarvis escribe y futura integración con Bóveda SGR; conservar gateway
+  de PII y aprobación humana. Dependencia: elección del usuario y estrategia de duplicados. Fuente:
+  [PROXIMAMENTE.md](PROXIMAMENTE.md), "Vault centralizado".
+- **“Preparame el día”** — **idea**, P3: vertical slice cross-módulo que propone hasta tres
+  cambios, pide aprobación, ejecuta solo lo aprobado, verifica y recién entonces guarda memoria.
+  Dependencia: procedencia, planificador/ejecutor/verificador y bandeja de aprobaciones. Fuente:
+  [PROXIMAMENTE.md](PROXIMAMENTE.md), catálogo de features.
+
+## Fuentes revisadas y exclusiones
+
+Revisados: [Handoff.md](Handoff.md), [PROXIMAMENTE.md](PROXIMAMENTE.md),
+[estado-actual.md](estado-actual.md), [decisiones-implementacion.md](decisiones-implementacion.md),
+[triaje-feedback-2026-10-02.md](triaje-feedback-2026-10-02.md), [PLAN-OLLAMA.md](../PLAN-OLLAMA.md),
+los cuatro roadmaps de módulos en `project/` y los dos planes de implementación de Jarvis.
+
+No se copian como pendientes: funcionalidades implementadas, decisiones ya resueltas, auditorías
+cerradas, el `.exe`/sync retirado el 2026-10-02, el toggle semántico de Bóveda ya implementado,
+las fases B0-B4/B6 del plan backend de Jarvis ya implementadas ni el rediseño visual de Jarvis ya
+construido. `PLAN-OLLAMA.md` conserva algunos checklists históricos (por ejemplo, el toggle de
+búsqueda semántica); el estado actual del código y este mapa prevalecen.

@@ -1,5 +1,9 @@
 # Próximamente
 
+> **Mapa consolidado:** consultar y mantener [Cerebro/Mapa-Maestro-Pendientes.md](Mapa-Maestro-Pendientes.md)
+> al planificar o cerrar cualquier trabajo. Este documento conserva el detalle histórico y las
+> propuestas diferidas; el mapa es el inventario vigente deduplicado.
+
 Ideas anotadas para evaluar/diseñar más adelante — no aprobadas, no implementadas. Formato libre, se promueven a una propuesta formal en `decisiones-implementacion.md` cuando se retoman.
 
 ## Actualización 2026-09-28 — auditorías ya desplegadas

@@ -1,5 +1,9 @@
 # Plan de implementación — Backend de Jarvis (soporte al rediseño frontend + config accesible)
 
+> Consultar [Cerebro/Mapa-Maestro-Pendientes.md](../Cerebro/Mapa-Maestro-Pendientes.md) al
+> planificar y actualizarlo al cerrar cada fase. Este plan conserva el detalle de implementación;
+> el mapa consolidado y `Cerebro/estado-actual.md` prevalecen sobre fases ya ejecutadas.
+
 Plan de principio a fin para el trabajo de backend necesario. Dos motivaciones:
 
 1. **Cerrar los huecos de datos** que el rediseño visual del frontend

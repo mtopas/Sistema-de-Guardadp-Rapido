@@ -1,5 +1,9 @@
 # SGR — Plan Ollama: Asistente Personal con LLM Local
 
+> **Inventario consolidado:** consultar [Cerebro/Mapa-Maestro-Pendientes.md](Cerebro/Mapa-Maestro-Pendientes.md)
+> antes de planificar cambios y actualizarlo al cerrar trabajos. Este plan conserva el detalle de
+> capas y pruebas; el mapa y `Cerebro/estado-actual.md` prevalecen sobre checklists históricos.
+
 > Documento de diseño y roadmap. Arrancamos con el bot de Telegram como canal principal; la visión completa es un asistente conversacional que conoce toda tu vida (Bóveda, Finanzas, Agenda, Hábitos) y responde preguntas sobre ella.
 
 **Estado (jun 2026):**

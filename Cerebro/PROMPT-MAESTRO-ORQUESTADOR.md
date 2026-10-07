@@ -56,6 +56,11 @@ Orquestador valida el resumen (Sección 6)
 Orquestador estampa el nuevo Handoff en el TOPE de Cerebro/Handoff.md arrastrando pendientes (Sección 7)
 ```
 
+**Inventario consolidado obligatorio:** antes de planificar una tarea, leer
+`Cerebro/Mapa-Maestro-Pendientes.md` además del tope de `Cerebro/Handoff.md`. Al cerrar una tarea,
+actualizar el mapa si se resolvió, creó, descartó o repriorizó un pendiente; el Handoff sigue siendo
+la cadena de custodia operativa y debe reflejar el cambio reciente.
+
 ---
 
 ## 3. Pulir el objetivo con el usuario
@@ -135,5 +140,7 @@ Cada vez que un trabajador entrega su resumen (o al cortar la sesión):
 ## 8. Relevo automático y arranque de sesión
 
 Gracias a `Cerebro/Handoff.md`, el relevo vive en disco:
-- **Al arrancar:** Leé inmediatamente los primeros 30-50 renglones de `Cerebro/Handoff.md` para absorber el estado actual y los pendientes activos sin que el usuario tenga que repetir contexto.
+- **Al arrancar:** Leé inmediatamente los primeros 30-50 renglones de `Cerebro/Handoff.md` y
+  `Cerebro/Mapa-Maestro-Pendientes.md` para absorber el estado actual y el inventario consolidado
+  sin que el usuario tenga que repetir contexto.
 - **Al cerrar:** Asegurate de que el último handoff en el tope refleje fielmente el estado final.

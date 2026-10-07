@@ -14,6 +14,45 @@ A diferencia del chat (cuyo contexto se pierde al cerrar la ventana), este archi
 
 ---
 
+## [2026-10-07, sesión 10 — mapa maestro de pendientes]
+
+- **Resultado:** Hecho. Se creó `Cerebro/Mapa-Maestro-Pendientes.md` como inventario consolidado y
+  deduplicado de pendientes, roadmaps, planes e ideas vigentes.
+- **Regla nueva:** el Mapa Maestro se lee al iniciar toda planificación relevante y se actualiza al
+  cerrar cualquier trabajo que resuelva, cree, descarte o repriorice un pendiente. Este Handoff
+  sigue siendo la cadena de custodia operativa y debe reflejar los cambios recientes; el mapa es el
+  inventario consolidado.
+- **Fuentes revisadas:** Handoff vigente, estado actual, decisiones de implementación, PROXIMAMENTE,
+  triaje de feedback, PLAN-OLLAMA, roadmaps de Bóveda/Agenda/Finanzas/Hábitos y planes de Jarvis.
+- **Criterio aplicado:** no se copiaron funcionalidades resueltas ni el `.exe`/sync retirado; se
+  deduplicaron T6/T7/T8, Agenda en vivo, notificaciones y Jarvis-Agenda. Los roadmaps dentro de
+  `project/` siguen siendo fuentes de detalle y no se modificaron por estar fuera del alcance.
+
+### Pendientes activos (arrastre consolidado)
+
+- [ ] [VERIF / USUARIO] Ejecutar las cuatro pruebas reales del título por IA y captura de Telegram;
+  además hacer hard refresh y revisar Ahorro, Ajustes, nota larga/link, categorías, listas y
+  movimientos sin descripción.
+- [ ] [PUSH / USUARIO] Pushear los commits locales posteriores a esta sesión.
+- [ ] [LIMPIEZA] Borrar la nota de feedback #1 con smoke test; limpiar, cuando convenga, el bundle
+  JavaScript viejo del homelab y la variable inerte `HOMELAB_HOST=`.
+- [ ] [T6/T7/T8] Implementar o planificar autoetiquetado conservador, transparencia de Proyectos
+  con `D:\Boveda` y carga manual de tiempo en pantalla; falta definir meta diaria en T8.
+- [ ] [JARVIS — AGENDA EN VIVO] Decidir y cablear `agenda.list_events` al chat; resolver también
+  el tratamiento de tareas pendientes sin duplicar estado en memoria.
+- [ ] [BÓVEDA] Evaluar latencia/umbral de sugerencia de categoría y agregar tests de regresión para
+  escritura de vault; investigar colisión `UNIQUE` de indexación semántica.
+- [ ] [UI] Resolver botones de hoja inaccesibles en mobile/tablet, batch de Hábitos con valores
+  inválidos y la limpieza menor de claves i18n muertas.
+- [ ] [FINANZAS] Diseñar ganancia realizada en ventas, migración legacy `Ahorro`, ledger >2000,
+  alertas y el flujo mensual del importador.
+- [ ] [OPERACIÓN] Auditar el backlog de PROXIMAMENTE contra el código, evaluar canal desktop/router
+  de Telegram, certeza de memoria, variantes frontend y video promo.
+- [ ] [FUTURO] Mantener el resto del inventario por módulo y por plataforma en el Mapa Maestro; no
+  abrir tickets de ideas diferidas sin prioridad o decisión explícita.
+
+---
+
 ## [2026-10-02, sesión 8 — triaje de feedback] — 14 notas del usuario verificadas contra el código
 - **Resultado:** Hecho (validado: commit `1c983c9` presente, sin trailers de IA; el triaje está en `Cerebro/triaje-feedback-2026-10-02.md`; no reproduje la verificación en código ni en navegador, el trabajador lo hizo solo por código, sin sandbox).
 - **Estado del repo:** `master` 2 commits adelante de `origin` (`7a02acc` handoff, `1c983c9` triaje); árbol limpio salvo este handoff.

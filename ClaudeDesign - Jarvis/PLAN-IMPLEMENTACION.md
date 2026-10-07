@@ -1,5 +1,9 @@
 # Plan de implementación — Rediseño visual de Jarvis frontend
 
+> Consultar [Cerebro/Mapa-Maestro-Pendientes.md](../Cerebro/Mapa-Maestro-Pendientes.md) al
+> planificar y actualizarlo al cerrar cada fase. Este plan conserva el detalle de implementación;
+> el mapa consolidado y `Cerebro/estado-actual.md` prevalecen sobre fases ya ejecutadas.
+
 Plan de principio a fin para aplicar el sistema visual de `Jarvis.dc.html` (mockup de
 Claude Design, esta misma carpeta) al frontend real de Jarvis en `project/frontend/src/`.
 Ordenado en fases secuenciales, cada una entregable y sin romper funcionalidad — Jarvis es

@@ -14,6 +14,49 @@ A diferencia del chat (cuyo contexto se pierde al cerrar la ventana), este archi
 
 ---
 
+## [2026-10-07, sesión 13 — primer slice móvil web sin voz]
+
+- **Resultado:** Hecho en `master`, sin deploy al homelab. La ruta explícita `/mobile` ofrece un
+  shell propio de Hoy y captura rápida por texto; no monta el layout, los modales ni los watchers
+  globales del escritorio.
+- **Portada y API:** `GET /mobile/hoy` agrega próximo bloque, hasta tres tareas, hábitos pendientes
+  y alertas financieras únicamente ante saldos negativos. La apertura móvil dispara solo ese
+  request; `App.jsx` carga el resto de las pantallas y datos por ruta.
+- **Captura intencional:** Gasto, Bóveda, Tarea, Hábito y Preguntar a Jarvis seleccionan primero el
+  destino y después aceptan texto. Bóveda usa `00 - Sin categorizar`; Tarea se fecha hoy; Hábito se
+  crea diario. Las cuatro altas persistentes muestran confirmación y deshacer con sus DELETE
+  existentes; una respuesta de Jarvis no se deshace.
+- **Fuera de alcance respetado:** sin micrófono, STT, Web Speech, grabación, escucha en segundo
+  plano, T6/T7/T8, tool calling nuevo, cambios de modelo de datos ni rediseño de escritorio.
+- **Verificación:** 529 tests backend, 233 tests frontend, 2 E2E móviles, `npm run build` correcto.
+  El E2E prueba que la portada no dispara cargas globales y completa una tarea por texto. Revisión
+  visual sin overflow en 390, 768 y 1440 px.
+- **Commit:** `a0e9bf4 Crea el shell móvil de Hoy con captura intencional`.
+
+### Pendientes activos (arrastre consolidado)
+
+- [ ] [DEPLOY MÓVIL] Desplegar backend + nuevo `dist` al homelab siguiendo `HOMELAB.md`; verificar
+  `/mobile`, `GET /mobile/hoy` y una captura real sin copiar `database/`, `uploads/` ni `vault/`.
+- [ ] [MÓVIL — VOZ] Validar primero el camino completo de texto con uso real. Después diseñar un
+  spike separado: interacción del botón, HTTPS/permisos, motor STT local/backend, latencia,
+  privacidad y compatibilidad. Mantener fallback de texto y prohibición de escucha en segundo plano.
+- [ ] [LIMPIEZA] Borrar la nota de feedback #1 con smoke test; limpiar, cuando convenga, el bundle
+  JavaScript viejo del homelab y la variable inerte `HOMELAB_HOST=`.
+- [ ] [T6/T7/T8] Implementar o planificar autoetiquetado conservador, transparencia de Proyectos
+  con `D:\Boveda` y carga manual de tiempo en pantalla; falta definir meta diaria en T8.
+- [ ] [JARVIS — AGENDA EN VIVO] Decidir y cablear `agenda.list_events` al chat; resolver también
+  el tratamiento de tareas pendientes sin duplicar estado en memoria.
+- [ ] [BÓVEDA / UI] Evaluar latencia/umbral de sugerencia de categoría, agregar tests de escritura
+  del vault e investigar colisión `UNIQUE`; resolver batch de Hábitos con valores inválidos y
+  claves i18n muertas.
+- [ ] [FINANZAS] Diseñar ganancia realizada en ventas, migración legacy `Ahorro`, ledger >2000,
+  alertas y mantener el flujo mensual del importador.
+- [ ] [OPERACIÓN / FUTURO] Auditar PROXIMAMENTE contra el código; evaluar canal desktop/router de
+  Telegram, certeza de memoria, variantes frontend y video promo. Mantener el resto del inventario
+  en el Mapa Maestro y actualizarlo junto al Handoff al cerrar futuros trabajos.
+
+---
+
 ## [2026-10-07, sesión 12 — controles de hoja responsive]
 
 - **Resultado:** Hecho. Los botones Guardar y Eliminar hoja dejaron de depender de `xl` para ser

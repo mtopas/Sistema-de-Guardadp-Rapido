@@ -18,7 +18,8 @@ export default defineConfig({
         background_color: '#0f0520',
         display: 'standalone',
         scope: '/',
-        start_url: '/',
+        id: '/mobile',
+        start_url: '/mobile',
         icons: [
           { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },

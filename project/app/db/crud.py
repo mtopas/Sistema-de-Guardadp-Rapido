@@ -33,6 +33,30 @@ def _extraer_tags(contenido: str, apuntes_html: Optional[str]) -> list:
     return tags
 
 
+def _normalizar_tags(tags) -> list[str]:
+    """Normaliza tags propios sin fusionar nombres semánticamente."""
+    if not isinstance(tags, (list, tuple)):
+        return []
+    vistos, resultado = set(), []
+    for raw in tags:
+        if not isinstance(raw, str):
+            continue
+        tag = raw.strip().lstrip("#").lower()
+        if tag and tag not in vistos:
+            vistos.add(tag)
+            resultado.append(tag)
+    return resultado
+
+
+def _parse_tags(raw) -> Optional[list[str]]:
+    if raw is None:
+        return None
+    try:
+        return _normalizar_tags(json.loads(raw))
+    except (TypeError, ValueError):
+        return None
+
+
 def _bajo_prefijo(ruta: str, prefijo: str) -> bool:
     # "/" siempre, nunca os.sep -- `ruta` se guarda con posix-style forward
     # slash (ver app/vault/sync.py, fix 2026-09-16); en Windows os.sep es
@@ -91,6 +115,11 @@ def _parse_preview(raw):
 
 def _hoja_dict(f):
     link_url = re.search(r"https?://\S+", f[1] or "") if f[5] == "link" else None
+    tags = _parse_tags(f[15]) if len(f) > 15 else None
+    if tags is None:
+        # Compatibilidad con filas antiguas: antes de la columna propia solo
+        # existían los hashtags embebidos en contenido/apuntes.
+        tags = _extraer_tags(f[1], f[6])
     return {
         "id": f[0],
         "contenido": f[1],
@@ -107,6 +136,7 @@ def _hoja_dict(f):
         "fecha_actualizado": f[12] if len(f) > 12 else None,
         "link_preview": _parse_preview(f[13]) if len(f) > 13 else None,
         "color": f[14] if len(f) > 14 else None,
+        "tags": tags,
         "link_url": link_url.group(0).rstrip(".,;:!?)\"'»") if link_url else None,
     }
 
@@ -297,13 +327,13 @@ def _asegurar_categoria_basura(cursor) -> int:
 _HOJA_SELECT = """
     SELECT h.id, h.contenido, h.fecha, h.categoria_id, c.nombre,
            h.tipo, h.apuntes, h.lugar, h.latitud, h.longitud, h.fecha_recordatorio,
-           h.icono, h.fecha_actualizado, h.link_preview, h.color
+           h.icono, h.fecha_actualizado, h.link_preview, h.color, h.tags
     FROM hojas h
     JOIN categorias c ON c.id = h.categoria_id
 """
 _VISIBLE_HOJA = "(c.ruta IS NULL OR (c.ruta != '05 - Basura' AND c.ruta NOT LIKE '05 - Basura/%'))"
 
-_UPDATABLE_HOJA = frozenset({"contenido", "categoria_id", "tipo", "apuntes", "icono", "lugar", "color"})
+_UPDATABLE_HOJA = frozenset({"contenido", "categoria_id", "tipo", "apuntes", "icono", "lugar", "color", "tags"})
 
 
 def crear_hoja(
@@ -395,11 +425,12 @@ def crear_hoja(
         """
         INSERT INTO hojas
             (contenido, fecha, categoria_id, tipo, apuntes, lugar, latitud, longitud,
-             icono, color, fecha_actualizado, link_preview, vault_id, ruta, mtime)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             icono, color, fecha_actualizado, link_preview, tags, vault_id, ruta, mtime)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (contenido, ahora, categoria_id, tipo, apuntes_final_html, lugar, latitud, longitud,
-         icono, color, ahora, preview_json, vault_id, ruta_rel, mtime),
+         icono, color, ahora, preview_json,
+         json.dumps(_extraer_tags(contenido, apuntes)), vault_id, ruta_rel, mtime),
     )
     conn.commit()
     hid = cursor.lastrowid
@@ -413,16 +444,7 @@ def obtener_hojas():
     sincronizar_vault_si_hace_falta()
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute(
-        """
-        SELECT h.id, h.contenido, h.fecha, h.categoria_id, c.nombre,
-               h.tipo, h.apuntes, h.lugar, h.latitud, h.longitud, h.fecha_recordatorio, h.icono, h.fecha_actualizado, h.link_preview, h.color
-        FROM hojas h
-        JOIN categorias c ON c.id = h.categoria_id
-        WHERE (c.ruta IS NULL OR (c.ruta != '05 - Basura' AND c.ruta NOT LIKE '05 - Basura/%'))
-        ORDER BY c.id ASC, h.id ASC
-        """
-    )
+    cursor.execute(_HOJA_SELECT + " WHERE " + _VISIBLE_HOJA + " ORDER BY c.id ASC, h.id ASC")
     filas = cursor.fetchall()
     conn.close()
     return [_hoja_dict(f) for f in filas]
@@ -431,16 +453,7 @@ def obtener_hojas():
 def obtener_hoja_por_id(hoja_id: int):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute(
-        """
-        SELECT h.id, h.contenido, h.fecha, h.categoria_id, c.nombre,
-               h.tipo, h.apuntes, h.lugar, h.latitud, h.longitud, h.fecha_recordatorio, h.icono, h.fecha_actualizado, h.link_preview, h.color
-        FROM hojas h
-        JOIN categorias c ON c.id = h.categoria_id
-        WHERE h.id = ? AND (c.ruta IS NULL OR (c.ruta != '05 - Basura' AND c.ruta NOT LIKE '05 - Basura/%'))
-        """,
-        (hoja_id,),
-    )
+    cursor.execute(_HOJA_SELECT + " WHERE h.id = ? AND " + _VISIBLE_HOJA, (hoja_id,))
     fila = cursor.fetchone()
     conn.close()
     if fila is None:
@@ -532,7 +545,7 @@ def actualizar_hoja(hoja_id: int, campos: dict) -> Optional[dict]:
     cursor = conn.cursor()
     cursor.execute(
         "SELECT contenido, categoria_id, tipo, apuntes, icono, color, lugar, latitud, longitud, "
-        "vault_id, ruta, fecha FROM hojas WHERE id = ?",
+        "tags, vault_id, ruta, fecha FROM hojas WHERE id = ?",
         (hoja_id,),
     )
     row = cursor.fetchone()
@@ -540,7 +553,7 @@ def actualizar_hoja(hoja_id: int, campos: dict) -> Optional[dict]:
         conn.close()
         return None
     (contenido_actual, categoria_id_actual, tipo_actual, apuntes_actual, icono_actual, color_actual,
-     lugar_actual, latitud_actual, longitud_actual, vault_id, ruta_actual, creado_en) = row
+     lugar_actual, latitud_actual, longitud_actual, tags_actual, vault_id, ruta_actual, creado_en) = row
 
     if not vault_id or not ruta_actual:
         conn.close()
@@ -601,11 +614,15 @@ def actualizar_hoja(hoja_id: int, campos: dict) -> Optional[dict]:
         "id": vault_id, "tipo": tipo, "creado_en": frontmatter.get("creado_en") or creado_en or ahora,
         "actualizado_en": ahora, "origen": frontmatter.get("origen") or "app",
     })
-    if "contenido" in safe or "apuntes" in safe:
-        tags_previos = frontmatter.get("tags") if isinstance(frontmatter.get("tags"), list) else []
-        frontmatter["tags"] = list(dict.fromkeys(
-            [*tags_previos, *_extraer_tags(contenido, apuntes_html)]
-        ))
+    tags_db = _parse_tags(tags_actual)
+    tags_previos = tags_db if tags_db is not None else _normalizar_tags(frontmatter.get("tags"))
+    if "tags" in safe:
+        tags = _normalizar_tags(safe["tags"])
+    elif "contenido" in safe or "apuntes" in safe:
+        tags = list(dict.fromkeys([*tags_previos, *_extraer_tags(contenido, apuntes_html)]))
+    else:
+        tags = tags_previos
+    frontmatter["tags"] = tags
     if tipo == "link":
         url_match = re.search(r"https?://\S+", contenido or "")
         frontmatter["url"] = url_match.group(0) if url_match else contenido
@@ -628,6 +645,7 @@ def actualizar_hoja(hoja_id: int, campos: dict) -> Optional[dict]:
         "apuntes": apuntes_final_html, "icono": icono, "color": color, "lugar": lugar,
         "fecha_actualizado": ahora, "ruta": ruta_rel, "mtime": nuevo_mtime,
         "link_preview": json.dumps(frontmatter["link_preview"]) if frontmatter.get("link_preview") else None,
+        "tags": json.dumps(tags),
     }
     cols = ", ".join(f"{k} = ?" for k in sets)
     cursor.execute(f"UPDATE hojas SET {cols} WHERE id = ?", list(sets.values()) + [hoja_id])

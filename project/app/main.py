@@ -724,6 +724,24 @@ def _detectar_origen(request: Request) -> str:
     return "telegram"
 
 
+def _autoetiquetar_hoja(hoja_id: int) -> None:
+    """Agrega tags IA confiables sin bloquear ni reemplazar los existentes."""
+    try:
+        from jarvis.captures.tags import sugerir_tags_para_hoja
+
+        hoja = obtener_hoja_por_id(hoja_id)
+        if not hoja:
+            return
+        sugeridos = sugerir_tags_para_hoja(hoja.get("contenido", ""), hoja.get("apuntes"))
+        if not sugeridos:
+            return
+        actuales = hoja.get("tags") or []
+        actualizar_hoja(hoja_id, {"tags": [*actuales, *sugeridos]})
+    except Exception as exc:  # el aut-etiquetado nunca rompe el guardado
+        if DEBUG:
+            print(f"_autoetiquetar_hoja: omitido: {exc}")
+
+
 @app.post("/hojas")
 async def crear_hoja_endpoint(hoja: HojaCreate, background_tasks: BackgroundTasks, request: Request):
     if not hoja.contenido.strip():
@@ -757,6 +775,7 @@ async def crear_hoja_endpoint(hoja: HojaCreate, background_tasks: BackgroundTask
     # Indexar en background — no bloquea la respuesta
     creada = obtener_hoja_por_id(hid)
     if creada:
+        background_tasks.add_task(_autoetiquetar_hoja, hid)
         background_tasks.add_task(
             semantic.index_hoja, hid, creada["contenido"], creada["categoria_nombre"],
             creada["tipo"], creada.get("apuntes") or "",
@@ -960,6 +979,8 @@ def actualizar_hoja_endpoint(hoja_id: int, data: HojaPatch, background_tasks: Ba
     # Re-indexar con el contenido actualizado (fetch completo para obtener categoria)
     hoja = obtener_hoja_por_id(hoja_id)
     if hoja:
+        if "apuntes" in campos or ("contenido" in campos and not hoja.get("apuntes")):
+            background_tasks.add_task(_autoetiquetar_hoja, hoja_id)
         background_tasks.add_task(
             semantic.index_hoja, hoja_id,
             hoja.get("contenido", ""),

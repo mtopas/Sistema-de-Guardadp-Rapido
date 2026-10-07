@@ -67,7 +67,8 @@ def init_db():
             longitud           REAL,
             fecha_recordatorio TEXT,
             fecha_actualizado  TEXT,
-            link_preview       TEXT
+            link_preview       TEXT,
+            tags               TEXT
         )
     """)
 
@@ -645,6 +646,11 @@ def _apply_migrations(cursor):
         cursor.execute("ALTER TABLE hojas ADD COLUMN link_preview TEXT")
         if DEBUG:
             print("migration: hojas.link_preview added")
+
+    if "tags" not in hoja_cols:
+        cursor.execute("ALTER TABLE hojas ADD COLUMN tags TEXT")
+        if DEBUG:
+            print("migration: hojas.tags added")
 
     # --- hojas: Milestone 2 (D:\Boveda como fuente de verdad) ---
     # `id` (INTEGER PK) sigue siendo el id que ya usan frontend/bot; vault_id/ruta

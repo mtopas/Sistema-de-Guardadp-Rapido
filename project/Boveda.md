@@ -91,9 +91,13 @@ Seed: categoría **General** si la tabla está vacía.
 | `icono` | TEXT | Override visual (`leafIcons.js`) |
 | `fecha_actualizado` | TEXT | Se actualiza al PATCH apuntes/icono |
 | `link_preview` | TEXT JSON | og:title, image, etc. (links) |
+| `tags` | TEXT JSON | Array propio de tags; conserva hashtags manuales y tags IA confiables |
 
 **Reglas implícitas:**
-- **Tags** (`#algo`): no hay tabla; se extraen de `contenido` + `apuntes` con regex (`utils/tags.js`).
+- **Tags**: `hojas.tags` persiste el array propio y también se replica en el frontmatter del `.md`.
+  Los `#hashtags` manuales existentes se incorporan por merge aditivo. Al guardar contenido
+  significativo, Jarvis puede agregar tags en segundo plano solo con confianza explícita y sin
+  reemplazar los existentes. La UI los muestra como chips removibles (`utils/tags.js`).
 - Las hojas viven en la categoría elegida; el grafo agrupa hojas bajo la categoría raíz del árbol.
 - Fotos: `contenido` = URL de `/uploads/...`; `apuntes` puede llevar `<img>` (patrón del bot).
 
@@ -293,7 +297,8 @@ project/
 ## 9. Preguntas abiertas (bloquean arquitectura)
 
 1. ¿Bóveda **solo un usuario** o categorías compartidas algún día?
-2. ¿Tags solo en texto o también **taxonomía formal** (tabla `tags`)?
+2. ¿Hace falta una taxonomía formal global de tags? El array propio por hoja ya está implementado;
+   el catálogo global de Jarvis sigue separado.
 3. ¿El bot debe **editar** hojas o solo crear?
 4. ¿Recordatorios de hoja son **imprescindibles** o basta integrar con Agenda?
 5. ¿Export **Markdown/ZIP** es requisito o copia NAS del `.db` alcanza?

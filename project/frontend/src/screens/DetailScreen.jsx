@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Trash2, Save, Calendar, MapPin, PenLine } from 'lucide-react'
+import { ArrowLeft, Trash2, Save, Calendar, MapPin, PenLine, X } from 'lucide-react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
@@ -10,7 +10,7 @@ import TopBar from '../components/TopBar'
 import IconPicker from '../components/IconPicker'
 import CategoryPicker from '../components/CategoryPicker'
 import { getCategoriaColor } from '../utils/categoriaColors'
-import { extractTags } from '../utils/tags'
+import { getHojaTags } from '../utils/tags'
 import { DEBUG } from '../config'
 import { getHojaImageUrl, getHojaEditableApuntes } from '../utils/hojaUtils'
 import { primerLinkEnCuerpo } from '../utils/cuerpoHoja'
@@ -46,6 +46,7 @@ export default function DetailScreen() {
   const categorias    = useStore(s => s.categorias)
   const eliminarHoja  = useStore(s => s.eliminarHoja)
   const updateHoja    = useStore(s => s.updateHoja)
+  const removeHojaTag = useStore(s => s.removeHojaTag)
   const showToast     = useStore(s => s.showToast)
 
   const hoja = hojas.find(h => h.id === parseInt(id))
@@ -127,7 +128,15 @@ export default function DetailScreen() {
 
   if (!hoja) return <div className="flex flex-col h-full" style={{ background: 'var(--bg)' }}><TopBar searchQuery={searchQuery} onSearchChange={setSearchQuery} /><div className="flex-1 grid place-items-center text-sm" style={{ color: 'var(--subtext)' }}>Hoja no encontrada.</div></div>
 
-  const tags = extractTags(hoja.contenido, hoja.apuntes)
+  const tags = getHojaTags(hoja)
+  const handleRemoveTag = async (tag) => {
+    try {
+      await removeHojaTag(hoja.id, tag, tags)
+      showToast('Tag eliminado')
+    } catch (_) {
+      showToast('No se pudo eliminar el tag', 'error')
+    }
+  }
   const imageUrl = getHojaImageUrl(hoja)
   // Preview (#10): primer link del cuerpo (`apuntes`), en cualquier posición;
   // para una hoja tipo=link legacy (URL en `contenido`, cuerpo vacío) cae a la
@@ -188,9 +197,14 @@ export default function DetailScreen() {
                   ● {hoja.tipo}
                 </span>
                 {tags.map(tag => (
-                  <span key={tag} className="text-[11px] px-2.5 py-0.5 rounded-full"
+                  <span key={tag} className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full"
                     style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--subtext)' }}>
                     {tag}
+                    <button type="button" onClick={() => handleRemoveTag(tag)}
+                      aria-label={`Eliminar tag ${tag}`} title={`Eliminar ${tag}`}
+                      className="inline-flex items-center rounded-full hover:text-white">
+                      <X size={11} />
+                    </button>
                   </span>
                 ))}
               </div>

@@ -23,6 +23,7 @@ class HojaPatch(BaseModel):
     contenido:   Optional[str] = None
     categoria_id: Optional[int] = None
     tipo:        Optional[str] = None
+    tags:        Optional[list[str]] = None
 
 
 class TituloIARequest(BaseModel):

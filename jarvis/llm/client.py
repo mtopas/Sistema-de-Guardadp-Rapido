@@ -190,7 +190,8 @@ _CLASSIFY_PROMPT = """\
 Clasifica el siguiente texto y extrae metadatos. Responde SOLO con JSON válido con estos campos:
 - "type": uno de "RAW", "SEMANTIC", "DECISION", "PROJECT", "PEOPLE"
 - "title": título descriptivo corto (máx 60 caracteres)
-- "tags": array de 1-5 keywords en minúsculas
+- "tags": array de 0-5 keywords en minúsculas; si no hay una señal clara, usá []
+- "tags_confidence": número entre 0.0 y 1.0 sobre la confianza exclusiva de los tags
 - "project": null o nombre del proyecto si el texto claramente pertenece a uno
 {catalog_block}
 Reglas para type:

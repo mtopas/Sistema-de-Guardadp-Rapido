@@ -238,20 +238,21 @@ def sincronizar_vault(vault_root: Path, conn: sqlite3.Connection) -> dict:
                 """
                 INSERT INTO hojas
                     (contenido, fecha, categoria_id, tipo, apuntes, lugar, latitud, longitud,
-                     icono, color, link_preview, fecha_actualizado, vault_id, ruta, mtime)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     icono, color, link_preview, fecha_actualizado, tags, vault_id, ruta, mtime)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(vault_id) DO UPDATE SET
                     contenido=excluded.contenido, fecha=excluded.fecha, categoria_id=excluded.categoria_id,
                     tipo=excluded.tipo, apuntes=excluded.apuntes, lugar=excluded.lugar,
                     latitud=excluded.latitud, longitud=excluded.longitud, icono=excluded.icono,
                     color=excluded.color, link_preview=excluded.link_preview,
-                    fecha_actualizado=excluded.fecha_actualizado, ruta=excluded.ruta, mtime=excluded.mtime
+                    fecha_actualizado=excluded.fecha_actualizado, tags=excluded.tags,
+                    ruta=excluded.ruta, mtime=excluded.mtime
                 """,
                 (
                     contenido, fecha_creado, categoria_id, tipo, apuntes_html,
                     nota.lugar, nota.latitud, nota.longitud, nota.icono,
                     nota.color, json.dumps(nota.link_preview) if nota.link_preview else None,
-                    fecha_actualizado, nota.id, rel_str, st.st_mtime,
+                    fecha_actualizado, json.dumps(nota.tags), nota.id, rel_str, st.st_mtime,
                 ),
             )
         except sqlite3.IntegrityError as exc:

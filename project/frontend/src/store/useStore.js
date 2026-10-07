@@ -2042,6 +2042,28 @@ export const useStore = create((set, get) => ({
     if (DEBUG) console.log('updateHoja:', id, patch)
   },
 
+  removeHojaTag: async (id, tag, visibleTags = []) => {
+    const target = String(tag).replace(/^#/, '').toLowerCase()
+    const nextTags = visibleTags.filter(item => (
+      String(item).replace(/^#/, '').toLowerCase() !== target
+    ))
+    const previous = get().hojas
+    const previousRecent = get().hojasRecientes
+    const apply = list => list.map(h => h.id === id ? { ...h, tags: nextTags } : h)
+    set(state => ({ hojas: apply(state.hojas), hojasRecientes: apply(state.hojasRecientes) }))
+    try {
+      const res = await fetch(`${API_URL}/hojas/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tags: nextTags }),
+      })
+      if (!res.ok) throw new Error('Error al quitar tag')
+    } catch (e) {
+      set({ hojas: previous, hojasRecientes: previousRecent })
+      throw e
+    }
+  },
+
   updateIcono: async (id, icono) => {
     set(state => ({
       hojas: state.hojas.map(h => h.id === id ? { ...h, icono } : h),

@@ -1,6 +1,20 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-10-07
 
+## Tags propios y autoetiquetado conservador de Bóveda (2026-10-07)
+
+Las hojas de Bóveda tienen ahora `hojas.tags` como JSON y el mismo array en el frontmatter del
+`.md`. La migración agrega solo la columna faltante; las filas antiguas conservan compatibilidad
+porque, si no tienen array persistido, la API deriva los tags de los `#hashtags` existentes.
+Los cambios de contenido hacen merge aditivo: nunca reemplazan tags previos. El PATCH explícito de
+`tags` permite quitar un tag individual desde la UI.
+
+Al crear una hoja, o al guardar apuntes, el backend dispara en segundo plano
+`jarvis/captures/tags.py`. Reusa `call_classify()` y `list_tag_catalog()`, exige
+`tags_confidence >= 0.8`, prefiere tags del catálogo y permite como máximo un tag nuevo cuando
+ninguno encaja. Sin contenido significativo, sin respuesta confiable o ante un error, no agrega
+nada. No hay backfill ni reprocesamiento histórico.
+
 ## T7 — Transparencia de Proyectos y lectura de Bóveda (2026-10-07)
 
 Jarvis separa ahora dos fuentes visibles bajo **PROYECTOS ACTIVOS**:

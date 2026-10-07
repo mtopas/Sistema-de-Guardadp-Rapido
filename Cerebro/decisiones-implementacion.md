@@ -11,6 +11,35 @@ Formato de cada entrada:
 
 ---
 
+## 2026-10-07 — Tags propios y autoetiquetado conservador en hojas de Bóveda
+
+Contexto: la Bóveda solo exponía tags derivados de `#hashtags`, mientras Jarvis ya tenía un
+clasificador local con catálogo de tags para `memory_entries`. El objetivo era llevar esa señal a
+las hojas sin reprocesar el historial ni perder control sobre tags existentes.
+
+Decisión:
+- Agregar `hojas.tags` como JSON nullable mediante `ALTER TABLE ... ADD COLUMN`, y replicarlo en
+  el frontmatter del archivo Markdown. Las filas antiguas siguen mostrando sus hashtags aunque aún
+  no tengan el array persistido.
+- Hacer merge aditivo al guardar contenido: se conservan tags propios y se agregan hashtags nuevos;
+  un PATCH explícito de `tags` es la única operación que remueve un tag.
+- Ejecutar el autoetiquetado únicamente en background después de crear una hoja o guardar apuntes.
+  `jarvis/captures/tags.py` reutiliza `call_classify()` + `list_tag_catalog()`, exige confianza
+  explícita mínima de 0.8, prefiere catálogo y acepta como máximo un tag inventado si ninguno del
+  catálogo encaja. Ante duda, respuesta inválida o contenido corto devuelve cero tags.
+- Mostrar los tags como chips removibles en `DetailScreen`; el click hace PATCH optimista y revierte
+  si falla la API.
+
+Diferencia con el modelo Jarvis: no se agregan filas a `memory_entries`, no se usa el worker de
+  consolidación y no se ejecuta backfill. El catálogo global de Jarvis sigue separado del array
+  propio de cada hoja.
+
+Impacto: `project/app/db/{database,crud}.py`, `project/app/main.py`, `project/app/models/hoja.py`,
+`project/app/vault/sync.py`, `jarvis/captures/tags.py`, `jarvis/llm/client.py` y componentes/utils
+de tags del frontend.
+
+---
+
 ## 2026-10-07 — T7 separa el catálogo de memoria de la lectura física de Proyectos
 
 Contexto: el panel **PROYECTOS ACTIVOS** mostraba únicamente `memory_projects`, aunque la fuente de

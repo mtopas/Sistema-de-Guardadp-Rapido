@@ -14,6 +14,212 @@ A diferencia del chat (cuyo contexto se pierde al cerrar la ventana), este archi
 
 ---
 
+## [2026-10-07, sesión 22 — diseño de revisión semanal de calidad]
+
+- **Resultado:** Dirección definida para la primera fase: calidad de Jarvis, no analítica personal
+  cross-módulo. Se reutilizará el historial de conversaciones existente para volumen por día/canal
+  y se agregará un ledger técnico mínimo para consultas; los snapshots semanales serán
+  determinísticos, locales y sin texto de los mensajes.
+- **Límites acordados:** no LLM sobre todo el chat, no contenido crudo en la telemetría, no UI ni
+  automatización semanal todavía. El calendario se interpreta en `America/Argentina/Buenos_Aires`.
+  El feedback explícito, detección semántica de malentendidos y métricas de Agenda/Finanzas/Hábitos/
+  Bóveda son fases posteriores.
+- **Ticket entregado al trabajador:** crear tablas aditivas para eventos técnicos y snapshots
+  semanales write-once; instrumentar `jarvis/query/service.py` de modo best-effort; reutilizar
+  `conversations`/`conversation_messages` solo para conteos diarios por canal; y exponer generación
+  manual + consulta del resumen, sin UI. Metadata permitida: fecha UTC, canal, conversación,
+  ruta, resultado categorizado, duración, conteos de contexto, tool y código categorizado. Prohibido
+  persistir prompt, respuesta o error textual. La generación acepta solo semanas cerradas y, si el
+  snapshot existe, debe devolverlo sin modificarlo.
+- **Criterios de aceptación para revisar el próximo resumen:** regresiones para metadata permitida,
+  fallo de telemetría inocuo, ruta Agenda, límites de semana ART, contenido no textual del snapshot,
+  rechazo de período abierto y write-once; suite backend completa, `git diff --check`, dependientes
+  del contrato de `query()` revisados y documentación de operación/decisión actualizada. Sin deploy
+  ni scheduler.
+
+### Pendientes activos (arrastre consolidado)
+
+- [ ] [JARVIS — CALIDAD SEMANAL F1] Implementar ledger técnico aditivo, agregado/snapshot semanal
+  reproducible y endpoints read-only/manuales; blindar privacidad, zona horaria y que una falla de
+  analítica no afecte una consulta. Sin UI, scheduler ni LLM en este slice.
+- [ ] [DEPLOY AGRUPADO — T4 + T6 + MÓVIL] Cuando el usuario lo indique, desplegar `d619160`,
+  `58995a3`, `ce66321`, `75c8dc2` y `735ac13` al homelab según `HOMELAB.md`, sin copiar
+  `database/`, `uploads/` ni `vault`; verificar pregunta de Agenda viva, tags IA/chip/filtro/grafo
+  de Bóveda y ausencia de alerta para residuos monetarios.
+- [ ] [MÓVIL — USUARIO] Usar `/mobile` con texto real: Gasto, Bóveda, Tarea, Hábito y Jarvis;
+  confirmar que la selección de destino y deshacer resultan naturales antes de abrir voz.
+- [ ] [MÓVIL — VOZ] Después de validar texto, diseñar spike de interacción, HTTPS/permisos, STT
+  local/backend, latencia, privacidad y compatibilidad. Mantener fallback de texto y sin escucha.
+- [ ] [LIMPIEZA / RESTO] Borrar feedback #1 con smoke test, tareas operativas y backlog conforme
+  al Mapa Maestro.
+
+---
+
+## [2026-10-07, sesión 21 — cierre de T4 Agenda en vivo]
+
+- **Resultado:** Hecho en `master`, pendiente de deploy por decisión del usuario. La consulta viva
+  de Agenda queda limitada a marcadores explícitos o a “qué tengo hoy/mañana/esta semana”; una
+  pregunta genérica ya no invoca `agenda.list_events` ni desplaza al RAG.
+- **Regresión:** `test_pregunta_generica_que_tengo_pendiente_no_ejecuta_tool` blinda el falso
+  positivo y el test temporal conserva la excepción intencional. Commit validado: `58995a3`.
+- **Verificación reportada:** 58 focalizados y 542 backend. El resumen omitió el campo nuevo de
+  dependientes revisados; el diff confirma que solo cambian el detector y su suite directa.
+
+### Pendientes activos (arrastre consolidado)
+
+- [ ] [DEPLOY AGRUPADO — T4 + T6 + MÓVIL] Cuando el usuario lo indique, desplegar `d619160`,
+  `58995a3`, `ce66321`, `75c8dc2` y `735ac13` al homelab según `HOMELAB.md`, sin copiar
+  `database/`, `uploads/` ni `vault`; verificar pregunta de Agenda viva, tags IA/chip/filtro/grafo
+  de Bóveda y ausencia de alerta para residuos monetarios.
+- [ ] [MÓVIL — USUARIO] Usar `/mobile` con texto real: Gasto, Bóveda, Tarea, Hábito y Jarvis;
+  confirmar que la selección de destino y deshacer resultan naturales antes de abrir voz.
+- [ ] [MÓVIL — VOZ] Después de validar texto, diseñar spike de interacción, HTTPS/permisos, STT
+  local/backend, latencia, privacidad y compatibilidad. Mantener fallback de texto y sin escucha.
+- [ ] [LIMPIEZA / RESTO] Borrar feedback #1 con smoke test, tareas operativas y backlog conforme
+  al Mapa Maestro.
+
+---
+
+## [2026-10-07, sesión 20 — endurecimiento del contrato Orquestador/Trabajador]
+
+- **Resultado:** Hecho. Se incorporaron desde CFRF las reglas útiles para SGR: revisión de
+  dependientes ante cambios de contrato, cierre honesto de validaciones visuales u operativas,
+  evidencia explícita del orquestador y worktrees solo cuando el usuario autorice paralelismo.
+- **Exclusiones deliberadas:** no se trasladaron CI remoto, servicios externos, el registro
+  ejecutivo de CFRF ni convenciones específicas de SimLab; SGR prioriza reproducibilidad local y
+  del homelab.
+- **Archivos de proceso:** `Cerebro/PROMPT-MAESTRO-TRABAJADOR.md`,
+  `Cerebro/PROMPT-MAESTRO-ORQUESTADOR.md` y `Agents.md`. Sin código de producto ni commit del
+  orquestador.
+
+### Pendientes activos (arrastre consolidado)
+
+- [ ] [JARVIS — AGENDA EN VIVO] Corregir el falso positivo de `d619160`: una pregunta genérica
+  como “¿qué tengo pendiente de mi proyecto?” no debe ejecutar `agenda.list_events`; conservar
+  Agenda explícita y consultas temporales como “¿qué tengo hoy?”. Agregar regresión antes de
+  considerar T4 listo para deploy.
+- [ ] [DEPLOY AGRUPADO — T6 + MÓVIL] Cuando el usuario lo indique, desplegar `ce66321`, `75c8dc2`
+  y `735ac13` al homelab según `HOMELAB.md`, sin copiar `database/`, `uploads/` ni `vault`;
+  verificar tags IA/chip/filtro/grafo de Bóveda y ausencia de alerta para residuos monetarios.
+- [ ] [MÓVIL — USUARIO] Usar `/mobile` con texto real: Gasto, Bóveda, Tarea, Hábito y Jarvis;
+  confirmar que la selección de destino y deshacer resultan naturales antes de abrir voz.
+- [ ] [MÓVIL — VOZ] Después de validar texto, diseñar spike de interacción, HTTPS/permisos, STT
+  local/backend, latencia, privacidad y compatibilidad. Mantener fallback de texto y sin escucha.
+- [ ] [LIMPIEZA / RESTO] Borrar feedback #1 con smoke test, tareas operativas y backlog conforme
+  al Mapa Maestro.
+
+---
+
+## [2026-10-07, sesión 19 — corrección de alerta financiera móvil]
+
+- **Resultado:** Hecho en `master`, pendiente de deploy por decisión del usuario. `/mobile/hoy`
+  normaliza cada saldo a dos decimales antes de decidir y devolver alertas; residuos como
+  `-1.8189894035458565e-11` ya no alertan y `-0.01` continúa siendo un descubierto real.
+- **Regresión:** `test_mobile_hoy_normaliza_saldos_antes_de_alertar` cubre ambos casos sin tocar
+  saldos persistidos ni movimientos. Commit validado: `735ac13`.
+- **Verificación reportada:** 535 tests backend y 20 focalizados; árbol de producto limpio salvo
+  las actualizaciones de bitácora del orquestador.
+
+### Pendientes activos (arrastre consolidado)
+
+- [ ] [DEPLOY AGRUPADO — T6 + MÓVIL] Cuando el usuario lo indique, desplegar `ce66321`, `75c8dc2`
+  y `735ac13` al homelab según `HOMELAB.md`, sin copiar `database/`, `uploads/` ni `vault`;
+  verificar tags IA/chip/filtro/grafo de Bóveda y ausencia de alerta para residuos monetarios.
+- [ ] [MÓVIL — USUARIO] Usar `/mobile` con texto real: Gasto, Bóveda, Tarea, Hábito y Jarvis;
+  confirmar que la selección de destino y deshacer resultan naturales antes de abrir voz.
+- [ ] [MÓVIL — VOZ] Después de validar texto, diseñar spike de interacción, HTTPS/permisos, STT
+  local/backend, latencia, privacidad y compatibilidad. Mantener fallback de texto y sin escucha.
+- [ ] [JARVIS — AGENDA EN VIVO] Diseñar y cablear `agenda.list_events` al chat sin duplicar tareas
+  pendientes en memoria.
+- [ ] [LIMPIEZA / RESTO] Borrar feedback #1 con smoke test, tareas operativas y backlog conforme
+  al Mapa Maestro.
+
+---
+
+## [2026-10-07, sesión 18 — T6 tags propios y autoetiquetado de Bóveda]
+
+- **Resultado:** Hecho en `master`, pendiente de deploy. T6 incorpora tags JSON propios por hoja,
+  fallback para `#hashtags`, chips removibles y autoetiquetado IA en background solo con confianza
+  explícita de al menos `0.8`; nunca reemplaza tags ni reprocesa el historial.
+- **Corrección de cierre:** la primera entrega dejaba lista, filtros y grafo usando el extractor
+  legado. `75c8dc2` unificó todos los consumidores de Bóveda con `getHojaTags()` y dejó regresión
+  para tags persistidos sin hashtag.
+- **Verificación reportada y revisada:** 534 backend, 241 frontend, build Vite, `py_compile` y
+  `git diff --check`; commits presentes `ce66321` y `75c8dc2`. El árbol solo contiene las
+  actualizaciones de bitácora del orquestador.
+
+### Pendientes activos (arrastre consolidado)
+
+- [ ] [T6 — DEPLOY Y VERIFICACIÓN] Desplegar `ce66321` + `75c8dc2` al homelab según `HOMELAB.md`,
+  sin copiar `database/`, `uploads/` ni `vault`; crear/editar una hoja con texto significativo,
+  confirmar tags IA, chip removible y filtro/grafo de Bóveda.
+- [ ] [MÓVIL — USUARIO] Usar `/mobile` con texto real: Gasto, Bóveda, Tarea, Hábito y Jarvis;
+  confirmar que la selección de destino y deshacer resultan naturales antes de abrir voz.
+- [ ] [MÓVIL — ALERTA FINANCIERA] Corregir el umbral de saldo negativo para no mostrar residuos de
+  punto flotante como excepción; cubrir con regresión.
+- [ ] [MÓVIL — VOZ] Después de validar texto, diseñar spike de interacción, HTTPS/permisos, STT
+  local/backend, latencia, privacidad y compatibilidad. Mantener fallback de texto y sin escucha.
+- [ ] [JARVIS — AGENDA EN VIVO] Diseñar y cablear `agenda.list_events` al chat sin duplicar tareas
+  pendientes en memoria.
+- [ ] [LIMPIEZA / RESTO] Borrar feedback #1 con smoke test, tareas operativas y backlog conforme
+  al Mapa Maestro.
+
+---
+
+## [2026-10-07, sesión 17 — verificación PWA en iPhone]
+
+- **Resultado:** Hecho. El usuario eliminó el acceso previo, reinstaló SGR desde Safari y confirmó
+  que el nuevo ícono oficial se muestra correctamente y abre la PWA en `/mobile`.
+- **Estado:** La entrada móvil instalada queda cerrada; no requiere cambios adicionales.
+
+### Pendientes activos (arrastre consolidado)
+
+- [ ] [MÓVIL — USUARIO] Usar `/mobile` con texto real: Gasto, Bóveda, Tarea, Hábito y Jarvis;
+  confirmar que la selección de destino y deshacer resultan naturales antes de abrir voz.
+- [ ] [MÓVIL — ALERTA FINANCIERA] Corregir el umbral de saldo negativo para no mostrar residuos de
+  punto flotante como excepción; cubrir con regresión.
+- [ ] [MÓVIL — VOZ] Después de validar texto, diseñar spike de interacción, HTTPS/permisos, STT
+  local/backend, latencia, privacidad y compatibilidad. Mantener fallback de texto y sin escucha.
+- [ ] [T6] Implementar autoetiquetado IA conservador y removible para Bóveda. T7 está desplegado;
+  T8 queda diferido.
+- [ ] [JARVIS — AGENDA EN VIVO] Diseñar y cablear `agenda.list_events` al chat sin duplicar tareas
+  pendientes en memoria.
+- [ ] [LIMPIEZA / RESTO] Borrar feedback #1 con smoke test, tareas operativas y backlog conforme
+  al Mapa Maestro.
+
+---
+
+## [2026-10-07, sesión 16 — ícono PWA oficial + entrada móvil]
+
+- **Resultado:** Hecho y desplegado en el homelab. El ícono oficial tiene fuente SVG reutilizable,
+  PNG de 180/192/512 px, favicon y `apple-touch-icon`; el manifiesto abre instalaciones PWA en
+  `/mobile` y mantiene `/` como inicio normal de Safari.
+- **Incidentes resueltos:** el backend no exponía los assets PWA y iOS podía instalar desde `/`
+  perdiendo la entrada móvil. Se agregaron rutas de assets y redirección exclusiva para modo
+  standalone, ambas cubiertas por regresión.
+- **Verificación:** 236 tests frontend, build de producción, 530 tests backend y verificación
+  remota de manifest, favicon e íconos con HTTP 200; backend, bot y worker activos. Árbol limpio.
+- **Commits:** `0f517fb`, `6cf9a05`, `8dd3cb2`, `6ab88b5`.
+
+### Pendientes activos (arrastre consolidado)
+
+- [ ] [PWA — USUARIO] Eliminar el acceso previo de SGR en iPhone, agregar la web otra vez desde
+  Safari y confirmar el nuevo ícono y la apertura directa en `/mobile`.
+- [ ] [MÓVIL — USUARIO] Usar `/mobile` con texto real: Gasto, Bóveda, Tarea, Hábito y Jarvis;
+  confirmar que la selección de destino y deshacer resultan naturales antes de abrir voz.
+- [ ] [MÓVIL — ALERTA FINANCIERA] Corregir el umbral de saldo negativo para no mostrar residuos de
+  punto flotante como excepción; cubrir con regresión.
+- [ ] [MÓVIL — VOZ] Después de validar texto, diseñar spike de interacción, HTTPS/permisos, STT
+  local/backend, latencia, privacidad y compatibilidad. Mantener fallback de texto y sin escucha.
+- [ ] [T6] Implementar autoetiquetado IA conservador y removible para Bóveda. T7 está desplegado;
+  T8 queda diferido.
+- [ ] [JARVIS — AGENDA EN VIVO] Diseñar y cablear `agenda.list_events` al chat sin duplicar tareas
+  pendientes en memoria.
+- [ ] [LIMPIEZA / RESTO] Borrar feedback #1 con smoke test, tareas operativas y backlog conforme
+  al Mapa Maestro.
+
+---
+
 ## [2026-10-07, sesión 15 — deploy móvil + T7]
 
 - **Resultado:** Hecho y verificado en el homelab. Se transfirió código y `dist`, excluyendo

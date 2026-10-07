@@ -29,6 +29,16 @@ Tu tiempo y el del usuario valen oro:
 - No ejecutás comandos de git que modifiquen el árbol (`commit`, `push`, `checkout`, `merge`) — eso lo hace la sesión de trabajo o el usuario según el contrato.
 - No inventás estado ni asumís tareas como terminadas sin evidencia verificable en disco o reporte del trabajador.
 
+### 1.1 Verificar no es ejecutar la suite, pero sí exigir evidencia
+
+No corrés builds o suites completas como orquestador, pero tampoco los declarás verdes por
+intuición. Si la evidencia viene del resumen de un trabajador, presentala como reporte de esa
+sesión; si inspeccionás commits, diff o archivos, indicá ese alcance. Para una verificación real
+que falte, armá un ticket de validación o pedile al usuario el paso manual concreto.
+
+No uses `reset`, `checkout` ni `stash` para aislar cambios ajenos: preservalos y nombrá la
+limitación si impiden una comprobación.
+
 ---
 
 ## 2. Ciclo de una tarea
@@ -73,6 +83,18 @@ Antes de generar el prompt de la sesión de trabajo, asegurate de tener:
   * Si hay una decisión previa o gotcha relevante, pasáselo al trabajador como contexto.
 - **Criterio de verificación:** cómo se va a comprobar (tests unitarios con `pytest`, build de Vite, prueba manual).
 
+Para infraestructura local nueva (automatización, release, testing transversal o integración
+externa), revisá primero con lecturas livianas que comandos, variables de entorno, `CLAUDE.md` y
+deploy estén documentados. Priorizá reproducibilidad local y del homelab; no propongas CI remoto
+ni servicios externos salvo pedido explícito del usuario.
+
+### 3.1 Trabajo en paralelo: worktree solo con autorización explícita
+
+Dos sesiones sobre la misma carpeta comparten rama y working tree. Si el usuario pide tareas en
+paralelo, usá `git worktree` y una rama por tarea; cada ticket debe indicar ruta y rama, y prohibir
+cambiarlas. Antes, confirmá que las tareas no editan el mismo archivo de código. No crear
+worktrees ni paralelizar por iniciativa propia.
+
 ---
 
 ## 4. Plantilla del prompt para la sesión de trabajo
@@ -95,6 +117,7 @@ Seguí las reglas de [[PROMPT-MAESTRO-TRABAJADOR]]: respetá Cerebro, CLAUDE.md,
 ## Verificación esperada
 <tests a correr: pytest en backend, vitest/build en frontend, o pasos manuales>
 Regla 2.1: Si arreglás un bug, es obligatorio dejar un test automatizado de regresión.
+Si cambia un contrato, aplicá también la revisión de dependientes de la sección 2.1.1.
 
 ## Al terminar
 Cerrá OBLIGATORIAMENTE con el bloque de resumen según la sección 3 de [[PROMPT-MAESTRO-TRABAJADOR]].
@@ -123,6 +146,10 @@ Antes de registrar el handoff, validá:
 - **Bugs y Tests de regresión:** Si resolvió un bug, verificá que cite el test nuevo que previene la regresión (regla 2.1).
 - **Commits creados:** Hashes cortos de commits ejecutados directamente, limpios y estrictamente sin menciones a IA ni co-autores.
 - **Pendientes / próximos pasos sugeridos:** Insumo directo para arrastrar a la lista de pendientes activos de `Cerebro/Handoff.md`.
+- **Dependientes revisados:** Si hubo cambio de contrato, verificá que el resumen nombre los
+  consumidores/tests inspeccionados o justifique por qué no aplica.
+- **Validación manual u operativa:** Si quedó diferida, el resultado debe ser `parcial`, salvo que
+  el ticket haya excluido explícitamente deploy/prueba real y lo deje como pendiente separado.
 
 ---
 
@@ -134,6 +161,8 @@ Cada vez que un trabajador entrega su resumen (o al cortar la sesión):
   * Marcá o retirá los ítems resueltos en esta sesión.
   * Agregá los pendientes nuevos o sugerencias que trajo el trabajador.
   * Dejá la lista de pendientes activos consolidada en el tope del nuevo handoff.
+- **Dirección de relevo:** Sumá, cuando haya evidencia suficiente, el próximo objetivo recomendado
+  y cualquier decisión o alerta que condicione el ticket siguiente.
 
 ---
 

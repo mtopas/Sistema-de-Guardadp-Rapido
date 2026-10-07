@@ -63,10 +63,11 @@ los enlaza.
 
 ### Tickets pequeños desbloqueados
 
-- **Autoetiquetado conservador de hojas con IA** — **decidido**, P1; tags fáciles de quitar, sin
-  agregar si la IA no está segura o no hace falta. Dependencia: decidir interfaz concreta y
-  reutilizar el catálogo/clasificador de Jarvis. Fuente: [Handoff.md](Handoff.md), T6/#6;
-  [triaje-feedback-2026-10-02.md](triaje-feedback-2026-10-02.md).
+- **Autoetiquetado conservador de hojas con IA** — **implementado, deploy pendiente**, P1; tags
+  JSON propios con fallback para `#hashtags`, chips removibles y autoetiquetado en background solo
+  con confianza explícita >= 0.8. Conserva tags existentes, no reprocesa historial y todos los
+  consumidores visuales usan `getHojaTags()`. Dependencia: deploy y prueba real con Ollama.
+  Fuente: commits `ce66321` y `75c8dc2`; [Handoff.md](Handoff.md), sesión 2026-10-07.
 - **Transparencia de Proyectos en Jarvis** — **resuelto**, P1; `GET /jarvis/projects/vault` lee
   `01 - Proyectos` con frontmatter, contenido y procedencia, y el frontend informa carga, vacío,
   fuente no disponible o desactualizada. `memory_projects` sigue separado y sin edición manual.
@@ -84,14 +85,14 @@ los enlaza.
   aproximadamente 400 caracteres deja demasiadas notas rápidas sin sugerencia. Dependencia:
   observar uso real y separar, si corresponde, el umbral del triaje de Inbox. Fuente:
   [Handoff.md](Handoff.md), sesiones 2026-10-02/06.
-- **Alerta financiera móvil por residuo de punto flotante** — **por diseñar**, P2; el deploy de
-  `/mobile/hoy` mostró `Brubank` como saldo negativo por `-1.8189894035458565e-11`, que no es una
-  alerta real. Definir tolerancia/normalización monetaria en el resumen sin ocultar saldos negativos
-  genuinos. Fuente: verificación post-deploy 2026-10-07.
-- **Jarvis debe leer Agenda en vivo** — **por diseñar**, P1; decidir cómo cablear
-  `agenda.list_events` al chat, porque el Tool Registry existe pero todavía no hay loop de tool
-  calling en la conversación. Dependencia: diseño del loop, permisos y contexto de respuesta.
-  Fuente: [Handoff.md](Handoff.md), T4/#3; [PROXIMAMENTE.md](PROXIMAMENTE.md).
+- **Alerta financiera móvil por residuo de punto flotante** — **implementado, deploy pendiente**,
+  P2; `/mobile/hoy` redondea cada saldo a dos decimales antes de evaluar y devolver la alerta:
+  `-1.8189894035458565e-11` no alerta y `-0.01` sí. No se modifican saldos ni movimientos
+  persistidos. Fuente: commit `735ac13`, sesión 2026-10-07.
+- **Jarvis debe leer Agenda en vivo** — **implementado, deploy pendiente**, P1; consulta
+  `agenda.list_events` bajo demanda y omite RAG/memoria. Solo se activa con marcador de Agenda o
+  “qué tengo hoy/mañana/esta semana”; una pregunta genérica no dispara la tool. Dependencia:
+  deploy y prueba real contra la Agenda. Fuente: commits `d619160` y `58995a3`; [Handoff.md](Handoff.md), T4/#3.
 
 ### Gaps documentados que siguen abiertos
 
@@ -165,6 +166,11 @@ los enlaza.
   de captura; Bóveda rápida va a Inbox; Finanzas solo aparece por saldo negativo; el producto vive
   primero en la ruta explícita `/mobile`. La interacción de grabación sigue sin decidir y pertenece
   al spike de voz posterior. Fuente: decisión de implementación 2026-10-07.
+- **Ícono PWA oficial y entrada instalada en móvil** — **resuelto**, P2: SVG reutilizable con
+  fondo Disco 90s y degradé Eclipse solar, PNG 180/192/512, favicon y `apple-touch-icon`. El
+  manifest usa `id` y `start_url` `/mobile`; una instalación standalone desde `/` se redirige a
+  móvil sin cambiar Safari normal. Verificado manualmente en iPhone tras reinstalar el acceso.
+  Fuente: commits `0f517fb`, `6cf9a05`, `8dd3cb2`, `6ab88b5`, sesión 2026-10-07.
 
 ### Bóveda
 
@@ -206,15 +212,23 @@ consolidan ítems repetidos del roadmap y de [PROXIMAMENTE.md](PROXIMAMENTE.md).
 
 ### Jarvis
 
-- **Agenda y contexto vivo** — **por diseñar**, P1: resolver el acceso en vivo a eventos y tareas
-  pendientes sin duplicar estado en `memory_entries`; escoger entre contexto read-only, ingestión
-  con expiración o consulta directa a `app.db`, y fijar ventana temporal. Dependencias: loop de
-  tools y política de actualización. Fuente: [PROXIMAMENTE.md](PROXIMAMENTE.md), "Ingestión de
-  Agenda"; [Handoff.md](Handoff.md), T4.
-- **Autoetiquetado inteligente de Bóveda (T6)** — **decidido**, P1: tags conservadores, fáciles de
-  quitar y sin agregar cuando la IA no está segura. T7 de transparencia de proyectos ya fue
-  resuelto y queda pendiente de deploy junto al slice móvil. Dependencias: UX y tags removibles.
-  Fuente: [Handoff.md](Handoff.md), T6/T7, sesión 2026-10-07.
+- **Agenda y contexto vivo** — **implementado, deploy pendiente**, P1: consulta directa read-only
+  con `agenda.list_events`, sin duplicar eventos en `memory_entries`; la ventana por defecto es
+  siete días y la explícita sale de la pregunta. El detector requiere marcador de Agenda o la
+  excepción temporal “qué tengo hoy/mañana/esta semana”. Dependencia: deploy y prueba real.
+  Fuente: commits `d619160` y `58995a3`; [Handoff.md](Handoff.md), T4.
+- **Revisión semanal de calidad de Jarvis** — **decidido**, P2: primera fase local y sin UI,
+  con telemetría técnica mínima por consulta, agregado determinístico semanal y snapshot
+  reproducible. Medirá volumen por día/canal/ruta, latencia, uso de contexto y errores o fallos
+  de tools; no copiará texto de mensajes al registro analítico ni invocará un LLM. El período se
+  calcula en `America/Argentina/Buenos_Aires`. El análisis semántico local de casos seleccionados,
+  feedback explícito y medición cross-módulo quedan para fases posteriores. Dependencia: definir e
+  implementar el contrato del reporte, luego observar una semana real antes de automatizar su
+  generación. Fuente: decisión de producto 2026-10-07.
+- **Autoetiquetado inteligente de Bóveda (T6)** — **implementado, deploy pendiente**, P1: tags
+  conservadores y removibles, sin alta si la IA no tiene confianza explícita >= 0.8. T7 ya está
+  desplegado; T6 requiere deploy y validación real con Ollama. Fuente: commits `ce66321` y
+  `75c8dc2`; [Handoff.md](Handoff.md), sesión 2026-10-07.
 - **Memoria conversacional de sesión** — **decidido**, P2: contexto por `chat_id`, últimos cuatro
   turnos, limpieza por diez minutos o `/nuevo`, sin mezclar comandos de captura. Dependencia:
   validar con las 30 frases de uso real. Fuente: [PLAN-OLLAMA.md](../PLAN-OLLAMA.md), Capa 5.

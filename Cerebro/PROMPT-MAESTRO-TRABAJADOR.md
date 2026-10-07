@@ -73,12 +73,36 @@ Si durante la sesión encontrás y resolvés un bug (o la tarea consistía puntu
 - **Criterio de éxito:** Si en el futuro alguien revierte tu fix o reintroduce el defecto, **el test nuevo debe fallar de inmediato**.
 - **Trazabilidad:** Citá expresamente el archivo y nombre del test creado tanto en la nota correspondiente como en el resumen de cierre.
 
+### 2.1.1 Cambio de contrato: revisar dependientes obligatoriamente
+
+Si el cambio modifica un contrato que otro código consume —respuesta o semántica de una API,
+efecto automático, endpoint, ruta PWA, texto o aparición de una acción/modal— no alcanza con
+probar el módulo editado:
+- Buscá los consumidores en `project/tests/`, `project/frontend/src/**/*.test.*` y
+  `project/frontend/e2e/` mediante el endpoint, texto o flujo afectado.
+- Actualizá los tests o flujos que dependían del comportamiento anterior en el mismo commit. Si
+  alguno queda grande o ambiguo, declaralo explícitamente como pendiente; nunca lo omitas.
+- Esta revisión complementa, no reemplaza, el test de regresión obligatorio de la sección 2.1.
+
 ### 2.2 Regla de los 3 intentos (Anti-bucles de depuración)
 Si un test, build o comando de verificación falla **3 veces consecutivas** con distintos intentos de solución:
 - **DETENETE INMEDIATAMENTE.** No sigas probando cambios a ciegas.
 - **Prohibido tocar archivos fuera del alcance** o "simplificar" tests existentes para forzarlos a pasar.
 - Cerrá la sesión reportando **`Resultado: bloqueado`**.
 - En el resumen de cierre, detallá qué hipótesis probaste, el error exacto y qué alternativa recomendás para que el Orquestador o el usuario decidan el rumbo.
+
+### 2.3 Validación visual u operativa antes del cierre
+
+Si el criterio de aceptación requiere algo que los tests no demuestran (UI visual, flujo PWA,
+Telegram, homelab o una integración real), antes del resumen entregá un checklist concreto de qué
+debe mirar el usuario y cuál es el resultado esperado.
+
+- Si el usuario puede validarlo en esa sesión, esperá su confirmación o su reporte y corregí lo
+  encontrado antes de cerrar.
+- Si el usuario difiere esa validación, el resultado es `parcial` y el resumen debe nombrar el paso
+  pendiente. La excepción es un ticket explícitamente limitado a código local con deploy o prueba
+  real declarados fuera de alcance: puede cerrar `hecho`, pero debe dejar ese estado operativo como
+  pendiente separado.
 
 ---
 
@@ -108,6 +132,8 @@ Al terminar tu trabajo (o si la sesión queda bloqueada o incompleta), debés im
 **Decisiones tomadas:** <aunque parezcan menores>
 
 **Verificación:** <tests corridos y resultado numérico exacto / build de producción / prueba manual>
+
+**Dependientes revisados:** <tests, E2E o consumidores actualizados tras un cambio de contrato; o "no aplica, motivo">
 
 **Estado del working tree:** <rama exacta en la que quedaste, y si quedaron archivos sin trackear>
 

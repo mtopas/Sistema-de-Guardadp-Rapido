@@ -70,8 +70,8 @@ los enlaza.
 - **Transparencia de Proyectos en Jarvis** — **resuelto**, P1; `GET /jarvis/projects/vault` lee
   `01 - Proyectos` con frontmatter, contenido y procedencia, y el frontend informa carga, vacío,
   fuente no disponible o desactualizada. `memory_projects` sigue separado y sin edición manual.
-  Homelab confirmado: CIFS → `/mnt/boveda` → `/app/boveda`, watchdog cada 60 s. Pendiente solo
-  deploy junto al slice móvil. Fuente: [Handoff.md](Handoff.md), T7/#4, sesión 2026-10-07.
+  Homelab desplegado y confirmado: CIFS → `/mnt/boveda` → `/app/boveda`, watchdog cada 60 s.
+  Fuente: [Handoff.md](Handoff.md), T7/#4, sesión 2026-10-07.
 - **Carga manual de tiempo en pantalla en Hábitos** — **diferido**, P3; semana lunes-domingo,
   siete totales diarios, top cinco apps, horas semanales y métricas total/promedio/mejor/peor día;
   falta decidir si habrá meta diaria. Diferido por decisión del usuario. Dependencia: definición
@@ -84,6 +84,10 @@ los enlaza.
   aproximadamente 400 caracteres deja demasiadas notas rápidas sin sugerencia. Dependencia:
   observar uso real y separar, si corresponde, el umbral del triaje de Inbox. Fuente:
   [Handoff.md](Handoff.md), sesiones 2026-10-02/06.
+- **Alerta financiera móvil por residuo de punto flotante** — **por diseñar**, P2; el deploy de
+  `/mobile/hoy` mostró `Brubank` como saldo negativo por `-1.8189894035458565e-11`, que no es una
+  alerta real. Definir tolerancia/normalización monetaria en el resumen sin ocultar saldos negativos
+  genuinos. Fuente: verificación post-deploy 2026-10-07.
 - **Jarvis debe leer Agenda en vivo** — **por diseñar**, P1; decidir cómo cablear
   `agenda.list_events` al chat, porque el Tool Registry existe pero todavía no hay loop de tool
   calling en la conversación. Dependencia: diseño del loop, permisos y contexto de respuesta.

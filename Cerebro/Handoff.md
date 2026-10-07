@@ -14,6 +14,38 @@ A diferencia del chat (cuyo contexto se pierde al cerrar la ventana), este archi
 
 ---
 
+## [2026-10-07, sesión 15 — deploy móvil + T7]
+
+- **Resultado:** Hecho y verificado en el homelab. Se transfirió código y `dist`, excluyendo
+  `database/`, `uploads/` y `vault`; backup previo `app.db.bak-pre-mobile-t7-20261007-133544` y
+  `jarvis.db.bak-pre-mobile-t7-20261007-133544` creado en el host.
+- **Incidente de deploy resuelto:** el primer rebuild dejó contenedores en la imagen previa porque
+  Compose conservó la etiqueta `sgr-app:latest`; se reconstruyó sin caché y se recrearon los tres
+  servicios. El bundle servido es `index-BhPG_SOE.js`, igual al build local.
+- **Verificación:** backend, bot y worker UP; `GET /mobile/hoy` responde el resumen nuevo,
+  `/jarvis/health` confirma worker vivo y `GET /jarvis/projects/vault` devuelve la nota real de
+  `01 - Proyectos` con procedencia. Mount CIFS presente durante el deploy.
+- **Hallazgo:** `/mobile/hoy` publicó una alerta falsa para saldo `-1.8189894035458565e-11`; es
+  residuo de `float`, no un saldo negativo real. Queda ticket P2 de tolerancia/normalización, sin
+  cambio de datos ni corrección improvisada en producción.
+
+### Pendientes activos (arrastre consolidado)
+
+- [ ] [MÓVIL — USUARIO] Usar `/mobile` con texto real: Gasto, Bóveda, Tarea, Hábito y Jarvis;
+  confirmar que la selección de destino y deshacer resultan naturales antes de abrir voz.
+- [ ] [MÓVIL — ALERTA FINANCIERA] Corregir el umbral de saldo negativo para no mostrar residuos de
+  punto flotante como excepción; cubrir con regresión.
+- [ ] [MÓVIL — VOZ] Después de validar texto, diseñar spike de interacción, HTTPS/permisos, STT
+  local/backend, latencia, privacidad y compatibilidad. Mantener fallback de texto y sin escucha.
+- [ ] [T6] Implementar autoetiquetado IA conservador y removible para Bóveda. T7 está desplegado;
+  T8 queda diferido.
+- [ ] [JARVIS — AGENDA EN VIVO] Diseñar y cablear `agenda.list_events` al chat sin duplicar tareas
+  pendientes en memoria.
+- [ ] [LIMPIEZA / RESTO] Borrar feedback #1 con smoke test, tareas operativas y backlog conforme
+  al Mapa Maestro.
+
+---
+
 ## [2026-10-07, sesión 14 — T7 Proyectos de Jarvis]
 
 - **Resultado:** Hecho en `master`, sin deploy al homelab. `GET /jarvis/projects/vault` expone la

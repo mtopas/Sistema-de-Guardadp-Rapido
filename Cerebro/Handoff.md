@@ -14,6 +14,81 @@ A diferencia del chat (cuyo contexto se pierde al cerrar la ventana), este archi
 
 ---
 
+## [2026-10-07, sesión 12 — controles de hoja responsive]
+
+- **Resultado:** Hecho. Los botones Guardar y Eliminar hoja dejaron de depender de `xl` para ser
+  visibles; el panel Información queda debajo del editor en mobile/tablet y mantiene la columna
+  lateral en desktop.
+- **Regresión:** `project/frontend/e2e/05-boveda-detail-responsive.test.ts` verifica los tres
+  viewports (375, 768 y 1440 px), scroll real hasta ambos botones y ausencia de solapamiento con
+  la navegación móvil.
+- **Verificación:** `npm test` (225 tests), `npm run build` y Playwright responsive (3/3). Revisión
+  visual completada en mobile, tablet y desktop.
+- **Commit:** `487af3a Fix: hacer accesibles los controles de hoja en pantallas pequeñas`.
+
+### Pendientes activos (arrastre consolidado)
+
+- [ ] [VERIF / USUARIO] Ejecutar las cuatro pruebas reales del título por IA y captura de Telegram;
+  además hacer hard refresh y revisar Ahorro, Ajustes, nota larga/link, categorías, listas y
+  movimientos sin descripción.
+- [ ] [PUSH / USUARIO] Pushear los commits locales posteriores a esta sesión.
+- [ ] [LIMPIEZA] Borrar la nota de feedback #1 con smoke test; limpiar, cuando convenga, el bundle
+  JavaScript viejo del homelab y la variable inerte `HOMELAB_HOST=`.
+- [ ] [T6/T7/T8] Implementar o planificar autoetiquetado conservador, transparencia de Proyectos
+  con `D:\Boveda` y carga manual de tiempo en pantalla; falta definir meta diaria en T8.
+- [ ] [JARVIS — AGENDA EN VIVO] Decidir y cablear `agenda.list_events` al chat; resolver también
+  el tratamiento de tareas pendientes sin duplicar estado en memoria.
+- [ ] [MÓVIL WEB] Resolver las cuatro decisiones de diseño antes de abrir un ticket de implementación;
+  mantener texto como camino completo mientras no exista una decisión de STT.
+- [ ] [BÓVEDA / UI] Evaluar latencia/umbral de sugerencia de categoría, agregar tests de escritura
+  del vault e investigar colisión `UNIQUE`; resolver batch de Hábitos con valores inválidos y
+  claves i18n muertas.
+- [ ] [FINANZAS] Diseñar ganancia realizada en ventas, migración legacy `Ahorro`, ledger >2000,
+  alertas y mantener el flujo mensual del importador.
+- [ ] [OPERACIÓN / FUTURO] Auditar PROXIMAMENTE contra el código; evaluar canal desktop/router de
+  Telegram, certeza de memoria, variantes frontend y video promo. Mantener el resto del inventario
+  en el Mapa Maestro y actualizarlo junto al Handoff al cerrar futuros trabajos.
+
+---
+
+## [2026-10-07, sesión 11 — propuesta móvil web]
+
+- **Resultado:** Diseño documentado; no se implementó, investigó ni aprobó tecnología de voz.
+- **Qué se agregó:** el Mapa Maestro incorpora “Móvil web: Hoy + captura intencional + voz” como
+  iniciativa futura. Define una portada móvil ultrarrápida, carga mínima de datos, acciones
+  deterministas (Gasto/Bóveda/Tarea/Hábito/Jarvis), texto o voz y confirmación con deshacer.
+- **Restricción técnica:** el reconocimiento web no puede ser la única vía; el micrófono exige HTTPS
+  y permiso explícito, y la compatibilidad/privacidad del reconocimiento varía. La fase inicial
+  debe funcionar totalmente con texto; STT backend/local queda como diseño posterior.
+- **Decisiones pendientes:** comportamiento del botón central, destino de captura de Bóveda,
+  presencia de Finanzas en “Hoy” y ruta/shell móvil explícito frente a adaptación final por
+  breakpoint.
+
+### Pendientes activos (arrastre consolidado)
+
+- [ ] [VERIF / USUARIO] Ejecutar las cuatro pruebas reales del título por IA y captura de Telegram;
+  además hacer hard refresh y revisar Ahorro, Ajustes, nota larga/link, categorías, listas y
+  movimientos sin descripción.
+- [ ] [PUSH / USUARIO] Pushear los commits locales posteriores a esta sesión.
+- [ ] [LIMPIEZA] Borrar la nota de feedback #1 con smoke test; limpiar, cuando convenga, el bundle
+  JavaScript viejo del homelab y la variable inerte `HOMELAB_HOST=`.
+- [ ] [T6/T7/T8] Implementar o planificar autoetiquetado conservador, transparencia de Proyectos
+  con `D:\Boveda` y carga manual de tiempo en pantalla; falta definir meta diaria en T8.
+- [ ] [JARVIS — AGENDA EN VIVO] Decidir y cablear `agenda.list_events` al chat; resolver también
+  el tratamiento de tareas pendientes sin duplicar estado en memoria.
+- [ ] [MÓVIL WEB] Resolver las cuatro decisiones de diseño antes de abrir un ticket de implementación;
+  mantener texto como camino completo mientras no exista una decisión de STT.
+- [ ] [BÓVEDA / UI] Evaluar latencia/umbral de sugerencia de categoría, agregar tests de escritura
+  del vault e investigar colisión `UNIQUE`; resolver también botones de hoja inaccesibles en
+  mobile/tablet, batch de Hábitos con valores inválidos y claves i18n muertas.
+- [ ] [FINANZAS] Diseñar ganancia realizada en ventas, migración legacy `Ahorro`, ledger >2000,
+  alertas y mantener el flujo mensual del importador.
+- [ ] [OPERACIÓN / FUTURO] Auditar PROXIMAMENTE contra el código; evaluar canal desktop/router de
+  Telegram, certeza de memoria, variantes frontend y video promo. Mantener el resto del inventario
+  en el Mapa Maestro y actualizarlo junto al Handoff al cerrar futuros trabajos.
+
+---
+
 ## [2026-10-07, sesión 10 — mapa maestro de pendientes]
 
 - **Resultado:** Hecho. Se creó `Cerebro/Mapa-Maestro-Pendientes.md` como inventario consolidado y

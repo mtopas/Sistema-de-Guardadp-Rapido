@@ -98,10 +98,11 @@ los enlaza.
   reproducir y determinar causa raíz antes de corregir. Dependencia: fixture que reproduzca la
   nota de `Jarvis/Entidades` y el camino de sync. Fuente: [estado-actual.md](estado-actual.md),
   hallazgos nuevos del cierre de auditoría de Bóveda.
-- **Botones de guardar/eliminar inaccesibles en mobile/tablet** — **por diseñar**, P2; definir
-  ubicación responsive manteniendo el pedido de conservarlos bajo Información. Dependencia:
-  decisión visual y prueba en viewport menor que `xl`. Fuente: [estado-actual.md](estado-actual.md),
-  hallazgos nuevos de la auditoría frontend.
+- **Botones de guardar/eliminar inaccesibles en mobile/tablet** — **resuelto**, P2: el panel
+  Información ahora se muestra debajo del editor cuando el viewport es menor que `xl`, conserva
+  ambos controles en ese panel y agrega espacio inferior para que la navegación móvil no los tape.
+  Regresión automatizada: `project/frontend/e2e/05-boveda-detail-responsive.test.ts`, verificada en
+  375, 768 y 1440 px. Commit: `487af3a`. Fuente: hallazgos nuevos de la auditoría frontend.
 - **Validación silenciosa de valores inválidos en registros batch de Hábitos** — **por diseñar**,
   P2; medir alcance y decidir si rechazar, normalizar o informar cada valor inválido. Dependencia:
   casos reales y contrato API. Fuente: [estado-actual.md](estado-actual.md), hallazgos nuevos.
@@ -123,6 +124,45 @@ los enlaza.
   [Handoff.md](Handoff.md), sesión 2026-10-06.
 
 ## 2. Futuro
+
+### Móvil web: “Hoy + captura intencional + voz”
+
+- **Shell móvil ultrarrápido** — **por diseñar**, P2: crear una experiencia móvil distinta de la
+  composición de escritorio, centrada en “qué exige atención hoy”, registrar algo y consultar a
+  Jarvis. La portada solo muestra próximo bloque, hasta tres tareas, hábitos pendientes y alertas
+  financieras excepcionales; no carga grafo, editor, tablas ni paneles completos. Dependencias:
+  definir si vive como ruta/shell móvil explícito durante el desarrollo o como adaptación final por
+  breakpoint. Fuente: propuesta de arquitectura móvil, conversación 2026-10-07.
+- **Arranque mínimo y resumen agregado de Hoy** — **por diseñar**, P2: reemplazar en móvil la carga
+  global actual de Bóveda, Finanzas, Agenda y Hábitos por carga diferida por ruta y un resumen
+  pequeño/cachable (propuesto `GET /mobile/hoy`). Dependencias: contrato agregado, estrategia de
+  caché y medición de bundle; no duplicar la lógica de cada módulo en el cliente. Fuente:
+  propuesta de arquitectura móvil, conversación 2026-10-07; [App.jsx](../project/frontend/src/App.jsx).
+- **Captura rápida con intención explícita** — **decidido**, P2: una hoja/modal compartida con
+  acciones Gasto, Bóveda, Tarea, Hábito y Pregunta a Jarvis; el usuario elige primero el destino y
+  luego Texto o Voz. Debe mostrar transcripción/texto editable, destino visible, confirmación y
+  deshacer. Esto evita que el router infiera erróneamente una intención ya elegida por el usuario.
+  Dependencias: contrato común de captura y reutilización segura de endpoints existentes. Fuente:
+  propuesta de arquitectura móvil, conversación 2026-10-07.
+- **Modo voz como interfaz, no como dependencia única** — **por diseñar**, P2: botón protagonista
+  de pulsar/mantener para hablar dentro de la captura, con fallback inmediato a texto. No hay voz
+  investigada, diseñada ni implementada todavía. La primera fase debe poder funcionar sin
+  reconocimiento; una fase posterior puede prototipar reconocimiento del navegador con detección
+  de capacidad, y la arquitectura objetivo sería grabar audio y transcribirlo en backend/local.
+  Dependencias: HTTPS, permiso explícito de micrófono, definición de motor STT, latencia, privacidad
+  y compatibilidad móvil. Fuente: propuesta de arquitectura móvil, conversación 2026-10-07;
+  [MDN getUserMedia](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia) y
+  [MDN Web Speech API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Speech_API).
+- **Límites de producto móvil** — **decidido**, P2: no escuchar en segundo plano, no usar voz como
+  única vía, no forzar paridad visual con escritorio y no delegar la selección de módulo al LLM si
+  el usuario ya eligió una acción. Escritorio conserva exploración/edición profunda; móvil prioriza
+  presencia diaria, captura y consulta puntual. Dependencias: validar el flujo con uso real antes
+  de abrir implementación de STT. Fuente: propuesta de arquitectura móvil, conversación 2026-10-07.
+- **Decisiones pendientes del diseño móvil** — **por diseñar**, P2: (1) botón principal abre
+  captura o graba de inmediato; recomendación actual: abre captura y ahí se mantiene para grabar;
+  (2) Bóveda rápida va a Inbox o permite contexto previo; recomendación: Inbox solo sin acción
+  contextual; (3) Finanzas muestra solo alertas excepcionales; (4) confirmar ruta/shell móvil
+  explícito primero. Fuente: propuesta de arquitectura móvil, conversación 2026-10-07.
 
 ### Bóveda
 

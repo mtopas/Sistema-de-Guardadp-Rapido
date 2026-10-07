@@ -14,6 +14,36 @@ A diferencia del chat (cuyo contexto se pierde al cerrar la ventana), este archi
 
 ---
 
+## [2026-10-07, sesión 14 — T7 Proyectos de Jarvis]
+
+- **Resultado:** Hecho en `master`, sin deploy al homelab. `GET /jarvis/projects/vault` expone la
+  lectura de `01 - Proyectos` con procedencia, contenido y frontmatter; el panel de Jarvis expresa
+  carga, vacío, fuente no disponible o dato desactualizado. `memory_projects` no fue reconciliado
+  ni habilitado para edición manual.
+- **Infraestructura confirmada:** CIFS `//192.168.137.1/Boveda` → `/mnt/boveda` → `/app/boveda`;
+  watchdog cada 60 s. La fuente física y la fuente derivada quedan deliberadamente separadas.
+- **Verificación:** 529 backend, 233 frontend, build, `py_compile` y revisión visual reportados por
+  el trabajador. Commit `e97c01a Implementar transparencia de proyectos en Jarvis`.
+
+### Pendientes activos (arrastre consolidado)
+
+- [ ] [DEPLOY MÓVIL + T7] Desplegar `a0e9bf4`/`126e3d4` y `e97c01a` al homelab según `HOMELAB.md`;
+  verificar `/mobile`, `GET /mobile/hoy`, una captura real y el panel Proyectos/vault, sin copiar
+  `database/`, `uploads/` ni `vault/`.
+- [ ] [MÓVIL — VOZ] Validar primero el camino completo de texto. Luego diseñar un spike separado:
+  interacción, HTTPS/permisos, STT local/backend, latencia, privacidad y compatibilidad; mantener
+  fallback de texto y prohibición de escucha en segundo plano.
+- [ ] [T6] Implementar autoetiquetado IA conservador y removible para Bóveda. T7 está resuelto;
+  T8 (tiempo en pantalla) quedó diferido por decisión del usuario.
+- [ ] [JARVIS — AGENDA EN VIVO] Decidir y cablear `agenda.list_events` al chat sin duplicar el
+  estado de tareas pendientes en memoria.
+- [ ] [LIMPIEZA / OPERACIÓN] Borrar feedback #1 con smoke test; limpieza opcional del bundle y
+  `HOMELAB_HOST=`; auditar PROXIMAMENTE, router Telegram, certeza de memoria y variantes frontend.
+- [ ] [RESTO] Mantener Bóveda/UI, Finanzas y futuras ideas en el Mapa Maestro; actualizar mapa y
+  Handoff al cerrar cada trabajo.
+
+---
+
 ## [2026-10-07, sesión 13 — primer slice móvil web sin voz]
 
 - **Resultado:** Hecho en `master`, sin deploy al homelab. La ruta explícita `/mobile` ofrece un

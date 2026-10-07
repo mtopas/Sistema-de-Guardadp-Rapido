@@ -67,13 +67,16 @@ los enlaza.
   agregar si la IA no está segura o no hace falta. Dependencia: decidir interfaz concreta y
   reutilizar el catálogo/clasificador de Jarvis. Fuente: [Handoff.md](Handoff.md), T6/#6;
   [triaje-feedback-2026-10-02.md](triaje-feedback-2026-10-02.md).
-- **Transparencia de Proyectos en Jarvis** — **decidido**, P1; mostrar actividad y leer la sección
-  `01 - Proyectos` de la Bóveda. Dependencia: verificar montaje y frecuencia de actualización de
-  `D:\Boveda` en el homelab. Fuente: [Handoff.md](Handoff.md), T7/#4.
-- **Carga manual de tiempo en pantalla en Hábitos** — **decidido**, P1; semana lunes-domingo,
+- **Transparencia de Proyectos en Jarvis** — **resuelto**, P1; `GET /jarvis/projects/vault` lee
+  `01 - Proyectos` con frontmatter, contenido y procedencia, y el frontend informa carga, vacío,
+  fuente no disponible o desactualizada. `memory_projects` sigue separado y sin edición manual.
+  Homelab confirmado: CIFS → `/mnt/boveda` → `/app/boveda`, watchdog cada 60 s. Pendiente solo
+  deploy junto al slice móvil. Fuente: [Handoff.md](Handoff.md), T7/#4, sesión 2026-10-07.
+- **Carga manual de tiempo en pantalla en Hábitos** — **diferido**, P3; semana lunes-domingo,
   siete totales diarios, top cinco apps, horas semanales y métricas total/promedio/mejor/peor día;
-  falta decidir si habrá meta diaria. Dependencia: definición de meta y modelo de datos de la
-  pantalla. Fuente: [Handoff.md](Handoff.md), T8/#14.
+  falta decidir si habrá meta diaria. Diferido por decisión del usuario. Dependencia: definición
+  de meta y modelo de datos de la pantalla. Fuente: [Handoff.md](Handoff.md), T8/#14,
+  conversación 2026-10-07.
 - **Latencia de la sugerencia de categoría** — **decidido**, P2; evaluar precalentamiento de
   Ollama (`keep_alive`) y/o mensaje de espera más claro. Dependencia: no cambiar timeouts sin
   medir de nuevo en homelab. Fuente: [Handoff.md](Handoff.md), sesión 2026-10-06.
@@ -204,9 +207,10 @@ consolidan ítems repetidos del roadmap y de [PROXIMAMENTE.md](PROXIMAMENTE.md).
   con expiración o consulta directa a `app.db`, y fijar ventana temporal. Dependencias: loop de
   tools y política de actualización. Fuente: [PROXIMAMENTE.md](PROXIMAMENTE.md), "Ingestión de
   Agenda"; [Handoff.md](Handoff.md), T4.
-- **Triage y organización inteligente de Bóveda** — **decidido**, P1: T6 autoetiquetado y T7
-  transparencia de proyectos; mantener aprobación humana y clasificador conservador. Dependencias:
-  montaje/mtime de `D:\Boveda`, UX y tags removibles. Fuente: [Handoff.md](Handoff.md), T6/T7.
+- **Autoetiquetado inteligente de Bóveda (T6)** — **decidido**, P1: tags conservadores, fáciles de
+  quitar y sin agregar cuando la IA no está segura. T7 de transparencia de proyectos ya fue
+  resuelto y queda pendiente de deploy junto al slice móvil. Dependencias: UX y tags removibles.
+  Fuente: [Handoff.md](Handoff.md), T6/T7, sesión 2026-10-07.
 - **Memoria conversacional de sesión** — **decidido**, P2: contexto por `chat_id`, últimos cuatro
   turnos, limpieza por diez minutos o `/nuevo`, sin mezclar comandos de captura. Dependencia:
   validar con las 30 frases de uso real. Fuente: [PLAN-OLLAMA.md](../PLAN-OLLAMA.md), Capa 5.

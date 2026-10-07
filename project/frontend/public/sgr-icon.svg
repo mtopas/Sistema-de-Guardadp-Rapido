@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">SGR</title>
+  <desc id="desc">Ícono violeta con halo luminoso y letras SGR en degradé solar</desc>
+  <defs>
+    <radialGradient id="background" cx="100%" cy="0%" r="125%"><stop offset="0" stop-color="#b889ff"/><stop offset="0.18" stop-color="#7138c5"/><stop offset="0.55" stop-color="#3a176f"/><stop offset="1" stop-color="#19082f"/></radialGradient>
+    <radialGradient id="halo" cx="100%" cy="0%" r="100%"><stop offset="0" stop-color="#fff7c2" stop-opacity="0.95"/><stop offset="0.24" stop-color="#ffcd5c" stop-opacity="0.42"/><stop offset="0.62" stop-color="#f29aff" stop-opacity="0.13"/><stop offset="1" stop-color="#f29aff" stop-opacity="0"/></radialGradient>
+    <linearGradient id="solar" x1="0%" y1="100%" x2="100%" y2="0%"><stop offset="0" stop-color="#ff9e1b"/><stop offset="0.5" stop-color="#ffd84a"/><stop offset="1" stop-color="#fff4a8"/></linearGradient>
+    <filter id="soft-glow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="12" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="url(#background)"/>
+  <circle cx="458" cy="54" r="270" fill="url(#halo)"/>
+  <circle cx="458" cy="54" r="20" fill="#fff8c7" opacity="0.9" filter="url(#soft-glow)"/>
+  <text x="256" y="326" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="172" font-weight="800" letter-spacing="-10" fill="url(#solar)" stroke="#ffbd38" stroke-width="2" paint-order="stroke">SGR</text>
+</svg>

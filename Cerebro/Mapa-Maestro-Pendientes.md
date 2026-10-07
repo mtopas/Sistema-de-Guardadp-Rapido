@@ -63,11 +63,13 @@ los enlaza.
 
 ### Tickets pequeños desbloqueados
 
-- **Autoetiquetado conservador de hojas con IA** — **implementado, deploy pendiente**, P1; tags
-  JSON propios con fallback para `#hashtags`, chips removibles y autoetiquetado en background solo
-  con confianza explícita >= 0.8. Conserva tags existentes, no reprocesa historial y todos los
-  consumidores visuales usan `getHojaTags()`. Dependencia: deploy y prueba real con Ollama.
-  Fuente: commits `ce66321` y `75c8dc2`; [Handoff.md](Handoff.md), sesión 2026-10-07.
+- **Autoetiquetado conservador de hojas con IA** — **implementado y desplegado, validación
+  pendiente**, P1; tags JSON propios con fallback para `#hashtags`, chips removibles y
+  autoetiquetado en background solo con confianza explícita >= 0.8. Conserva tags existentes, no
+  reprocesa historial y todos los consumidores visuales usan `getHojaTags()`. El homelab no tenía
+  tags persistidos activos: falta una hoja real con tags para validar chip, filtro y grafo, sin
+  hacer backfill por esa prueba. Fuente: commits `ce66321` y `75c8dc2`; [Handoff.md](Handoff.md),
+  sesión 24.
 - **Transparencia de Proyectos en Jarvis** — **resuelto**, P1; `GET /jarvis/projects/vault` lee
   `01 - Proyectos` con frontmatter, contenido y procedencia, y el frontend informa carga, vacío,
   fuente no disponible o desactualizada. `memory_projects` sigue separado y sin edición manual.
@@ -85,14 +87,19 @@ los enlaza.
   aproximadamente 400 caracteres deja demasiadas notas rápidas sin sugerencia. Dependencia:
   observar uso real y separar, si corresponde, el umbral del triaje de Inbox. Fuente:
   [Handoff.md](Handoff.md), sesiones 2026-10-02/06.
-- **Alerta financiera móvil por residuo de punto flotante** — **implementado, deploy pendiente**,
-  P2; `/mobile/hoy` redondea cada saldo a dos decimales antes de evaluar y devolver la alerta:
+- **Alerta financiera móvil por residuo de punto flotante** — **resuelto y desplegado**, P2;
+  `/mobile/hoy` redondea cada saldo a dos decimales antes de evaluar y devolver la alerta:
   `-1.8189894035458565e-11` no alerta y `-0.01` sí. No se modifican saldos ni movimientos
-  persistidos. Fuente: commit `735ac13`, sesión 2026-10-07.
-- **Jarvis debe leer Agenda en vivo** — **implementado, deploy pendiente**, P1; consulta
+  persistidos. La revisión del homelab no mostró alerta espuria. Fuente: commit `735ac13`;
+  [Handoff.md](Handoff.md), sesión 24.
+- **Jarvis debe leer Agenda en vivo** — **resuelto y desplegado**, P1; consulta
   `agenda.list_events` bajo demanda y omite RAG/memoria. Solo se activa con marcador de Agenda o
-  “qué tengo hoy/mañana/esta semana”; una pregunta genérica no dispara la tool. Dependencia:
-  deploy y prueba real contra la Agenda. Fuente: commits `d619160` y `58995a3`; [Handoff.md](Handoff.md), T4/#3.
+  “qué tengo hoy/mañana/esta semana”; una pregunta genérica no dispara la tool. Ambas rutas se
+  verificaron contra la Agenda real. Fuente: commits `d619160` y `58995a3`; [Handoff.md](Handoff.md), sesión 24.
+- **Selector de categorías de Gasto en móvil** — **bug confirmado**, P1: el endpoint entrega
+  `name` pero la UI lee `nombre`, por lo que el selector queda vacío e impide completar la captura
+  de Gasto. Dependencia: normalizar el contrato en el consumidor y agregar regresión. Fuente:
+  [Handoff.md](Handoff.md), sesión 24.
 
 ### Gaps documentados que siguen abiertos
 
@@ -143,11 +150,13 @@ los enlaza.
   ni watchers globales; su apertura dispara únicamente el resumen. Los catálogos se cargan al
   elegir una acción. Pendiente opcional: medir caché/bundle con uso real. Fuente: implementación
   2026-10-07; [App.jsx](../project/frontend/src/App.jsx).
-- **Captura rápida con intención explícita por texto** — **resuelto**, P2: Gasto, Bóveda, Tarea,
-  Hábito y Preguntar a Jarvis eligen primero destino y luego texto. Bóveda usa Inbox, Tarea queda
-  para hoy y Hábito es diario; las altas muestran confirmación y deshacer mediante sus DELETE
-  existentes. Jarvis conserva la respuesta pero no ofrece deshacer. Fuente: implementación
-  2026-10-07; [mobileCapture.js](../project/frontend/src/mobile/mobileCapture.js).
+- **Captura rápida con intención explícita por texto** — **implementado, validación parcial**,
+  P2: Gasto, Bóveda, Tarea, Hábito y Preguntar a Jarvis eligen primero destino y luego texto.
+  Bóveda usa Inbox, Tarea queda para hoy y Hábito es diario; las altas muestran confirmación y
+  deshacer mediante sus DELETE existentes. En homelab se validaron Bóveda, Tarea, Hábito y Jarvis;
+  Gasto está bloqueado por el selector vacío `name`/`nombre`. Jarvis conserva la respuesta pero no
+  ofrece deshacer. Fuente: [Handoff.md](Handoff.md), sesión 24;
+  [mobileCapture.js](../project/frontend/src/mobile/mobileCapture.js).
 - **Modo voz como interfaz, no como dependencia única** — **por diseñar**, P2: botón protagonista
   de pulsar/mantener para hablar dentro de la captura, con fallback inmediato a texto. No hay voz
   investigada, diseñada ni implementada todavía. La primera fase debe poder funcionar sin

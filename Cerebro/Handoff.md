@@ -1,5 +1,50 @@
 # Handoffs de Coordinación — SGR / Jarvis
 
+## [2026-10-07, sesión 24 — despliegue agrupado de Agenda, Bóveda y móvil]
+
+- **Resultado:** Parcial. La sesión desplegó al homelab el snapshot `58995a3` con T4 Agenda,
+  T6 Bóveda y la vista móvil, sin incluir `bb87344` y preservando `database/`, `uploads/`,
+  `vault` y `.env`. `backend`, `bot` y `worker` quedaron `Up` y los endpoints principales
+  respondieron 200.
+- **Validación operativa reportada:** Agenda viva respondió a una consulta explícita y una
+  consulta genérica no disparó la tool; Jarvis completó su flujo real. Bóveda cargó 166 hojas y
+  el grafo funcionó. En `/mobile`, Bóveda, Tarea, Hábito y Jarvis pasaron con destino y deshacer.
+  La alerta por residuo monetario no apareció.
+- **Aceptación pendiente / defecto real:** el selector de categorías de **Gasto** queda vacío:
+  la API devuelve `name` y la UI lee `nombre`. Por eso la validación de texto móvil es parcial y
+  no se abre el spike de voz todavía. No se resolvió ningún bug ni se creó commit en esta sesión.
+- **Bóveda:** no había tags persistidos en datos activos, por lo que chip y filtro no tuvieron
+  un caso real que validar. Una nota temporal usada en la prueba fue movida a Basura mediante el
+  deshacer recuperable de la aplicación; no se reporta borrado irreversible.
+- **Deuda observada, fuera de alcance:** errores 500 de embeddings Ollama y un Markdown legado
+  con frontmatter inválido. No atribuirlos al deploy hasta reproducirlos de forma aislada.
+- **Verificación reportada por la sesión trabajadora:** 7 pruebas de Agenda y 5 de frontend;
+  contenedores operativos, endpoints principales 200 y revisión manual parcial. **Evidencia
+  inspeccionada por orquestación:** `master` está limpio y adelantado un commit documental
+  (`f6c2e48`); no se reejecutaron pruebas ni operaciones remotas desde esta sesión.
+
+### Pendientes activos (arrastre consolidado)
+
+- [ ] [MÓVIL — GASTO] Corregir el contrato de lectura de categorías en el selector: la API
+  entrega `name` y la UI busca `nombre`. Agregar regresión y validar alta de Gasto real antes de
+  volver a declarar completo el flujo móvil de texto.
+- [ ] [BÓVEDA — TAGS] Generar o localizar una hoja activa con tags persistidos y validar en el
+  homelab chip, filtro y grafo. No hacer backfill histórico por esta sola validación.
+- [ ] [MÓVIL — USUARIO] Completar prueba real de Gasto después del fix; Bóveda, Tarea, Hábito y
+  Jarvis ya fueron comprobados con destino/deshacer.
+- [ ] [MÓVIL — VOZ] Solo después de completar texto, diseñar spike de interacción, HTTPS/permisos,
+  STT local/backend, latencia, privacidad y compatibilidad. Mantener fallback de texto y sin
+  escucha.
+- [ ] [JARVIS — CALIDAD SEMANAL F1] Al cerrar una semana con uso real, generar y revisar su
+  snapshot manual antes de decidir scheduler, UI, feedback explícito o análisis semántico.
+- [ ] [JARVIS / BÓVEDA — DIAGNÓSTICO] Reproducir y aislar los 500 de embeddings Ollama y el
+  Markdown de frontmatter inválido; no corregir ni modificar datos reales sin causa raíz y
+  fixture de regresión.
+- [ ] [LIMPIEZA / RESTO] Borrar feedback #1 con smoke test, tareas operativas y backlog conforme
+  al Mapa Maestro.
+
+---
+
 ## [2026-10-07, sesión 23 — cierre de base semanal de calidad de Jarvis]
 
 - **Resultado:** Hecho en `master`. La Fase 1 de calidad semanal de Jarvis queda implementada en

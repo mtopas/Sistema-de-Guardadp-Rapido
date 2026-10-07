@@ -28,6 +28,20 @@ desde la pregunta; si no aparece, se consulta desde hoy hasta siete días despu�
 entra al prompt y, en esta rama, no se usa RAG ni se copia información a `memory_entries`, Chroma o
 la Bóveda. Ante error o lista vacía, Jarvis lo declara y no inventa datos.
 
+## Despliegue agrupado de Agenda, Bóveda y móvil (2026-10-07)
+
+El homelab recibió el snapshot `58995a3` con Agenda viva, tags de Bóveda y vista móvil, sin incluir
+la Fase 1 de calidad semanal (`bb87344`) ni copiar `database/`, `uploads/`, `vault` o `.env`.
+`backend`, `bot` y `worker` quedaron operativos; la verificación manual confirmó la ruta explícita
+de Agenda y que una consulta genérica no ejecuta esa tool, 166 hojas de Bóveda con grafo funcional,
+y el flujo móvil de Bóveda, Tarea, Hábito y Jarvis con destino/deshacer.
+
+La aceptación móvil no está completa: el selector de categorías de Gasto queda vacío porque la API
+expone `name` y el consumidor espera `nombre`. La validación de chip y filtro de tags quedó diferida
+por ausencia de tags persistidos en las hojas activas; no se hizo backfill. Se observaron además
+errores 500 de embeddings Ollama y un Markdown legado con frontmatter inválido, ambos fuera del
+alcance del despliegue y pendientes de reproducir antes de corregir.
+
 ## Tags propios y autoetiquetado conservador de Bóveda (2026-10-07)
 
 Las hojas de Bóveda tienen ahora `hojas.tags` como JSON y el mismo array en el frontmatter del

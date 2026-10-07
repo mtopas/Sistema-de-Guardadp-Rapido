@@ -495,6 +495,16 @@ def serve_icon_512():
     return _dist_file(DIST_DIR / "icon-512.png", media_type="image/png", headers=_ASSET_IMMUTABLE)
 
 
+@app.get("/apple-touch-icon.png", include_in_schema=False)
+def serve_apple_touch_icon():
+    return _dist_file(DIST_DIR / "apple-touch-icon.png", media_type="image/png", headers=_ASSET_IMMUTABLE)
+
+
+@app.get("/sgr-icon.svg", include_in_schema=False)
+def serve_sgr_icon():
+    return _dist_file(DIST_DIR / "sgr-icon.svg", media_type="image/svg+xml", headers=_ASSET_IMMUTABLE)
+
+
 @app.get("/meta")
 def api_meta():
     """Diagnóstico: qué SQLite usa esta instancia de la API (bot vs UI deben coincidir)."""

@@ -13,6 +13,7 @@ Endpoints:
     GET  /jarvis/entities/{name}  — entradas vinculadas a una entidad
     GET  /jarvis/stats/types      — conteos por tipo de memoria (panel izquierdo)
     GET  /jarvis/projects         — proyectos con memory_count/last_activity crudos
+    GET  /jarvis/projects/vault   — lectura de Bóveda/01 - Proyectos con procedencia
     GET  /jarvis/events           — últimos eventos del worker (tab Debug)
     GET  /jarvis/health           — señal real de "worker vivo" (heartbeat)
     GET  /jarvis/chats            — lista de chats web (multi-chat)
@@ -50,7 +51,7 @@ from jarvis.db.database import get_connection
 from jarvis.entities.service import get_entries_for_entity, list_entities
 from jarvis.events.service import list_recent_events
 from jarvis.memory.service import capture_raw, edit_entry, forget_entry, get_entry
-from jarvis.projects.service import list_projects_with_activity
+from jarvis.projects.service import list_projects_with_activity, read_vault_project_section
 from jarvis.query.service import query as _run_query
 from jarvis.stats.service import count_entries_by_type
 from jarvis.tags.service import get_entries_for_tag, list_tags_with_counts
@@ -396,8 +397,14 @@ def stats_types_endpoint(user_id: str = Query(default=JARVIS_DEFAULT_USER)):
 
 @router.get("/projects")
 def projects_endpoint(user_id: str = Query(default=JARVIS_DEFAULT_USER)):
-    """Proyectos con memory_count/last_activity crudos (Fase B2, panel izquierdo)."""
+    """Proyectos derivados de memory_projects, con actividad de memoria vigente."""
     return list_projects_with_activity(user_id=user_id)
+
+
+@router.get("/projects/vault")
+def vault_projects_endpoint():
+    """Notas que están físicamente en la sección activa de proyectos de la Bóveda."""
+    return read_vault_project_section()
 
 
 @router.get("/events")

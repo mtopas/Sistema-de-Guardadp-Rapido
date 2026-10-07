@@ -19,6 +19,7 @@ beforeEach(() => {
   useStore.setState({
     jarvisActiveChatId: 'chat-a', jarvisMessages: [], jarvisLoading: false,
     jarvisHealth: { worker_alive: true }, fetchJarvisChats: vi.fn(),
+    jarvisVaultProjects: { status: 'loading', section: '01 - Proyectos', notes: [], read_at: null, error: null },
   })
 })
 
@@ -40,6 +41,21 @@ describe('Jarvis chat y estado del worker', () => {
     globalThis.fetch = vi.fn().mockRejectedValue(new Error('sin conexión'))
     await useStore.getState().fetchJarvisHealth()
     expect(useStore.getState().jarvisHealth.worker_alive).toBe(false)
+    errorLog.mockRestore()
+  })
+
+  it('conserva la última lectura y marca dato desactualizado si falla el refresh', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ status: 'available', notes: [{ source_id: 'n1' }], read_at: '2026-10-07T12:00:00Z' }) })
+      .mockRejectedValueOnce(new Error('mount caído'))
+
+    await useStore.getState().fetchJarvisVaultProjects()
+    expect(useStore.getState().jarvisVaultProjects.status).toBe('available')
+    await useStore.getState().fetchJarvisVaultProjects()
+
+    expect(useStore.getState().jarvisVaultProjects.status).toBe('stale')
+    expect(useStore.getState().jarvisVaultProjects.notes).toEqual([{ source_id: 'n1' }])
     errorLog.mockRestore()
   })
 })

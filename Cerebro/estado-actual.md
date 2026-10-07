@@ -1,6 +1,30 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-10-07
 
+## T7 — Transparencia de Proyectos y lectura de Bóveda (2026-10-07)
+
+Jarvis separa ahora dos fuentes visibles bajo **PROYECTOS ACTIVOS**:
+
+- `GET /jarvis/projects` sigue leyendo `memory_projects`, catálogo derivado de la clasificación del
+  worker. Sus contadores y actividad cambian cuando el worker procesa nuevas capturas; la UI no permite
+  editar ese catálogo manualmente.
+- `GET /jarvis/projects/vault` lee en solo lectura las notas `.md` ubicadas físicamente en
+  `Bóveda/01 - Proyectos`, ignora `README.md`, conserva `source_id` y `source_path`, y devuelve título,
+  contenido acotado, frontmatter relevante y fechas de actualización. No crea ni modifica filas de
+  `memory_projects`.
+
+La disponibilidad real fue confirmada en el homelab el 2026-10-07: `//192.168.137.1/Boveda` está
+montado por CIFS en `/mnt/boveda`, con `x-systemd.automount`; Docker hace bind-mount de esa ruta a
+`/app/boveda` en backend, bot y worker. `sgr-boveda-mount-watchdog.timer` ejecuta el reintento cada
+60 segundos. La lectura de proyectos es directa contra ese montaje en cada polling de la UI; no hay
+un sync adicional de `memory_projects`. En el equipo local, `D:\Boveda\01 - Proyectos` tenía una nota
+activa al verificar.
+
+La interfaz explica fuente, actualización y procedencia, y distingue carga inicial, vacío, fuente no
+disponible y dato desactualizado (cache conservado tras fallar un refresh). Ver
+`jarvis/projects/service.py`, `jarvis/api/router.py`, `frontend/src/components/jarvis/JarvisLeftPanel.jsx`
+y `frontend/src/utils/jarvisProjects.js`.
+
 ## Primer slice móvil web: Hoy + captura intencional por texto (2026-10-07)
 
 Implementado en la ruta explícita `/mobile`, con shell propio y sin paridad visual forzada con el

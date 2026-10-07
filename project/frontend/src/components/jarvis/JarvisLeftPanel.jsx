@@ -1,12 +1,15 @@
 import { useStore } from '../../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import { MEMORY_TYPE_COLORS, MEMORY_TYPE_DESC, MEMORY_TYPE_ORDER, rgba } from '../../utils/jarvisPalette'
+import { formatAge } from '../../utils/formatAge'
+import { getVaultProjectStatusCopy } from '../../utils/jarvisProjects'
 
 export default function JarvisLeftPanel() {
-  const { jarvisTypeCounts, jarvisProjects, jarvisEntities, setJarvisTab } = useStore(
+  const { jarvisTypeCounts, jarvisProjects, jarvisVaultProjects, jarvisEntities, setJarvisTab } = useStore(
     useShallow(s => ({
       jarvisTypeCounts: s.jarvisTypeCounts,
       jarvisProjects:   s.jarvisProjects,
+      jarvisVaultProjects: s.jarvisVaultProjects,
       jarvisEntities:   s.jarvisEntities,
       setJarvisTab:     s.setJarvisTab,
     }))
@@ -23,6 +26,7 @@ export default function JarvisLeftPanel() {
   // heat es una decisión de escala visual del frontend (Fase B2: el backend
   // devuelve memory_count crudo, no un heat pre-normalizado).
   const maxCount = Math.max(1, ...jarvisProjects.map(p => p.memory_count || 0))
+  const vaultCopy = getVaultProjectStatusCopy(jarvisVaultProjects.status)
 
   return (
     <div
@@ -89,8 +93,12 @@ export default function JarvisLeftPanel() {
         <div className="jv-mono" style={{ fontSize: 10, letterSpacing: '0.16em', color: 'var(--jv-mute)' }}>
           PROYECTOS ACTIVOS
         </div>
+        <div style={{ fontSize: 11, lineHeight: 1.55, color: 'var(--jv-subtext)' }}>
+          <strong style={{ color: '#d8e4ff' }}>Memoria:</strong> sale de <span className="jv-mono">memory_projects</span>.
+          El worker la actualiza después de clasificar capturas; no se edita desde acá.
+        </div>
         {jarvisProjects.length === 0 && (
-          <div style={{ fontSize: 11, color: 'var(--jv-mute)', padding: '4px 2px' }}>Sin proyectos todavía</div>
+          <div style={{ fontSize: 11, color: 'var(--jv-mute)', padding: '4px 2px' }}>Sin proyectos clasificados todavía.</div>
         )}
         {jarvisProjects.map(p => {
           const heat = Math.round(((p.memory_count || 0) / maxCount) * 100)
@@ -112,6 +120,33 @@ export default function JarvisLeftPanel() {
             </div>
           )
         })}
+        <div style={{ marginTop: 4, paddingTop: 12, borderTop: '1px solid rgba(150,170,255,0.1)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div className="jv-mono" style={{ fontSize: 9.5, letterSpacing: '0.12em', color: 'var(--jv-mute)' }}>LECTURA DE BÓVEDA</div>
+          <div style={{ fontSize: 11, lineHeight: 1.5, color: '#d8e4ff' }}>{vaultCopy.title}</div>
+          <div style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--jv-subtext)' }}>{vaultCopy.detail}</div>
+          <div className="jv-mono" style={{ fontSize: 9.5, color: 'rgba(200,214,255,0.45)' }}>Fuente: Bóveda / 01 - Proyectos</div>
+          {jarvisVaultProjects.is_refreshing && jarvisVaultProjects.status !== 'loading' && (
+            <div style={{ fontSize: 10, color: '#7dd3fc' }}>Actualizando lectura…</div>
+          )}
+          {jarvisVaultProjects.status === 'stale' && jarvisVaultProjects.error && (
+            <div style={{ fontSize: 10, lineHeight: 1.45, color: '#fbbf24' }}>{jarvisVaultProjects.error}</div>
+          )}
+          {(jarvisVaultProjects.status === 'available' || jarvisVaultProjects.status === 'stale') && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              {jarvisVaultProjects.notes.map(note => (
+                <div key={note.source_id} style={{ padding: 9, borderRadius: 8, background: 'rgba(56,189,248,0.05)', border: '1px solid rgba(56,189,248,0.12)' }}>
+                  <div style={{ fontSize: 11.5, color: '#e4e9ff', fontWeight: 600 }}>{note.title}</div>
+                  <div style={{ marginTop: 4, fontSize: 10.5, lineHeight: 1.45, color: 'var(--jv-subtext)', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                    {note.content || 'Nota sin contenido visible.'}
+                  </div>
+                  <div className="jv-mono" style={{ marginTop: 6, fontSize: 8.5, lineHeight: 1.4, color: 'rgba(200,214,255,0.4)' }}>
+                    {note.source_path} · {formatAge(note.updated_at || note.modified_at)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       <div

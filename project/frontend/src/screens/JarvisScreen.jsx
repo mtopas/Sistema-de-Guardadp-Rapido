@@ -21,12 +21,13 @@ export default function JarvisScreen() {
   // desde cualquier pantalla, no solo /jarvis. El banner inline de abajo
   // sigue leyendo el mismo estado del store.
   const { jarvisTab,
-          fetchJarvisTypeCounts, fetchJarvisProjects, fetchJarvisInbox, fetchJarvisBudget,
+          fetchJarvisTypeCounts, fetchJarvisProjects, fetchJarvisVaultProjects, fetchJarvisInbox, fetchJarvisBudget,
           fetchJarvisEntities, fetchJarvisHealth, fetchJarvisEvents, fetchJarvisChats } = useStore(
     useShallow(s => ({
       jarvisTab:                  s.jarvisTab,
       fetchJarvisTypeCounts:      s.fetchJarvisTypeCounts,
       fetchJarvisProjects:        s.fetchJarvisProjects,
+      fetchJarvisVaultProjects:   s.fetchJarvisVaultProjects,
       fetchJarvisInbox:           s.fetchJarvisInbox,
       fetchJarvisBudget:          s.fetchJarvisBudget,
       fetchJarvisEntities:        s.fetchJarvisEntities,
@@ -44,6 +45,7 @@ export default function JarvisScreen() {
   useEffect(() => {
     fetchJarvisTypeCounts()
     fetchJarvisProjects()
+    fetchJarvisVaultProjects()
     fetchJarvisInbox()
     fetchJarvisBudget()
     fetchJarvisEntities()
@@ -52,6 +54,8 @@ export default function JarvisScreen() {
     fetchJarvisChats()
     const id = setInterval(() => {
       fetchJarvisTypeCounts()
+      fetchJarvisProjects()
+      fetchJarvisVaultProjects()
       fetchJarvisInbox()
       fetchJarvisBudget()
       fetchJarvisEntities()
@@ -59,7 +63,7 @@ export default function JarvisScreen() {
       fetchJarvisEvents()
     }, JARVIS_POLL_MS)
     return () => clearInterval(id)
-  }, [fetchJarvisTypeCounts, fetchJarvisProjects, fetchJarvisInbox, fetchJarvisBudget, fetchJarvisEntities, fetchJarvisHealth, fetchJarvisEvents, fetchJarvisChats])
+  }, [fetchJarvisTypeCounts, fetchJarvisProjects, fetchJarvisVaultProjects, fetchJarvisInbox, fetchJarvisBudget, fetchJarvisEntities, fetchJarvisHealth, fetchJarvisEvents, fetchJarvisChats])
 
   return (
     <div

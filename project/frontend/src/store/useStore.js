@@ -2110,6 +2110,7 @@ export const useStore = create((set, get) => ({
   jarvisTypeCounts:      {}, // {RAW: n, SEMANTIC: n, ...} — solo tipos presentes (GET /jarvis/stats/types)
   jarvisEntities:        [],
   jarvisProjects:        [],
+  jarvisVaultProjects:   { status: 'loading', section: '01 - Proyectos', notes: [], read_at: null, error: null },
   jarvisHealth:          { worker_alive: false },
   jarvisEvents:          [],
   jarvisEventsLimit:     JARVIS_EVENTS_PAGE_SIZE, // "cargar más" en el tab Debug
@@ -2335,6 +2336,26 @@ export const useStore = create((set, get) => ({
       if (!res.ok) throw new Error('not ok')
       set({ jarvisProjects: await res.json() })
     } catch (e) { if (DEBUG) console.error('fetchJarvisProjects:', e) }
+  },
+
+  fetchJarvisVaultProjects: async () => {
+    const previous = get().jarvisVaultProjects
+    set({ jarvisVaultProjects: { ...previous, is_refreshing: true } })
+    try {
+      const res = await fetch(`${API_URL}/jarvis/projects/vault`)
+      if (!res.ok) throw new Error('not ok')
+      const data = await res.json()
+      set({ jarvisVaultProjects: { ...data, is_refreshing: false, error: null } })
+    } catch (e) {
+      const hasCachedData = Boolean(previous.read_at)
+      set({ jarvisVaultProjects: {
+        ...previous,
+        status: hasCachedData ? 'stale' : 'unavailable',
+        error: 'No se pudo actualizar la lectura de la Bóveda.',
+        is_refreshing: false,
+      } })
+      if (DEBUG) console.error('fetchJarvisVaultProjects:', e)
+    }
   },
 
   // Detalle de una entrada de memoria — fuentes clickeables del chat

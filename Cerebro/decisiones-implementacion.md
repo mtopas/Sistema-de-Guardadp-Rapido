@@ -11,6 +11,39 @@ Formato de cada entrada:
 
 ---
 
+## 2026-10-07 — T7 separa el catálogo de memoria de la lectura física de Proyectos
+
+Contexto: el panel **PROYECTOS ACTIVOS** mostraba únicamente `memory_projects`, aunque la fuente de
+verdad de contenido es la Bóveda. Antes de implementar se verificó el estado real del homelab en solo
+lectura: `//192.168.137.1/Boveda` está montado por CIFS en `/mnt/boveda`, con automount systemd y
+`sgr-boveda-mount-watchdog.timer` reintentando cada 60 segundos; los tres servicios Docker reciben
+`/mnt/boveda:/app/boveda`.
+
+Decisión:
+- Mantener `GET /jarvis/projects` y `memory_projects` sin cambios de esquema ni edición manual. Ese
+  catálogo sigue representando proyectos inferidos por el clasificador al procesar capturas, y sus
+  métricas siguen viniendo de entradas vigentes asociadas.
+- Agregar `GET /jarvis/projects/vault`, lector directo y de solo lectura de `Bóveda/01 - Proyectos`.
+  La ubicación física dentro de esa sección determina que una nota sea activa; no se hace fuzzy match
+  ni se crean proyectos de memoria a partir de nombres o contenido de la Bóveda.
+- Excluir el `README.md` estructural y devolver para cada nota `source_id`, `source_path`, título,
+  contenido acotado, frontmatter relevante y `updated_at`/`modified_at`. La respuesta informa
+  `available`, `empty` o `unavailable`, fecha de lectura y procedencia relativa, sin exponer rutas
+  absolutas de una máquina.
+- La UI refresca ambas fuentes junto con el polling de Jarvis. Si falla un refresh después de una
+  lectura válida conserva las notas y muestra `Dato desactualizado`; si nunca hubo lectura muestra
+  `Fuente de proyectos no disponible`. También explica carga inicial y sección vacía.
+
+Diferencia con spec: T7 agrega una lectura explícita de la Bóveda sin alterar el clasificador ni el
+modelo existente. La actualización no es un sync de catálogo: la Bóveda se lee desde el montaje real
+y `memory_projects` sigue siendo un índice derivado reconstruible.
+
+Impacto: `jarvis/projects/service.py`, `jarvis/api/router.py`, `frontend/src/store/useStore.js`,
+`frontend/src/screens/JarvisScreen.jsx`, `frontend/src/components/jarvis/JarvisLeftPanel.jsx`,
+`frontend/src/utils/jarvisProjects.js` y sus pruebas.
+
+---
+
 ## 2026-10-07 — El primer producto móvil vive en `/mobile` y selecciona intención antes del texto
 
 Contexto: la aplicación precargaba Bóveda, Finanzas, Agenda y Hábitos desde `App.jsx`, incluso cuando

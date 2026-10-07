@@ -135,6 +135,7 @@ from app.db.crud import (
     habitos_registros_upsert,
     habitos_registros_batch_upsert,
     habitos_registros_eliminar,
+    mobile_resumen_hoy,
 )
 from app.db.database import init_db
 from app import semantic
@@ -1030,6 +1031,26 @@ async def _fetch_link_preview(url: str) -> dict:
 @app.get("/preview")
 async def fetch_preview(url: str = Query(...)):
     return await _fetch_link_preview(url)
+
+
+# ---------------------------------------------------------------------------
+# Móvil — resumen agregado de Hoy
+# ---------------------------------------------------------------------------
+
+@app.get("/mobile/hoy")
+def obtener_mobile_hoy(
+    fecha: Optional[str] = Query(None, description="Fecha local YYYY-MM-DD"),
+    hora: Optional[str] = Query(None, description="Hora local HH:MM"),
+):
+    ahora = datetime.now()
+    fecha_hoy = fecha or ahora.date().isoformat()
+    hora_actual = hora or ahora.strftime("%H:%M")
+    try:
+        datetime.strptime(fecha_hoy, "%Y-%m-%d")
+        datetime.strptime(hora_actual, "%H:%M")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="fecha y hora deben usar YYYY-MM-DD y HH:MM") from exc
+    return mobile_resumen_hoy(fecha_hoy, hora_actual)
 
 
 # ---------------------------------------------------------------------------

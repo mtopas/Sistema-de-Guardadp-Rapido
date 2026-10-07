@@ -3131,6 +3131,109 @@ def habitos_pendientes_hoy(fecha_hoy: str) -> list:
     return result
 
 
+def mobile_resumen_hoy(fecha_hoy: str, hora_actual: str) -> dict:
+    """Resumen mínimo para la portada móvil, sin cargar módulos completos.
+
+    El contrato devuelve únicamente datos accionables de hoy. La selección y
+    el recorte ocurren en backend para que el cliente móvil no tenga que pedir
+    colecciones completas de Agenda, Hábitos o Finanzas.
+    """
+    eventos = agenda_obtener_eventos(fecha_desde=fecha_hoy, fecha_hasta=fecha_hoy)
+    tareas_pendientes = agenda_obtener_tareas(solo_pendientes=True)
+    habitos_hoy = habitos_pendientes_hoy(fecha_hoy)
+    cuentas = fin_obtener_cuentas()
+
+    bloques = []
+    for evento in eventos:
+        inicio = evento.get("fecha_inicio") or ""
+        if evento.get("todo_el_dia") or len(inicio) < 16:
+            continue
+        hora = inicio[11:16]
+        if hora >= hora_actual:
+            bloques.append({
+                "tipo": "evento",
+                "id": evento["id"],
+                "titulo": evento["titulo"],
+                "hora": hora,
+                "fin": (evento.get("fecha_fin") or "")[11:16] or None,
+                "color": evento.get("calendario_color") or "#2563eb",
+            })
+
+    for tarea in tareas_pendientes:
+        if tarea.get("fecha_opcional") != fecha_hoy:
+            continue
+        hora = tarea.get("hora_bloque") or tarea.get("hora_opcional")
+        if hora and hora >= hora_actual:
+            bloques.append({
+                "tipo": "tarea",
+                "id": tarea["id"],
+                "titulo": tarea["titulo"],
+                "hora": hora,
+                "fin": None,
+                "color": tarea.get("lista_color") or "#7c3aed",
+            })
+
+    bloques.sort(key=lambda bloque: (bloque["hora"], bloque["tipo"], bloque["id"]))
+
+    def _orden_tarea(tarea: dict):
+        fecha = tarea.get("fecha_opcional")
+        if fecha and fecha < fecha_hoy:
+            grupo = 0
+        elif fecha == fecha_hoy:
+            grupo = 1
+        elif fecha:
+            grupo = 2
+        else:
+            grupo = 3
+        return (grupo, fecha or "9999-12-31", tarea.get("hora_opcional") or "99:99", tarea["id"])
+
+    tareas = sorted(tareas_pendientes, key=_orden_tarea)[:3]
+    tareas = [{
+        "id": tarea["id"],
+        "titulo": tarea["titulo"],
+        "fecha": tarea.get("fecha_opcional"),
+        "hora": tarea.get("hora_bloque") or tarea.get("hora_opcional"),
+        "lista": tarea.get("lista_nombre") or None,
+        "color": tarea.get("lista_color") or "#7c3aed",
+        "vencida": bool(tarea.get("fecha_opcional") and tarea["fecha_opcional"] < fecha_hoy),
+    } for tarea in tareas]
+
+    habitos = []
+    for habito in habitos_hoy:
+        registro = habito.get("registro_hoy")
+        if registro and float(registro.get("valor") or 0) >= 1:
+            continue
+        habitos.append({
+            "id": habito["id"],
+            "nombre": habito["nombre"],
+            "hora": habito.get("hora"),
+            "color": habito.get("color") or "#059669",
+            "progreso": float(registro.get("valor") or 0) if registro else 0,
+        })
+
+    alertas = []
+    for cuenta in cuentas:
+        for moneda, key in (("ARS", "ars"), ("USD", "usd")):
+            saldo = float(cuenta.get(key) or 0)
+            if saldo < 0:
+                alertas.append({
+                    "tipo": "saldo_negativo",
+                    "cuenta_id": cuenta["id"],
+                    "cuenta": cuenta["name"],
+                    "moneda": moneda,
+                    "monto": saldo,
+                })
+    alertas.sort(key=lambda alerta: alerta["monto"])
+
+    return {
+        "fecha": fecha_hoy,
+        "proximo_bloque": bloques[0] if bloques else None,
+        "tareas": tareas,
+        "habitos_pendientes": habitos,
+        "alertas_financieras": alertas[:3],
+    }
+
+
 def habitos_eliminar(habito_id: int) -> bool:
     conn = get_connection()
     cursor = conn.cursor()

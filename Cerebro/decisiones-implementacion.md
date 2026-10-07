@@ -11,6 +11,31 @@ Formato de cada entrada:
 
 ---
 
+## 2026-10-07 — El primer producto móvil vive en `/mobile` y selecciona intención antes del texto
+
+Contexto: la aplicación precargaba Bóveda, Finanzas, Agenda y Hábitos desde `App.jsx`, incluso cuando
+una visita móvil solo necesitaba saber qué exigía atención hoy y registrar una acción breve.
+
+Decisión:
+- La primera experiencia móvil es una ruta explícita `/mobile`, no una reducción por breakpoint de
+  cada pantalla de escritorio. Conserva una identidad visual y un contrato de datos propios.
+- `GET /mobile/hoy` agrega en backend un payload mínimo: próximo bloque, hasta tres tareas, hábitos
+  pendientes y alertas financieras excepcionales. En este slice, “excepcional” significa saldo de
+  cuenta negativo; sin excepción, Finanzas no ocupa espacio.
+- `App.jsx` carga pantallas y datos por ruta. `/mobile` no monta `Layout`, modales ni watchers
+  globales. Los catálogos auxiliares se piden solo al elegir Gasto, Bóveda o Tarea.
+- La captura es determinista: el usuario elige Gasto/Bóveda/Tarea/Hábito/Jarvis y después escribe.
+  Bóveda usa exclusivamente Inbox (`00 - Sin categorizar`), Tarea se fecha hoy y Hábito crea una
+  rutina diaria. Cada alta muestra destino, confirmación y DELETE para deshacer cuando existe.
+- Voz queda fuera de este slice. No se agregó micrófono, STT, grabación, Web Speech, escucha en
+  segundo plano ni tool calling nuevo de Jarvis.
+
+Diferencia con la propuesta previa: se resuelven las decisiones abiertas a favor de ruta explícita,
+botón que abre captura, Inbox fijo y Finanzas solo por excepción. No se implementa la capa de voz.
+
+Impacto: `app/db/crud.py`, `app/main.py`, `frontend/src/App.jsx`,
+`frontend/src/screens/MobileHoyScreen.jsx`, `frontend/src/mobile/mobileCapture.js` y sus pruebas.
+
 ## 2026-10-05 — Título de las hojas pensado por IA (modelo local) + notas con link a cuerpo único
 
 Contexto: una nota mandada por el bot (un link + el comentario "Herramienta para que Jarvis pueda

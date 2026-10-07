@@ -65,7 +65,8 @@ Componente  →  useStore (acción)  →  fetch(API)  →  crud.py  →  SQLite
 ```
 
 - **Un solo store** (`frontend/src/store/useStore.js`): Bóveda + Finanzas + Agenda + Hábitos + tema/idioma/toast/modales.
-- **Sin capa de servicios** en frontend; sin React Query. Mutaciones: update optimista local + try/catch offline.
+- **Sin capa de servicios general** en frontend; sin React Query. Mutaciones: update optimista local + try/catch offline. El slice móvil encapsula su contrato acotado en `src/mobile/mobileCapture.js`.
+- **Carga por ruta:** `App.jsx` divide las pantallas con `lazy()` y pide solo los datos del módulo abierto. `/mobile` evita el loader global y arranca únicamente con `GET /mobile/hoy`; los destinos de captura se cargan después de elegir una acción.
 - **Backend plano:** casi todas las rutas en `app/main.py`; SQL en `app/db/crud.py`. Carpetas `app/routes/` y `app/services/` existen pero **no se usan**.
 - **`DEBUG`** en `app/config.py` — logs solo si está activo.
 
@@ -79,6 +80,7 @@ Componente  →  useStore (acción)  →  fetch(API)  →  crud.py  →  SQLite
 | `/finanzas` | `FinanzasScreen` — 5 tabs | 3 columnas: izq / centro / der (der solo xl) |
 | `/agenda` | `AgendaScreen` — 4 tabs | 3 columnas: izq / centro / der (der solo xl) |
 | `/habitos` | `HabitosScreen` — 3 tabs | 3 columnas: izq / centro / der (der solo xl) |
+| `/mobile` | `MobileHoyScreen` — Hoy + captura intencional por texto | Shell propio, sin sidebar ni modales globales |
 | `/settings` | `SettingsScreen` — datos, perfil, avisos, apariencia, feedback e información | Pantalla propia, sin sidebar Bóveda |
 
 Modales globales en `App.jsx`: `CaptureModal` (Bóveda), `MovementModal` (Finanzas), `TweaksPanel` (temas/tono/fuentes, Ctrl+M).
@@ -236,6 +238,17 @@ Sin seed — arranca vacío.
 ---
 
 ## Estado implementado vs pendiente (mayo 2026)
+
+### Móvil web — primer slice de texto
+
+- Ruta explícita `/mobile`, responsive en 390/768/1440 px, distinta del escritorio.
+- `GET /mobile/hoy` devuelve próximo bloque, hasta tres tareas, hábitos pendientes y únicamente
+  alertas financieras excepcionales (saldos negativos). No entrega colecciones completas.
+- Captura con intención elegida antes del texto: Gasto, Bóveda (Inbox `00 - Sin categorizar`),
+  Tarea (para hoy), Hábito diario y Preguntar a Jarvis. Muestra destino antes de enviar,
+  confirmación y deshacer para las cuatro altas persistentes; la consulta a Jarvis no se deshace.
+- Las pantallas pesadas se separan en chunks por ruta y `/mobile` no monta modales/watchers globales.
+- Voz, micrófono, STT, escucha en segundo plano y tool calling de Jarvis siguen fuera de alcance.
 
 ### Bóveda — hecho
 

@@ -131,12 +131,18 @@ project/
 - `/finanzas` — `FinanzasScreen` (tabs: dashboard | anual | fire | ahorro | datos)
 - `/agenda` — `AgendaScreen` (tabs: hoy | mes | tareas | revisión)
 - `/habitos` — `HabitosScreen` (tabs: hoy | progreso | historial)
+- `/mobile` — `MobileHoyScreen` (shell rápido: resumen agregado de Hoy + captura intencional por texto)
 - `/jarvis` — `JarvisScreen` (ver sección Jarvis más abajo)
 - `/hoja/:id`, `/settings`, `/capture` (legacy)
 
 Modales en `App.jsx`: `CaptureModal`, `MovementModal`, `TweaksPanel` (Ctrl+M: temas, tono, fuentes).
 Modal Agenda en `AgendaScreen`: `EventoModal` (TopBar CTA o clic en día), `HorarioFacultadModal` (botón Facultad).
 Modal Hábitos en `HabitosScreen`: `NuevoHabitoModal` (TopBar CTA o botón del panel izq); `CompletarModal` (click en celda de grilla).
+
+`App.jsx` carga pantallas con `lazy()` y datos por ruta. `/mobile` queda fuera de `Layout`, modales y
+watchers globales: su único fetch inicial es `GET /mobile/hoy`; cuentas/categorías/listas se piden
+recién después de elegir Gasto, Bóveda o Tarea. No reintroducir un `useEffect` global que precargue
+todos los módulos.
 
 ### Bóveda
 
@@ -352,4 +358,3 @@ antes de tocar `jarvis/vault/`, `jarvis/db/`, o `project/app/vault/`.
 ## Slash Commands y Roles
 - `/orquestador` — Inicia el rol de Tech Lead / Coordinador (lee `Cerebro/PROMPT-MAESTRO-ORQUESTADOR.md` y `Cerebro/Handoff.md`).
 - `/trabajador` — Inicia la sesión técnica de ejecución en Modo Cavernícola (lee `Cerebro/PROMPT-MAESTRO-TRABAJADOR.md`).
-

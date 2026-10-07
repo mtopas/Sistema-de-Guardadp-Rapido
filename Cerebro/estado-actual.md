@@ -1,5 +1,23 @@
 # Estado Actual de Jarvis
-Última actualización: 2026-10-05
+Última actualización: 2026-10-07
+
+## Primer slice móvil web: Hoy + captura intencional por texto (2026-10-07)
+
+Implementado en la ruta explícita `/mobile`, con shell propio y sin paridad visual forzada con el
+escritorio. El arranque llama únicamente a `GET /mobile/hoy`; `App.jsx` dejó de precargar Bóveda,
+Finanzas, Agenda y Hábitos globalmente y ahora carga datos/pantallas pesadas según la ruta activa.
+
+- **Portada:** próximo bloque, máximo tres tareas, hábitos programados aún pendientes y alertas
+  financieras solo ante saldos negativos.
+- **Captura:** Gasto, Bóveda, Tarea, Hábito y Preguntar a Jarvis. La intención se elige antes de
+  escribir; el destino queda visible. Bóveda guarda en `00 - Sin categorizar`, Tarea queda fechada
+  para hoy y Hábito se crea diario.
+- **Confirmación/deshacer:** disponible para movimientos, hojas, tareas y hábitos mediante sus
+  endpoints DELETE existentes; las respuestas de Jarvis no se deshacen.
+- **Sin voz:** no se agregó micrófono, STT, Web Speech, grabación, escucha en segundo plano ni tool
+  calling. Queda como spike posterior después de validar el flujo de texto.
+- **Pruebas:** 529 backend, 233 frontend, 2 E2E móviles; build Vite correcto y revisión visual sin
+  overflow en 390, 768 y 1440 px.
 
 ## Título de las hojas por IA + notas con link a cuerpo único (2026-10-05)
 

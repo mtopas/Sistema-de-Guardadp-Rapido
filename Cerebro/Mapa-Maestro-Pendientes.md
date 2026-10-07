@@ -125,23 +125,21 @@ los enlaza.
 
 ### Móvil web: “Hoy + captura intencional + voz”
 
-- **Shell móvil ultrarrápido** — **por diseñar**, P2: crear una experiencia móvil distinta de la
-  composición de escritorio, centrada en “qué exige atención hoy”, registrar algo y consultar a
-  Jarvis. La portada solo muestra próximo bloque, hasta tres tareas, hábitos pendientes y alertas
-  financieras excepcionales; no carga grafo, editor, tablas ni paneles completos. Dependencias:
-  definir si vive como ruta/shell móvil explícito durante el desarrollo o como adaptación final por
-  breakpoint. Fuente: propuesta de arquitectura móvil, conversación 2026-10-07.
-- **Arranque mínimo y resumen agregado de Hoy** — **por diseñar**, P2: reemplazar en móvil la carga
-  global actual de Bóveda, Finanzas, Agenda y Hábitos por carga diferida por ruta y un resumen
-  pequeño/cachable (propuesto `GET /mobile/hoy`). Dependencias: contrato agregado, estrategia de
-  caché y medición de bundle; no duplicar la lógica de cada módulo en el cliente. Fuente:
-  propuesta de arquitectura móvil, conversación 2026-10-07; [App.jsx](../project/frontend/src/App.jsx).
-- **Captura rápida con intención explícita** — **decidido**, P2: una hoja/modal compartida con
-  acciones Gasto, Bóveda, Tarea, Hábito y Pregunta a Jarvis; el usuario elige primero el destino y
-  luego Texto o Voz. Debe mostrar transcripción/texto editable, destino visible, confirmación y
-  deshacer. Esto evita que el router infiera erróneamente una intención ya elegida por el usuario.
-  Dependencias: contrato común de captura y reutilización segura de endpoints existentes. Fuente:
-  propuesta de arquitectura móvil, conversación 2026-10-07.
+- **Shell móvil ultrarrápido** — **resuelto**, P2: ruta explícita `/mobile` con identidad propia,
+  centrada en “Hoy” y sin cargar la composición de escritorio. Muestra próximo bloque, hasta tres
+  tareas, hábitos pendientes y alertas financieras solo ante saldo negativo. Verificado sin
+  overflow en 390, 768 y 1440 px. Fuente: implementación 2026-10-07;
+  [MobileHoyScreen.jsx](../project/frontend/src/screens/MobileHoyScreen.jsx).
+- **Arranque mínimo y resumen agregado de Hoy** — **resuelto**, P2: `GET /mobile/hoy` entrega el
+  payload recortado y `App.jsx` divide pantallas/datos por ruta. `/mobile` no monta `Layout`, modales
+  ni watchers globales; su apertura dispara únicamente el resumen. Los catálogos se cargan al
+  elegir una acción. Pendiente opcional: medir caché/bundle con uso real. Fuente: implementación
+  2026-10-07; [App.jsx](../project/frontend/src/App.jsx).
+- **Captura rápida con intención explícita por texto** — **resuelto**, P2: Gasto, Bóveda, Tarea,
+  Hábito y Preguntar a Jarvis eligen primero destino y luego texto. Bóveda usa Inbox, Tarea queda
+  para hoy y Hábito es diario; las altas muestran confirmación y deshacer mediante sus DELETE
+  existentes. Jarvis conserva la respuesta pero no ofrece deshacer. Fuente: implementación
+  2026-10-07; [mobileCapture.js](../project/frontend/src/mobile/mobileCapture.js).
 - **Modo voz como interfaz, no como dependencia única** — **por diseñar**, P2: botón protagonista
   de pulsar/mantener para hablar dentro de la captura, con fallback inmediato a texto. No hay voz
   investigada, diseñada ni implementada todavía. La primera fase debe poder funcionar sin
@@ -156,11 +154,10 @@ los enlaza.
   el usuario ya eligió una acción. Escritorio conserva exploración/edición profunda; móvil prioriza
   presencia diaria, captura y consulta puntual. Dependencias: validar el flujo con uso real antes
   de abrir implementación de STT. Fuente: propuesta de arquitectura móvil, conversación 2026-10-07.
-- **Decisiones pendientes del diseño móvil** — **por diseñar**, P2: (1) botón principal abre
-  captura o graba de inmediato; recomendación actual: abre captura y ahí se mantiene para grabar;
-  (2) Bóveda rápida va a Inbox o permite contexto previo; recomendación: Inbox solo sin acción
-  contextual; (3) Finanzas muestra solo alertas excepcionales; (4) confirmar ruta/shell móvil
-  explícito primero. Fuente: propuesta de arquitectura móvil, conversación 2026-10-07.
+- **Decisiones del diseño móvil** — **resuelto para el slice de texto**, P2: la acción abre la hoja
+  de captura; Bóveda rápida va a Inbox; Finanzas solo aparece por saldo negativo; el producto vive
+  primero en la ruta explícita `/mobile`. La interacción de grabación sigue sin decidir y pertenece
+  al spike de voz posterior. Fuente: decisión de implementación 2026-10-07.
 
 ### Bóveda
 

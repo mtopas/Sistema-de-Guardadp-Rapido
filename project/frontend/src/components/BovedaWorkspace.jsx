@@ -4,9 +4,10 @@ import { Compass, FileText, FolderTree, Link2, List, Network, Search, Tags } fro
 import { useStore } from '../store/useStore'
 import { buildCategoriaColorMap } from '../utils/categoriaColors'
 import { buildHojaContextItems } from '../utils/hojaMenu'
-import { extractTags } from '../utils/tags'
+import { getHojaTags } from '../utils/tags'
 import { getHojaDisplayTitle } from '../utils/hojaUtils'
 import { getLeafIcon } from '../utils/leafIcons'
+import { buildBovedaTagCounts, filterBovedaHojas } from '../utils/bovedaTags'
 import NetworkGraph from './NetworkGraph'
 import AgendaContextMenu from './agenda/AgendaContextMenu'
 import EditHojaModal from './EditHojaModal'
@@ -39,7 +40,7 @@ function Metric({ Icon, label, value, detail, color }) {
 
 function HojaRow({ hoja, color, active, onOpen, onContextMenu }) {
   const Icon = getLeafIcon(hoja.icono, hoja.tipo)
-  const tags = extractTags(hoja.contenido, hoja.apuntes)
+  const tags = getHojaTags(hoja)
   const title = getHojaDisplayTitle(hoja) || 'Sin título'
 
   return (
@@ -96,27 +97,12 @@ export default function BovedaWorkspace({ onOpenHoja, onHojaDeleted, searchQuery
 
   const colorMap = useMemo(() => buildCategoriaColorMap(categorias), [categorias])
   const today = localDate(new Date())
-  const tags = useMemo(() => {
-    const counts = new Map()
-    hojas.forEach(hoja => extractTags(hoja.contenido, hoja.apuntes).forEach(tag => {
-      counts.set(tag, (counts.get(tag) || 0) + 1)
-    }))
-    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-  }, [hojas])
+  const tags = useMemo(() => buildBovedaTagCounts(hojas), [hojas])
 
-  const filteredHojas = useMemo(() => {
-    const terms = [searchQuery, query].map(q => q.trim().toLowerCase()).filter(Boolean)
-    return hojas
-      .filter(hoja => {
-        const hojaTags = extractTags(hoja.contenido, hoja.apuntes)
-        const matchingTag = !selectedTag || hojaTags.includes(selectedTag)
-        const matchingQuery = terms.every(term => [hoja.contenido, hoja.apuntes, hoja.categoria_nombre, ...hojaTags]
-          .filter(Boolean)
-          .some(value => value.toLowerCase().includes(term)))
-        return matchingTag && matchingQuery
-      })
-      .sort((a, b) => new Date(b.fecha_actualizado || b.fecha) - new Date(a.fecha_actualizado || a.fecha))
-  }, [hojas, selectedTag, query, searchQuery])
+  const filteredHojas = useMemo(
+    () => filterBovedaHojas(hojas, { selectedTag, searchQuery, query }),
+    [hojas, selectedTag, query, searchQuery]
+  )
 
   const updatedToday = hojas.filter(hoja => localDate(hoja.fecha_actualizado || hoja.fecha) === today).length
   const links = hojas.filter(hoja => hoja.tipo === 'link').length

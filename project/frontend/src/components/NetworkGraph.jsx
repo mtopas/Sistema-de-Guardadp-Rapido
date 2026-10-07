@@ -3,14 +3,14 @@ import { Minus, Plus, RotateCcw } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { buildCategoriaColorMap } from '../utils/categoriaColors'
 import { BRANCH_COLORS } from '../utils/themes'
-import { extractTags } from '../utils/tags'
+import { getHojaTags } from '../utils/tags'
 
 const W = 720, H = 560
 const HUB = { x: W / 2, y: H / 2, r: 36 }
 const BRANCH_DIST = 165
 const MAX_LEAVES_PER_BRANCH = 14
 
-function buildGraph(categorias, hojas) {
+export function buildGraph(categorias, hojas) {
   const colorMap = buildCategoriaColorMap(categorias)
   const rootOf = {}
   const findRoot = (id, seen = new Set()) => {
@@ -58,7 +58,7 @@ function buildGraph(categorias, hojas) {
       const dist = 90 + ((j * 37) % 50)
       leaves.push({
         id: h.id, tipo: h.tipo, contenido: h.contenido,
-        apuntes: h.apuntes, color: b.color, branchId: b.id,
+        apuntes: h.apuntes, tags: h.tags, color: b.color, branchId: b.id,
         categoria: b.name,
         x: b.x + Math.cos(a) * dist,
         y: b.y + Math.sin(a) * dist,
@@ -76,7 +76,7 @@ function buildGraph(categorias, hojas) {
 
   const tagOwners = {}
   leaves.forEach(l => {
-    extractTags(l.contenido, l.apuntes).forEach(t => {
+    getHojaTags(l).forEach(t => {
       if (!tagOwners[t]) tagOwners[t] = []
       tagOwners[t].push(l)
     })

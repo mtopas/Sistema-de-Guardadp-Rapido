@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ChevronDown, ChevronRight, Plus, FolderPlus, ChevronsUpDown, Sparkles } from 'lucide-react'
 import { useStore } from '../store/useStore'
-import { extractTags } from '../utils/tags'
+import { getHojaTags } from '../utils/tags'
 import { buildHojaContextItems } from '../utils/hojaMenu'
 import { buildCategoriaColorMap } from '../utils/categoriaColors'
 import { t } from '../utils/i18n'
@@ -58,7 +58,7 @@ function Highlight({ text, query }) {
 
 // ── Note card ─────────────────────────────────────────────────────────────────
 function NoteCard({ hoja, dotColor, onClick, onContextMenu, query }) {
-  const tags     = extractTags(hoja.contenido, hoja.apuntes)
+  const tags     = getHojaTags(hoja)
   const title    = getHojaDisplayTitle(hoja).slice(0, 80)
   const color    = dotColor || 'var(--accent)'
   const LeafIcon = getLeafIcon(hoja.icono, hoja.tipo)

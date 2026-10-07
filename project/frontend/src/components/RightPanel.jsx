@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { ArrowRight, Calendar, FileText, Image as ImageIcon, Link as LinkIcon, Pencil, Tag } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { buildCategoriaColorMap } from '../utils/categoriaColors'
-import { extractTags } from '../utils/tags'
+import { getHojaTags } from '../utils/tags'
 import { getLeafIcon } from '../utils/leafIcons'
 import { getHojaDisplayTitle, getHojaImageUrl } from '../utils/hojaUtils'
 import { buildHojaContextItems } from '../utils/hojaMenu'
@@ -62,7 +62,7 @@ export default function RightPanel({ selectedHojaId, onSelectHoja }) {
     .slice(0, 7), [hojas, hojasRecientes])
   const selected = useMemo(() => hojas.find(hoja => hoja.id === selectedHojaId) || null, [hojas, selectedHojaId])
   const selectedColor = selected ? (colorMap[selected.categoria_id] || 'var(--accent)') : 'var(--accent)'
-  const selectedTags = selected ? extractTags(selected.contenido, selected.apuntes) : []
+  const selectedTags = selected ? getHojaTags(selected) : []
   const LeafIcon = selected ? getLeafIcon(selected.icono, selected.tipo) : FileText
 
   return (

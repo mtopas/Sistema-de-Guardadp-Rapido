@@ -11,6 +11,23 @@ Formato de cada entrada:
 
 ---
 
+## 2026-10-07 — Consulta viva de Agenda bajo demanda en Jarvis
+
+Contexto: el chat de Jarvis consultaba únicamente memoria RAG, pero Agenda es una fuente operativa
+que debe leerse en vivo sin duplicar eventos en el sistema de memoria.
+
+Decisión:
+- Detectar solo preguntas acotadas de Agenda y resolver sus ventanas temporales explícitas: hoy,
+  mañana, semana y próximos eventos. Sin ventana, usar desde hoy hasta siete días después.
+- Ejecutar exclusivamente `DEFAULT_EXECUTOR.execute("agenda.list_events", "1.0.0", args)`.
+- Pasar el resultado vivo al prompt y omitir RAG y entidades en esta rama, para que la Agenda sea la
+  única fuente de verdad. Un error o una lista vacía se informa explícitamente, sin completar datos.
+- No escribir `memory_entries`, Chroma ni Bóveda; tampoco agregar loop genérico de tool-calling.
+
+Impacto: `jarvis/query/service.py`, `project/tests/test_jarvis_query_agenda.py`.
+
+---
+
 ## 2026-10-07 — Tags propios y autoetiquetado conservador en hojas de Bóveda
 
 Contexto: la Bóveda solo exponía tags derivados de `#hashtags`, mientras Jarvis ya tenía un

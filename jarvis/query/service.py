@@ -8,7 +8,8 @@ call_reason() ya maneja el fallback a modo local si budget == EXHAUSTED (spec §
 La Privacy Gateway ya filtra entradas antes del modelo externo (spec §17).
 """
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+import re
 
 from jarvis.chats.service import autoname_if_untitled
 from jarvis.config import JARVIS_DEFAULT_USER
@@ -22,6 +23,7 @@ from jarvis.entities.service import get_entries_for_entity, match_entities_in_te
 from jarvis.llm.client import call_reason
 from jarvis.privacy.gateway import filter_context
 from jarvis.retriever.retriever import retrieve
+from jarvis.tools import DEFAULT_EXECUTOR
 
 logger = logging.getLogger(__name__)
 
@@ -64,8 +66,19 @@ def query(
     # en UI, ver jarvis/chats/service.py).
     autoname_if_untitled(conversation_id, question)
 
-    # RAG — recuperar fragmentos candidatos (n_results extra para dejar margen al ranking)
-    context_entries = retrieve(question, n_results=8, user_id=user_id)
+    agenda_query = _resolve_agenda_query(question)
+    agenda_events = None
+    agenda_error = None
+    if agenda_query is not None:
+        result = DEFAULT_EXECUTOR.execute("agenda.list_events", "1.0.0", agenda_query)
+        if result.ok:
+            agenda_events = result.data.get("eventos", []) if isinstance(result.data, dict) else []
+        else:
+            agenda_error = result.error.get("message", "error desconocido") if result.error else "error desconocido"
+
+    # La Agenda en vivo es la única fuente para esta rama. No usar RAG: evita que un
+    # evento histórico copiado a memoria pueda competir con el resultado actual.
+    context_entries = [] if agenda_query is not None else retrieve(question, n_results=8, user_id=user_id)
 
     # Privacy Gateway — bloquear fragmentos que no pueden salir al modelo externo
     safe_entries = filter_context(context_entries)
@@ -86,11 +99,17 @@ def query(
     # Entidades conocidas mencionadas en la pregunta (0.2 Slice 3) — sección aparte
     # "Lo que sé sobre [nombre]" con sus entradas vinculadas, también filtradas por
     # el Privacy Gateway antes de ir al prompt del modelo externo.
-    entity_sections = _build_entity_sections(question, user_id)
+    entity_sections = "" if agenda_query is not None else _build_entity_sections(question, user_id)
 
     # Construir mensaje para el modelo
     messages = _build_messages(
-        question, safe_entries, history, had_blocked=blocked > 0, entity_sections=entity_sections
+        question,
+        safe_entries,
+        history,
+        had_blocked=blocked > 0,
+        entity_sections=entity_sections,
+        agenda_events=agenda_events,
+        agenda_error=agenda_error,
     )
 
     # Llamar al modelo de razonamiento (maneja budget EXHAUSTED internamente)
@@ -123,6 +142,8 @@ def _build_messages(
     history: list[dict],
     had_blocked: bool,
     entity_sections: str = "",
+    agenda_events: list[dict] | None = None,
+    agenda_error: str | None = None,
 ) -> list[dict]:
     context_text = "\n\n".join(
         f"[{e.get('type', 'RAW')} | {e.get('origin_trust', '?')}] "
@@ -135,6 +156,24 @@ def _build_messages(
         if had_blocked
         else ""
     )
+
+    if agenda_events is not None:
+        agenda_text = _format_agenda_events(agenda_events)
+        agenda_instruction = (
+            "Esta es una consulta de Agenda. Respondé exclusivamente con los eventos vivos "
+            "incluidos abajo. Si la lista está vacía, decí claramente que no hay eventos en "
+            "ese rango. No inventes eventos ni completes datos desde la memoria."
+        )
+        agenda_context = f"\n\nAgenda viva:\n{agenda_text}"
+    elif agenda_error is not None:
+        agenda_instruction = (
+            "La consulta de Agenda falló. Informá claramente que no se pudo consultar la "
+            "Agenda y no inventes eventos ni uses la memoria como reemplazo."
+        )
+        agenda_context = f"\n\nEstado de Agenda: error de consulta ({agenda_error})"
+    else:
+        agenda_instruction = ""
+        agenda_context = ""
 
     system_msg = {
         "role": "system",
@@ -153,6 +192,7 @@ def _build_messages(
             "algo el usuario (ej. 'hace dos días me dijiste que...'), pero nunca la copie tal "
             "cual dentro de la respuesta. "
             "Nunca inventés datos que no estén en el contexto."
+            + agenda_instruction
             + entity_sections
         ),
     }
@@ -161,7 +201,7 @@ def _build_messages(
         "role": "user",
         "content": (
             f"Contexto de memoria:\n{context_text}{privacy_note}"
-            f"\n\nPregunta: {question}"
+            f"\n\nPregunta: {question}{agenda_context}"
         ),
     }
 
@@ -172,6 +212,39 @@ def _build_messages(
 
     # system + historial (sin la pregunta actual que ya va en user_msg enriquecido)
     return [system_msg] + timed_history + [user_msg]
+
+
+_AGENDA_MARKERS = re.compile(
+    r"\b(agenda|calendario|evento(?:s)?|reuni(?:ó|o)n(?:es)?|cita(?:s)?|turno(?:s)?)\b",
+    re.IGNORECASE,
+)
+
+
+def _resolve_agenda_query(question: str) -> dict[str, str] | None:
+    """Detecta preguntas acotadas de Agenda y devuelve su ventana inclusiva."""
+    normalized = question.casefold()
+    asks_schedule = bool(_AGENDA_MARKERS.search(normalized)) or bool(
+        re.search(r"\b(qué|que)\s+(tengo|hay)\b", normalized)
+    )
+    if not asks_schedule:
+        return None
+
+    today = date.today()
+    if re.search(r"\bmañana\b", normalized):
+        start = end = today + timedelta(days=1)
+    elif re.search(r"\bhoy\b", normalized):
+        start = end = today
+    elif re.search(r"\b(semana|7\s+d[ií]as)\b", normalized):
+        start, end = today, today + timedelta(days=6)
+    else:
+        start, end = today, today + timedelta(days=7)
+    return {"desde": start.isoformat(), "hasta": end.isoformat()}
+
+
+def _format_agenda_events(events: list[dict]) -> str:
+    if not events:
+        return "(no hay eventos en el rango consultado)"
+    return "\n".join(str(event) for event in events)
 
 
 def _relative_es(iso: str | None) -> str:

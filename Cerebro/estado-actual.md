@@ -1,6 +1,14 @@
 # Estado Actual de Jarvis
 Última actualización: 2026-10-07
 
+## Consulta viva de Agenda desde Jarvis (2026-10-07)
+
+Las preguntas acotadas de Agenda (hoy, mañana, semana y próximos eventos) ejecutan bajo demanda
+únicamente `DEFAULT_EXECUTOR.execute("agenda.list_events", "1.0.0", args)`. El rango se resuelve
+desde la pregunta; si no aparece, se consulta desde hoy hasta siete días después. El resultado vivo
+entra al prompt y, en esta rama, no se usa RAG ni se copia información a `memory_entries`, Chroma o
+la Bóveda. Ante error o lista vacía, Jarvis lo declara y no inventa datos.
+
 ## Tags propios y autoetiquetado conservador de Bóveda (2026-10-07)
 
 Las hojas de Bóveda tienen ahora `hojas.tags` como JSON y el mismo array en el frontmatter del

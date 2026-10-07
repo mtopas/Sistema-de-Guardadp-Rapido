@@ -51,6 +51,28 @@ def test_pregunta_no_agenda_no_ejecuta_tool(monkeypatch):
     assert result["context_count"] == 0
 
 
+def test_pregunta_generica_que_tengo_pendiente_no_ejecuta_tool(monkeypatch):
+    _, executor = _run_query(
+        monkeypatch,
+        "¿Qué tengo pendiente de mi proyecto?",
+        SimpleNamespace(ok=True, data={"eventos": []}),
+    )
+
+    executor.execute.assert_not_called()
+
+
+def test_pregunta_temporal_que_tengo_hoy_sin_marcador_ejecuta_tool(monkeypatch):
+    _, executor = _run_query(
+        monkeypatch,
+        "¿Qué tengo hoy?",
+        SimpleNamespace(ok=True, data={"eventos": []}),
+    )
+
+    executor.execute.assert_called_once_with(
+        "agenda.list_events", "1.0.0", {"desde": "2026-10-07", "hasta": "2026-10-07"}
+    )
+
+
 def test_agenda_vacia_pasa_contexto_explicito_sin_inventar(monkeypatch):
     build = Mock(return_value=[])
     monkeypatch.setattr(service, "_build_messages", build)

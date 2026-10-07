@@ -223,9 +223,10 @@ _AGENDA_MARKERS = re.compile(
 def _resolve_agenda_query(question: str) -> dict[str, str] | None:
     """Detecta preguntas acotadas de Agenda y devuelve su ventana inclusiva."""
     normalized = question.casefold()
-    asks_schedule = bool(_AGENDA_MARKERS.search(normalized)) or bool(
-        re.search(r"\b(qué|que)\s+(tengo|hay)\b", normalized)
+    temporal_exception = bool(
+        re.search(r"\b(qué|que)\s+tengo\s+(hoy|mañana|esta\s+semana)\b", normalized)
     )
+    asks_schedule = bool(_AGENDA_MARKERS.search(normalized)) or temporal_exception
     if not asks_schedule:
         return None
 

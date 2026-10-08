@@ -96,10 +96,16 @@ los enlaza.
   `agenda.list_events` bajo demanda y omite RAG/memoria. Solo se activa con marcador de Agenda o
   “qué tengo hoy/mañana/esta semana”; una pregunta genérica no dispara la tool. Ambas rutas se
   verificaron contra la Agenda real. Fuente: commits `d619160` y `58995a3`; [Handoff.md](Handoff.md), sesión 24.
-- **Selector de categorías de Gasto en móvil** — **bug confirmado**, P1: el endpoint entrega
-  `name` pero la UI lee `nombre`, por lo que el selector queda vacío e impide completar la captura
-  de Gasto. Dependencia: normalizar el contrato en el consumidor y agregar regresión. Fuente:
-  [Handoff.md](Handoff.md), sesión 24.
+- **Selector de categorías de Gasto en móvil** — **resuelto, deploy pendiente**, P1: `dbab24a`
+  alinea el consumidor con el contrato `name` de `/fin/categorias`, preserva
+  `categoria_nombre` en el alta y deja regresión para una categoría seleccionable. Dependencia:
+  desplegar y validar visualmente una alta/deshacer real de Gasto. Fuente: [Handoff.md](Handoff.md),
+  sesión 25.
+- **Fecha de movimientos creados por `/mov`** — **diagnosticado, fix pendiente**, P1: el bot
+  persiste `YYYY-MM-DD`; JavaScript lo interpreta como UTC y lo muestra el día anterior en ART.
+  La corrección debe emitir datetime local explícito y renderizar/ordenar los date-only históricos
+  como fecha calendario local. Dependencia: regresiones del payload del bot y ambos formatos, sin
+  migrar datos reales. Fuente: [Handoff.md](Handoff.md), sesión 26.
 
 ### Gaps documentados que siguen abiertos
 
@@ -150,13 +156,13 @@ los enlaza.
   ni watchers globales; su apertura dispara únicamente el resumen. Los catálogos se cargan al
   elegir una acción. Pendiente opcional: medir caché/bundle con uso real. Fuente: implementación
   2026-10-07; [App.jsx](../project/frontend/src/App.jsx).
-- **Captura rápida con intención explícita por texto** — **implementado, validación parcial**,
-  P2: Gasto, Bóveda, Tarea, Hábito y Preguntar a Jarvis eligen primero destino y luego texto.
-  Bóveda usa Inbox, Tarea queda para hoy y Hábito es diario; las altas muestran confirmación y
-  deshacer mediante sus DELETE existentes. En homelab se validaron Bóveda, Tarea, Hábito y Jarvis;
-  Gasto está bloqueado por el selector vacío `name`/`nombre`. Jarvis conserva la respuesta pero no
-  ofrece deshacer. Fuente: [Handoff.md](Handoff.md), sesión 24;
-  [mobileCapture.js](../project/frontend/src/mobile/mobileCapture.js).
+- **Captura rápida con intención explícita por texto** — **implementado, despliegue final
+  pendiente**, P2: Gasto, Bóveda, Tarea, Hábito y Preguntar a Jarvis eligen primero destino y
+  luego texto. Bóveda usa Inbox, Tarea queda para hoy y Hábito es diario; las altas muestran
+  confirmación y deshacer mediante sus DELETE existentes. En homelab se validaron Bóveda, Tarea,
+  Hábito y Jarvis; la corrección de Gasto está en `dbab24a` y requiere deploy + prueba visual.
+  Jarvis conserva la respuesta pero no ofrece deshacer. Fuente: [Handoff.md](Handoff.md), sesión
+  25; [mobileCapture.js](../project/frontend/src/mobile/mobileCapture.js).
 - **Modo voz como interfaz, no como dependencia única** — **por diseñar**, P2: botón protagonista
   de pulsar/mantener para hablar dentro de la captura, con fallback inmediato a texto. No hay voz
   investigada, diseñada ni implementada todavía. La primera fase debe poder funcionar sin

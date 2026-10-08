@@ -36,11 +36,26 @@ la Fase 1 de calidad semanal (`bb87344`) ni copiar `database/`, `uploads/`, `vau
 de Agenda y que una consulta genérica no ejecuta esa tool, 166 hojas de Bóveda con grafo funcional,
 y el flujo móvil de Bóveda, Tarea, Hábito y Jarvis con destino/deshacer.
 
-La aceptación móvil no está completa: el selector de categorías de Gasto queda vacío porque la API
-expone `name` y el consumidor espera `nombre`. La validación de chip y filtro de tags quedó diferida
-por ausencia de tags persistidos en las hojas activas; no se hizo backfill. Se observaron además
-errores 500 de embeddings Ollama y un Markdown legado con frontmatter inválido, ambos fuera del
-alcance del despliegue y pendientes de reproducir antes de corregir.
+El defecto del selector de Gasto se corrigió localmente en `dbab24a`: el consumidor usa
+`category.name`, se conserva `categoria_nombre` al crear el movimiento y hay regresión específica.
+Ese commit todavía debe desplegarse y validarse visualmente con un alta/deshacer real antes de dar
+por completa la captura móvil. La validación de chip y filtro de tags quedó diferida por ausencia de
+tags persistidos en las hojas activas; no se hizo backfill. Se observaron además errores 500 de
+embeddings Ollama y un Markdown legado con frontmatter inválido, ambos fuera del alcance del
+despliegue y pendientes de reproducir antes de corregir.
+
+## Diagnóstico: fecha de movimientos por Telegram `/mov` (2026-10-08)
+
+`/mov` produce una fecha sin hora (`YYYY-MM-DD`) y la API/SQLite la preservan. Los componentes de
+Finanzas la renderizan y ordenan con `new Date(fecha)`, que interpreta esa forma como medianoche
+UTC: en `America/Argentina/Buenos_Aires` se presenta como las 21:00 del día anterior. Una fecha
+con hora como `YYYY-MM-DDTHH:MM` no tiene ese corrimiento, que explica la diferencia observada
+frente a un movimiento creado desde la UI.
+
+La corrección pendiente debe tener dos ramas compatibles: el bot emitirá fecha/hora local ART y el
+frontend tratará las filas históricas date-only como fechas calendario locales. No se migrarán ni
+editarán movimientos existentes solo por esta corrección. La inspección read-only de producción no
+encontró ya una fila date-only de `2026-10-07`, pero la reproducción en scratch confirmó la causa.
 
 ## Tags propios y autoetiquetado conservador de Bóveda (2026-10-07)
 

@@ -1,5 +1,88 @@
 # Handoffs de Coordinación — SGR / Jarvis
 
+## [2026-10-08, sesión 26 — diagnóstico de desfase de fecha en `/mov`]
+
+- **Resultado:** Hecho: causa demostrada, sin cambio de producto. `/mov` envía `fecha` como
+  `YYYY-MM-DD`; API y SQLite la preservan como texto. El frontend la pasa a `new Date(fecha)` y
+  JavaScript interpreta una fecha sin hora como medianoche UTC: en Argentina se muestra a las
+  21:00 del día anterior.
+- **Reproducción:** en scratch, `new Date('2026-10-07')` se presentó como 6 de octubre en ART,
+  mientras `2026-10-07T13:00` conservó el 7. La UI normal crea `YYYY-MM-DDTHH:MM`, de ahí la
+  diferencia de formato observada.
+- **Alcance de evidencia:** la base canónica se leyó sin mutarla. El único movimiento actual sin
+  hora era `id=235` del `2026-10-03`; no quedó una fila date-only del 7 de octubre que permita
+  identificar inequívocamente el movimiento reportado. La causa no depende de esa identificación.
+- **Corrección mínima propuesta:** el bot debe emitir una fecha/hora local explícita usando
+  `America/Argentina/Buenos_Aires`; los renderizadores y ordenamientos deben tratar los registros
+  históricos `YYYY-MM-DD` como fecha de calendario local, nunca como instante UTC. Cubrir ambos
+  formatos con regresión sin reescribir datos existentes.
+- **Verificación reportada por la sesión trabajadora:** traza bot→API→SQLite→store→componentes,
+  scratch, API real read-only y `git diff --check`. Sin cambios ni commit.
+
+### Pendientes activos (arrastre consolidado)
+
+- [ ] [FINANZAS — FECHA `/MOV`] Corregir el desfase de fecha: emitir datetime local ART en el bot,
+  mantener compatibilidad visual/ordenamiento para `YYYY-MM-DD` históricos y agregar regresiones
+  de payload del bot y render de ambos formatos. No migrar ni editar movimientos existentes.
+- [ ] [DEPLOY MÓVIL — GASTO] Desplegar `dbab24a` al homelab según `HOMELAB.md`, sin copiar
+  `database/`, `uploads/` ni `vault`; validar visualmente categorías disponibles, alta de un Gasto
+  real con el destino correcto y deshacer recuperable.
+- [ ] [BÓVEDA — TAGS] Generar o localizar una hoja activa con tags persistidos y validar en el
+  homelab chip, filtro y grafo. No hacer backfill histórico por esta sola validación.
+- [ ] [MÓVIL — USUARIO] Tras el deploy de `dbab24a`, completar la prueba de Gasto; Bóveda, Tarea,
+  Hábito y Jarvis ya fueron comprobados con destino/deshacer.
+- [ ] [MÓVIL — VOZ] Solo después de completar texto, diseñar spike de interacción, HTTPS/permisos,
+  STT local/backend, latencia, privacidad y compatibilidad. Mantener fallback de texto y sin
+  escucha.
+- [ ] [JARVIS — CALIDAD SEMANAL F1] Al cerrar una semana con uso real, generar y revisar su
+  snapshot manual antes de decidir scheduler, UI, feedback explícito o análisis semántico.
+- [ ] [JARVIS / BÓVEDA — DIAGNÓSTICO] Reproducir y aislar los 500 de embeddings Ollama y el
+  Markdown de frontmatter inválido; no corregir ni modificar datos reales sin causa raíz y
+  fixture de regresión.
+- [ ] [LIMPIEZA / RESTO] Borrar feedback #1 con smoke test, tareas operativas y backlog conforme
+  al Mapa Maestro.
+
+---
+
+## [2026-10-07, sesión 25 — fix del selector de categorías de Gasto móvil]
+
+- **Resultado:** Hecho en `master`: `dbab24a` corrige el selector de Gasto en `/mobile` para usar
+  `category.name`, el campo que expone `GET /fin/categorias`. El backend y el contrato existente
+  no cambiaron.
+- **Regresión:** `project/frontend/src/mobile/mobileCapture.test.js` cubre una categoría
+  `{ id, name: 'Comida' }` como valor y etiqueta seleccionable. `submitMobileCapture` conserva el
+  envío de `categoria_nombre` al crear el movimiento.
+- **Verificación reportada por la sesión trabajadora:** 5 pruebas Vitest focalizadas, build de
+  frontend y `git diff --check` correctos. Dependientes revisados: consumidor móvil y payload de
+  alta de movimiento; no hubo contrato cambiado.
+- **Límite:** no se desplegó ni se hizo prueba visual manual. El fix no está en el homelab aún, por
+  lo que la aceptación completa de la captura móvil sigue pendiente de deploy y alta/deshacer real
+  de un Gasto.
+- **Evidencia inspeccionada por orquestación:** `dbab24a` está en `master`, el árbol quedó limpio
+  al cierre del trabajador y el commit toca solo la pantalla móvil, su lógica y la regresión.
+
+### Pendientes activos (arrastre consolidado)
+
+- [ ] [DEPLOY MÓVIL — GASTO] Desplegar `dbab24a` al homelab según `HOMELAB.md`, sin copiar
+  `database/`, `uploads/` ni `vault`; validar visualmente categorías disponibles, alta de un Gasto
+  real con el destino correcto y deshacer recuperable.
+- [ ] [BÓVEDA — TAGS] Generar o localizar una hoja activa con tags persistidos y validar en el
+  homelab chip, filtro y grafo. No hacer backfill histórico por esta sola validación.
+- [ ] [MÓVIL — USUARIO] Tras el deploy de `dbab24a`, completar la prueba de Gasto; Bóveda, Tarea,
+  Hábito y Jarvis ya fueron comprobados con destino/deshacer.
+- [ ] [MÓVIL — VOZ] Solo después de completar texto, diseñar spike de interacción, HTTPS/permisos,
+  STT local/backend, latencia, privacidad y compatibilidad. Mantener fallback de texto y sin
+  escucha.
+- [ ] [JARVIS — CALIDAD SEMANAL F1] Al cerrar una semana con uso real, generar y revisar su
+  snapshot manual antes de decidir scheduler, UI, feedback explícito o análisis semántico.
+- [ ] [JARVIS / BÓVEDA — DIAGNÓSTICO] Reproducir y aislar los 500 de embeddings Ollama y el
+  Markdown de frontmatter inválido; no corregir ni modificar datos reales sin causa raíz y
+  fixture de regresión.
+- [ ] [LIMPIEZA / RESTO] Borrar feedback #1 con smoke test, tareas operativas y backlog conforme
+  al Mapa Maestro.
+
+---
+
 ## [2026-10-07, sesión 24 — despliegue agrupado de Agenda, Bóveda y móvil]
 
 - **Resultado:** Parcial. La sesión desplegó al homelab el snapshot `58995a3` con T4 Agenda,

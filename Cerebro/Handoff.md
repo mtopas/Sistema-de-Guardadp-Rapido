@@ -1,5 +1,51 @@
 # Handoffs de Coordinación — SGR / Jarvis
 
+## [2026-10-13, sesión 28 — deploy de Gasto móvil y entrega `/jq`]
+
+- **Resultado:** Hecho. Se desplegó `dbab24a` (selector de categorías de Gasto móvil) y
+  `f6d4813` (fragmentación robusta de `/jq`) al homelab. La sincronización excluyó
+  `database/`, `uploads/`, `vault` y `.env`; no se modificaron datos de producción.
+- **Verificación operativa:** `backend`, `bot` y `worker` están `running` con cero reinicios;
+  `/meta` y `/jarvis/health` respondieron. El `index-CEEIJpBz.js` servido coincide con el build
+  local. El contenedor del bot contiene la lógica de fragmentación de `/jq` y los logs iniciales
+  no muestran errores de importación ni trazas nuevas.
+- **Estado Jarvis:** health conserva tres fallos consecutivos de evaluación pasiva por timeout de
+  Ollama a 120 s; era un problema ya observado antes del deploy y no impidió el arranque.
+- **Alerta de reproducibilidad:** la capa editable de Jarvis descargó versiones nuevas permitidas
+  por rangos existentes durante el build. El sistema arrancó sano, pero se debe evaluar lock de
+  dependencias antes de próximos rebuilds para evitar drift no intencional.
+- **Validación humana pendiente:** probar en Telegram una respuesta `/jq` que requiera más de un
+  mensaje (incluido Markdown inválido) y, en `/mobile`, seleccionar categoría, crear un Gasto y
+  deshacerlo. No se declaran aceptaciones visuales completas sin esas pruebas.
+
+### Pendientes activos (arrastre consolidado)
+
+- [ ] [VALIDACIÓN — MÓVIL + `/JQ`] En producción, validar categorías disponibles, alta/deshacer
+  de Gasto y una respuesta `/jq` larga incluso con Markdown inválido; informar cualquier residuo
+  del provisional “Buscando…”.
+- [ ] [FINANZAS — FECHA `/MOV`] Corregir el desfase de fecha: emitir datetime local ART en el bot,
+  mantener compatibilidad visual/ordenamiento para `YYYY-MM-DD` históricos y agregar regresiones
+  de payload del bot y render de ambos formatos. No migrar ni editar movimientos existentes.
+- [ ] [QA — RUTA MÓVIL] Reproducir `test_mobile_routes.py::test_mobile_hoy_agrega_solo_datos_accionables`
+  que falló en la suite completa de `f6d4813`; no atribuirlo a ese fix ni corregirlo sin causa.
+- [ ] [REPRODUCIBILIDAD — JARVIS] Evaluar lock de dependencias para evitar que un rebuild de
+  `jarvis` descargue versiones nuevas dentro de rangos abiertos; no actualizar paquetes por esta
+  investigación sin un objetivo y regresiones explícitas.
+- [ ] [BÓVEDA — TAGS] Generar o localizar una hoja activa con tags persistidos y validar en el
+  homelab chip, filtro y grafo. No hacer backfill histórico por esta sola validación.
+- [ ] [MÓVIL — VOZ] Solo después de completar texto, diseñar spike de interacción, HTTPS/permisos,
+  STT local/backend, latencia, privacidad y compatibilidad. Mantener fallback de texto y sin
+  escucha.
+- [ ] [JARVIS — CALIDAD SEMANAL F1] Al cerrar una semana con uso real, generar y revisar su
+  snapshot manual antes de decidir scheduler, UI, feedback explícito o análisis semántico.
+- [ ] [JARVIS / BÓVEDA — DIAGNÓSTICO] Reproducir y aislar los 500 de embeddings Ollama y el
+  Markdown de frontmatter inválido; no corregir ni modificar datos reales sin causa raíz y
+  fixture de regresión.
+- [ ] [LIMPIEZA / RESTO] Borrar feedback #1 con smoke test, tareas operativas y backlog conforme
+  al Mapa Maestro.
+
+---
+
 ## [2026-10-13, sesión 27 — entrega robusta de respuestas largas en `/jq`]
 
 - **Resultado:** Hecho en `master`: `f6d4813` evita que `/jq` quede en “🔍 Buscando en tu

@@ -1,5 +1,5 @@
 # Estado Actual de Jarvis
-Última actualización: 2026-10-07
+Última actualización: 2026-10-13
 
 ## Base de revisión semanal de calidad de Jarvis — Fase 1 (2026-10-07)
 
@@ -26,7 +26,7 @@ LLM ni envío fuera del equipo en esta fase.
 dejaba fijo el mensaje provisional “🔍 Buscando en tu memoria…”. El handler fragmenta la salida con
 margen de 3900 caracteres: edita el provisional con la primera parte y envía las restantes. Si el
 Markdown es inválido, repite la entrega completa en texto plano, sin perder footers de contexto o
-privacidad. Está cubierto con una respuesta larga + Markdown inválido; requiere deploy y prueba
+privacidad. Está desplegado y cubierto con una respuesta larga + Markdown inválido; resta prueba
 real por Telegram.
 
 ## Consulta viva de Agenda desde Jarvis (2026-10-07)
@@ -45,13 +45,13 @@ la Fase 1 de calidad semanal (`bb87344`) ni copiar `database/`, `uploads/`, `vau
 de Agenda y que una consulta genérica no ejecuta esa tool, 166 hojas de Bóveda con grafo funcional,
 y el flujo móvil de Bóveda, Tarea, Hábito y Jarvis con destino/deshacer.
 
-El defecto del selector de Gasto se corrigió localmente en `dbab24a`: el consumidor usa
+El defecto del selector de Gasto se corrigió y desplegó en `dbab24a`: el consumidor usa
 `category.name`, se conserva `categoria_nombre` al crear el movimiento y hay regresión específica.
-Ese commit todavía debe desplegarse y validarse visualmente con un alta/deshacer real antes de dar
-por completa la captura móvil. La validación de chip y filtro de tags quedó diferida por ausencia de
-tags persistidos en las hojas activas; no se hizo backfill. Se observaron además errores 500 de
-embeddings Ollama y un Markdown legado con frontmatter inválido, ambos fuera del alcance del
-despliegue y pendientes de reproducir antes de corregir.
+Resta validarlo visualmente con un alta/deshacer real antes de dar por completa la captura móvil.
+La validación de chip y filtro de tags quedó diferida por ausencia de tags persistidos en las hojas
+activas; no se hizo backfill. Se observaron además errores 500 de embeddings Ollama y un Markdown
+legado con frontmatter inválido, ambos fuera del alcance del despliegue y pendientes de reproducir
+antes de corregir.
 
 ## Diagnóstico: fecha de movimientos por Telegram `/mov` (2026-10-08)
 

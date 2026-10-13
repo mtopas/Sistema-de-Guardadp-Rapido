@@ -96,20 +96,20 @@ los enlaza.
   `agenda.list_events` bajo demanda y omite RAG/memoria. Solo se activa con marcador de Agenda o
   “qué tengo hoy/mañana/esta semana”; una pregunta genérica no dispara la tool. Ambas rutas se
   verificaron contra la Agenda real. Fuente: commits `d619160` y `58995a3`; [Handoff.md](Handoff.md), sesión 24.
-- **Selector de categorías de Gasto en móvil** — **resuelto, deploy pendiente**, P1: `dbab24a`
+- **Selector de categorías de Gasto en móvil** — **resuelto y desplegado, validación pendiente**, P1: `dbab24a`
   alinea el consumidor con el contrato `name` de `/fin/categorias`, preserva
   `categoria_nombre` en el alta y deja regresión para una categoría seleccionable. Dependencia:
-  desplegar y validar visualmente una alta/deshacer real de Gasto. Fuente: [Handoff.md](Handoff.md),
-  sesión 25.
+  validar visualmente una alta/deshacer real de Gasto. Fuente: [Handoff.md](Handoff.md),
+  sesión 28.
 - **Fecha de movimientos creados por `/mov`** — **diagnosticado, fix pendiente**, P1: el bot
   persiste `YYYY-MM-DD`; JavaScript lo interpreta como UTC y lo muestra el día anterior en ART.
   La corrección debe emitir datetime local explícito y renderizar/ordenar los date-only históricos
   como fecha calendario local. Dependencia: regresiones del payload del bot y ambos formatos, sin
   migrar datos reales. Fuente: [Handoff.md](Handoff.md), sesión 26.
-- **Entrega de respuestas largas por `/jq`** — **resuelto, deploy pendiente**, P1: `f6d4813`
+- **Entrega de respuestas largas por `/jq`** — **resuelto y desplegado, validación pendiente**, P1: `f6d4813`
   fragmenta con margen seguro, reemplaza el provisional y conserva todo el contenido incluso con
-  Markdown inválido. Dependencia: deploy y prueba Telegram con respuesta >4096. Fuente:
-  [Handoff.md](Handoff.md), sesión 27.
+  Markdown inválido. Dependencia: prueba Telegram con respuesta >4096. Fuente:
+  [Handoff.md](Handoff.md), sesión 28.
 
 ### Gaps documentados que siguen abiertos
 
@@ -125,6 +125,10 @@ los enlaza.
   P2: la suite completa reportó 548 passed y este único failure al validar `f6d4813`, sin relación
   demostrada con el cambio de `/jq`. Dependencia: reproducir primero y fijar causa antes de editar
   producto o test. Fuente: [Handoff.md](Handoff.md), sesión 27.
+- **Reproducibilidad de dependencias Jarvis** — **por diagnosticar**, P2: el build de producción
+  descargó versiones nuevas permitidas por rangos abiertos de `jarvis`, aunque el arranque quedó
+  sano. Dependencia: decidir lockfile o pins sin actualizar paquetes por accidente. Fuente:
+  [Handoff.md](Handoff.md), sesión 28.
 - **Botones de guardar/eliminar inaccesibles en mobile/tablet** — **resuelto**, P2: el panel
   Información ahora se muestra debajo del editor cuando el viewport es menor que `xl`, conserva
   ambos controles en ese panel y agrega espacio inferior para que la navegación móvil no los tape.

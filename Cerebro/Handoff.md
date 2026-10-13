@@ -1,5 +1,47 @@
 # Handoffs de Coordinación — SGR / Jarvis
 
+## [2026-10-13, sesión 27 — entrega robusta de respuestas largas en `/jq`]
+
+- **Resultado:** Hecho en `master`: `f6d4813` evita que `/jq` quede en “🔍 Buscando en tu
+  memoria…” cuando la respuesta supera el límite de Telegram. La primera parte reemplaza el
+  mensaje provisional y las siguientes se envían aparte, con margen de 3900 caracteres.
+- **Robustez:** el fallback ante Markdown inválido se aplica a la respuesta completa fragmentada;
+  conserva los footers de contexto y privacidad y no pierde contenido por `Message_too_long`.
+- **Regresión:** `test_bot_jq.py::test_jq_entrega_respuesta_larga_completa_si_markdown_es_invalido`
+  cubre el caso real de respuesta >4096 y formato inválido.
+- **Verificación reportada por la sesión trabajadora:** 8 pruebas focalizadas y `git diff --check`
+  correctos. La suite completa quedó en 548 passed / 1 failed (`test_mobile_routes.py::test_mobile_hoy_agrega_solo_datos_accionables`), reportado como previo y ajeno; debe reproducirse antes de asignar causa.
+- **Límite:** no se desplegó. La prueba manual pendiente debe enviar una consulta Telegram que
+  fuerce una respuesta larga y confirmar que no queda el provisional ni se pierde texto.
+- **Evidencia inspeccionada por orquestación:** `f6d4813` está en `master`, con cambios limitados
+  a fragmentación, handler `/jq` y regresión. El log de producción del incidente confirmó
+  `Message_too_long` tras los timeouts de Ollama/Chroma.
+
+### Pendientes activos (arrastre consolidado)
+
+- [ ] [DEPLOY AGRUPADO — MÓVIL + `/JQ`] Desplegar `dbab24a` y `f6d4813` al homelab según
+  `HOMELAB.md`, sin copiar `database/`, `uploads/` ni `vault`; validar alta/deshacer de Gasto y
+  una respuesta `/jq` larga, incluso si contiene Markdown inválido.
+- [ ] [FINANZAS — FECHA `/MOV`] Corregir el desfase de fecha: emitir datetime local ART en el bot,
+  mantener compatibilidad visual/ordenamiento para `YYYY-MM-DD` históricos y agregar regresiones
+  de payload del bot y render de ambos formatos. No migrar ni editar movimientos existentes.
+- [ ] [QA — RUTA MÓVIL] Reproducir `test_mobile_routes.py::test_mobile_hoy_agrega_solo_datos_accionables`
+  que falló en la suite completa de `f6d4813`; no atribuirlo a ese fix ni corregirlo sin causa.
+- [ ] [BÓVEDA — TAGS] Generar o localizar una hoja activa con tags persistidos y validar en el
+  homelab chip, filtro y grafo. No hacer backfill histórico por esta sola validación.
+- [ ] [MÓVIL — VOZ] Solo después de completar texto, diseñar spike de interacción, HTTPS/permisos,
+  STT local/backend, latencia, privacidad y compatibilidad. Mantener fallback de texto y sin
+  escucha.
+- [ ] [JARVIS — CALIDAD SEMANAL F1] Al cerrar una semana con uso real, generar y revisar su
+  snapshot manual antes de decidir scheduler, UI, feedback explícito o análisis semántico.
+- [ ] [JARVIS / BÓVEDA — DIAGNÓSTICO] Reproducir y aislar los 500 de embeddings Ollama y el
+  Markdown de frontmatter inválido; no corregir ni modificar datos reales sin causa raíz y
+  fixture de regresión.
+- [ ] [LIMPIEZA / RESTO] Borrar feedback #1 con smoke test, tareas operativas y backlog conforme
+  al Mapa Maestro.
+
+---
+
 ## [2026-10-08, sesión 26 — diagnóstico de desfase de fecha en `/mov`]
 
 - **Resultado:** Hecho: causa demostrada, sin cambio de producto. `/mov` envía `fecha` como

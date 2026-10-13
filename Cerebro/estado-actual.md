@@ -20,6 +20,15 @@ Endpoints internos manuales: `POST /jarvis/quality/snapshots/{YYYY-MM-DD}` gener
 snapshot; `GET /jarvis/quality/snapshots/{YYYY-MM-DD}` consulta el resumen. No hay UI, scheduler,
 LLM ni envío fuera del equipo en esta fase.
 
+## Respuestas largas de `/jq` (2026-10-13)
+
+`f6d4813` resuelve el caso en que Telegram rechazaba la respuesta por superar 4096 caracteres y
+dejaba fijo el mensaje provisional “🔍 Buscando en tu memoria…”. El handler fragmenta la salida con
+margen de 3900 caracteres: edita el provisional con la primera parte y envía las restantes. Si el
+Markdown es inválido, repite la entrega completa en texto plano, sin perder footers de contexto o
+privacidad. Está cubierto con una respuesta larga + Markdown inválido; requiere deploy y prueba
+real por Telegram.
+
 ## Consulta viva de Agenda desde Jarvis (2026-10-07)
 
 Las preguntas acotadas de Agenda (hoy, mañana, semana y próximos eventos) ejecutan bajo demanda

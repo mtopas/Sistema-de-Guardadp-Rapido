@@ -106,6 +106,10 @@ los enlaza.
   La corrección debe emitir datetime local explícito y renderizar/ordenar los date-only históricos
   como fecha calendario local. Dependencia: regresiones del payload del bot y ambos formatos, sin
   migrar datos reales. Fuente: [Handoff.md](Handoff.md), sesión 26.
+- **Entrega de respuestas largas por `/jq`** — **resuelto, deploy pendiente**, P1: `f6d4813`
+  fragmenta con margen seguro, reemplaza el provisional y conserva todo el contenido incluso con
+  Markdown inválido. Dependencia: deploy y prueba Telegram con respuesta >4096. Fuente:
+  [Handoff.md](Handoff.md), sesión 27.
 
 ### Gaps documentados que siguen abiertos
 
@@ -117,6 +121,10 @@ los enlaza.
   reproducir y determinar causa raíz antes de corregir. Dependencia: fixture que reproduzca la
   nota de `Jarvis/Entidades` y el camino de sync. Fuente: [estado-actual.md](estado-actual.md),
   hallazgos nuevos del cierre de auditoría de Bóveda.
+- **Fallo aislado de `test_mobile_hoy_agrega_solo_datos_accionables`** — **por diagnosticar**,
+  P2: la suite completa reportó 548 passed y este único failure al validar `f6d4813`, sin relación
+  demostrada con el cambio de `/jq`. Dependencia: reproducir primero y fijar causa antes de editar
+  producto o test. Fuente: [Handoff.md](Handoff.md), sesión 27.
 - **Botones de guardar/eliminar inaccesibles en mobile/tablet** — **resuelto**, P2: el panel
   Información ahora se muestra debajo del editor cuando el viewport es menor que `xl`, conserva
   ambos controles en ese panel y agrega espacio inferior para que la navegación móvil no los tape.

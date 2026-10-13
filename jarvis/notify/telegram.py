@@ -93,6 +93,11 @@ def send_telegram_message(chat_id: str, text: str, reply_markup: dict | None = N
 _REPORT_MESSAGE_LIMIT = 3900
 
 
+def split_telegram_text(text: str, limit: int = _REPORT_MESSAGE_LIMIT) -> list[str]:
+    """Divide texto completo en mensajes que respetan el límite de Telegram."""
+    return _pack_sections([text], limit)
+
+
 def send_report(chat_id: str, title: str, sections: list[str]) -> None:
     """Arma y envía un reporte largo (ej. consolidación periódica, ver
     jarvis/worker/consolidation.py) como uno o varios mensajes de Telegram.

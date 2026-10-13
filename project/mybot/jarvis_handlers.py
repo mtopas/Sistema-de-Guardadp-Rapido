@@ -48,6 +48,7 @@ try:
     from jarvis.ingestion.inbox_triage import titulo_desde_vault_path as _titulo_desde_vault_path
     from jarvis.memory.service import capture_raw, get_entry as _get_jarvis_entry
     from jarvis.query.service import query as _jarvis_query
+    from jarvis.notify.telegram import split_telegram_text
     _JARVIS_AVAILABLE = True
 except ImportError:
     _JARVIS_AVAILABLE = False
@@ -59,6 +60,23 @@ except ImportError:
 # Tiempo máximo de espera por la razón de una DECISION antes de guardar igual
 # sin ella -- la captura nunca se pierde, con o sin respuesta del usuario.
 JARVIS_CLARIFICATION_TIMEOUT_S = 180
+
+
+async def _send_jq_response(thinking_msg, source_msg, text: str) -> None:
+    """Edita el aviso inicial y entrega una respuesta larga completa."""
+    chunks = split_telegram_text(text)
+    sent_messages = []
+    try:
+        await thinking_msg.edit_text(chunks[0], parse_mode="Markdown")
+        for chunk in chunks[1:]:
+            sent_messages.append(await source_msg.reply_text(chunk, parse_mode="Markdown"))
+    except BadRequest as exc:
+        logger.warning("[jq] Markdown inválido en la respuesta (%s) — reintentando sin formato", exc)
+        await thinking_msg.edit_text(chunks[0])
+        for sent_msg, chunk in zip(sent_messages, chunks[1:]):
+            await sent_msg.edit_text(chunk)
+        for chunk in chunks[1 + len(sent_messages):]:
+            await source_msg.reply_text(chunk)
 
 
 def jarvis_init() -> None:
@@ -556,16 +574,7 @@ async def cmd_jq(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     final_text = f"{answer}{footer}"
 
-    try:
-        await thinking_msg.edit_text(final_text, parse_mode="Markdown")
-    except BadRequest as exc:
-        # El texto del LLM (o el username/hashtag de una fuente citada) puede traer
-        # un numero impar de "_"/"*"/"`" sueltos que, sumados a los que el footer usa
-        # a proposito para la cursiva, rompen el parser de Markdown legacy de Telegram
-        # ("Can't parse entities..."). Nunca vale la pena perder la respuesta real por
-        # un error de formato — reintentar en texto plano.
-        logger.warning("[jq] Markdown inválido en la respuesta (%s) — reintentando sin formato", exc)
-        await thinking_msg.edit_text(final_text)
+    await _send_jq_response(thinking_msg, msg, final_text)
 
     logger.info(
         "[jq] respondido conv_id=%s context=%d/%d",
